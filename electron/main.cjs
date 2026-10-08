@@ -15,6 +15,7 @@ const { Updater } = require('./updater.cjs');
 const { SubtitleStore } = require('./subtitle-store.cjs');
 const { createTranslator } = require('./subtitle-translator.cjs');
 const { QUARTER_PROVIDERS, quarterForDate, quarterPeriod, quarterQuery } = require('./quarter-catalog.cjs');
+const { fetchLatestEpisodes } = require('./latest-episodes.cjs');
 let subtitleTranslator = null;
 const translator = () => subtitleTranslator ||= createTranslator(app.getPath('userData'));
 
@@ -443,10 +444,13 @@ async function miruroApi(pathname,params={}){
 }
 function miruroText(html=''){return String(html||'').replace(/<br\s*\/?>/gi,'\n').replace(/<[^>]+>/g,'').replace(/&mdash;/g,'—').replace(/&ndash;/g,'–').replace(/&quot;/g,'"').replace(/&#0?39;|&apos;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').trim()}
 function miruroItem(raw={}){
-  const title=raw.title||{},native=title.native||'',externalId=key=>Number(raw.external_ids?.[key]?.[0])||null;
+  const title=raw.title||{},native=title.native||'',externalId=key=>Number(raw.external_ids?.[key]?.[0])||null,counts=raw.episode_counts||{};
+  let availableEpisodeCount=Math.max(Number(counts.raw)||0,Number(counts.sub)||0,Number(counts.dub)||0);
+  if(counts.raw!=null)availableEpisodeCount=Math.min(availableEpisodeCount,Number(counts.raw)||0);
+  if(Number(raw.episode_count)>0)availableEpisodeCount=Math.min(availableEpisodeCount,Number(raw.episode_count));
   return {provider:'miruro',id:raw.id,mal_id:`miruro:${raw.id}`,title:title.english||title.romaji||native,title_english:'',title_japanese:native,romaji:title.romaji||'',
     images:{webp:{large_image_url:raw.cover_url||''}},score:Number(raw.average_score)?Number(raw.average_score)/10:null,year:raw.season_year||'',type:raw.format||'Anime',
-    episodes:Number(raw.episode_count)||null,status:String(raw.status||'').toLowerCase().replace(/_/g,' ').replace(/^./,c=>c.toUpperCase()),synopsis:miruroText(raw.description),genres:(raw.genres||[]).map(name=>({name:String(name)})),studios:[],
+    episodes:Number(raw.episode_count)||null,availableEpisodeCount,status:String(raw.status||'').toLowerCase().replace(/_/g,' ').replace(/^./,c=>c.toUpperCase()),synopsis:miruroText(raw.description),genres:(raw.genres||[]).map(name=>({name:String(name)})),studios:[],
     url:`${MIRURO_WEB}/watch/${raw.id}`,anilistId:externalId('anilist'),malId:externalId('mal')};
 }
 function miruroEpisode(raw,anime){
@@ -1994,6 +1998,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('provider:season', (_, provider) => homeShows(provider,'season'));
   ipcMain.handle('provider:quarter', (_, provider, year, quarter) => homeShows(provider,'quarter',year,quarter));
   ipcMain.handle('provider:airing', (_, provider) => homeShows(provider,'airing'));
+  ipcMain.handle('provider:latest-episodes', (_, provider, candidates) => fetchLatestEpisodes(provider, candidates));
   ipcMain.handle('provider:catalog', async (_, provider, query = '', offset = 0, sort = '') => {
     if (sort && !query) return sortedCatalog(provider, String(sort), offset);
     if (provider === 'reanime') {

@@ -9,7 +9,7 @@ const store = {
   set(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 };
 function migrateContentSource(source){if(source!=='linkani')return source||'reanime';localStorage.setItem('contentSource','reanime');return 'reanime'}
-const state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: migrateContentSource(localStorage.getItem('contentSource')), catalogOffset:36, catalogTotal:null, catalogLoading:false, catalogDone:false, quarterShows:[], quarterSelection:null };
+const state = { season: [], top: [], airing:[], latestEpisodes:[], library: store.get('library'), history: store.get('history'), downloads:[], source: migrateContentSource(localStorage.getItem('contentSource')), catalogOffset:36, catalogTotal:null, catalogLoading:false, catalogDone:false, quarterShows:[], quarterSelection:null };
 let hlsPlayer = null;
 let skipSegments = [];
 let activeSkip = null;
@@ -100,12 +100,15 @@ function switchView(name) {
 
 function card(a) {
   rememberAnime(a);const el=document.createElement('article'); el.className='anime-card'; el.dataset.id=a.mal_id;
-  el.innerHTML=`<div class="poster"><button class="heart ${saved(a.mal_id)?'saved':''}" title="내 목록">${heartIcon()}</button>${a.score?`<span class="score">★ ${a.score}</span>`:''}</div><h3 ${titleAttr(a)}>${escapeHtml(titleOf(a))}</h3><p>${[a.year,a.type,a.episodes?`${a.episodes}화`:null].filter(Boolean).join(' · ')}</p>`;
+  const latestEpisode=Number(a.latestEpisodeNumber)||0,latestDate=Number(a.latestAiringAt)?new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric'}).format(new Date(Number(a.latestAiringAt)*1000)):'';
+  if(latestEpisode)el.classList.add('latest-episode-card');
+  el.innerHTML=`<div class="poster"><button class="heart ${saved(a.mal_id)?'saved':''}" title="내 목록">${heartIcon()}</button>${a.score?`<span class="score">★ ${a.score}</span>`:''}${latestEpisode?`<span class="latest-episode-badge">EP.${escapeHtml(String(latestEpisode))}</span>`:''}</div><h3 ${titleAttr(a)}>${escapeHtml(titleOf(a))}</h3><p>${latestEpisode?`방영 ${escapeHtml(latestDate)}`:[a.year,a.type,a.episodes?`${a.episodes}화`:null].filter(Boolean).join(' · ')}</p>`;
   setBackgroundImage(el.querySelector('.poster'),imageOf(a));
   // The whole card opens the anime (its title and facts too, the row in 인기 순위), with Enter or Space as well.
   el.tabIndex=0;el.setAttribute('role','button');el.setAttribute('aria-label',titleOf(a));
-  el.addEventListener('click', e => { if(!e.target.closest('.heart')) openDetail(a.mal_id); });
-  el.addEventListener('keydown', e => { if((e.key==='Enter'||e.key===' ')&&e.target===el){e.preventDefault();openDetail(a.mal_id)} });
+  if(latestEpisode)el.setAttribute('aria-label',`${titleOf(a)} ${latestEpisode}화 최신 방영 회차 재생`);
+  el.addEventListener('click', e => { if(e.target.closest('.heart'))return;if(latestEpisode)playLatestEpisode(a);else openDetail(a.mal_id); });
+  el.addEventListener('keydown', e => { if((e.key==='Enter'||e.key===' ')&&e.target===el){e.preventDefault();if(latestEpisode)playLatestEpisode(a);else openDetail(a.mal_id)} });
   el.querySelector('.heart').addEventListener('click', e => { e.stopPropagation(); toggleLibrary(a, e.currentTarget); });
   return el;
 }
@@ -375,6 +378,17 @@ async function openDetail(id) {
     $('.detail-save').onclick=e=>toggleLibrary(a,e.currentTarget);
     $('.detail-web')?.addEventListener('click',()=>window.lilac.openExternal(a.url));
   } catch(e){if(openDetail.token===token)$('#detailContent').innerHTML=`<div class="empty-state"><h3>정보를 불러오지 못했어요</h3><p>${escapeHtml(e.message)}</p></div>`;}
+}
+
+async function playLatestEpisode(anime){
+  const number=Number(anime?.latestEpisodeNumber);if(!anime||!Number.isInteger(number)||number<=0)return;
+  try{
+    const result=await window.lilac.providerDetail(anime),data=result?.data||anime,episodes=result?.episodes||[];
+    const episode=episodes.find(item=>Number(item.number)===number&&item.playable!==false);
+    if(!episode){toast(`${number}화는 현재 공급원에서 재생 가능한 회차로 확인되지 않았습니다.`);openDetail(anime.mal_id);return}
+    const title=titleOf(data),context={episode,subtitleTitle:title,image:imageOf(data),anime:data,seriesEpisodes:episodes,comparisonEpisodes:nearbyEpisodes(episodes,episode),resolveKind:'provider'};
+    resolveIntoPlayer(()=>window.lilac.providerResolve(episode),`${title} · ${episode.name||number}화`,context,title,number);
+  }catch(error){toast(`최신 회차를 불러오지 못했습니다: ${String(error?.message||error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`)}
 }
 
 async function doSearch(query) {
@@ -955,6 +969,59 @@ async function loadLinkkfHome(){
   $('#scheduleRetry').onclick=()=>loadLinkkfSchedule(selected);loadLinkkfSchedule(selected);
   window.lilac.linkkfSections().then(sections=>{[['pv','#pvSection','#pvRail'],['movie','#movieSection','#movieRail'],['adult16','#adultSection','#adultRail']].forEach(([key,section,rail])=>{const items=sections?.[key]||[];$(section).classList.toggle('hidden',!items.length);if(items.length)renderCards(rail,items)})}).catch(()=>{});
 }
+let latestEpisodeRequest=0;
+const latestEpisodeCacheKey=provider=>`latestEpisodeCache:v1:${provider}`;
+function latestSourceEpisodeCount(provider,anime){return provider==='reanime'?Math.max(Number(anime?.subbed)||0,Number(anime?.dubbed)||0):Number(anime?.availableEpisodeCount)||0}
+function cachedLatestEpisodeItems(provider,candidates){
+  const value=store.get(latestEpisodeCacheKey(provider),null),age=Date.now()-Number(value?.savedAt||0);
+  if(!Array.isArray(value?.items)||age<0||age>12*60*60*1000)return null;
+  const current=new Map(candidates.map(anime=>[Number(anime?.anilistId),anime]));
+  const items=value.items.map(item=>{const anime=current.get(Number(item?.anilistId));return anime&&Number(item.latestEpisodeNumber)>0&&Number(item.latestEpisodeNumber)<=latestSourceEpisodeCount(provider,anime)?{...anime,latestEpisodeNumber:Number(item.latestEpisodeNumber),latestAiringAt:Number(item.latestAiringAt)}:null}).filter(Boolean);
+  return {items,age};
+}
+function rememberLatestEpisodeItems(provider,items){try{store.set(latestEpisodeCacheKey(provider),{savedAt:Date.now(),items:items.slice(0,30)})}catch{}}
+function showLatestEpisodeItems(items){state.latestEpisodes=items;renderCards('#latestEpisodeRail',items);$('#seeAllLatestEpisodes').classList.toggle('hidden',!items.length)}
+async function loadLatestEpisodeRail(provider,candidates){
+  const request=++latestEpisodeRequest,section=$('#latestEpisodeSection'),rail=$('#latestEpisodeRail'),status=$('#latestEpisodeStatus');
+  state.latestEpisodes=[];rail.replaceChildren();$('#seeAllLatestEpisodes').classList.add('hidden');$('#latestEpisodeRetry').classList.add('hidden');section.classList.remove('hidden');
+  if(!['reanime','miruro'].includes(provider)){
+    status.textContent=provider==='linkkf'?'회차별 최신 정보 연결은 준비 중입니다. 요일별 방영표를 아래에서 확인할 수 있어요.':'현재 공급원의 회차별 최신 방영 정보 연결은 준비 중입니다.';
+    return;
+  }
+  const sourceCandidates=Array.isArray(candidates)?candidates.slice(0,120):[];
+  if(!sourceCandidates.length){status.textContent='현재 방영 중인 작품 목록이 없습니다.';return;}
+  if(!sourceCandidates.some(anime=>Number(anime?.anilistId)>0)){status.textContent='현재 방영 작품과 연결되는 AniList ID를 찾지 못했습니다.';return;}
+  const cached=cachedLatestEpisodeItems(provider,sourceCandidates),cacheIsFresh=cached&&cached.age<30*60*1000;
+  if(cached)showLatestEpisodeItems(cached.items);
+  if(cacheIsFresh){status.textContent=`저장된 방영 회차 ${cached.items.length}개`;return;}
+  status.textContent='최근 방영 회차를 확인하는 중...';
+  try{
+    const byId=new Map();for(const anime of sourceCandidates){const id=Number(anime?.anilistId),previous=byId.get(id);if(id>0&&(!previous||latestSourceEpisodeCount(provider,anime)>latestSourceEpisodeCount(provider,previous)))byId.set(id,anime)}
+    const queryCandidates=sourceCandidates.map(anime=>({provider,anilistId:Number(anime?.anilistId)||null,subbed:Number(anime?.subbed)||0,dubbed:Number(anime?.dubbed)||0,availableEpisodeCount:Number(anime?.availableEpisodeCount)||0}));
+    const result=await window.lilac.providerLatestEpisodes(provider,queryCandidates);
+    if(request!==latestEpisodeRequest||provider!==state.source)return;
+    const items=(result?.data||[]).map(({anime,episode,airingAt})=>{const source=byId.get(Number(anime?.anilistId));return source?{...source,latestEpisodeNumber:Number(episode),latestAiringAt:Number(airingAt)}:null}).filter(item=>item&&item.latestEpisodeNumber>0);
+    showLatestEpisodeItems(items);rememberLatestEpisodeItems(provider,items);
+    status.textContent=items.length?`최근 14일 방영 회차 ${items.length}개${result.fromCache?' · 저장된 정보':''}`:'최근 14일 내에 방영했고 이 공급원에서 제공 중인 회차가 없습니다.';
+  }catch(error){
+    if(request!==latestEpisodeRequest||provider!==state.source)return;
+    status.textContent=cached?.items.length?`최신 정보 갱신 실패 · 저장된 회차 ${cached.items.length}개를 표시 중입니다.`:`최신 방영 정보를 불러오지 못했습니다: ${String(error?.message||error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`;
+    $('#latestEpisodeRetry').classList.remove('hidden');
+  }
+}
+async function retryLatestEpisodeRail(){
+  const provider=state.source;if(!['reanime','miruro'].includes(provider)){await loadLatestEpisodeRail(provider,state.airing);return;}
+  $('#latestEpisodeRetry').classList.add('hidden');$('#latestEpisodeStatus').textContent='방영 중인 작품을 다시 불러오는 중...';
+  try{
+    const result=await window.lilac.providerAiring(provider);if(provider!==state.source)return;
+    state.airing=result?.data||[];$('#airingSection').classList.toggle('hidden',!state.airing.length);if(state.airing.length)renderCards('#airingRail',state.airing.slice(0,30));
+    await loadLatestEpisodeRail(provider,state.airing);
+  }catch(error){
+    if(provider!==state.source)return;
+    $('#latestEpisodeStatus').textContent=`방영 중인 작품을 불러오지 못했습니다: ${String(error?.message||error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`;
+    $('#latestEpisodeRetry').classList.remove('hidden');
+  }
+}
 
 // Android SearchScreen (Linkkf): 태그 필터 — 시즌 타입 / 장르 / 연도, one tag per group.
 const filterState={format:null,genre:null,year:null,page:1,totalPages:1,loaded:false};
@@ -1001,9 +1068,11 @@ async function init(){
   try {
     let season,top;
     if(state.source==='linkkf'){
+      state.airing=[];loadLatestEpisodeRail(state.source,[]);
       try{const linkkf=await window.lilac.linkkfHome(1,20);season=linkkf;top={data:linkkf.data.slice().reverse()};state.catalogPage=2;$('#filterBar').classList.remove('hidden');}
       catch(error){showSourceNotice(state.source);[season,top]=await Promise.all([window.lilac.season(),window.lilac.top()]);}
     }else if(PROVIDER_SOURCES.includes(state.source)){
+      state.airing=[];
       // The catalog's first page (most popular first) fills 인기 애니메이션 and 전체; this season's shows come separately.
       // Asked twice: Miruro's list (several pages checked for playable episodes) did not always come the first time.
       const selectedQuarter=state.quarterSelection,currentQuarter=currentQuarterSelection(),quarterSource=QUARTER_PROVIDERS.includes(state.source);
@@ -1011,7 +1080,7 @@ async function init(){
       if(quarterSource)$('#quarterStatus').textContent='분기별 작품을 불러오는 중...';
       const current=(quarterSource?fetchQuarterItems(state.source,currentQuarter.year,currentQuarter.quarter):window.lilac.providerSeason(state.source)).catch(error=>({error}));
       const selected=quarterSource&&selectedQuarter&&(selectedQuarter.year!==currentQuarter.year||selectedQuarter.quarter!==currentQuarter.quarter)?fetchQuarterItems(state.source,selectedQuarter.year,selectedQuarter.quarter).catch(error=>({error})):current;
-      const airing=window.lilac.providerAiring(state.source).catch(()=>null);
+      const airing=window.lilac.providerAiring(state.source).then(data=>({value:data})).catch(error=>({error}));
       try{season=await window.lilac.providerCatalog(state.source);top={data:season.data}}
       catch(error){showSourceNotice(state.source);[season,top]=await Promise.all([window.lilac.season(),window.lilac.top()]);}
       const [result,onAir,selectedResult]=await Promise.all([current,airing,selected]);
@@ -1025,8 +1094,9 @@ async function init(){
         else $('#quarterStatus').textContent='';
         $('#quarterRetry').classList.toggle('hidden',!selectedResult?.error&&!selectedResult?.stale);
       }
-      if(onAir?.data?.length)state.airing=onAir.data;
-    }else [season,top]=await Promise.all([window.lilac.season(),window.lilac.top()]);
+      if(onAir?.error){state.airing=[];$('#latestEpisodeSection').classList.remove('hidden');$('#latestEpisodeStatus').textContent=`방영 중인 작품을 불러오지 못했습니다: ${String(onAir.error?.message||onAir.error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`;$('#latestEpisodeRetry').classList.remove('hidden');}
+      else{state.airing=onAir?.value?.data||[];loadLatestEpisodeRail(state.source,state.airing);}
+    }else{state.airing=[];loadLatestEpisodeRail(state.source,[]);[season,top]=await Promise.all([window.lilac.season(),window.lilac.top()]);}
     state.season=season.data;state.top=top.data;if(state.source==='reanime'){state.catalogOffset=season.data.length;state.catalogTotal=season.total||null}else if(['animenosub','ohli24'].includes(state.source)){state.catalogOffset=season.nextOffset||2}else if(state.source==='miruro'){state.catalogOffset=season.nextOffset;state.catalogDone=Boolean(season.done)}const quarterSource=QUARTER_PROVIDERS.includes(state.source),homeSeason=quarterSource?state.quarterShows:(state.current||state.season);$('#seasonRail').closest('.content-section').classList.toggle('hidden',!quarterSource&&Boolean(state.current&&!homeSeason?.length));renderCards('#seasonRail',(homeSeason||[]).slice(0,30));$('#airingSection').classList.toggle('hidden',!state.airing?.length);if(state.airing?.length)renderCards('#airingRail',state.airing.slice(0,30));renderCards('#topRail',state.top.slice(0,20));if(!quarterSource)$('#seasonTitle').textContent='이번 시즌 신작';if(state.source==='linkkf'&&state.season[0]?.provider==='linkkf')loadLinkkfHome();
     const heroPool=[[state.current,'이번 시즌 추천'],[state.season,'이번 시즌 추천'],[state.top,'인기 작품']].find(([list])=>list?.length);if(heroPool)renderHero(heroPool[0],heroPool[1]);
   } catch(e){$('#seasonRail').classList.remove('loading-cards');$('#topRail').classList.remove('loading-cards');if(QUARTER_PROVIDERS.includes(state.source)){$('#quarterStatus').textContent=`분기별 목록을 불러오지 못했습니다: ${e.message}`;$('#quarterRetry').classList.remove('hidden')}showSourceNotice(null);}
@@ -1048,6 +1118,8 @@ $$('.nav').forEach(b=>b.onclick=()=>switchView(b.dataset.view));$$('[data-goto]'
 function showHomeList(list,label){switchView('search');if(!list?.length)return;$('#pageSearch').value='';$('#filterMore')?.classList.add('hidden');renderCards('#searchGrid',list);$('#searchStatus').textContent=`${label} ${list.length}개 · 인기순`}
 $('#seeAllSeason').onclick=()=>QUARTER_PROVIDERS.includes(state.source)?showHomeList(state.quarterShows,state.quarterSelection?.label||'분기별 작품'):showHomeList(state.current||state.season,'이번 시즌 신작');
 $('#seeAllAiring').onclick=()=>showHomeList(state.airing,'방영 중');
+$('#seeAllLatestEpisodes').onclick=()=>showHomeList(state.latestEpisodes,'최근 방영 회차');
+$('#latestEpisodeRetry').onclick=retryLatestEpisodeRail;
 $('#seeAllTop').onclick=()=>showHomeList(state.top,'인기 애니메이션');
 $$('[data-library-tab]').forEach(button=>button.onclick=()=>{$$('[data-library-tab]').forEach(x=>x.classList.toggle('selected',x===button));$('#savedLibraryPanel').classList.toggle('hidden',button.dataset.libraryTab!=='saved');$('#downloadsPanel').classList.toggle('hidden',button.dataset.libraryTab!=='downloads')});
 $('#openDownloadFolder').onclick=()=>window.lilac.openDownloadsFolder();
