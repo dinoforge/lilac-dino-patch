@@ -11,14 +11,16 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 원본 기준: whispelyn-byte/LilacAnime-desktop main, v0.5.6, d7d4ec4853d252d67f0febb939be9770ca703444
 - 초기 main 스냅샷: 2bf37e51f1ab07f7c7b0d06f86cb6705005642f2, root commit
 - upstream 원본 이력은 로컬 upstream-main 브랜치에 남아 있다. 새 GitHub 저장소에는 main 스냅샷만 push했다.
-- 원본 코드 변경은 아직 없다.
+- Phase 0 보고서 commit: f2feb47c7440ae5c5a7995e9f7bc67e4c17ae472.
+- 첫 Phase 1 코드 변경: 다음 화 자동 재생 설정과 종료 후 자동 전환을 제거하고, 종료 시 수동 선택 안내를 표시한다. 다음 화 버튼은 유지한다.
 
 ## 완료
 
 - 새 폴더 이름 LilacAnime-Player로 시작했다.
-- 비공개 GitHub 저장소 anime-player를 만들고 main을 push했다. 원격 SHA와 로컬 HEAD가 일치하고 작업 트리가 깨끗한 것을 확인했다.
+- 비공개 GitHub 저장소 anime-player를 만들고 main을 push했다. Phase 0 보고서 commit까지 원격 SHA와 로컬 HEAD가 일치하는 것을 확인했다.
 - 사용자 제공 CODEX_FIRST_PROMPT.md와 CODEX_MASTER_PLAN.md를 docs/planning에 보관했다.
-- 의존성 설치, 로컬 자동 테스트 10/10, Windows NSIS 패키지 빌드를 확인했다.
+- 기준선 자동 테스트는 10/10, 자동 재생 제거 후 관련 자동 테스트는 11/11 통과했다.
+- 변경 후 npm run dist가 성공했고 Windows NSIS 설치 파일을 다시 만들었다.
 - 실제 외부 재생은 검증하지 않았다. 라이브 테스트 파일도 실행하지 않았다. 기존 기본 앱 데이터 프로필은 열어보지 않았다.
 - Phase 0 보고서: docs/BASELINE_AUDIT.md, docs/FEATURE_GAP.md, docs/PHASE1_PLAN.md.
 
@@ -32,6 +34,6 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 ## 다음
 
-1. Phase 1 코드 변경 전에 원본 재사용 권한과 실제 테스트 영상·자막 출처의 이용 조건을 확인한다.
-2. 첫 코드 변경은 보고서의 최소 범위부터 시작한다.
-3. 실제 서비스 검증과 로컬 테스트를 분리해 기록한다.
+1. 보고서 및 첫 코드 변경을 새 main에 commit/push하고 원격 SHA를 확인한다.
+2. 실제 영상·자막 테스트 전 원본 재사용 권한과 각 출처의 이용 조건을 확인한다.
+3. 허가된 실제 자료와 분리된 userData 프로필로 Windows 시청 흐름을 검증한다.

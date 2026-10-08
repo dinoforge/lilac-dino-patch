@@ -4,7 +4,13 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
+const appSource = fs.readFileSync(path.join(__dirname, '../src/app.js'), 'utf8');
 const source = fs.readFileSync(path.join(__dirname, '../src/player.js'), 'utf8');
+function appSection(start, end) {
+  const first = appSource.indexOf(start), last = appSource.indexOf(end, first);
+  assert.ok(first >= 0 && last > first, 'Missing app section: ' + start);
+  return appSource.slice(first, last);
+}
 function section(start, end) {
   const first = source.indexOf(start), last = source.indexOf(end, first);
   assert.ok(first >= 0 && last > first, `Missing player section: ${start}`);
@@ -126,4 +132,24 @@ test('ASS canvas follows stretched video bounds and returns to the original boun
   video.style.objectFit = 'contain'; window.LilacAss.resize(); await new Promise(resolve => setImmediate(resolve));
   assert.equal(created[0].bounds.width, 1600); assert.equal(created[0].bounds.x, 250);
   await window.LilacAss.destroy(); assert.equal(window.LilacAss.active, false);
+});
+
+test('ending an episode exposes controls and never starts the next episode automatically', () => {
+  const status = { textContent: '' }, calls = [];
+  const context = vm.createContext({
+    siblingEpisode: () => ({ number: 2 }),
+    $: selector => selector === '#downloadStatus' ? status : null,
+    showPlayerControls: () => calls.push('controls'),
+    playSiblingEpisode: () => calls.push('autoplay')
+  });
+  vm.runInContext(appSection('function handleEpisodeEnded()', "\n$('#video').addEventListener('ended'"), context);
+  context.handleEpisodeEnded();
+  assert.equal(status.textContent, '재생이 끝났습니다. 다음 화는 직접 선택해 주세요.');
+  assert.deepEqual(calls, ['controls']);
+
+  context.siblingEpisode = () => null;
+  context.handleEpisodeEnded();
+  assert.equal(status.textContent, '마지막 회차입니다.');
+  assert.deepEqual(calls, ['controls', 'controls']);
+  assert.match(source, /\$\('#nextEpisode'\)\.onclick\s*=\s*\(\)\s*=>\s*playSiblingEpisode\(siblingEpisode\(1\)\)/);
 });

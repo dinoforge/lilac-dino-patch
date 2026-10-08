@@ -1,8 +1,8 @@
 // Android PlayerScreen port: in-player settings menu, previous/next episode buttons, screen lock,
-// OP/ED auto skip, autoplay toggle and remote-style (TV) keyboard control. Loaded after app.js and
+// OP/ED auto skip and remote-style (TV) keyboard control. Loaded after app.js and
 // shares its globals ($, currentPlaybackContext, hlsPlayer, ...).
 
-// Android PlayerSettings defaults: autoPlay, showChapterSkipButton, autoSkip and vttStyleEnabled are on.
+// Android PlayerSettings defaults: showChapterSkipButton, autoSkip and vttStyleEnabled are on.
 function playerFlag(key, fallback = true) { const value = localStorage.getItem(key); return value === null ? fallback : value !== 'false'; }
 let playerLocked = false, unlockTimer = null, usingKeyboard = false;
 // Focus is only moved into menus for keyboard/remote users; mouse users would just see a stray focus ring.
@@ -56,7 +56,6 @@ function openPlayerSettings(open, focusSection = null) {
 
 // Mirrors the settings page so both edit the same stored values.
 function syncPlayerSettingsUI() {
-  $('#psAutoPlay').checked = playerFlag('playerAutoPlay');
   $('#psSkipButton').checked = playerFlag('playerSkipButton');
   $('#psAutoSkip').checked = playerFlag('playerAutoSkip', false);
   $('#assEffectsHint').textContent = assEffectsEnabled() ? '노래 가사·간판 번역 등의 위치·색·움직임을 그대로 보여 줍니다' : '효과를 줄여 가볍게 보여 줍니다 (영상이 버벅일 때)';
@@ -681,7 +680,6 @@ makeRemoteFocusable();
 // --- wiring ------------------------------------------------------------------------------------
 $('#playerSettingsButton').onclick = () => openPlayerSettings(!playerSettingsOpen());
 $('#closePlayerSettings').onclick = () => { openPlayerSettings(false); $('#playerSettingsButton').focus(); };
-$('#psAutoPlay').onchange = event => localStorage.setItem('playerAutoPlay', String(event.target.checked));
 $('#psSkipButton').onchange = event => { localStorage.setItem('playerSkipButton', String(event.target.checked)); updateSkipState($('#video')); };
 $('#psAutoSkip').onchange = event => localStorage.setItem('playerAutoSkip', String(event.target.checked));
 $$('#psSubtitleSources button').forEach(button => button.onclick = () => selectSubtitleSource(button.dataset.source));

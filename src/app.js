@@ -979,7 +979,11 @@ function saveHistorySoon(){saveHistorySoon.last=Date.now();store.set('history',s
 $('#video').addEventListener('pause',()=>{saveHistorySoon();$('#immersivePlayer').classList.remove('is-playing');showPlayerControls()});
 $('#video').addEventListener('waiting',()=>{$('#playerEmpty').classList.remove('hidden')});
 $('#video').addEventListener('canplay',()=>{$('#playerEmpty').classList.add('hidden');applyPendingResume()});
-$('#video').addEventListener('ended',()=>{const next=siblingEpisode(1);if(!next){$('#downloadStatus').textContent='마지막 회차입니다.';showPlayerControls();return}if(!playerFlag('playerAutoPlay')){$('#downloadStatus').textContent='재생이 끝났습니다.';showPlayerControls();return}playSiblingEpisode(next)});
+function handleEpisodeEnded(){
+  $('#downloadStatus').textContent=siblingEpisode(1)?'재생이 끝났습니다. 다음 화는 직접 선택해 주세요.':'마지막 회차입니다.';
+  showPlayerControls();
+}
+$('#video').addEventListener('ended',handleEpisodeEnded);
 $('#video').addEventListener('loadedmetadata',()=>{applyPendingResume();scheduleOpEdAnalysis()});
 $('#video').addEventListener('durationchange',applyPendingResume);
 $('#filterToggle').onclick=toggleFilterPanel;$('#filterApply').onclick=()=>{$('#filterPanel').classList.add('hidden');$('#filterToggle').setAttribute('aria-expanded','false');runLinkkfFilter()};$('#filterReset').onclick=()=>{filterState.format=filterState.genre=filterState.year=null;$$('[data-filter-group] button').forEach(x=>x.classList.remove('selected'));$('#filterToggle').textContent='태그 필터'};$('#filterMore').onclick=()=>runLinkkfFilter(true);
