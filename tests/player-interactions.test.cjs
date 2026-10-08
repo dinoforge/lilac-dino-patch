@@ -134,9 +134,12 @@ test('ASS canvas follows stretched video bounds and returns to the original boun
   await window.LilacAss.destroy(); assert.equal(window.LilacAss.active, false);
 });
 
-test('ending an episode exposes controls and never starts the next episode automatically', () => {
+test('ending an episode saves completion, exposes controls, and never starts the next episode automatically', () => {
   const status = { textContent: '' }, calls = [];
   const context = vm.createContext({
+    currentHistoryKey: 'episode-key',
+    state: { history: [{ key: 'episode-key', progress: 83 }] },
+    saveHistorySoon: () => calls.push('save'),
     siblingEpisode: () => ({ number: 2 }),
     $: selector => selector === '#downloadStatus' ? status : null,
     showPlayerControls: () => calls.push('controls'),
@@ -145,11 +148,12 @@ test('ending an episode exposes controls and never starts the next episode autom
   vm.runInContext(appSection('function handleEpisodeEnded()', "\n$('#video').addEventListener('ended'"), context);
   context.handleEpisodeEnded();
   assert.equal(status.textContent, '재생이 끝났습니다. 다음 화는 직접 선택해 주세요.');
-  assert.deepEqual(calls, ['controls']);
+  assert.equal(context.state.history[0].progress, 100);
+  assert.deepEqual(calls, ['save', 'controls']);
 
   context.siblingEpisode = () => null;
   context.handleEpisodeEnded();
   assert.equal(status.textContent, '마지막 회차입니다.');
-  assert.deepEqual(calls, ['controls', 'controls']);
+  assert.deepEqual(calls, ['save', 'controls', 'save', 'controls']);
   assert.match(source, /\$\('#nextEpisode'\)\.onclick\s*=\s*\(\)\s*=>\s*playSiblingEpisode\(siblingEpisode\(1\)\)/);
 });

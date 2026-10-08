@@ -980,6 +980,11 @@ $('#video').addEventListener('pause',()=>{saveHistorySoon();$('#immersivePlayer'
 $('#video').addEventListener('waiting',()=>{$('#playerEmpty').classList.remove('hidden')});
 $('#video').addEventListener('canplay',()=>{$('#playerEmpty').classList.add('hidden');applyPendingResume()});
 function handleEpisodeEnded(){
+  if(currentHistoryKey){
+    const item=state.history.find(x=>(x.key||x.src)===currentHistoryKey);
+    if(item){item.progress=100;item.updated=Date.now();}
+    saveHistorySoon();
+  }
   $('#downloadStatus').textContent=siblingEpisode(1)?'재생이 끝났습니다. 다음 화는 직접 선택해 주세요.':'마지막 회차입니다.';
   showPlayerControls();
 }
