@@ -24,7 +24,7 @@ Windows 데스크톱에서 마우스와 키보드로 사용한다. 홈, 전체 �
 
 ## Capabilities and Constraints
 
-- 콘텐츠 소스: Linkkf, Animenosub, RE:Anime.
+- 콘텐츠 소스: Linkkf, Animenosub, RE:Anime, Miruro, 애니24. LinkAni는 지원하지 않는다.
 - 작품 검색, 상세, 회차, 보관함, 시청 기록, 직접 영상 재생.
 - Linkkf VTT, Kairan ASS, Csora ASS, 사용자 자막 선택 구조.
 - 재생 속도, 화질, 자막 크기·위치·스타일·싱크, 탐색 간격, 자동 재생, OP/ED 스킵 설정.

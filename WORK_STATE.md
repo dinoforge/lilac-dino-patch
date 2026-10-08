@@ -34,11 +34,14 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 이전 `reanime-korean-display` 폴더는 사용자가 직접 정리하기로 했다. 이 프로젝트에서는 해당 폴더를 이동하거나 삭제하지 않는다.
 - Linkkf 요일표가 요일별 API 실패와 실제 빈 목록을 구분하고, 실패한 요일을 다시 불러오도록 수정했다. 요일별 일부 실패도 다른 요일 목록을 유지한다.
 - `node --test tests/player-interactions.test.cjs tests/flix-proxy.test.cjs`: 13/13 통과. `node --check`와 `git diff --check`도 통과했다. `npm run dist`로 Windows NSIS 설치 파일을 다시 만들었고, 패키지 `app.asar`에서 새 응답 상태 처리와 재시도 UI를 확인했다. 설치 파일은 124,519,640바이트다.
+- LinkAni는 사용자 결정으로 콘텐츠 공급원에서 제외했다. 설정 선택지와 검색·상세·재생 네트워크 어댑터를 제거하고, 이전 `contentSource=linkani` 값만 RE:Anime로 옮긴다. 라이브러리·시청 기록·다운로드 데이터는 삭제하지 않는다. 이전 LinkAni 기록은 재생할 수 없다는 안내를 보인다.
+- LinkAni 제거 검증: 관련 테스트 15/15 통과, `node --check`와 `git diff --check` 통과. `npm run dist` Windows NSIS 빌드 성공. 패키지 `app.asar`에서 LinkAni 선택지·온라인 어댑터가 없고, 이전 설정 마이그레이션과 저장 기록 안내는 포함된 것을 확인했다. 설치 파일은 124,518,298바이트다. 외부 사이트 재생은 이번 변경에서 검증하지 않았다.
 
 ## 주요 결정
 
 - 새 앱은 Windows 우선, Android는 후속이다. Chrome·macOS는 제품 범위에서 제외한다.
 - 새 저장소는 비공개로 둔다. 원본 라이선스와 출처별 이용 조건이 확인되기 전 공개 배포하지 않는다.
+- 지원 공급원은 Linkkf, 애니24, Animenosub, RE:Anime, Miruro다. LinkAni는 제외한다.
 - 첫 기능 검증은 검색·상세·회차·실제 재생·로컬 이어보기·한국어 자막·수동 싱크·다음 화 수동 시작이다.
 - 자동 자막 싱크와 API 없는 ChatGPT 자동 번역은 미검증 목표다. 외부 API 자동 번역을 필수로 두지 않는다.
 - 요구사항 28에 따라 다음 화 자동 재생을 끈다.

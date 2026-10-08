@@ -6,6 +6,8 @@ const path = require('node:path');
 
 const appSource = fs.readFileSync(path.join(__dirname, '../src/app.js'), 'utf8');
 const source = fs.readFileSync(path.join(__dirname, '../src/player.js'), 'utf8');
+const mainSource = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
+const indexHtml = fs.readFileSync(path.join(__dirname, '../src/index.html'), 'utf8');
 function appSection(start, end) {
   const first = appSource.indexOf(start), last = appSource.indexOf(end, first);
   assert.ok(first >= 0 && last > first, 'Missing app section: ' + start);
@@ -190,4 +192,26 @@ test('weekday schedule marks all days unavailable when the schedule request fail
   assert.match(h.rail.innerHTML, /일정 정보를 불러오지 못했습니다/);
   assert.equal(h.retry.classList.contains('hidden'), false);
   assert.equal(h.buttons[7].attrs['aria-selected'], 'true');
+});
+
+test('removing LinkAni migrates only the saved content source and preserves user data', () => {
+  const storage = new Map([['contentSource', 'linkani'], ['history', '["keep"]'], ['library', '["keep"]']]);
+  const context = vm.createContext({ localStorage: {
+    getItem: key => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, String(value))
+  } });
+  vm.runInContext(appSection('function migrateContentSource(', '\nconst state ='), context);
+  assert.equal(context.migrateContentSource('linkani'), 'reanime');
+  assert.equal(storage.get('contentSource'), 'reanime');
+  assert.equal(storage.get('history'), '["keep"]');
+  assert.equal(storage.get('library'), '["keep"]');
+  assert.equal(context.migrateContentSource('miruro'), 'miruro');
+});
+
+test('LinkAni is absent from source choices and online provider adapters', () => {
+  const providerList = appSource.match(/const PROVIDER_SOURCES=\[([^\]]+)\]/)?.[1] || '';
+  assert.ok(providerList);
+  assert.doesNotMatch(providerList, /linkani/i);
+  assert.doesNotMatch(indexHtml, /(?:data-value|option value)="linkani"/i);
+  assert.doesNotMatch(mainSource, /LINKANI_WEB|linkaniFetch|linkaniItems|linkaniDetail|resolveLinkaniEpisode|provider\s*===\s*['"]linkani['"]/i);
 });
