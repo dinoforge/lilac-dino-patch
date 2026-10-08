@@ -14,6 +14,7 @@ const { DownloadManager } = require('./download-manager.cjs');
 const { Updater } = require('./updater.cjs');
 const { SubtitleStore } = require('./subtitle-store.cjs');
 const { createTranslator } = require('./subtitle-translator.cjs');
+const { QUARTER_PROVIDERS, quarterForDate, quarterPeriod, quarterQuery } = require('./quarter-catalog.cjs');
 let subtitleTranslator = null;
 const translator = () => subtitleTranslator ||= createTranslator(app.getPath('userData'));
 
@@ -1951,18 +1952,19 @@ app.whenReady().then(async () => {
   // air): "2026 가을 신작" (this season; Re:Anime and Miruro filter their catalog by season and year, Animenosub its
   // list by season tag) and "방영 중" (airing now). Seasons follow the anime calendar (January winter, April spring,
   // July summer, October autumn).
-  async function homeShows(provider,kind){
-    const now=new Date(),year=now.getFullYear(),index=Math.floor(now.getMonth()/3),season=['WINTER','SPRING','SUMMER','FALL'][index];
-    const current=kind==='season',data=[];
+  async function homeShows(provider,kind,requestedYear,requestedQuarter){
+    const period=kind==='quarter'?quarterPeriod(requestedYear,requestedQuarter):quarterForDate(),{year,season}=period;
+    const current=kind==='season'||kind==='quarter',data=[];
+    if(kind==='quarter'&&!QUARTER_PROVIDERS.includes(provider))throw new Error('이 콘텐츠 소스는 확인된 분기별 목록을 제공하지 않습니다.');
     if (provider === 'reanime') {
-      const filter=current?`season=${season}&year=${year}`:'status=RELEASING&sort=popularity';
+      const filter=current?new URLSearchParams(quarterQuery(provider,period)).toString():'status=RELEASING&sort=popularity';
       const root=await providerFetch(`${REANIME_WEB}/api/v1/search?limit=100&offset=0&${filter}`,{json:true,referer:`${REANIME_WEB}/search`});
       // Its status can say "Not Yet Released" for a show with episodes, so the episode counts decide.
       data.push(...reanimeItems(root).filter(item=>item.subbed>0||item.dubbed>0));
     } else if (provider === 'miruro') {
       let cursor;const candidates=[];
       for(let page=0;page<6&&candidates.length<40;page++){
-        const root=await miruroApi('anime',current?{season,season_year:year,sort:'-popularity',limit:15,cursor}:{status:'RELEASING',sort:'-popularity',limit:15,cursor});
+        const root=await miruroApi('anime',current?{...quarterQuery(provider,period),sort:'-popularity',limit:15,cursor}:{status:'RELEASING',sort:'-popularity',limit:15,cursor});
         candidates.push(...(root.data||[]).filter(raw=>raw.status!=='NOT_YET_RELEASED'&&Object.values(raw.episode_counts||{}).some(count=>Number(count)>0)));
         cursor=root.next_cursor;if(!root.has_more||!cursor)break;
       }
@@ -1974,7 +1976,8 @@ app.whenReady().then(async () => {
         data.push(...candidates.filter(raw=>playable.has(raw.id)).map(miruroItem));
       }else data.push(...candidates.map(miruroItem));
     } else if (provider === 'animenosub') {
-      const filter=current?`season%5B0%5D=${season.toLowerCase()}-${year}`:'status=ongoing';
+      const seasonTag=quarterQuery(provider,period)?.season;
+      const filter=current?`${new URLSearchParams({'season[0]':seasonTag})}`:'status=ongoing';
       for(let page=1;page<=3;page++){
         // Only the result cards (the page also links its own views such as "Text Mode" under /anime/), without the
         // ones ribboned "Upcoming".
@@ -1986,9 +1989,10 @@ app.whenReady().then(async () => {
       // 이번 시즌 신작: the airing list (updated first); it has no separate "airing" rail.
       if(current)data.push(...ohliItems(await ohliFetch(`${OHLI24_WEB}/ing`)));
     } else throw new Error('지원하지 않는 콘텐츠 소스입니다.');
-    return {data,label:current?`${year} ${['겨울','봄','여름','가을'][index]}`:''};
+    return {data,label:current?period.label:''};
   }
   ipcMain.handle('provider:season', (_, provider) => homeShows(provider,'season'));
+  ipcMain.handle('provider:quarter', (_, provider, year, quarter) => homeShows(provider,'quarter',year,quarter));
   ipcMain.handle('provider:airing', (_, provider) => homeShows(provider,'airing'));
   ipcMain.handle('provider:catalog', async (_, provider, query = '', offset = 0, sort = '') => {
     if (sort && !query) return sortedCatalog(provider, String(sort), offset);

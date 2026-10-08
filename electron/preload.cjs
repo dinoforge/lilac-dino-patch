@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('lilac', {
   linkkfRecordView: postId => ipcRenderer.invoke('linkkf:record-view', postId),
   providerCatalog: (provider, query = '', offset = 0, sort = '') => ipcRenderer.invoke('provider:catalog', provider, query, offset, sort),
   providerSeason: provider => ipcRenderer.invoke('provider:season', provider),
+  providerQuarter: (provider, year, quarter) => ipcRenderer.invoke('provider:quarter', provider, year, quarter),
   providerAiring: provider => ipcRenderer.invoke('provider:airing', provider),
   providerDetail: anime => ipcRenderer.invoke('provider:detail', anime),
   providerPlay: (episode, title) => ipcRenderer.invoke('provider:play', episode, title),

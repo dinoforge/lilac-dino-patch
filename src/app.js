@@ -9,7 +9,7 @@ const store = {
   set(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 };
 function migrateContentSource(source){if(source!=='linkani')return source||'reanime';localStorage.setItem('contentSource','reanime');return 'reanime'}
-const state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: migrateContentSource(localStorage.getItem('contentSource')), catalogOffset:36, catalogTotal:null, catalogLoading:false, catalogDone:false };
+const state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: migrateContentSource(localStorage.getItem('contentSource')), catalogOffset:36, catalogTotal:null, catalogLoading:false, catalogDone:false, quarterShows:[], quarterSelection:null };
 let hlsPlayer = null;
 let skipSegments = [];
 let activeSkip = null;
@@ -77,7 +77,7 @@ function updateLibraryButton(button,isSaved,withLabel=true){if(!button)return;bu
 // Cards shown outside the home lists (related works, schedule, filters) must still open.
 const knownAnime=new Map();
 function rememberAnime(a){if(a?.mal_id!=null&&!knownAnime.has(String(a.mal_id)))knownAnime.set(String(a.mal_id),a);return a}
-function animeById(id) { return [...(state.current||[]),...(state.airing||[]),...state.season,...state.top,...state.library].find(x=>String(x.mal_id)===String(id))||knownAnime.get(String(id)); }
+function animeById(id) { return [...(state.quarterShows||[]),...(state.current||[]),...(state.airing||[]),...state.season,...state.top,...state.library].find(x=>String(x.mal_id)===String(id))||knownAnime.get(String(id)); }
 function toast(message) { const el=$('#toast'); el.textContent=message; el.classList.add('show'); clearTimeout(toast.t); toast.t=setTimeout(()=>el.classList.remove('show'),2200); }
 
 // 설정 > 재생 시작 화면 (GitHub issue #1): full screen, or the app window as it is. Going on to another episode inside
@@ -166,6 +166,88 @@ const PROVIDER_SOURCES=['reanime','animenosub','miruro','ohli24'],SOURCE_LABELS=
 // (sortedCatalog). 애니24 lists have no year or score to sort by.
 const ALL_SORTS={reanime:['popular','year','score'],miruro:['popular','year','score'],animenosub:['popular','year','score'],linkkf:['default','year']},SORT_LABELS={popular:'인기순',default:'기본 순서',year:'최신순',score:'평점순'};
 const OWN_ORDER={reanime:'popular',miruro:'popular',linkkf:'default'};
+const QUARTER_PROVIDERS=['reanime','miruro','animenosub'],QUARTER_CACHE_TTL=12*60*60*1000,QUARTER_CACHE_LIMIT=16;
+function currentQuarterSelection(date=new Date()){
+  const year=date.getFullYear(),quarter=Math.floor(date.getMonth()/3)+1;
+  return {year,quarter,label:`${year}년 ${quarter}분기`};
+}
+function quarterLabel(year,quarter){return `${year}년 ${quarter}분기`}
+function readQuarterSelection(provider){
+  const current=currentQuarterSelection();if(!QUARTER_PROVIDERS.includes(provider))return current;
+  try{
+    const saved=JSON.parse(localStorage.getItem(`quarterSelection:${provider}`)||'null'),year=Number(saved?.year),quarter=Number(saved?.quarter);
+    if(Number.isInteger(year)&&year>=1960&&year<=current.year&&Number.isInteger(quarter)&&quarter>=1&&quarter<=4)return {year,quarter,label:quarterLabel(year,quarter)};
+  }catch{}
+  return current;
+}
+function quarterCacheKey(provider,year,quarter){return `quarterCache:${provider}:${year}:${quarter}`}
+function readQuarterCache(provider,year,quarter){
+  try{
+    const entry=JSON.parse(localStorage.getItem(quarterCacheKey(provider,year,quarter))||'null');
+    if(!Array.isArray(entry?.items)||!Number.isFinite(entry.savedAt))return null;
+    return {...entry,fresh:Date.now()-entry.savedAt<QUARTER_CACHE_TTL};
+  }catch{return null}
+}
+function compactQuarterItems(items){
+  return items.map(item=>({provider:item.provider,id:item.id,mal_id:item.mal_id,title:item.title,title_english:item.title_english||'',title_japanese:item.title_japanese||'',images:item.images||{},score:item.score||null,year:item.year||'',type:item.type||'Anime',episodes:item.episodes||null,status:item.status||'',synopsis:'',genres:item.genres||[],studios:item.studios||[],url:item.url,anilistId:item.anilistId||null,malId:item.malId||null,canWatch:item.canWatch,subbed:item.subbed,dubbed:item.dubbed})).filter(item=>item.mal_id&&item.id&&item.title);
+}
+function writeQuarterCache(provider,year,quarter,items){
+  try{
+    localStorage.setItem(quarterCacheKey(provider,year,quarter),JSON.stringify({savedAt:Date.now(),items:compactQuarterItems(items)}));
+    const entries=[];
+    for(let i=0;i<localStorage.length;i++){
+      const key=localStorage.key(i);if(!key?.startsWith('quarterCache:'))continue;
+      try{entries.push({key,savedAt:Number(JSON.parse(localStorage.getItem(key))?.savedAt)||0})}catch{}
+    }
+    entries.sort((a,b)=>b.savedAt-a.savedAt);entries.slice(QUARTER_CACHE_LIMIT).forEach(entry=>localStorage.removeItem(entry.key));
+  }catch{}
+}
+async function fetchQuarterItems(provider,year,quarter,{refresh=false}={}){
+  const cached=readQuarterCache(provider,year,quarter);if(cached?.fresh&&!refresh)return {items:cached.items,fromCache:true,stale:false};
+  try{
+    const result=await window.lilac.providerQuarter(provider,year,quarter);
+    if(!Array.isArray(result?.data))throw new Error('분기 목록 응답이 올바르지 않습니다.');
+    writeQuarterCache(provider,year,quarter,result.data);return {items:result.data,fromCache:false,stale:false};
+  }catch(error){if(cached)return {items:cached.items,fromCache:true,stale:true,error};throw error}
+}
+function syncQuarterControls(){
+  if(!state.quarterSelection)return;
+  const {year,quarter}=state.quarterSelection;$('#quarterYear').value=String(year);
+  $('#quarterTabs').querySelectorAll('button').forEach(button=>{const selected=Number(button.dataset.quarter)===quarter;button.classList.toggle('selected',selected);button.setAttribute('aria-pressed',String(selected))});
+  $('#seasonTitle').textContent=quarterLabel(year,quarter);
+}
+function setupQuarterControls(provider){
+  const controls=$('#quarterControls'),status=$('#quarterStatus'),yearSelect=$('#quarterYear'),tabs=$('#quarterTabs'),retry=$('#quarterRetry');
+  if(!QUARTER_PROVIDERS.includes(provider)){state.quarterSelection=null;state.quarterShows=[];controls.classList.add('hidden');status.textContent='선택한 소스는 분기별 연도 정보를 제공하지 않아 분류하지 않습니다.';return null}
+  controls.classList.remove('hidden');status.textContent='';retry.classList.add('hidden');
+  const current=currentQuarterSelection(),selection=readQuarterSelection(provider);state.quarterSelection=selection;
+  yearSelect.replaceChildren(...Array.from({length:current.year-1959},(_,index)=>{const year=current.year-index,option=document.createElement('option');option.value=String(year);option.textContent=`${year}년`;return option}));
+  tabs.replaceChildren(...[1,2,3,4].map(quarter=>{const button=document.createElement('button');button.type='button';button.setAttribute('aria-pressed','false');button.dataset.quarter=String(quarter);button.textContent=`${quarter}분기`;button.onclick=()=>selectHomeQuarter(Number(yearSelect.value),quarter);return button}));
+  yearSelect.onchange=()=>selectHomeQuarter(Number(yearSelect.value),state.quarterSelection.quarter);
+  retry.onclick=()=>selectHomeQuarter(state.quarterSelection.year,state.quarterSelection.quarter,{refresh:true});syncQuarterControls();return selection;
+}
+let quarterRequest=0;
+async function selectHomeQuarter(year,quarter,{refresh=false}={}){
+  if(!QUARTER_PROVIDERS.includes(state.source)||!Number.isInteger(year)||year<1960||year>new Date().getFullYear()||!Number.isInteger(quarter)||quarter<1||quarter>4)return;
+  state.quarterSelection={year,quarter,label:quarterLabel(year,quarter)};
+  try{localStorage.setItem(`quarterSelection:${state.source}`,JSON.stringify({year,quarter}))}catch{}
+  syncQuarterControls();const request=++quarterRequest,cached=readQuarterCache(state.source,year,quarter),rail=$('#seasonRail'),status=$('#quarterStatus'),retry=$('#quarterRetry');retry.classList.add('hidden');
+  if(cached?.fresh&&!refresh){
+    state.quarterShows=cached.items;rail.classList.remove('loading-cards');renderCards('#seasonRail',state.quarterShows.slice(0,30));
+    status.textContent=state.quarterShows.length?'목록을 저장해 두었습니다.':'이 분기에 등록된 작품이 없습니다.';return;
+  }
+  if(cached){state.quarterShows=cached.items;rail.classList.remove('loading-cards');renderCards('#seasonRail',state.quarterShows.slice(0,30));status.textContent='저장한 목록을 확인하고 있습니다...'}
+  else{state.quarterShows=[];rail.classList.add('loading-cards');rail.replaceChildren();status.textContent='분기별 작품을 불러오는 중...'}
+  try{
+    const result=await fetchQuarterItems(state.source,year,quarter,{refresh});if(request!==quarterRequest)return;
+    state.quarterShows=result.items;rail.classList.remove('loading-cards');renderCards('#seasonRail',state.quarterShows.slice(0,30));
+    status.textContent=result.stale?'최신 목록을 가져오지 못해 저장된 목록을 표시합니다.':result.fromCache?'목록을 저장해 두었습니다.':state.quarterShows.length?'':'이 분기에 등록된 작품이 없습니다.';
+    retry.classList.toggle('hidden',!result.stale);
+  }catch(error){
+    if(request!==quarterRequest)return;state.quarterShows=[];rail.classList.remove('loading-cards');renderCards('#seasonRail',[]);
+    status.textContent=`분기별 목록을 불러오지 못했습니다: ${error.message}`;retry.classList.remove('hidden');
+  }
+}
 function allSort(){const sorts=ALL_SORTS[state.source]||[];let picked='';try{picked=localStorage.getItem(`allSort:${state.source}`)||''}catch{}return sorts.includes(picked)?picked:sorts[0]||''}
 const sortedMode=()=>{const sort=allSort();return Boolean(sort)&&sort!==OWN_ORDER[state.source]};
 function sortedList(){const sort=allSort(),key=`${state.source}:${sort}`;if(state.sorted?.key!==key)state.sorted={key,sort,items:[],offset:0,done:false,loading:false,total:null,pending:false};return state.sorted}
@@ -915,6 +997,7 @@ async function init(){
   state.history=state.history.filter(item=>!/^http:\/\/127\.0\.0\.1:\d+\/__flix\//i.test(item.src||''));store.set('history',state.history);
   renderContinue(); renderLibrary();
   $('#contentSource').value=state.source;$('#themeSelect').value=localStorage.getItem('theme')||'dark';$('#titleLanguage').value=titleLanguage();const savedSpeed=Number(localStorage.getItem('defaultSpeed')||1),speedIndex=Math.max(0,SPEED_OPTIONS.indexOf(savedSpeed));$('#defaultSpeed').value=String(speedIndex);$('#speed').value=String(savedSpeed);$('#speedLabel').textContent=`${savedSpeed.toFixed(2)}x`;$('#defaultQuality').value=localStorage.getItem('defaultQuality')||'1080p';$('#playerStart').value=localStorage.getItem('playerStart')==='window'?'window':'fullscreen';$('#subtitleSource').value=localStorage.getItem('subtitleSource')||'reanime';$('#subtitleSize').value=localStorage.getItem('subtitleSize')||'100';$('#subtitleSync').value=localStorage.getItem('subtitleSync')||'0';$('#vttBold').checked=localStorage.getItem('vttBold')!=='false';$('#vttOutline').value=localStorage.getItem('vttOutline')||'2';$('#subtitlePosition').value=localStorage.getItem('subtitlePosition')||'12';$('#seekSeconds').value=localStorage.getItem('seekSeconds')||'10';$('#opedAudioAnalysis').checked=localStorage.getItem('opedAudioAnalysis')!=='false';$('#subtitleSizeLabel').textContent=`${$('#subtitleSize').value}%`;$('#subtitleSyncLabel').textContent=`${$('#subtitleSync').value} ms`;$('#outlineLabel').textContent=Number($('#vttOutline').value).toFixed(1);$('#positionLabel').textContent=`${$('#subtitlePosition').value}%`;syncSettingChoices();
+  setupQuarterControls(state.source);
   try {
     let season,top;
     if(state.source==='linkkf'){
@@ -923,13 +1006,30 @@ async function init(){
     }else if(PROVIDER_SOURCES.includes(state.source)){
       // The catalog's first page (most popular first) fills 인기 애니메이션 and 전체; this season's shows come separately.
       // Asked twice: Miruro's list (several pages checked for playable episodes) did not always come the first time.
-      const current=window.lilac.providerSeason(state.source).catch(()=>window.lilac.providerSeason(state.source)).catch(()=>null),airing=window.lilac.providerAiring(state.source).catch(()=>null);
-      try{season=await window.lilac.providerCatalog(state.source);top={data:season.data};const [result,onAir]=await Promise.all([current,airing]);if(result){state.current=result.data||[];state.currentLabel=result.label}if(onAir?.data?.length)state.airing=onAir.data}
+      const selectedQuarter=state.quarterSelection,currentQuarter=currentQuarterSelection(),quarterSource=QUARTER_PROVIDERS.includes(state.source);
+      const initialQuarterRequest=quarterRequest;
+      if(quarterSource)$('#quarterStatus').textContent='분기별 작품을 불러오는 중...';
+      const current=(quarterSource?fetchQuarterItems(state.source,currentQuarter.year,currentQuarter.quarter):window.lilac.providerSeason(state.source)).catch(error=>({error}));
+      const selected=quarterSource&&selectedQuarter&&(selectedQuarter.year!==currentQuarter.year||selectedQuarter.quarter!==currentQuarter.quarter)?fetchQuarterItems(state.source,selectedQuarter.year,selectedQuarter.quarter).catch(error=>({error})):current;
+      const airing=window.lilac.providerAiring(state.source).catch(()=>null);
+      try{season=await window.lilac.providerCatalog(state.source);top={data:season.data}}
       catch(error){showSourceNotice(state.source);[season,top]=await Promise.all([window.lilac.season(),window.lilac.top()]);}
+      const [result,onAir,selectedResult]=await Promise.all([current,airing,selected]);
+      if(result&&!result.error){state.current=quarterSource?result.items||[]:result.data||[];state.currentLabel=quarterSource?currentQuarter.label:result.label}
+      if(quarterSource&&quarterRequest===initialQuarterRequest){
+        state.quarterShows=selectedResult&&!selectedResult.error?selectedResult.items||[]:[];
+        if(selectedResult?.stale)$('#quarterStatus').textContent='최신 목록을 가져오지 못해 저장된 목록을 표시합니다.';
+        else if(selectedResult?.fromCache)$('#quarterStatus').textContent=state.quarterShows.length?'목록을 저장해 두었습니다.':'이 분기에 등록된 작품이 없습니다.';
+        else if(selectedResult?.error)$('#quarterStatus').textContent=`분기별 목록을 불러오지 못했습니다: ${selectedResult.error.message}`;
+        else if(!state.quarterShows.length)$('#quarterStatus').textContent='이 분기에 등록된 작품이 없습니다.';
+        else $('#quarterStatus').textContent='';
+        $('#quarterRetry').classList.toggle('hidden',!selectedResult?.error&&!selectedResult?.stale);
+      }
+      if(onAir?.data?.length)state.airing=onAir.data;
     }else [season,top]=await Promise.all([window.lilac.season(),window.lilac.top()]);
-    state.season=season.data;state.top=top.data;if(state.source==='reanime'){state.catalogOffset=season.data.length;state.catalogTotal=season.total||null}else if(['animenosub','ohli24'].includes(state.source)){state.catalogOffset=season.nextOffset||2}else if(state.source==='miruro'){state.catalogOffset=season.nextOffset;state.catalogDone=Boolean(season.done)}$('#seasonRail').closest('.content-section').classList.toggle('hidden',Boolean(state.current&&!state.current.length));renderCards('#seasonRail',(state.current||state.season).slice(0,30));$('#airingSection').classList.toggle('hidden',!state.airing?.length);if(state.airing?.length)renderCards('#airingRail',state.airing.slice(0,30));renderCards('#topRail',state.top.slice(0,20));$('#seasonTitle').textContent='이번 시즌 신작';if(state.source==='linkkf'&&state.season[0]?.provider==='linkkf')loadLinkkfHome();
+    state.season=season.data;state.top=top.data;if(state.source==='reanime'){state.catalogOffset=season.data.length;state.catalogTotal=season.total||null}else if(['animenosub','ohli24'].includes(state.source)){state.catalogOffset=season.nextOffset||2}else if(state.source==='miruro'){state.catalogOffset=season.nextOffset;state.catalogDone=Boolean(season.done)}const quarterSource=QUARTER_PROVIDERS.includes(state.source),homeSeason=quarterSource?state.quarterShows:(state.current||state.season);$('#seasonRail').closest('.content-section').classList.toggle('hidden',!quarterSource&&Boolean(state.current&&!homeSeason?.length));renderCards('#seasonRail',(homeSeason||[]).slice(0,30));$('#airingSection').classList.toggle('hidden',!state.airing?.length);if(state.airing?.length)renderCards('#airingRail',state.airing.slice(0,30));renderCards('#topRail',state.top.slice(0,20));if(!quarterSource)$('#seasonTitle').textContent='이번 시즌 신작';if(state.source==='linkkf'&&state.season[0]?.provider==='linkkf')loadLinkkfHome();
     const heroPool=[[state.current,'이번 시즌 추천'],[state.season,'이번 시즌 추천'],[state.top,'인기 작품']].find(([list])=>list?.length);if(heroPool)renderHero(heroPool[0],heroPool[1]);
-  } catch(e){$('#seasonRail').classList.remove('loading-cards');$('#topRail').classList.remove('loading-cards');showSourceNotice(null);}
+  } catch(e){$('#seasonRail').classList.remove('loading-cards');$('#topRail').classList.remove('loading-cards');if(QUARTER_PROVIDERS.includes(state.source)){$('#quarterStatus').textContent=`분기별 목록을 불러오지 못했습니다: ${e.message}`;$('#quarterRetry').classList.remove('hidden')}showSourceNotice(null);}
 }
 // A source whose server does not answer (Linkkf's API behind Cloudflare 522 in October 2026): said above the home page
 // until the app is opened again, not in a passing toast, with the source's name as the settings show it, what the list
@@ -946,7 +1046,7 @@ $('#sourceNotice [data-notice="source"]').onclick=()=>{switchView('settings');wi
 $$('.nav').forEach(b=>b.onclick=()=>switchView(b.dataset.view));$$('[data-goto]').forEach(b=>b.onclick=()=>switchView(b.dataset.goto));
 // 홈 > "2026 가을 신작" / "방영 중" > 전체 보기: the whole list in the search view.
 function showHomeList(list,label){switchView('search');if(!list?.length)return;$('#pageSearch').value='';$('#filterMore')?.classList.add('hidden');renderCards('#searchGrid',list);$('#searchStatus').textContent=`${label} ${list.length}개 · 인기순`}
-$('#seeAllSeason').onclick=()=>showHomeList(state.current,'이번 시즌 신작');
+$('#seeAllSeason').onclick=()=>QUARTER_PROVIDERS.includes(state.source)?showHomeList(state.quarterShows,state.quarterSelection?.label||'분기별 작품'):showHomeList(state.current||state.season,'이번 시즌 신작');
 $('#seeAllAiring').onclick=()=>showHomeList(state.airing,'방영 중');
 $('#seeAllTop').onclick=()=>showHomeList(state.top,'인기 애니메이션');
 $$('[data-library-tab]').forEach(button=>button.onclick=()=>{$$('[data-library-tab]').forEach(x=>x.classList.toggle('selected',x===button));$('#savedLibraryPanel').classList.toggle('hidden',button.dataset.libraryTab!=='saved');$('#downloadsPanel').classList.toggle('hidden',button.dataset.libraryTab!=='downloads')});

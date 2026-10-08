@@ -61,6 +61,16 @@ dialog { max-height: calc(100vh - 48px); }
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
 #scheduleTabs { margin: 0 0 14px; }
 .chip-row button { min-height: 34px; padding: 0 14px; border: 1px solid var(--line); border-radius: 17px; background: var(--panel); color: var(--text); font-size: 12px; cursor: pointer; }
+.quarter-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: -4px 0 14px; }
+.quarter-year { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+.quarter-year select { min-height: 34px; border: 1px solid var(--line); border-radius: 8px; padding: 0 9px; background: var(--panel); color: var(--text); font: inherit; }
+.quarter-tabs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.quarter-tabs::-webkit-scrollbar { display: none; }
+.quarter-tabs button { min-height: 34px; min-width: 60px; padding: 0 12px; border: 1px solid var(--line); border-radius: 17px; background: var(--panel); color: var(--text); font-size: 12px; cursor: pointer; }
+.quarter-tabs button.selected { border-color: var(--lilac); background: var(--lilac); color: #1c1b1f; font-weight: 700; }
+.quarter-tabs button:focus-visible, .quarter-year select:focus-visible { outline: 2px solid var(--lilac); outline-offset: 2px; }
+.quarter-status { margin: -7px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.quarter-status:empty { display: none; }
 .chip-row button:hover { border-color: var(--lilac); }
 .chip-row button.selected { border-color: var(--lilac); background: color-mix(in srgb, var(--lilac) 18%, transparent); color: var(--lilac); font-weight: 700; }
 .rail-empty { color: var(--muted); font-size: 12px; }
