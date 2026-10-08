@@ -1953,8 +1953,15 @@ app.whenReady().then(async () => {
     return { data: linkkfAnime(root.data || {}) };
   });
   ipcMain.handle('linkkf:schedule', async () => {
-    const days = await Promise.all(LINKKF_SCHEDULE_TAGS.map(tag => linkkfFetch(`${LINKKF_API}/singlefilter.php?categorytagid=${tag}&limit=50`).then(root => (root.data || []).map(linkkfAnime)).catch(() => [])));
-    return days;
+    const results = await Promise.all(LINKKF_SCHEDULE_TAGS.map(async (tag, index) => {
+      try {
+        const root = await linkkfFetch(`${LINKKF_API}/singlefilter.php?categorytagid=${tag}&limit=50`);
+        return { index, data: (root.data || []).map(linkkfAnime), unavailable: false };
+      } catch {
+        return { index, data: [], unavailable: true };
+      }
+    }));
+    return { days: results.map(result => result.data), unavailableDays: results.filter(result => result.unavailable).map(result => result.index) };
   });
   ipcMain.handle('linkkf:sections', async () => {
     const entries = await Promise.all(Object.entries(LINKKF_SEASON_TYPES).map(([key, tag]) => linkkfFilter({ page: 1, limit: 10, seasonTypeIds: [tag] }).then(result => [key, result.data]).catch(() => [key, []])));

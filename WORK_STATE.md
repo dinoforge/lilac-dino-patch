@@ -29,9 +29,11 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 - 원본 `main`과 최신 릴리스 태그는 모두 v0.5.6 / `d7d4ec4853d252d67f0febb939be9770ca703444`이며 기준선 이후 새 커밋은 없다.
 - 회차 종료 처리에서 이어보기 진행률을 100%로 확정하고 `localStorage`에 즉시 저장하도록 보강했다. 5초 저장 간격 안에 앱을 닫아도 완료 위치가 빠지지 않도록 했다. 다음 화 자동 재생은 계속 비활성이다.
-- `node --test tests/player-interactions.test.cjs tests/flix-proxy.test.cjs`: 11/11 통과. `npm run dist`: Windows NSIS 빌드 성공. 설치 패키지의 `app.asar`에 수정 코드가 들어갔고 `.local-archive`는 포함되지 않음을 확인했다.
+- 회차 종료 진행률 저장 수정 당시 `node --test tests/player-interactions.test.cjs tests/flix-proxy.test.cjs` 11/11 통과, `npm run dist` Windows NSIS 빌드 성공. 설치 패키지에서 수정 코드를 확인했다.
 - 실제 외부 영상·자막 재생 및 별도 userData 프로필 검증은 아직 하지 않았다.
-- 이전 `reanime-korean-display` 폴더는 3,707개 파일, 5,065,218,783바이트다. 내용을 잃지 않도록 프로젝트 내부 `.local-archive/reanime-korean-display`로 옮기려 했지만, 현재 Codex 앱 프로세스의 작업 디렉터리가 원본 폴더를 잡고 있어 Windows가 이동을 거부했다. 원본은 그대로 남아 있고 아직 파일은 옮겨지지 않았다. `.local-archive/`는 Git 제외 규칙에 추가했다.
+- 이전 `reanime-korean-display` 폴더는 사용자가 직접 정리하기로 했다. 이 프로젝트에서는 해당 폴더를 이동하거나 삭제하지 않는다.
+- Linkkf 요일표가 요일별 API 실패와 실제 빈 목록을 구분하고, 실패한 요일을 다시 불러오도록 수정했다. 요일별 일부 실패도 다른 요일 목록을 유지한다.
+- `node --test tests/player-interactions.test.cjs tests/flix-proxy.test.cjs`: 13/13 통과. `node --check`와 `git diff --check`도 통과했다. `npm run dist`로 Windows NSIS 설치 파일을 다시 만들었고, 패키지 `app.asar`에서 새 응답 상태 처리와 재시도 UI를 확인했다. 설치 파일은 124,519,640바이트다.
 
 ## 주요 결정
 
@@ -43,6 +45,6 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 ## 다음
 
-1. Codex를 새 프로젝트 폴더에서 다시 연 뒤 이전 폴더 전체를 `.local-archive/reanime-korean-display`로 이동하고 파일 수·크기를 대조한다.
+1. 분기별 작품 탐색을 공급원별 시즌·연도 정보가 확인되는 범위에서 구현하고, 날짜 정보가 없는 공급원은 추정 분류하지 않는다.
 2. 원본 재사용 권한과 실제 영상·자막 출처의 이용 조건을 확인한다.
 3. 허가된 테스트 자료와 분리된 userData 프로필로 Windows 검색·재생·한국어 자막·이어보기를 검증한다.

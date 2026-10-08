@@ -157,3 +157,37 @@ test('ending an episode saves completion, exposes controls, and never starts the
   assert.deepEqual(calls, ['save', 'controls', 'save', 'controls']);
   assert.match(source, /\$\('#nextEpisode'\)\.onclick\s*=\s*\(\)\s*=>\s*playSiblingEpisode\(siblingEpisode\(1\)\)/);
 });
+
+function scheduleHarness(linkkfSchedule) {
+  const buttons = Array.from({ length: 8 }, () => ({ classList: classList(), attrs: {}, setAttribute(name, value) { this.attrs[name] = value; } }));
+  const rail = { classList: classList(), innerHTML: '', replaceChildren() { this.innerHTML = ''; } };
+  const retry = { classList: classList('hidden'), onclick: null };
+  const context = vm.createContext({
+    state: { season: [{ id: 'latest' }] }, window: { lilac: { linkkfSchedule } },
+    $: selector => selector === '#scheduleRail' ? rail : selector === '#scheduleRetry' ? retry : null,
+    $$: selector => selector === '#scheduleTabs button' ? buttons : [],
+    renderCards: (_, items) => { rail.innerHTML = `cards:${items.map(item => item.id).join(',')}`; }
+  });
+  vm.runInContext(appSection('const SCHEDULE_TABS=', '\nasync function loadLinkkfHome()'), context);
+  return { context, rail, retry, buttons };
+}
+
+test('weekday schedule distinguishes an empty day from a failed day and offers retry', async () => {
+  const empty = scheduleHarness(async () => ({ days: Array.from({ length: 7 }, () => []), unavailableDays: [] }));
+  await empty.context.loadLinkkfSchedule(1);
+  assert.match(empty.rail.innerHTML, /등록된 작품이 없습니다/);
+  assert.equal(empty.retry.classList.contains('hidden'), true);
+
+  const failed = scheduleHarness(async () => ({ days: Array.from({ length: 7 }, () => []), unavailableDays: [0] }));
+  await failed.context.loadLinkkfSchedule(1);
+  assert.match(failed.rail.innerHTML, /일정 정보를 불러오지 못했습니다/);
+  assert.equal(failed.retry.classList.contains('hidden'), false);
+});
+
+test('weekday schedule marks all days unavailable when the schedule request fails', async () => {
+  const h = scheduleHarness(async () => { throw new Error('offline'); });
+  await h.context.loadLinkkfSchedule(7);
+  assert.match(h.rail.innerHTML, /일정 정보를 불러오지 못했습니다/);
+  assert.equal(h.retry.classList.contains('hidden'), false);
+  assert.equal(h.buttons[7].attrs['aria-selected'], 'true');
+});

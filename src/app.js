@@ -842,19 +842,32 @@ function applyTheme(value){const systemLight=matchMedia('(prefers-color-scheme: 
 // Android HomeScreen (Linkkf): 방영 일정(UP/월~일) + PV·트레일러 / 극장판 / 16+ rails.
 const SCHEDULE_TABS=['UP','월','화','수','목','금','토','일'];
 let linkkfSchedule=null;
+let linkkfScheduleUnavailableDays=[];
 function renderScheduleTab(index){
   $$('#scheduleTabs button').forEach((button,i)=>{button.classList.toggle('selected',i===index);button.setAttribute('aria-selected',String(i===index))});
   const items=index===0?state.season:(linkkfSchedule?.[index-1]||[]);
   if(index>0&&!linkkfSchedule){$('#scheduleRail').classList.add('loading-cards');$('#scheduleRail').replaceChildren();return}
+  $('#scheduleRail').classList.remove('loading-cards');
+  if(index>0&&linkkfScheduleUnavailableDays.includes(index-1)){$('#scheduleRail').innerHTML='<p class="rail-empty">이 요일의 방영 일정 정보를 불러오지 못했습니다.</p>';return}
   renderCards('#scheduleRail',items.slice(0,20));
   if(!items.length)$('#scheduleRail').innerHTML='<p class="rail-empty">이 요일에 등록된 작품이 없습니다.</p>';
+}
+async function loadLinkkfSchedule(selected){
+  linkkfSchedule=null;linkkfScheduleUnavailableDays=[];$('#scheduleRetry').classList.add('hidden');renderScheduleTab(selected);
+  try{
+    const result=await window.lilac.linkkfSchedule(),days=Array.isArray(result)?result:result?.days;
+    if(!Array.isArray(days))throw new Error('Invalid schedule response');
+    linkkfSchedule=days;linkkfScheduleUnavailableDays=Array.isArray(result?.unavailableDays)?result.unavailableDays.filter(index=>Number.isInteger(index)&&index>=0&&index<7):[];
+  }catch{
+    linkkfSchedule=Array.from({length:7},()=>[]);linkkfScheduleUnavailableDays=Array.from({length:7},(_,index)=>index);
+  }
+  $('#scheduleRetry').classList.toggle('hidden',!linkkfScheduleUnavailableDays.length);renderScheduleTab(selected);
 }
 async function loadLinkkfHome(){
   $('#scheduleSection').classList.remove('hidden');$('#seasonTitle').textContent='최신 애니메이션';
   const today=(new Date().getDay()+6)%7+1;let selected=today;
   $('#scheduleTabs').replaceChildren(...SCHEDULE_TABS.map((label,index)=>{const button=document.createElement('button');button.type='button';button.setAttribute('role','tab');button.textContent=label;button.onclick=()=>{selected=index;renderScheduleTab(index)};return button}));
-  renderScheduleTab(selected);
-  window.lilac.linkkfSchedule().then(days=>{linkkfSchedule=days;renderScheduleTab(selected)}).catch(()=>{linkkfSchedule=[];renderScheduleTab(selected)});
+  $('#scheduleRetry').onclick=()=>loadLinkkfSchedule(selected);loadLinkkfSchedule(selected);
   window.lilac.linkkfSections().then(sections=>{[['pv','#pvSection','#pvRail'],['movie','#movieSection','#movieRail'],['adult16','#adultSection','#adultRail']].forEach(([key,section,rail])=>{const items=sections?.[key]||[];$(section).classList.toggle('hidden',!items.length);if(items.length)renderCards(rail,items)})}).catch(()=>{});
 }
 

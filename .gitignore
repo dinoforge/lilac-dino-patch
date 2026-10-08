@@ -4,6 +4,3 @@ dist/
 .idea/
 .vscode/
 src/vendor/
-
-# Local-only archive migrated from the previous Re:Anime project folder.
-.local-archive/
