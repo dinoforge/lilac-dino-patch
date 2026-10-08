@@ -8,8 +8,9 @@ const store = {
   get(key, fallback = []) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } },
   set(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 };
+const storedRecentSearches=store.get('recentSearches');
 function migrateContentSource(source){if(source!=='linkani')return source||'reanime';localStorage.setItem('contentSource','reanime');return 'reanime'}
-const state = { season: [], top: [], airing:[], latestEpisodes:[], library: store.get('library'), history: store.get('history'), downloads:[], source: migrateContentSource(localStorage.getItem('contentSource')), catalogOffset:36, catalogTotal:null, catalogLoading:false, catalogDone:false, quarterShows:[], quarterSelection:null };
+const state = { season: [], top: [], airing:[], latestEpisodes:[], library: store.get('library'), history: store.get('history'), recentSearches:Array.isArray(storedRecentSearches)?storedRecentSearches.filter(value=>typeof value==='string').slice(0,10):[], downloads:[], source: migrateContentSource(localStorage.getItem('contentSource')), catalogOffset:36, catalogTotal:null, catalogLoading:false, catalogDone:false, quarterShows:[], quarterSelection:null };
 let hlsPlayer = null;
 let skipSegments = [];
 let activeSkip = null;
@@ -51,6 +52,7 @@ async function resolvePendingTitles(){
 }
 function refreshTitleElements(keys=null){
   $$('[data-title-for]').forEach(el=>{const key=el.dataset.titleFor;if(keys&&!keys.includes(key))return;const a=titleAnime.get(key);if(a)el.textContent=titleOf(a)});
+  refreshSearchAutocomplete();
   if(!keys||(currentPlaybackContext?.anime&&keys.includes(animeTitleKey(currentPlaybackContext.anime))))updatePlayerTitle();
 }
 // A saved item's title in the current language; items without anime info keep the name they were saved with.
@@ -391,8 +393,41 @@ async function playLatestEpisode(anime){
   }catch(error){toast(`최신 회차를 불러오지 못했습니다: ${String(error?.message||error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`)}
 }
 
+function normalizeSearchText(value){return String(value||'').normalize('NFKC').toLocaleLowerCase().replace(/\s+/g,' ').trim()}
+function nextRecentSearches(history,query,limit=10){
+  const label=String(query||'').trim(),items=[label,...(Array.isArray(history)?history:[])].filter(value=>typeof value==='string').map(value=>value.trim()).filter(Boolean),seen=new Set();
+  return items.filter(value=>{const key=normalizeSearchText(value);if(!key||seen.has(key))return false;seen.add(key);return true}).slice(0,limit);
+}
+function buildSearchSuggestionData(query,animeItems,recentSearches,getKnownTitles=()=>({}),language='ko',limit=5){
+  const needle=normalizeSearchText(query),recent=[],recentSeen=new Set(),anime=[],animeSeen=new Set();
+  for(const value of Array.isArray(recentSearches)?recentSearches:[]){if(typeof value!=='string')continue;const label=value.trim(),key=normalizeSearchText(label);if(!label||recentSeen.has(key)||needle&&!key.includes(needle))continue;recentSeen.add(key);recent.push({type:'recent',label,query:label});if(recent.length>=limit)break}
+  if(!needle)return {recent,anime};
+  for(const item of Array.isArray(animeItems)?animeItems:[]){if(!item)continue;const known=getKnownTitles(item)||{},fields=[known.ko,known.en,item.title,item.title_english,item.title_japanese,item.title_native,item.title_romaji].filter(value=>typeof value==='string'&&value.trim()),matches=fields.map(normalizeSearchText).filter(value=>value.includes(needle));if(!matches.length)continue;
+    const key=item.mal_id!=null?`mal:${item.mal_id}`:`${item.provider||'jikan'}:${item.id??fields[0]}`;if(animeSeen.has(key))continue;animeSeen.add(key);
+    const labelCandidates=language==='en'?[known.en,item.title_english,item.title,item.title_japanese,known.ko]:[known.ko,item.title,item.title_english,item.title_japanese,known.en],label=labelCandidates.find(value=>typeof value==='string'&&value.trim())?.trim();if(!label)continue;
+    anime.push({type:'anime',label,query:label,detail:[item.year,item.type].filter(Boolean).join(' · '),rank:matches.some(value=>value.startsWith(needle))?0:1});
+  }
+  anime.sort((a,b)=>a.rank-b.rank);return {recent,anime:anime.slice(0,limit).map(({rank,...item})=>item)};
+}
+const searchAutocompleteControls=[];
+function searchAnimeCandidates(){return [...(state.current||[]),...(state.season||[]),...(state.top||[]),...(state.airing||[]),...(state.latestEpisodes||[]).map(item=>item?.anime||item),...(state.quarterShows||[]),...(state.library||[]),...(state.history||[]).map(item=>item?.anime).filter(Boolean),...knownAnime.values()]}
+function renderSearchAutocomplete(control){
+  const query=control.input.value,rows=buildSearchSuggestionData(query,searchAnimeCandidates(),state.recentSearches,item=>displayTitles.get(animeTitleKey(item))||{},titleLanguage()),list=control.list,popup=control.popup;list.replaceChildren();list.dataset.activeIndex='-1';control.input.removeAttribute('aria-activedescendant');let optionIndex=0;
+  const addGroup=(heading,items)=>{if(!items.length)return;const label=document.createElement('div');label.className='search-suggestion-heading';label.setAttribute('role','presentation');label.textContent=heading;list.append(label);for(const item of items){const option=document.createElement('button');option.type='button';option.className='search-suggestion-option';option.id=`${control.input.id}-suggestion-${optionIndex}`;option.dataset.searchQuery=item.query;option.dataset.suggestionIndex=String(optionIndex);option.setAttribute('role','option');option.setAttribute('aria-selected','false');const title=document.createElement('span');title.className='search-suggestion-title';title.textContent=item.label;option.append(title);if(item.detail){const detail=document.createElement('small');detail.textContent=item.detail;option.append(detail)}list.append(option);optionIndex++}};
+  addGroup('최근 검색어',rows.recent);addGroup('작품',rows.anime);const clear=control.popup.querySelector('[data-clear-search-history]');clear.hidden=!state.recentSearches.length;popup.classList.toggle('hidden',optionIndex===0);control.input.setAttribute('aria-expanded',String(optionIndex>0));
+}
+function refreshSearchAutocomplete(){for(const control of searchAutocompleteControls)if(!control.popup.classList.contains('hidden'))renderSearchAutocomplete(control)}
+function closeSearchAutocomplete(){for(const control of searchAutocompleteControls){control.popup.classList.add('hidden');control.input.setAttribute('aria-expanded','false');control.input.removeAttribute('aria-activedescendant')}}
+function saveRecentSearch(query){state.recentSearches=nextRecentSearches(state.recentSearches,query);try{store.set('recentSearches',state.recentSearches)}catch{}closeSearchAutocomplete()}
+function setActiveSearchSuggestion(control,index){const options=[...control.list.querySelectorAll('[role="option"]')];if(!options.length)return;const next=Math.max(0,Math.min(options.length-1,index));options.forEach((option,i)=>option.setAttribute('aria-selected',String(i===next)));control.list.dataset.activeIndex=String(next);control.input.setAttribute('aria-activedescendant',options[next].id);options[next].scrollIntoView?.({block:'nearest'})}
+function bindSearchAutocomplete(inputId,listId){const input=$(`#${inputId}`),popup=input.parentElement.querySelector('.search-suggestions'),list=$(`#${listId}`),control={input,popup,list};searchAutocompleteControls.push(control);
+  input.addEventListener('focus',()=>renderSearchAutocomplete(control));input.addEventListener('input',()=>renderSearchAutocomplete(control));
+  input.addEventListener('keydown',event=>{const isOpen=!control.popup.classList.contains('hidden');if(event.key==='ArrowDown'||event.key==='ArrowUp'){if(!isOpen)renderSearchAutocomplete(control);const count=control.list.querySelectorAll('[role="option"]').length;if(!count)return;event.preventDefault();const current=Number(control.list.dataset.activeIndex||-1);setActiveSearchSuggestion(control,current<0?(event.key==='ArrowDown'?0:count-1):current+(event.key==='ArrowDown'?1:-1));return}if(event.key==='Escape'&&isOpen){closeSearchAutocomplete();return}if(event.key==='Enter'){const index=Number(control.list.dataset.activeIndex||-1),option=control.list.querySelector(`[data-suggestion-index="${index}"]`);doSearch(option?.dataset.searchQuery||input.value)}});
+  popup.addEventListener('pointerdown',event=>{if(event.target.closest('[role="option"]'))event.preventDefault()});popup.addEventListener('click',event=>{const option=event.target.closest('[role="option"]');if(option){doSearch(option.dataset.searchQuery);return}if(event.target.closest('[data-clear-search-history]')){state.recentSearches=[];try{store.set('recentSearches',[])}catch{}refreshSearchAutocomplete();toast('최근 검색 기록을 지웠어요.')}});
+}
+document.addEventListener('pointerdown',event=>{for(const control of searchAutocompleteControls)if(!control.popup.parentElement.contains(event.target)){control.popup.classList.add('hidden');control.input.setAttribute('aria-expanded','false');control.input.removeAttribute('aria-activedescendant')}});
 async function doSearch(query) {
-  query=query.trim(); if(!query)return; switchView('search'); $('#pageSearch').value=query; $('#searchStatus').textContent='검색 중...'; $('#searchGrid').replaceChildren();
+  query=query.trim(); if(!query)return; saveRecentSearch(query); switchView('search'); $('#pageSearch').value=query; $('#globalSearch').value=query; $('#searchStatus').textContent='검색 중...'; $('#searchGrid').replaceChildren();
   $('#filterMore').classList.add('hidden');if(state.source==='linkkf')$('#searchStatus').textContent='Linkkf 전체 목록에서 검색 중... (처음 검색은 목록을 받느라 조금 걸립니다)';
   const searchToken=(doSearch.token||0)+1;
   const search=text=>PROVIDER_SOURCES.includes(state.source)?window.lilac.providerCatalog(state.source,text):state.source==='linkkf'?window.lilac.linkkfSearch(text):window.lilac.search(text);
@@ -1132,7 +1167,7 @@ $('#clearDownloads').onclick=()=>{const count=state.downloads.filter(job=>!['que
 $('#clearDownloadsCancel').onclick=()=>$('#clearDownloadsDialog').close();
 $('#clearDownloadsList').onclick=async()=>{$('#clearDownloadsDialog').close();try{const count=await window.lilac.clearDownloads();toast(`다운로드 목록 ${count}개를 비웠어요. 영상 파일은 폴더에 남아 있어요.`)}catch(error){toast(`비우지 못했습니다: ${ipcMessage(error)}`)}};
 window.lilac.onDownloadsChanged(downloads=>{state.downloads=downloads;renderDownloads()});
-$('#globalSearch').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch(e.target.value)});$('#pageSearch').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch(e.target.value)});$('#searchButton').onclick=()=>doSearch($('#pageSearch').value);
+bindSearchAutocomplete('globalSearch','globalSearchSuggestions');bindSearchAutocomplete('pageSearch','pageSearchSuggestions');$('#searchButton').onclick=()=>doSearch($('#pageSearch').value);
 applyTheme(localStorage.getItem('theme')||'dark');
 $('#openVideo').onclick=async()=>{const src=await window.lilac.chooseVideo();if(src)play(src,decodeURIComponent(src.split('/').pop()))};$('#playUrl').onclick=()=>{const url=$('#streamUrl').value.trim();if(/^https?:\/\//i.test(url))play(url,'직접 스트림');else toast('올바른 https 영상 주소를 입력하세요.')};
 $('#openSubtitle').onclick=async()=>{const file=await window.lilac.chooseSubtitleDetails();if(!file)return;currentSubtitlePath=file.path;attachSubtitle(file.url,'사용자 자막',{path:file.path,assUrl:file.assUrl,assPath:file.assPath,fonts:file.fonts,source:'user'})};

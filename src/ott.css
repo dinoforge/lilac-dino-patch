@@ -23,10 +23,22 @@ body.ott-scrolled .sidebar,body:not(.ott-home) .sidebar{background-color:color-m
 .nav[data-view="settings"].active i{background:none;padding:0}
 .topbar{position:fixed;z-index:51;top:0;right:158px;left:auto;height:var(--ott-head);padding:0;border:0;background:transparent;backdrop-filter:none}
 .search-box{width:270px;height:38px;margin:0;padding:0 14px;gap:9px;border-radius:999px;background:#00000073;border:1px solid #ffffff33;transition:border-color .14s,background-color .14s}
+.search-box,.big-search{position:relative;overflow:visible}
 .search-box:focus-within{border-color:var(--lilac);background:#000000b3}
 .search-box kbd{display:none}
 .search-icon{flex:none;width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;color:var(--muted)}
 .big-search .search-icon{width:20px;height:20px}
+.search-suggestions{position:absolute;z-index:120;top:calc(100% + 8px);left:0;right:0;max-height:min(60vh,420px);overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);box-shadow:0 16px 40px #0008;text-align:left}
+.search-box .search-suggestions{left:auto;right:0;min-width:320px}
+.search-suggestion-list{padding:7px}
+.search-suggestion-heading{padding:8px 9px 5px;color:var(--muted);font-size:10px;font-weight:700;letter-spacing:.04em}
+.search-suggestion-option{display:flex;width:100%;min-height:38px;align-items:center;justify-content:space-between;gap:14px;padding:9px;border:0;border-radius:7px;background:transparent;color:var(--text);text-align:left;cursor:pointer}
+.search-suggestion-option:hover,.search-suggestion-option[aria-selected="true"]{background:color-mix(in srgb,var(--lilac) 16%,transparent)}
+.search-suggestion-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.search-suggestion-option small{flex:none;color:var(--muted);font-size:10px}
+.search-suggestion-footer{padding:0 7px 7px;text-align:right}
+.search-suggestion-footer button{padding:6px 9px;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:10px;cursor:pointer}
+.search-suggestion-footer button:hover{background:color-mix(in srgb,var(--lilac) 14%,transparent);color:var(--text)}
 
 main{padding-bottom:0}
 .view{max-width:none;padding:calc(var(--ott-head) + 18px) var(--ott-gutter) 64px}

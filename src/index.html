@@ -44,7 +44,7 @@
 
     <main>
       <header class="topbar">
-        <div class="search-box"><svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input id="globalSearch" placeholder="보고 싶은 애니메이션을 검색해 보세요" /><kbd>Enter</kbd></div>
+        <div class="search-box"><svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input id="globalSearch" placeholder="보고 싶은 애니메이션을 검색해 보세요" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="globalSearchSuggestions" autocomplete="off" /><kbd>Enter</kbd><div class="search-suggestions hidden"><div id="globalSearchSuggestions" class="search-suggestion-list" role="listbox" aria-label="최근 검색 및 작품 제안"></div><div class="search-suggestion-footer"><button type="button" data-clear-search-history>최근 검색 기록 지우기</button></div></div></div>
       </header>
 
       <section id="homeView" class="view active">
@@ -63,7 +63,7 @@
 
       <section id="searchView" class="view">
         <div class="page-head"><h1>어떤 이야기를 찾고 있나요?</h1><p>제목을 검색해 작품 정보와 평점을 확인하세요.</p></div>
-        <div class="big-search"><svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input id="pageSearch" placeholder="애니메이션 제목 입력" /><button id="searchButton">검색</button></div>
+        <div class="big-search"><svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input id="pageSearch" placeholder="애니메이션 제목 입력" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="pageSearchSuggestions" autocomplete="off" /><button id="searchButton">검색</button><div class="search-suggestions hidden"><div id="pageSearchSuggestions" class="search-suggestion-list" role="listbox" aria-label="최근 검색 및 작품 제안"></div><div class="search-suggestion-footer"><button type="button" data-clear-search-history>최근 검색 기록 지우기</button></div></div></div>
         <div id="filterBar" class="filter-bar hidden"><button id="filterToggle" class="ghost filter-toggle" aria-expanded="false" aria-controls="filterPanel">태그 필터</button></div>
         <div id="filterPanel" class="filter-panel hidden"><div class="filter-group"><b>시즌 타입</b><div class="chip-row" data-filter-group="format"></div></div><div class="filter-group"><b>장르</b><div class="chip-row" data-filter-group="genre"></div></div><div class="filter-group"><b>연도</b><div class="chip-row" data-filter-group="year"></div></div><div class="filter-actions"><button id="filterReset" class="ghost">초기화</button><button id="filterApply" class="primary">적용</button></div></div>
         <div id="searchStatus" class="result-status">인기 작품을 둘러보거나 검색을 시작하세요.</div>
