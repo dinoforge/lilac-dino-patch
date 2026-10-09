@@ -190,6 +190,30 @@ test('subtitle sync accepts large positive and negative values without the old 5
   assert.equal(h.storage.get('subtitleSync'), '6000');
 });
 
+test('manual subtitle timing edits persist from both settings surfaces on change', () => {
+  const h = setup(), offsets = [];
+  const elements = Object.fromEntries(['#subtitleSync', '#subtitleSyncLabel', '#psSubtitleSync', '#psSyncLabel'].map(selector => [selector, { value: '0', textContent: '0', oninput: null, onchange: null }]));
+  const originalSelect = h.context.$;
+  h.context.$ = selector => elements[selector] || originalSelect(selector);
+  h.context.$$ = () => [];
+  h.context.syncPlayerSettingsUI = () => {};
+  h.context.applyVttLayout = () => {};
+  h.context.window.LilacAss = { setOffset: value => offsets.push(value) };
+  const bindingStart = appSource.indexOf("$('#subtitleSync').oninput="), bindingEnd = appSource.indexOf('};', bindingStart) + 2;
+  assert.ok(bindingStart >= 0 && bindingEnd > bindingStart, 'Missing settings page sync input binding');
+  vm.runInContext(appSource.slice(bindingStart, bindingEnd), h.context);
+  vm.runInContext(section('function setSubtitleSetting(', 'function setSubtitleSync('), h.context);
+  vm.runInContext(section('function setSubtitleSync(', '// VTT placement and sync'), h.context);
+  vm.runInContext(section("$('#psSubtitleSync').onchange =", "$('#psVttStyle').onchange ="), h.context);
+
+  assert.equal(elements['#subtitleSync'].oninput, null);
+  for (const [selector, value] of [['#psSubtitleSync', '750'], ['#subtitleSync', '-1000']]) {
+    const input = elements[selector]; input.value = value; input.onchange({ target: input });
+    assert.equal(h.storage.get('subtitleSync'), value);
+    assert.equal(offsets.at(-1), Number(value));
+  }
+});
+
 test('ending an episode saves completion, exposes controls, and never starts the next episode automatically', () => {
   const status = { textContent: '' }, calls = [];
   const context = vm.createContext({
