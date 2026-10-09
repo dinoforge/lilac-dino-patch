@@ -193,6 +193,12 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - `npm run vendor`, 전체 `node --test` 143/143, `node --check`, `git diff --check` 통과. `npm run dist` Windows NSIS 빌드 성공(124,546,228바이트). 패키지 `app.asar`를 임시 폴더에 추출해 bundled JS에서 native callback은 있고 `_rvfcpolyfillmap`과 `rvfc-polyfill` import는 없는 것을 확인했다.
 - 전체 notice와 `default.woff2` 원 라이선스, Expat 생성기 경로는 여전히 미해결이며 공개 배포를 막는다. Electron 공식 release page는 현재 고정된 38.8.6이 end-of-support라고 표시한다. 이 major runtime 변경은 승인 없이 바꾸지 않고 다음 설정 검토 항목에 둔다.
 
+## 2026-10-09 JASSUB runtime dependency notice audit
+
+- pinned `build/license_defaults`는 JASSUB·Brotli를 Expat(MIT), libass를 ISC, FriBidi를 LGPL-2.1+, HarfBuzz를 MIT~old, FreeType을 FTL로 분류한다. 다섯 pinned submodule의 `LICENSE`/`COPYING` 파일을 확인했다. `Makefile_licence`는 `expat` 입력도 요구하지만 `.gitmodules`에는 대응 경로가 없다. 이 설정만으로 WASM에 Expat 코드가 포함됐다고 볼 수 없다.
+- 같은 esbuild 설정의 metafile에서 main bundle 입력은 `abslink@1.3.0`(Apache-2.0)·`throughput@1.0.2`(MIT), worker 입력은 `abslink@1.3.0`·`lfa-ponyfill@1.1.1`(MIT)로 확인됐다. `rvfc-polyfill@1.0.8`은 native-only alias로 대체됐다. 세 라이선스 문구는 vendor 빌드 산출물에 복사되지 않으며, 기본 폰트 family 표기만으로 `default.woff2`의 출처·라이선스를 확인하지 못했다.
+- 상세 파일 위치와 한계는 `docs/DEPENDENCY_LICENSE_INVENTORY.md`에 기록했다. 이 조사에서는 앱 번들에 notice 파일을 추가하지 않았고, 공개 배포 차단 상태를 유지한다.
+
 ## 주요 결정
 
 - 새 앱은 Windows 우선, Android는 후속이다. Chrome·macOS는 제품 범위에서 제외한다.
@@ -205,6 +211,6 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 ## 다음
 
 1. FFmpeg는 아직 선택하지 않는다. BtbN의 8.1.3·9.0.2 LGPL shared 후보는 합성 remux/디코딩을 통과했지만 기존 FFmpeg 6.1.1보다 큰 배포 폴더와 미확인 소스·외부 고지가 남았다. 최소 호환 빌드에는 shell 기반 빌드 환경이 필요하지만 현재 Docker·WSL 배포판·Bash·Make가 없어 설치하지 않고 보류했다. 해결 전까지 현행 의존성 유지, 설치 파일 공개 보류를 계속한다.
-2. JASSUB source commit 후보·다섯 submodule SHA와 font 파일 매칭은 확인됐고, GPL-3.0 `rvfc-polyfill` fallback은 앱 빌드에서 제외했다. 다음에는 포함된 JASSUB/libass 구성요소의 고지를 완전하게 만들고 Expat 경로와 font의 원 라이선스를 확인한 뒤 app/NSIS 패키지에 넣어 검사한다. upstream generator는 shell 기반이며 이 환경에는 Docker/WSL 배포판이 없어 실행하지 않았다. 전체 재배포 조건은 미해결이다.
+2. JASSUB source commit 후보·다섯 submodule SHA와 font 파일 매칭은 확인됐고, GPL-3.0 `rvfc-polyfill` fallback은 앱 빌드에서 제외했다. 다음에는 pinned C/WASM 구성요소와 번들된 `abslink`·`lfa-ponyfill`·`throughput`의 완전한 고지를 만들고 Expat 경로와 font 원 라이선스를 확인한 뒤 app/NSIS 패키지에 넣어 검사한다. upstream generator는 shell 기반이며 이 환경에는 Docker/WSL 배포판이 없어 실행하지 않았다. 전체 재배포 조건은 미해결이다.
 3. Aya Expanse의 비상업 조건, `ja-ko-vn` 양자화 파일의 권리, 임의 GGUF의 조건을 추가 확인한다. 8개 preset 다운로드 pin은 적용됐으며 기존 모델 파일은 새로 검사하거나 교체하지 않는다. HY-MT1.5 1.8B·7B는 앱에서 차단했고 사용자 기존 파일을 보존한다.
 4. 프로젝트 코드·로고·아이콘 재배포 허가와 AniList 보완성, TMDB·AI 기능 결합 조건을 해결하기 전까지 공개 저장소·설치 파일 배포와 실사이트 콘텐츠 요청은 보류한다. 권리 해결 후 검색→상세→회차 재생→자막→이어보기 실제 인수 검증을 계획한다.
