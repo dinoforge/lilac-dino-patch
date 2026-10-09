@@ -136,6 +136,28 @@ test('ASS canvas follows stretched video bounds and returns to the original boun
   await window.LilacAss.destroy(); assert.equal(window.LilacAss.active, false);
 });
 
+test('subtitle sync accepts large positive and negative values without the old 5-second cap', () => {
+  const $html = require('cheerio').load(indexHtml);
+  for (const id of ['subtitleSync', 'psSubtitleSync']) {
+    const input = $html(`#${id}`);
+    assert.equal(input.attr('type'), 'number'); assert.equal(input.attr('step'), '250');
+    assert.equal(input.attr('min'), undefined); assert.equal(input.attr('max'), undefined);
+  }
+  const h = setup(), offsets = [], cue = { startTime: 120, endTime: 125 };
+  h.video.textTracks = [{ cues: [cue] }]; h.context.flattenVttCues = () => {}; h.context.vttBaseline = () => 85;
+  h.context.setSubtitleSetting = (key, value) => h.storage.set(key, String(value));
+  h.context.toast = () => {};
+  h.context.window.LilacAss = { setOffset: value => offsets.push(value) };
+  vm.runInContext(section('function applyVttLayout()', '// Android subtitle source chips'), h.context);
+  vm.runInContext(section('function setSubtitleSync(', '// VTT placement and sync'), h.context);
+  assert.equal(h.context.setSubtitleSync(90000), true); assert.equal(cue.startTime, 210); assert.equal(offsets.at(-1), 90000);
+  assert.equal(h.context.setSubtitleSync(-90000), true); assert.equal(cue.startTime, 30); assert.equal(offsets.at(-1), -90000);
+  assert.equal(h.context.setSubtitleSync(Infinity), false); assert.equal(h.context.setSubtitleSync(''), false); assert.equal(cue.startTime, 30);
+  h.context.setSubtitleSync(5500);
+  h.context.handlePlayerKey({ key: 'x', code: 'KeyX', preventDefault() {} });
+  assert.equal(h.storage.get('subtitleSync'), '6000');
+});
+
 test('ending an episode saves completion, exposes controls, and never starts the next episode automatically', () => {
   const status = { textContent: '' }, calls = [];
   const context = vm.createContext({
