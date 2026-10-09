@@ -90,3 +90,12 @@
 - [TMDB 개발자 FAQ — attribution 및 상업적 이용](https://developer.themoviedb.org/docs/faq)
 - [TMDB 공식 로고 및 크레딧 지침](https://www.themoviedb.org/about/logos-attribution)
 - [TMDB 공식 승인 primary full blue SVG](https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg)
+
+## 2026-10-09 공식 조건 재확인 및 코드 대조
+
+- Re:Anime의 [Terms and Conditions](https://reanime.to/terms)를 사이트 작품 페이지의 Terms 버튼을 통해 직접 열어 읽었다. 2항은 개인·비상업적·일시적 시청을 위한 임시 1부 다운로드만 허용한다고 적고, 자료의 수정·복사, 상업적 이용·공개 전시, 사이트 소프트웨어 역공학, 권리 표시 제거, 다른 사람에게 이전하거나 다른 서버에 미러링하는 것을 금지한다. 약관은 사이트가 사전 통지 없이 변경할 수 있다고 적는다. 별도 앱 연동·자동 조회·캐시·오프라인 보관의 허용 범위는 명시적으로 확인되지 않았다. 페이지가 제3자 미디어를 링크한다는 안내도 이 프로젝트의 앱 사용 권한을 주지 않는다.
+- AniList의 [API 이용 조건](https://anilist.gitbook.io/anilist-apiv2-docs/docs/guide/terms-of-use)을 다시 열어 확인했다. 비상업적 이용은 허용한다고 설명하지만, API 데이터의 보관·대량 수집과 AniList가 보완적이지 않다고 판단하는 동종 서비스(예: 애니·만화 목록/추적 서비스)에서의 이용을 제한한다. 월 수익 150달러 초과 상업 서비스는 상업 라이선스가 필요하다고 적는다. 현재 앱은 작품 목록·시청 기록도 제공하고 선택 작품의 방영 정보를 조회하므로, 보완 서비스인지 약관만으로 확정하지 않는다.
+- AniList의 [요청 제한 안내](https://anilist.gitbook.io/anilist-apiv2-docs/docs/guide/rate-limiting)는 현재 일시 제한 30회/분, 정상 기준 90회/분, 별도 버스트 제한과 `Retry-After`를 안내한다. 코드의 공통 요청 간격 2.1초는 시작 간격상 약 29회/분으로 제한하지만, 실제 서버의 버스트 정책·실사용 부하는 확인하지 않았다.
+- TMDB 공식 API 약관 URL은 이번 브라우저 열기에서 robots 정책으로 직접 읽을 수 없었다. 검색 가능한 TMDB 공식 약관 본문은 6개월을 넘는 캐시와 AI/ML 기반 애플리케이션과 연결한 API·콘텐츠 사용을 금지한다고 표시한다. 공식 [개발자 FAQ](https://developer.themoviedb.org/docs/faq)는 비상업적 사용의 출처 표시, 승인된 TMDB 로고와 About/Credits 고지, 상업 사용 라이선스를 안내한다. FAQ의 고지 예문과 API 약관에 표시된 문구는 서로 다르게 나타나므로 현재 앱에는 API 약관의 더 구체적인 문구를 유지한다. 약관 본문을 직접 다시 읽지 못한 한계는 남긴다.
+- 코드 대조: `electron/main.cjs`의 `tmdbOverview()`는 TMDB 줄거리를 조회·캐시한다. 별도 `translationContext()`는 공급원 작품 제목과 AniList의 인물·장르·줄거리를 사용하며 TMDB 응답을 조회하거나 포함하지 않는다. 이 경로 확인은 TMDB 데이터를 번역 프롬프트로 직접 넘기지 않는다는 점만 보여 준다. 약관의 “AI 기반 애플리케이션과 연결” 제한이 같은 앱 안의 별도 기능에도 적용되는지는 문서와 코드만으로 확정할 수 없으므로, TMDB 또는 AI 번역 중 하나를 공개 빌드에서 제외하거나 TMDB의 서면 확인을 받기 전에는 공개 배포하지 않는다.
+- 이번 재확인에서도 권리자에게 연락하거나 실제 영상·자막 파일을 요청·저장하지 않았다. 공급원·업스트림 코드·에셋·자막의 프로젝트별 허가를 받지 않았으므로 비공개 개발만 계속한다.
