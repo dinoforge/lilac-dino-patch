@@ -154,6 +154,13 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 패키지 `dist/default.woff2`의 SHA-256은 `886929903707C5BB28B07CD2EED69921B3D5EF5C49C73A0DD1E187EBF6546A4C`이며 upstream `src/default.woff2` 파일 blob과 일치한다. JASSUB 코드의 기본 family는 `liberation sans`다. 글꼴의 원 저작권자와 별도 라이선스 출처는 아직 못 찾았다.
 - 출처 확인이 끝나지 않아 JASSUB·libass의 전체 고지를 생성하거나 재배포 허가를 결론 내리지 않았다. 상세 비교와 한계는 `docs/DEPENDENCY_LICENSE_INVENTORY.md`에 반영했다.
 
+## 2026-10-09 자막 트랙 빈 결과·조회 실패 상태 보정
+
+- RE:Anime·Miruro의 빈 트랙 목록을 “불러오지 못했습니다”와 구분한다. 정상 응답에 트랙이 없으면 현재 회차에 선택 가능한 트랙이 없다고 표시하고, Re:Anime 트랙 요청이 실패하면 실패 상태와 재시도를 제공한다. Miruro는 현재 재생 결과에서 트랙을 함께 받으므로, 별도 조회 기능이 없는 재시도 버튼을 보이지 않게 했다.
+- 응답의 `tracks`가 배열인지 확인하고, 조회 중·성공·실패 상태는 현재 재생 문맥에만 둔다. 저장 데이터 형식, 사용자 기록, 공급원 IPC와 외부 요청 경로는 바꾸지 않았다.
+- 회귀 테스트는 Miruro 빈 응답/재시도 비노출, Re:Anime 성공 빈 응답과 실패 후 재시도, 트랙 선택 상태를 확인한다. 관련 테스트 묶음 33/33, 전체 `node --test` 139/139 통과했으며 `node --check src/app.js`, 테스트 파일 구문 검사, `git diff --check`도 통과했다.
+- 검증 범위는 격리 VM의 렌더러 UI와 합성 조회 응답이다. 실제 Re:Anime·Miruro 사이트 응답, 스트림 자막 일치, NSIS 설치 UI는 검증하지 않았다.
+
 ## 주요 결정
 
 - 새 앱은 Windows 우선, Android는 후속이다. Chrome·macOS는 제품 범위에서 제외한다.

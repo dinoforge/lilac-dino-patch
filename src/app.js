@@ -520,7 +520,9 @@ async function resolveIntoPlayer(resolver,name,context={},subtitleTitle='',episo
     const offlineEpisodes=downloaded?.status==='completed'?downloadedSeries(downloaded):[];
     play(stream.url,name,{...context,seriesEpisodes:offlineEpisodes.length?offlineEpisodes:context.seriesEpisodes,streamHeaders:stream.headers||{},offline:Boolean(downloaded?.status==='completed'),hls:Boolean(stream.hls)});
     if(downloaded?.status==='completed')$('#downloadStatus').textContent='다운로드한 영상 재생 중';
-    currentPlaybackContext.subtitleTracks=stream.subtitleTracks||[];currentPlaybackContext.subtitleReferer=stream.referer||'';renderSubtitleTracks();loadMissingSubtitleTracks();
+    currentPlaybackContext.subtitleTracks=Array.isArray(stream.subtitleTracks)?stream.subtitleTracks:[];currentPlaybackContext.subtitleReferer=stream.referer||'';
+    currentPlaybackContext.subtitleTrackStatus=currentPlaybackContext.episode?.provider==='reanime'&&!currentPlaybackContext.subtitleTracks.length?'idle':'loaded';
+    if(currentPlaybackContext.subtitleTrackStatus==='idle')loadMissingSubtitleTracks();else renderSubtitleTracks();
     currentPlaybackContext.videoServers=stream.servers||[];currentPlaybackContext.videoServer=stream.server||'';if(typeof renderVideoServers==='function')renderVideoServers();
     ensureSubtitle(stream,searchTitle,episode);
   }catch(error){
@@ -801,12 +803,13 @@ const TRACK_PROVIDERS=['reanime','miruro'];
 function trackProvider(){const provider=currentPlaybackContext.episode?.provider;return TRACK_PROVIDERS.includes(provider)?provider:null}
 function trackSourceLabel(){return trackProvider()==='miruro'?'Miruro':'Re:Anime'}
 function renderSubtitleTracks(){
-  const box=$('#subtitleTracks'),list=$('#subtitleTrackList'),tracks=currentPlaybackContext.subtitleTracks||[],hasTracks=Boolean(trackProvider());
+  const context=currentPlaybackContext,box=$('#subtitleTracks'),list=$('#subtitleTrackList'),tracks=Array.isArray(context.subtitleTracks)?context.subtitleTracks:[],provider=trackProvider(),hasTracks=Boolean(provider),loading=Boolean(context.resolving||context.tracksLoading||context.subtitleTrackStatus==='loading');
   $('#subtitleTracks .sheet-tracks-head b').textContent=`${trackSourceLabel()} 자막 트랙`;$$('[data-source="reanime"]').forEach(button=>(button.querySelector('b')||button).textContent=trackProvider()==='miruro'?'Miruro':'Re:Anime');
   // Only the sources this episode can use: the site's own subtitle (Linkkf) or tracks (Re:Anime / Miruro) when it has them.
   $('#psSubtitleSources [data-source="linkkf"]').classList.toggle('hidden',currentPlaybackContext.resolveKind!=='linkkf');$('#psSubtitleSources [data-source="reanime"]').classList.toggle('hidden',!trackProvider());
   box.classList.toggle('hidden',!hasTracks||openSheet()!=='reanime');if(!hasTracks){list.replaceChildren();return}
-  $('#subtitleTrackState').textContent=tracks.length?`${tracks.length}개 트랙`:currentPlaybackContext.resolving||currentPlaybackContext.tracksLoading?'현재 회차의 자막 트랙을 불러오는 중…':'자막 트랙을 불러오지 못했습니다.';$('#reloadSubtitleTracks').classList.toggle('hidden',Boolean(tracks.length||currentPlaybackContext.resolving||currentPlaybackContext.tracksLoading));
+  const status=tracks.length?`${tracks.length}개 트랙`:loading?'현재 회차의 자막 트랙을 확인하는 중…':context.subtitleTrackStatus==='error'?`${trackSourceLabel()} 자막 트랙을 불러오지 못했습니다.`:context.subtitleTrackStatus==='loaded'?'이 회차에는 선택 가능한 자막 트랙이 없습니다.':`${trackSourceLabel()} 자막 트랙을 아직 확인하지 않았습니다.`;
+  $('#subtitleTrackState').textContent=status;$('#reloadSubtitleTracks').classList.toggle('hidden',provider!=='reanime'||Boolean(tracks.length||loading));
   // Korean, English and Japanese first; a label like "Chinese (Chinese (Han, Simplified) - Full Subtitles)" shows the
   // language on top and the rest small underneath.
   const rank=track=>isKoreanTrack(track)?0:/english|^en(?:[-_]|$)/i.test(`${track.label} ${track.language||''}`)?1:/japanese|^ja(?:[-_]|$)/i.test(`${track.label} ${track.language||''}`)?2:3;
@@ -816,9 +819,10 @@ function renderSubtitleTracks(){
 }
 // Downloaded episodes play from disk, so fetch the Re:ANIME track list separately.
 async function loadMissingSubtitleTracks(){
-  const context=currentPlaybackContext,episode=context.episode;if(episode?.provider!=='reanime'||context.subtitleTracks?.length)return;
-  const requestId=playbackRequestId;context.tracksLoading=true;renderSubtitleTracks();
-  try{const result=await window.lilac.providerSubtitleTracks(episode);if(requestId!==playbackRequestId)return;context.subtitleTracks=result.tracks||[];context.subtitleReferer=result.referer||context.subtitleReferer}catch{}
+  const context=currentPlaybackContext,episode=context.episode;if(episode?.provider!=='reanime'||context.tracksLoading||context.subtitleTracks?.length)return;
+  const requestId=playbackRequestId;context.subtitleTrackStatus='loading';context.tracksLoading=true;renderSubtitleTracks();
+  try{const result=await window.lilac.providerSubtitleTracks(episode);if(requestId!==playbackRequestId)return;if(!Array.isArray(result?.tracks))throw new Error('자막 트랙 응답이 올바르지 않습니다.');context.subtitleTracks=result.tracks;context.subtitleTrackStatus='loaded';context.subtitleReferer=result.referer||context.subtitleReferer}
+  catch{if(requestId===playbackRequestId)context.subtitleTrackStatus='error'}
   finally{if(requestId===playbackRequestId){context.tracksLoading=false;renderSubtitleTracks()}}
 }
 // Korean translation (the translation API or the local AI, 설정 > 자막 자동 번역) of the selected Re:Anime / Miruro track or the picked
@@ -1348,7 +1352,7 @@ $('#opedAudioAnalysis').onchange=e=>localStorage.setItem('opedAudioAnalysis',Str
 $('#selectHistory').onclick=()=>setHistorySelection(true);$('#historyCancelSelect').onclick=()=>setHistorySelection(false);$('#historySelectAll').onclick=()=>{state.history.forEach(item=>historySelection.keys.add(historyKeyOf(item)));renderHistory()};$('#historyDeleteSelected').onclick=()=>{const count=historySelection.keys.size;if(!count)return;state.history=state.history.filter(item=>!historySelection.keys.has(historyKeyOf(item)));store.set('history',state.history);setHistorySelection(false);renderContinue();toast(`${count}개 시청 기록을 삭제했습니다.`)};
 const setAssEffects=enabled=>{localStorage.setItem('assEffects',String(enabled));syncAssEffectsUI();if(currentSubtitle?.assUrl){renderAssSubtitle();$('#subtitleState').textContent=`${currentSubtitle.label} 적용됨${enabled?' · ASS 효과':''}`}};$('#assEffectsSheet').onchange=e=>setAssEffects(e.target.checked);
 $$('#fontChoices button').forEach(button=>button.onclick=()=>{localStorage.setItem('subtitleFont',button.dataset.value);localStorage.removeItem('subtitleFontPath');subtitleFontChanged()});$('#chooseSubtitleFont').onclick=async()=>{const file=await window.lilac.chooseFont();if(!file)return;localStorage.setItem('subtitleFontPath',file);subtitleFontChanged();toast('자막 폰트를 적용했습니다.')};$('#resetSubtitleFont').onclick=()=>{localStorage.removeItem('subtitleFontPath');subtitleFontChanged()};syncAssEffectsUI();syncSubtitleFontUI();
-$('#reloadSubtitleTracks').onclick=()=>{currentPlaybackContext.subtitleTracks=[];loadMissingSubtitleTracks()};
+$('#reloadSubtitleTracks').onclick=()=>{void loadMissingSubtitleTracks()};
 $('#clearHistory').onclick=()=>{state.history=[];store.set('history',[]);renderHistory();toast('시청 기록을 삭제했습니다.')};
 document.querySelector('main').addEventListener('scroll',event=>{const main=event.currentTarget;if($('#allView').classList.contains('active')&&main.scrollTop+main.clientHeight>=main.scrollHeight-700)loadFullCatalog()});
 applyCueStyle();
