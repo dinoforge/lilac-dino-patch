@@ -24,7 +24,9 @@ let currentHistoryKey = null;
 let currentPlaybackContext = {};
 let playbackRequestId = 0;
 let subtitleSelectionRequestId = 0;
+let latestEpisodeRequestId = 0;
 let pendingResumeProgress = 0;
+function cancelPendingLatestEpisode(){latestEpisodeRequestId++}
 
 // 한국어 제목을 우선 표시하고, 확인된 원제를 보조로 보여 준다. 제목을 아직 모르면 TMDB → AniList → Wikidata에서 찾는다.
 const displayTitles=new Map(),titleAnime=new Map(),pendingTitles=new Map(),titleLookupStarted=new Set();let titleTimer=null;
@@ -92,6 +94,7 @@ function enterPlayer(){const already=$('.view.active')?.id==='playerView';switch
 function switchView(name) {
   if(name!=='player'&&typeof finishSpaceHold==='function')finishSpaceHold(false);
   const current=$('.view.active')?.id?.replace(/View$/,'');
+  if(name!==current)cancelPendingLatestEpisode();
   if(name==='player'&&current&&current!=='player')viewBeforePlayer=current;
   document.body.classList.toggle('player-mode',name==='player');
   $$('.view').forEach(v => v.classList.toggle('active', v.id === `${name}View`));
@@ -388,7 +391,7 @@ function showHero(index){
 function heroDetail(a){const id=String(a.mal_id);if(id.startsWith('linkkf:'))return window.lilac.linkkfDetail(id.slice(7)).then(r=>r?.data);if(/^(animenosub|reanime|miruro|ohli24):/.test(id))return window.lilac.providerDetail(a).then(r=>r?.data);return window.lilac.detail(id).then(r=>r?.data)}
 function cleanSynopsis(text){return String(text||'').replace(/<[^>]*>/g,' ').replace(/\s*[(\[](?:Source|출처)[^)\]]*[)\]]\s*$/i,'').replace(/\s+/g,' ').trim()}
 async function openDetail(id) {
-  const dialog=$('#detailDialog'),token=Symbol(id);openDetail.token=token;$('#detailContent').innerHTML='<div class="empty-state"><p>작품 정보를 불러오는 중...</p></div>';if(!dialog.open)dialog.showModal();$('#detailContent').scrollTop=0;
+  cancelPendingLatestEpisode();const dialog=$('#detailDialog'),token=Symbol(id);openDetail.token=token;$('#detailContent').innerHTML='<div class="empty-state"><p>작품 정보를 불러오는 중...</p></div>';if(!dialog.open)dialog.showModal();$('#detailContent').scrollTop=0;
   try {
     if(String(id).startsWith('linkani:'))throw new Error('이전에 저장된 작품의 콘텐츠 소스는 더 이상 지원하지 않습니다. 다른 콘텐츠 소스에서 다시 찾아 주세요.');
     const isLinkkf=String(id).startsWith('linkkf:'); const isExternal=/^(animenosub|reanime|miruro|ohli24):/.test(String(id));
@@ -435,13 +438,15 @@ async function openDetail(id) {
 
 async function playLatestEpisode(anime){
   const number=Number(anime?.latestEpisodeNumber);if(!anime||!Number.isInteger(number)||number<=0)return;
+  const requestId=++latestEpisodeRequestId;
   try{
     const result=await window.lilac.providerDetail(anime),data=result?.data||anime,episodes=result?.episodes||[];
+    if(requestId!==latestEpisodeRequestId)return;
     const episode=episodes.find(item=>item?.provider===anime.provider&&Number(item.number)===number&&item.playable!==false);
     if(!episode){toast(`${number}화는 현재 공급원에서 재생 가능한 회차로 확인되지 않았습니다.`);openDetail(anime.mal_id);return}
     const title=titleOf(data),context={episode,subtitleTitle:title,image:imageOf(data),anime:data,seriesEpisodes:episodes,comparisonEpisodes:nearbyEpisodes(episodes,episode),resolveKind:'provider'};
     resolveIntoPlayer(()=>window.lilac.providerResolve(episode),`${title} · ${episode.name||number}화`,context,title,number);
-  }catch(error){toast(`최신 회차를 불러오지 못했습니다: ${String(error?.message||error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`)}
+  }catch(error){if(requestId===latestEpisodeRequestId)toast(`최신 회차를 불러오지 못했습니다: ${String(error?.message||error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`)}
 }
 
 function normalizeSearchText(value){return String(value||'').normalize('NFKC').toLocaleLowerCase().replace(/\s+/g,' ').trim()}
@@ -478,7 +483,7 @@ function bindSearchAutocomplete(inputId,listId){const input=$(`#${inputId}`),pop
 }
 document.addEventListener('pointerdown',event=>{for(const control of searchAutocompleteControls)if(!control.popup.parentElement.contains(event.target)){control.popup.classList.add('hidden');control.input.setAttribute('aria-expanded','false');control.input.removeAttribute('aria-activedescendant')}});
 async function doSearch(query) {
-  query=query.trim(); if(!query)return; saveRecentSearch(query); switchView('search'); $('#pageSearch').value=query; $('#globalSearch').value=query; $('#searchStatus').textContent='검색 중...'; $('#searchGrid').replaceChildren();
+  query=query.trim(); if(!query)return;cancelPendingLatestEpisode();saveRecentSearch(query); switchView('search'); $('#pageSearch').value=query; $('#globalSearch').value=query; $('#searchStatus').textContent='검색 중...'; $('#searchGrid').replaceChildren();
   $('#filterMore').classList.add('hidden');if(state.source==='linkkf')$('#searchStatus').textContent='Linkkf 전체 목록에서 검색 중... (처음 검색은 목록을 받느라 조금 걸립니다)';
   const searchToken=(doSearch.token||0)+1;
   const search=text=>PROVIDER_SOURCES.includes(state.source)?window.lilac.providerCatalog(state.source,text):state.source==='linkkf'?window.lilac.linkkfSearch(text):window.lilac.search(text);
@@ -503,7 +508,7 @@ async function doSearch(query) {
 }
 
 function showPendingPlayer(name,context={}){
-  const requestId=++playbackRequestId,video=$('#video');
+  cancelPendingLatestEpisode();const requestId=++playbackRequestId,video=$('#video');
   if(hlsPlayer){hlsPlayer.destroy();hlsPlayer=null;}
   video.pause();video.removeAttribute('src');video.load();
   currentPlaybackContext={...context,resolving:true};clearSubtitle();renderSubtitleSheet();skipSegments=[];activeSkip=null;currentHistoryKey=null;
@@ -560,7 +565,7 @@ async function resolveIntoPlayer(resolver,name,context={},subtitleTitle='',episo
 }
 
 function play(src,name='직접 재생',context={}) {
-  ++playbackRequestId;const video=$('#video');currentPlaybackContext={...context,currentUrl:src};cancelOtherEpisodeTranslations();clearSubtitle();renderSubtitleSheet();skipSegments=[];activeSkip=null;activeSkipKey=null;opEdAnalysisKey=null;if(hlsPlayer){hlsPlayer.destroy();hlsPlayer=null;} video.removeAttribute('src');
+  cancelPendingLatestEpisode();++playbackRequestId;const video=$('#video');currentPlaybackContext={...context,currentUrl:src};cancelOtherEpisodeTranslations();clearSubtitle();renderSubtitleSheet();skipSegments=[];activeSkip=null;activeSkipKey=null;opEdAnalysisKey=null;if(hlsPlayer){hlsPlayer.destroy();hlsPlayer=null;} video.removeAttribute('src');
   enterPlayer();setPlayerLocked(false);showPlayerControls();updateEpisodeButtons();$('#playerEmpty').classList.remove('hidden');$('#subtitleState').textContent='온라인 자막을 확인하는 중...';
   const isHls=/\.m3u8(?:$|\?)/i.test(src)||/\/__flix\//i.test(src)||Boolean(context.hls);
   if(isHls&&window.Hls?.isSupported()){

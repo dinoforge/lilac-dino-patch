@@ -112,11 +112,12 @@ test('home update rail keeps saved cards and exposes retry when the refresh fail
   assert.equal(h.elements.get('latestEpisodeRetry').classList.contains('hidden'), false);
 });
 
-function setupLatestPlayback({ anime, episodes }) {
+function setupLatestPlayback({ anime, episodes, providerDetail }) {
   const calls = [], messages = [];
   const context = vm.createContext({
+    latestEpisodeRequestId: 0,
     window: { lilac: {
-      providerDetail: async item => { calls.push({ type: 'detail', item }); return { data: item, episodes }; },
+      providerDetail: providerDetail || (async item => { calls.push({ type: 'detail', item }); return { data: item, episodes }; }),
       providerResolve: async episode => { calls.push({ type: 'resolve', episode }); return { url: 'file:///synthetic.mp4' }; }
     } },
     titleOf: item => item.title,
@@ -168,4 +169,26 @@ test('latest episode playback opens detail instead of resolving a same-number fo
   assert.equal(h.calls.some(call => call.type === 'player' || call.type === 'resolve'), false);
   assert.deepEqual(h.calls.filter(call => call.type === 'openDetail').map(call => call.id), ['ohli24:show']);
   assert.match(h.messages[0], /현재 공급원에서 재생 가능한 회차로 확인되지 않았습니다/);
+});
+
+test('a late latest-episode lookup cannot replace a newer home-card selection', async () => {
+  const pending = new Map();
+  const providerDetail = item => new Promise(resolve => pending.set(item.mal_id, resolve));
+  const firstAnime = { provider: 'reanime', mal_id: 'reanime:first', title: '먼저 누른 작품', latestEpisodeNumber: 8 };
+  const secondAnime = { provider: 'reanime', mal_id: 'reanime:second', title: '나중에 누른 작품', latestEpisodeNumber: 9 };
+  const firstEpisode = { provider: 'reanime', number: 8, url: 'https://reanime.test/first' };
+  const secondEpisode = { provider: 'reanime', number: 9, url: 'https://reanime.test/second' };
+  const h = setupLatestPlayback({ anime: firstAnime, episodes: [], providerDetail });
+
+  const first = h.context.playLatestEpisode(firstAnime);
+  const second = h.context.playLatestEpisode(secondAnime);
+  pending.get(secondAnime.mal_id)({ data: secondAnime, episodes: [secondEpisode] });
+  await second;
+  pending.get(firstAnime.mal_id)({ data: firstAnime, episodes: [firstEpisode] });
+  await first;
+
+  const players = h.calls.filter(call => call.type === 'player');
+  assert.equal(players.length, 1);
+  assert.equal(players[0].playback.episode.url, secondEpisode.url);
+  assert.deepEqual(h.messages, []);
 });
