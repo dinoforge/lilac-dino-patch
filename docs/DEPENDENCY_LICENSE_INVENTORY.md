@@ -35,6 +35,8 @@
 
 - `ffmpeg-static@5.3.0`은 직접 프로덕션 의존성이고 `package.json`에서 `node_modules/ffmpeg-static/**`를 `asarUnpack` 대상으로 지정한다. 코드에서는 HLS 다운로드 remux 및 OP/ED 오디오 지문 계산에 실행한다.
 - 현재 Windows 바이너리의 동봉 README는 `www.gyan.dev`의 FFmpeg 6.1.1 essentials 빌드, GPL v3, 원본 커밋 `e38092ef93`을 명시한다. 빌드 설정에는 `libx264`, `libx265`, `libass` 등이 들어 있다. 실행 파일 크기는 82,797,568바이트다.
+- 현재 `dist/win-unpacked/resources/app.asar.unpacked/node_modules/ffmpeg-static/`에는 `ffmpeg.exe.LICENSE`와 `ffmpeg.exe.README`가 함께 들어 있다. 따라서 해당 로컬 설치본에 GPL 텍스트와 버전·구성 정보가 있다는 것은 확인했다. 패키지에는 대응 소스 아카이브나 Gyan의 전체 빌드 레시피가 포함되지 않는다. README의 FFmpeg 커밋 식별자는 원본 소스 위치를 가리키지만, 정적으로 포함된 외부 라이브러리의 전체 소스·패치·빌드 환경까지 이 저장소에서 재현 가능한 상태라는 뜻은 아니다.
+- Gyan의 공식 빌드 안내는 Windows 빌드가 정적이며 GPLv3라고 밝히고 essentials 구성요소에 `libx264`, `libx265`를 열거한다. `ffmpeg-static`은 Windows x64 바이너리 출처로 Gyan을 지목하며 각 바이너리 README의 정확한 원본 버전을 확인하도록 한다. FFmpeg의 법적 안내는 GPL 대상 선택 구성요소를 쓰면 FFmpeg 전체에 GPL이 적용된다고 설명한다. 그 페이지의 세부 체크리스트는 LGPL 동적 링크 사례를 다루므로, 이를 이 별도 실행 파일과 앱의 결합에 대한 법률 결론으로 확대하지 않는다.
 - 패키지 메타데이터 `GPL-3.0-or-later`와 바이너리 README의 `GPL v3`를 함께 기록한다. 이 자료만으로 앱 전체의 라이선스가 어떻게 되는지 결론 내리지 않는다. 실제 바이너리 빌드 구성에 맞는 완전한 대응 소스, 저작권·라이선스 고지, 재배포 방법과 앱 결합 조건을 해결하기 전에는 설치 파일 배포를 승인하지 않는다.
 - 대체 또는 재빌드가 필요하면 FFmpeg 의존 기능 두 곳을 모두 추적하고, 배포용 빌드 구성·해당 소스·고지를 한 세트로 고정한다. 이 인벤토리 작업에서는 런타임이나 기능을 바꾸지 않았다.
 
@@ -92,7 +94,7 @@
 ## 확인 자료
 
 - 로컬: `package.json`, `package-lock.json`, `node_modules/*/package.json` 및 각 패키지 고지 파일, `scripts/build-jassub.cjs`, `electron/local-ai.cjs`, `electron/download-manager.cjs`, `electron/oped-fingerprint.cjs`, 현재 `dist/win-unpacked`.
-- [FFmpeg 법적 안내](https://ffmpeg.org/legal.html), [ffmpeg-static 저장소](https://github.com/eugeneware/ffmpeg-static), [Gyan FFmpeg Windows 빌드](https://www.gyan.dev/ffmpeg/builds/).
+- [FFmpeg 법적 안내](https://www.ffmpeg.org/legal.html), [ffmpeg-static 저장소와 Windows 바이너리 출처 설명](https://github.com/eugeneware/ffmpeg-static), [Gyan FFmpeg Windows 빌드와 GPLv3·정적 구성 안내](https://www.gyan.dev/ffmpeg/builds/), [현재 바이너리가 가리키는 FFmpeg 원본 커밋](https://github.com/FFmpeg/FFmpeg/commit/e38092ef93).
 - [JASSUB 저장소](https://github.com/ThaUnknown/jassub), [Electron 앱 배포 문서](https://www.electronjs.org/docs/latest/tutorial/application-distribution), [llama.cpp 저장소](https://github.com/ggml-org/llama.cpp).
 - [Gemma 4 QAT GGUF 카드](https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf), [Google Gemma 조건](https://ai.google.dev/gemma/terms), [Tencent Hy-MT2 1.8B 저장소](https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF), [Aya Expanse GGUF 저장소](https://huggingface.co/bartowski/aya-expanse-8b-GGUF), [Tencent HY-MT1.5 라이선스](https://huggingface.co/tencent/HY-MT1.5-7B-GGUF/blob/main/License.txt), [ja-ko-vn 기본 모델](https://huggingface.co/hell0ks/ja-ko-vn-7b-v1).
 
