@@ -25,8 +25,9 @@ let currentPlaybackContext = {};
 let playbackRequestId = 0;
 let subtitleSelectionRequestId = 0;
 let latestEpisodeRequestId = 0;
+let historyPlaybackRequestId = 0;
 let pendingResumeProgress = 0;
-function cancelPendingLatestEpisode(){latestEpisodeRequestId++}
+function cancelPendingPlaybackLookups(){latestEpisodeRequestId++;historyPlaybackRequestId++;playbackRequestId++}
 
 // 한국어 제목을 우선 표시하고, 확인된 원제를 보조로 보여 준다. 제목을 아직 모르면 TMDB → AniList → Wikidata에서 찾는다.
 const displayTitles=new Map(),titleAnime=new Map(),pendingTitles=new Map(),titleLookupStarted=new Set();let titleTimer=null;
@@ -94,7 +95,7 @@ function enterPlayer(){const already=$('.view.active')?.id==='playerView';switch
 function switchView(name) {
   if(name!=='player'&&typeof finishSpaceHold==='function')finishSpaceHold(false);
   const current=$('.view.active')?.id?.replace(/View$/,'');
-  if(name!==current)cancelPendingLatestEpisode();
+  if(name!==current)cancelPendingPlaybackLookups();
   if(name==='player'&&current&&current!=='player')viewBeforePlayer=current;
   document.body.classList.toggle('player-mode',name==='player');
   $$('.view').forEach(v => v.classList.toggle('active', v.id === `${name}View`));
@@ -287,7 +288,7 @@ async function loadFullCatalog(){catalogBrowser.initialize();if(catalogBrowser.a
 async function loadLinkkfCatalogPage(){if(state.catalogLoading||state.catalogDone)return;state.catalogLoading=true;$('#allStatus').textContent=`Linkkf 목록을 더 불러오는 중... (${state.season.length})`;try{const page=state.catalogPage||2,result=await window.lilac.linkkfHome(page,20),before=state.season.length;if(catalogBrowser.active())return;state.season=[...new Map([...state.season,...result.data].map(a=>[a.mal_id,a])).values()];state.catalogPage=page+1;state.catalogDone=result.data.length===0||state.season.length===before;renderAll();$('#allStatus').textContent=`${state.season.length}개 작품${state.catalogDone?'':' · 아래로 스크롤하면 더 불러옵니다.'}`}catch(e){if(!catalogBrowser.active())$('#allStatus').textContent=`목록을 불러오지 못했습니다: ${e.message}`}finally{state.catalogLoading=false}}
 function historyImage(h){if(h.image)return h.image;if(h.anime){const direct=imageOf(h.anime);if(direct)return direct}const title=h.subtitleTitle||h.name.split(' · ')[0];return imageOf([...state.season,...state.top,...state.library].find(a=>[titleOf(a),a.title,a.title_english].includes(title))||{})}
 function renderHistory(){const list=$('#historyList');list.replaceChildren(...state.history.map(h=>{const row=document.createElement('article');row.className='history-card';row.tabIndex=0;row.setAttribute('role','button');const image=historyImage(h),episode=h.episode?.number||h.name.match(/(?:·|EP\.?)[^\d]*(\d+)/i)?.[1]||1;row.innerHTML=`<div class="history-thumb"${image?` style="background-image:url('${image}')"`:''}><span class="history-card-play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 6 9 6-9 6Z"/></svg></span><div class="history-progress"><i style="width:${Math.max(0,Math.min(100,h.progress||0))}%"></i></div></div><b ${h.anime?titleAttr(h.anime):''}>${escapeHtml(storedTitle(h))}</b>${originalTitleMarkup(h.anime,'history-original')}<span>EP.${escapeHtml(String(episode))}</span>`;const key=historyKeyOf(h),activate=()=>{if(!historySelection.active){playHistoryItem(h);return}historySelection.keys.has(key)?historySelection.keys.delete(key):historySelection.keys.add(key);row.classList.toggle('selected',historySelection.keys.has(key));row.setAttribute('aria-pressed',String(historySelection.keys.has(key)));updateHistorySelectionBar()};row.classList.toggle('selecting',historySelection.active);if(historySelection.active){row.classList.toggle('selected',historySelection.keys.has(key));row.setAttribute('aria-pressed',String(historySelection.keys.has(key)));row.querySelector('.history-thumb').insertAdjacentHTML('beforeend','<span class="history-check" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m6 12 4 4 8-8"/></svg></span>')}row.onclick=activate;row.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();activate()}};return row;}));updateHistorySelectionBar();$('#historyCount').textContent=`${state.history.length}개`;$('#emptyHistory').classList.toggle('hidden',state.history.length>0);list.classList.toggle('hidden',!state.history.length);}
-async function playHistoryItem(item){let anime=item.anime||[...state.season,...state.top,...state.library].find(a=>[titleOf(a),a.title,a.title_english,displayTitles.get(animeTitleKey(a))?.ko,displayTitles.get(animeTitleKey(a))?.en].includes(item.subtitleTitle||item.name.split(' · ')[0])),episodes=[],localJob=item.episode?jobByRef(episodeRef(item.episode)):null;if(localJob?.status==='completed'){anime=localJob.anime||anime;episodes=downloadedSeries(localJob)}else try{if(anime?.provider==='linkkf'){const servers=await window.lilac.linkkfEpisodes(anime.id);episodes=servers.find(server=>server.episodes.some(ep=>ep.token===item.episode?.token))?.episodes||servers[0]?.episodes||[]}else if(anime&&PROVIDER_SOURCES.includes(anime.provider)){const detail=await window.lilac.providerDetail(anime);anime=detail.data;episodes=detail.episodes||[]}}catch{}if(!episodes.length&&item.episode?.provider==='reanime'&&URL.canParse?.(item.episode.url)){const current=Number(item.episode.number)||1,parsed=new URL(item.episode.url),next={...item.episode,name:String(current+1),number:current+1,url:`${parsed.origin}/watch/${parsed.pathname.split('/').filter(Boolean).pop()}?ep=${current+1}`};episodes=[item.episode,next]}const episode=item.episode,name=item.name;
+async function playHistoryItem(item){cancelPendingPlaybackLookups();const requestId=++historyPlaybackRequestId,playerRequest=playbackRequestId;let anime=item.anime||[...state.season,...state.top,...state.library].find(a=>[titleOf(a),a.title,a.title_english,displayTitles.get(animeTitleKey(a))?.ko,displayTitles.get(animeTitleKey(a))?.en].includes(item.subtitleTitle||item.name.split(' · ')[0])),episodes=[],localJob=item.episode?jobByRef(episodeRef(item.episode)):null;if(localJob?.status==='completed'){anime=localJob.anime||anime;episodes=downloadedSeries(localJob)}else try{if(anime?.provider==='linkkf'){const servers=await window.lilac.linkkfEpisodes(anime.id);episodes=servers.find(server=>server.episodes.some(ep=>ep.token===item.episode?.token))?.episodes||servers[0]?.episodes||[]}else if(anime&&PROVIDER_SOURCES.includes(anime.provider)){const detail=await window.lilac.providerDetail(anime);anime=detail.data;episodes=detail.episodes||[]}}catch{}if(requestId!==historyPlaybackRequestId||playerRequest!==playbackRequestId)return;if(!episodes.length&&item.episode?.provider==='reanime'&&URL.canParse?.(item.episode.url)){const current=Number(item.episode.number)||1,parsed=new URL(item.episode.url),next={...item.episode,name:String(current+1),number:current+1,url:`${parsed.origin}/watch/${parsed.pathname.split('/').filter(Boolean).pop()}?ep=${current+1}`};episodes=[item.episode,next]}const episode=item.episode,name=item.name;
 // As on Android, continue watching reopens the last played episode; from 95% on it starts over (see play()).
 const context={episode,subtitleTitle:item.subtitleTitle,image:item.image,resumeProgress:item.progress,comparisonEpisodes:nearbyEpisodes(episodes,episode),seriesEpisodes:episodes,resolveKind:item.resolveKind||(anime?.provider==='linkkf'?'linkkf':undefined),anime};if(item.episode){await resolveIntoPlayer(()=>context.resolveKind==='linkkf'?window.lilac.linkkfResolve(episode):window.lilac.providerResolve(episode),name,context,item.subtitleTitle||item.name.split(' · ')[0],episodeNumberOf(episode)||1)}else play(item.src,item.name,context)}
 
@@ -391,7 +392,7 @@ function showHero(index){
 function heroDetail(a){const id=String(a.mal_id);if(id.startsWith('linkkf:'))return window.lilac.linkkfDetail(id.slice(7)).then(r=>r?.data);if(/^(animenosub|reanime|miruro|ohli24):/.test(id))return window.lilac.providerDetail(a).then(r=>r?.data);return window.lilac.detail(id).then(r=>r?.data)}
 function cleanSynopsis(text){return String(text||'').replace(/<[^>]*>/g,' ').replace(/\s*[(\[](?:Source|출처)[^)\]]*[)\]]\s*$/i,'').replace(/\s+/g,' ').trim()}
 async function openDetail(id) {
-  cancelPendingLatestEpisode();const dialog=$('#detailDialog'),token=Symbol(id);openDetail.token=token;$('#detailContent').innerHTML='<div class="empty-state"><p>작품 정보를 불러오는 중...</p></div>';if(!dialog.open)dialog.showModal();$('#detailContent').scrollTop=0;
+  cancelPendingPlaybackLookups();const dialog=$('#detailDialog'),token=Symbol(id);openDetail.token=token;$('#detailContent').innerHTML='<div class="empty-state"><p>작품 정보를 불러오는 중...</p></div>';if(!dialog.open)dialog.showModal();$('#detailContent').scrollTop=0;
   try {
     if(String(id).startsWith('linkani:'))throw new Error('이전에 저장된 작품의 콘텐츠 소스는 더 이상 지원하지 않습니다. 다른 콘텐츠 소스에서 다시 찾아 주세요.');
     const isLinkkf=String(id).startsWith('linkkf:'); const isExternal=/^(animenosub|reanime|miruro|ohli24):/.test(String(id));
@@ -438,15 +439,15 @@ async function openDetail(id) {
 
 async function playLatestEpisode(anime){
   const number=Number(anime?.latestEpisodeNumber);if(!anime||!Number.isInteger(number)||number<=0)return;
-  const requestId=++latestEpisodeRequestId;
+  cancelPendingPlaybackLookups();const requestId=++latestEpisodeRequestId,playerRequest=playbackRequestId;
   try{
     const result=await window.lilac.providerDetail(anime),data=result?.data||anime,episodes=result?.episodes||[];
-    if(requestId!==latestEpisodeRequestId)return;
+    if(requestId!==latestEpisodeRequestId||playerRequest!==playbackRequestId)return;
     const episode=episodes.find(item=>item?.provider===anime.provider&&Number(item.number)===number&&item.playable!==false);
     if(!episode){toast(`${number}화는 현재 공급원에서 재생 가능한 회차로 확인되지 않았습니다.`);openDetail(anime.mal_id);return}
     const title=titleOf(data),context={episode,subtitleTitle:title,image:imageOf(data),anime:data,seriesEpisodes:episodes,comparisonEpisodes:nearbyEpisodes(episodes,episode),resolveKind:'provider'};
     resolveIntoPlayer(()=>window.lilac.providerResolve(episode),`${title} · ${episode.name||number}화`,context,title,number);
-  }catch(error){if(requestId===latestEpisodeRequestId)toast(`최신 회차를 불러오지 못했습니다: ${String(error?.message||error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`)}
+  }catch(error){if(requestId===latestEpisodeRequestId&&playerRequest===playbackRequestId)toast(`최신 회차를 불러오지 못했습니다: ${String(error?.message||error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`)}
 }
 
 function normalizeSearchText(value){return String(value||'').normalize('NFKC').toLocaleLowerCase().replace(/\s+/g,' ').trim()}
@@ -483,7 +484,7 @@ function bindSearchAutocomplete(inputId,listId){const input=$(`#${inputId}`),pop
 }
 document.addEventListener('pointerdown',event=>{for(const control of searchAutocompleteControls)if(!control.popup.parentElement.contains(event.target)){control.popup.classList.add('hidden');control.input.setAttribute('aria-expanded','false');control.input.removeAttribute('aria-activedescendant')}});
 async function doSearch(query) {
-  query=query.trim(); if(!query)return;cancelPendingLatestEpisode();saveRecentSearch(query); switchView('search'); $('#pageSearch').value=query; $('#globalSearch').value=query; $('#searchStatus').textContent='검색 중...'; $('#searchGrid').replaceChildren();
+  query=query.trim(); if(!query)return;cancelPendingPlaybackLookups();saveRecentSearch(query); switchView('search'); $('#pageSearch').value=query; $('#globalSearch').value=query; $('#searchStatus').textContent='검색 중...'; $('#searchGrid').replaceChildren();
   $('#filterMore').classList.add('hidden');if(state.source==='linkkf')$('#searchStatus').textContent='Linkkf 전체 목록에서 검색 중... (처음 검색은 목록을 받느라 조금 걸립니다)';
   const searchToken=(doSearch.token||0)+1;
   const search=text=>PROVIDER_SOURCES.includes(state.source)?window.lilac.providerCatalog(state.source,text):state.source==='linkkf'?window.lilac.linkkfSearch(text):window.lilac.search(text);
@@ -508,7 +509,7 @@ async function doSearch(query) {
 }
 
 function showPendingPlayer(name,context={}){
-  cancelPendingLatestEpisode();const requestId=++playbackRequestId,video=$('#video');
+  cancelPendingPlaybackLookups();const video=$('#video');
   if(hlsPlayer){hlsPlayer.destroy();hlsPlayer=null;}
   video.pause();video.removeAttribute('src');video.load();
   currentPlaybackContext={...context,resolving:true};clearSubtitle();renderSubtitleSheet();skipSegments=[];activeSkip=null;currentHistoryKey=null;
@@ -517,7 +518,7 @@ function showPendingPlayer(name,context={}){
   $('.player-spinner').classList.remove('hidden');
   $('#playerEmpty p').textContent='영상 서버에 연결하고 있어요';$('#playerTitle').textContent=name;updatePlayerTitle();$('#playerMeta').textContent='재생 준비 중';
   $('#downloadStatus').textContent='영상 주소를 확인하는 중...';$('#subtitleState').textContent='영상 연결 후 자막을 확인합니다.';renderSubtitleTracks();
-  return requestId;
+  return ++playbackRequestId;
 }
 
 
@@ -594,7 +595,7 @@ function bindHlsPlayerEvents(instance,video){
 }
 
 function play(src,name='직접 재생',context={}) {
-  cancelPendingLatestEpisode();++playbackRequestId;const video=$('#video');currentPlaybackContext={...context,currentUrl:src};cancelOtherEpisodeTranslations();clearSubtitle();renderSubtitleSheet();skipSegments=[];activeSkip=null;activeSkipKey=null;opEdAnalysisKey=null;if(hlsPlayer){hlsPlayer.destroy();hlsPlayer=null;} video.removeAttribute('src');
+  cancelPendingPlaybackLookups();++playbackRequestId;const video=$('#video');currentPlaybackContext={...context,currentUrl:src};cancelOtherEpisodeTranslations();clearSubtitle();renderSubtitleSheet();skipSegments=[];activeSkip=null;activeSkipKey=null;opEdAnalysisKey=null;if(hlsPlayer){hlsPlayer.destroy();hlsPlayer=null;} video.removeAttribute('src');
   enterPlayer();setPlayerLocked(false);showPlayerControls();updateEpisodeButtons();$('#playerEmpty').classList.remove('hidden');$('.player-spinner').classList.remove('hidden');$('#subtitleState').textContent='온라인 자막을 확인하는 중...';
   const isHls=/\.m3u8(?:$|\?)/i.test(src)||/\/__flix\//i.test(src)||Boolean(context.hls);
   if(isHls&&window.Hls?.isSupported()){

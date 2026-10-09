@@ -116,6 +116,8 @@ function setupLatestPlayback({ anime, episodes, providerDetail }) {
   const calls = [], messages = [];
   const context = vm.createContext({
     latestEpisodeRequestId: 0,
+    historyPlaybackRequestId: 0,
+    playbackRequestId: 0,
     window: { lilac: {
       providerDetail: providerDetail || (async item => { calls.push({ type: 'detail', item }); return { data: item, episodes }; }),
       providerResolve: async episode => { calls.push({ type: 'resolve', episode }); return { url: 'file:///synthetic.mp4' }; }
@@ -129,6 +131,11 @@ function setupLatestPlayback({ anime, episodes, providerDetail }) {
     toast: message => messages.push(message),
     openDetail: id => calls.push({ type: 'openDetail', id })
   });
+  context.cancelPendingPlaybackLookups = () => {
+    context.latestEpisodeRequestId++;
+    context.historyPlaybackRequestId++;
+    context.playbackRequestId++;
+  };
   const app = fs.readFileSync(path.join(root, 'src/app.js'), 'utf8');
   const start = app.indexOf('async function playLatestEpisode(anime){');
   const end = app.indexOf('\nfunction normalizeSearchText', start);
