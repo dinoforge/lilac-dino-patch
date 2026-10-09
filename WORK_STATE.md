@@ -270,6 +270,12 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 두 이어보기 카드를 연속 선택해 응답 순서가 뒤집히는 경우 최신 선택만 회차·진행률을 전달하는지 검증했다. 홈 최신 회차와 이어보기 조회를 서로 교차 실행해 가장 최근 선택만 재생하는 것도 확인했다. 탐색을 벗어난 요청은 재생을 시작하지 않는다. 관련 테스트 12/12, 전체 `node --test` 183/183, 앱·테스트 구문 검사, `git diff --check` 통과.
 - `npm run dist` Windows NSIS 빌드 성공(설치 파일 124,549,216바이트). 패키지 `app.asar`의 `src/app.js`에 새 선택 순번과 늦은 이어보기 응답 차단이 포함된 것을 확인했다. 실제 공급원 요청·영상 재생은 수행하지 않았으며 설치 파일은 로컬 산출물로만 보관한다.
 
+## 2026-10-10 JASSUB 고지 생성 경로 재확인
+
+- JASSUB `656371a`의 공식 `Makefile_licence`, `.gitmodules`, `build/license_defaults`, `build/license_extract.sh`를 GitHub API로 직접 확인했다. Makefile은 `expat`을 고지 대상에 넣고 `.git/modules/lib/%/HEAD`를 요구하지만, `.gitmodules`에는 5개 submodule만 있고 `license_defaults`에도 `expat` 항목이 없다. 추출 script는 매핑된 라이선스, 소스 디렉터리, `licensecheck`를 요구한다.
+- 따라서 선언된 submodule만으로는 upstream Expat 고지 target의 입력을 재현할 수 없다. 이 불일치는 Expat이 WASM에 포함됐다는 증거가 아니다. 번들된 `abslink@1.3.0`, `throughput@1.0.2`, `lfa-ponyfill@1.1.1`도 설치된 npm 패키지에 SPDX metadata만 있고 별도 LICENSE/COPYING/NOTICE 파일이 없다.
+- 앱 코드·의존성·자산·사용자 데이터는 바꾸지 않았다. 전체 고지, Expat 입력 출처, 기본 font 권리는 미해결이며 배포 보류를 유지한다. 상세 출처와 추출 절차는 `docs/DEPENDENCY_LICENSE_INVENTORY.md`, `docs/RIGHTS_REVIEW.md`에 기록했다.
+
 ## 주요 결정
 
 - 새 앱은 Windows 우선, Android는 후속이다. Chrome·macOS는 제품 범위에서 제외한다.
@@ -282,6 +288,6 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 ## 다음
 
 1. FFmpeg는 아직 선택하지 않는다. BtbN의 8.1.3·9.0.2 LGPL shared 후보는 합성 remux/디코딩을 통과했지만 기존 FFmpeg 6.1.1보다 큰 배포 폴더와 미확인 소스·외부 고지가 남았다. 최소 호환 빌드에는 shell 기반 빌드 환경이 필요하지만 현재 Docker·WSL 배포판·Bash·Make가 없어 설치하지 않고 보류했다. 해결 전까지 현행 의존성 유지, 설치 파일 공개 보류를 계속한다.
-2. JASSUB source commit 후보·다섯 submodule SHA와 font 파일 매칭은 확인됐고, GPL-3.0 `rvfc-polyfill` fallback은 앱 빌드에서 제외했다. 다음에는 pinned C/WASM 구성요소와 번들된 `abslink`·`lfa-ponyfill`·`throughput`의 완전한 고지를 만들고 Expat 경로와 font 원 라이선스를 확인한 뒤 app/NSIS 패키지에 넣어 검사한다. upstream generator는 shell 기반이며 이 환경에는 Docker/WSL 배포판이 없어 실행하지 않았다. 전체 재배포 조건은 미해결이다.
+2. JASSUB source commit 후보·다섯 submodule SHA와 font 파일 매칭은 확인됐고, GPL-3.0 `rvfc-polyfill` fallback은 앱 빌드에서 제외했다. 추가 조사에서 upstream 고지 생성기의 `expat` 요구가 `.gitmodules` 및 `license_defaults`와 맞지 않고, 세 번들 JS 보조 패키지에는 별도 고지 파일도 없는 것을 확인했다. 다음 단계는 pinned C/WASM source에서 정확한 고지 입력을 추적하고, Expat 포함 여부와 폰트 원 라이선스를 증거로 확인한 뒤, 완전성을 검토할 수 있는 고지만 app/NSIS 패키지에 넣는 것이다. 이 환경에는 Docker/WSL 배포판, Bash, Make, `licensecheck`가 없어 upstream shell generator를 실행하지 않았다. 전체 재배포 조건은 미해결이다.
 3. Aya Expanse GGUF는 설정의 Cohere 조건 링크와 다운로드 전 사용자 확인을 제공한다. 앱이 약관 열람·법적 동의나 자격을 검증하지는 않는다. `ja-ko-vn` GGUF와 기반 모델 두 저장소는 Apache-2.0을 선언하지만 학습 대화 자료 출처·권리는 확인하지 못했다. 임의 GGUF의 약관은 앱이 검사하지 않는다. 8개 preset 다운로드 pin은 적용됐으며 기존 모델 파일은 새로 검사하거나 교체하지 않는다. HY-MT1.5 1.8B·7B는 앱에서 차단했고 기존 사용자 파일을 보존한다.
 4. 프로젝트 코드·로고·아이콘 재배포 허가와 AniList 보완성, TMDB·AI 기능 결합 조건을 해결하기 전까지 공개 저장소·설치 파일 배포와 실사이트 콘텐츠 요청은 보류한다. 권리 해결 후 검색→상세→회차 재생→자막→이어보기 실제 인수 검증을 계획한다.
