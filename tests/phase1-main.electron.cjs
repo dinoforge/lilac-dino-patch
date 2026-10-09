@@ -199,9 +199,21 @@ function fixtureResponse(rawUrl, requestInit = {}) {
   if (url.hostname === 'reanime.to' && url.pathname === '/api/v1/search') {
     fixtureRequests.push(url.href);
     const matchesSearch = url.searchParams.get('q') === SEARCH_TITLE;
-    const matchesQuarter = url.searchParams.get('season') === 'FALL' && url.searchParams.get('year') === '2026';
+    const requestedSeason = url.searchParams.get('season');
+    const requestedYear = Number(url.searchParams.get('year'));
+    const matchesQuarter = ['FALL', 'SUMMER'].includes(requestedSeason)
+      && [2025, 2026].includes(requestedYear);
     const matches = matchesSearch || matchesQuarter;
-    return response({ data: matches ? [animeFixture] : [], total: matches ? 1 : 0 });
+    const result = matchesQuarter && !(requestedSeason === 'FALL' && requestedYear === 2026) ? {
+      ...animeFixture,
+      anime_id: `phase1-quarter-ui-${requestedYear}-${requestedSeason.toLowerCase()}`,
+      title: { english: '분기 선택 UI 합성작', native: '分期選択合成作品', romaji: 'Quarter Selection UI Fixture' },
+      season: requestedSeason,
+      season_year: requestedYear,
+      anilist_id: 62007,
+      mal_id: 72007
+    } : animeFixture;
+    return response({ data: matches ? [result] : [], total: matches ? 1 : 0 });
   }
   if (url.hostname === 'reanime.to' && url.pathname === `/anime/${SLUG}`) {
     fixtureRequests.push(url.href);
@@ -441,6 +453,65 @@ app.whenReady().then(async () => {
     await win.webContents.executeJavaScript(`(() => {
       state.source = ${JSON.stringify(previousHomeSource)};
       document.querySelector('#homeOrder [data-order="season"]').click();
+    })()`);
+
+    await win.webContents.executeJavaScript(`(() => {
+      state.source = 'reanime';
+      switchView('home');
+      setupQuarterControls('reanime');
+      const year = document.querySelector('#quarterYear');
+      year.value = '2025';
+      year.dispatchEvent(new Event('change'));
+    })()`);
+    const selectedYearQuarter = await waitFor('quarter year selection rendered from packaged main IPC', () =>
+      win.webContents.executeJavaScript(`(() => {
+        const card = document.querySelector('#seasonRail .anime-card');
+        if (document.querySelector('#seasonTitle')?.textContent !== '2025년 4분기' || !card) return null;
+        return {
+          title: document.querySelector('#seasonTitle').textContent,
+          cardTitle: card.querySelector('h3')?.textContent || '',
+          cardId: card.dataset.id,
+          year: document.querySelector('#quarterYear').value,
+          selectedQuarter: document.querySelector('#quarterTabs [data-quarter="4"]')?.getAttribute('aria-pressed')
+        };
+      })()`)
+    );
+    assert.equal(selectedYearQuarter.year, '2025');
+    assert.equal(selectedYearQuarter.selectedQuarter, 'true');
+    assert.equal(selectedYearQuarter.cardTitle, '분기 선택 UI 합성작');
+    assert.equal(selectedYearQuarter.cardId, 'reanime:phase1-quarter-ui-2025-fall');
+    await win.webContents.executeJavaScript(`document.querySelector('#quarterTabs [data-quarter="3"]').click()`);
+    const selectedQuarter = await waitFor('quarter tab selection rendered from packaged main IPC', () =>
+      win.webContents.executeJavaScript(`(() => {
+        const card = document.querySelector('#seasonRail .anime-card');
+        if (document.querySelector('#seasonTitle')?.textContent !== '2025년 3분기' || !card) return null;
+        return {
+          title: document.querySelector('#seasonTitle').textContent,
+          cardTitle: card.querySelector('h3')?.textContent || '',
+          cardId: card.dataset.id,
+          year: document.querySelector('#quarterYear').value,
+          selectedQuarter: document.querySelector('#quarterTabs [data-quarter="3"]')?.getAttribute('aria-pressed')
+        };
+      })()`)
+    );
+    assert.equal(selectedQuarter.year, '2025');
+    assert.equal(selectedQuarter.selectedQuarter, 'true');
+    assert.equal(selectedQuarter.cardTitle, '분기 선택 UI 합성작');
+    assert.equal(selectedQuarter.cardId, 'reanime:phase1-quarter-ui-2025-summer');
+    assert.ok(fixtureRequests.some(rawUrl => {
+      const url = new URL(rawUrl);
+      return url.hostname === 'reanime.to' && url.pathname === '/api/v1/search'
+        && url.searchParams.get('year') === '2025' && url.searchParams.get('season') === 'FALL';
+    }), 'the year control reached the real packaged quarter IPC');
+    assert.ok(fixtureRequests.some(rawUrl => {
+      const url = new URL(rawUrl);
+      return url.hostname === 'reanime.to' && url.pathname === '/api/v1/search'
+        && url.searchParams.get('year') === '2025' && url.searchParams.get('season') === 'SUMMER';
+    }), 'the quarter tab reached the real packaged quarter IPC');
+    await win.webContents.executeJavaScript(`(() => {
+      state.source = ${JSON.stringify(previousHomeSource)};
+      setupQuarterControls(state.source);
+      catalogUpdateUI.renderHome();
     })()`);
 
     const animenosubUpdates = await win.webContents.executeJavaScript("window.lilac.catalogUpdates('animenosub', 0)");
@@ -689,7 +760,7 @@ app.whenReady().then(async () => {
     assert.equal(deniedUnknownFetches.length, 0, `no unregistered main-process URL was requested: ${deniedUnknownFetches.join(', ')}`);
     assert.equal(deniedBrowserRequests.length, 0, `no external browser request was allowed or attempted: ${deniedBrowserRequests.join(', ')}`);
 
-    console.log('Packaged Phase 1 smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs, Re:Anime/Miruro latest airing, weekday schedule, Animenosub/Ani24 update feeds and Animenosub recent-updates home card, search/detail/episodes, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
+    console.log('Packaged Phase 1 smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs and Re:Anime quarter selection UI, Re:Anime/Miruro latest airing, weekday schedule, Animenosub/Ani24 update feeds and Animenosub recent-updates home card, search/detail/episodes, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
     console.log(`Playback: ${playbackState.width}x${playbackState.height} at ${playbackState.currentTime.toFixed(2)}s; resume: ${resumeState.currentTime.toFixed(2)}s from saved 50%; fallback: ${fallbackState.server} at ${fallbackState.currentTime.toFixed(2)}s with selected subtitle; synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; renderer proxy requests: ${rendererProxyRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: 0; blocked browser requests: 0; external network calls: 0.`);
     await new Promise(resolve => localPlayerServer.close(resolve));
     app.quit();
