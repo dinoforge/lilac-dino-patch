@@ -22,6 +22,19 @@ test('every downloadable preset has a fixed revision and SHA-256', () => {
   }
 });
 
+test('Aya Expanse exposes its terms and asks before starting a download', () => {
+  const model = LOCAL_AI_MODELS.find(item => item.id === 'aya-expanse-8b');
+  assert.equal(model.licenseAcknowledgementRequired, true);
+  assert.equal(model.licenseUrl, 'https://cohere.com/cohere-labs-cc-by-nc-license');
+
+  const renderer = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  assert.match(renderer, /window\.lilac\.openExternal\(model\.licenseUrl\)/);
+  const install = renderer.match(/async function installLocalModel\(id\)\{([\s\S]*?)\n\}/)?.[1];
+  assert.ok(install, 'installLocalModel function exists');
+  assert.match(install, /licenseAcknowledgementRequired[\s\S]*?confirm\(/);
+  assert.ok(install.indexOf('confirm(') < install.indexOf('localModelProgress[id]=0'), 'declining does not start download progress');
+});
+
 test('model download pins the URL and verifies fresh, resumed, and mismatched files', async t => {
   const userData = temporaryUserData(t);
   const model = LOCAL_AI_MODELS.find(item => item.id === 'hy-mt2-1.8b');

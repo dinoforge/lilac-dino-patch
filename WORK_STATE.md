@@ -205,6 +205,14 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - `ja-ko-vn` GGUF의 고정 snapshot과 README는 Apache-2.0을 선언하고 `hell0ks/ja-ko-vn-7b-v1`에서 양자화했다고 밝힌다. 원 모델은 TrillionLabs Tri-7B-Base를 기반으로 fine-tune됐다고 설명하며, 두 저장소의 model card도 Apache-2.0을 표시한다. 학습 대화 자료의 출처·권리 설명은 찾지 못했다. 기존과 같이 성능 검토를 위해 legacy 목록 정책을 유지한다.
 - `node --check electron/local-ai.cjs`, `node --test tests/local-ai-model-pins.test.cjs` 2/2, `git diff --check`가 통과했다. `npm run dist`도 성공해 Windows NSIS 설치 파일 124,546,916바이트를 만들었다. `app.asar`에서 비상업 경고와 JASSUB native callback을 확인했고, GPL fallback marker 및 별도 `node_modules/jassub` 패키지는 없다. 모델·사용자 데이터 파일은 읽거나 변경하지 않았다.
 
+## 2026-10-09 Aya Expanse 다운로드 전 이용 조건 확인
+
+- Aya Expanse 설정 행에 Cohere 공식 CC-BY-NC 4.0 및 허용 사용 추가 조건 링크를 넣었다. 다운로드 버튼을 누르면 조건을 먼저 확인하고 비상업 용도로만 사용한다는 확인 창이 뜬다. 취소하면 다운로드 IPC와 진행 상태를 시작하지 않는다.
+- 확인 창은 사용자 안내용이며 앱이 약관 열람, 법적 동의 또는 사용 적격성을 검사하거나 기록하지 않는다. 약관 링크를 누르면 기본 브라우저에서 공식 Cohere 페이지를 연다. 기존 설치 모델 파일이나 사용자 설정은 건드리지 않았다.
+- [Cohere 공식 모델 카드](https://huggingface.co/CohereLabs/aya-expanse-8b), [CC-BY-NC 4.0 및 허용 사용 추가 조건](https://cohere.com/cohere-labs-cc-by-nc-license), [Cohere 사용 정책](https://docs.cohere.com/docs/usage-policy/)을 확인했다. 공개 배포 제한은 유지한다.
+- `node --test tests/local-ai-model-pins.test.cjs` 3/3, 전체 `node --test` 144/144 통과. `node --check electron/local-ai.cjs`, `node --check src/app.js`, 테스트 파일 구문 검사, `git diff --check`도 통과했다.
+- `npm run dist` Windows NSIS 빌드 성공(설치 파일 124,547,245바이트). 패키지 `app.asar`에서 Cohere 링크, 확인 창, 다운로드 진행 전에 놓인 확인 검사를 확인했다. 실제 브라우저에서 링크를 열거나 Aya 모델을 받지는 않았고, 기존 사용자 데이터도 건드리지 않았다.
+
 ## 주요 결정
 
 - 새 앱은 Windows 우선, Android는 후속이다. Chrome·macOS는 제품 범위에서 제외한다.
@@ -218,5 +226,5 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 1. FFmpeg는 아직 선택하지 않는다. BtbN의 8.1.3·9.0.2 LGPL shared 후보는 합성 remux/디코딩을 통과했지만 기존 FFmpeg 6.1.1보다 큰 배포 폴더와 미확인 소스·외부 고지가 남았다. 최소 호환 빌드에는 shell 기반 빌드 환경이 필요하지만 현재 Docker·WSL 배포판·Bash·Make가 없어 설치하지 않고 보류했다. 해결 전까지 현행 의존성 유지, 설치 파일 공개 보류를 계속한다.
 2. JASSUB source commit 후보·다섯 submodule SHA와 font 파일 매칭은 확인됐고, GPL-3.0 `rvfc-polyfill` fallback은 앱 빌드에서 제외했다. 다음에는 pinned C/WASM 구성요소와 번들된 `abslink`·`lfa-ponyfill`·`throughput`의 완전한 고지를 만들고 Expat 경로와 font 원 라이선스를 확인한 뒤 app/NSIS 패키지에 넣어 검사한다. upstream generator는 shell 기반이며 이 환경에는 Docker/WSL 배포판이 없어 실행하지 않았다. 전체 재배포 조건은 미해결이다.
-3. Aya Expanse GGUF는 CC-BY-NC-4.0과 Cohere 이용 안내가 고정 README에 있으며 설정에 비상업 조건을 표시한다. `ja-ko-vn` GGUF와 기반 모델 두 저장소는 Apache-2.0을 선언하지만 학습 대화 자료 출처·권리는 확인하지 못했다. 임의 GGUF의 약관은 앱이 검사하지 않는다. 8개 preset 다운로드 pin은 적용됐으며 기존 모델 파일은 새로 검사하거나 교체하지 않는다. HY-MT1.5 1.8B·7B는 앱에서 차단했고 기존 사용자 파일을 보존한다.
+3. Aya Expanse GGUF는 설정의 Cohere 조건 링크와 다운로드 전 사용자 확인을 제공한다. 앱이 약관 열람·법적 동의나 자격을 검증하지는 않는다. `ja-ko-vn` GGUF와 기반 모델 두 저장소는 Apache-2.0을 선언하지만 학습 대화 자료 출처·권리는 확인하지 못했다. 임의 GGUF의 약관은 앱이 검사하지 않는다. 8개 preset 다운로드 pin은 적용됐으며 기존 모델 파일은 새로 검사하거나 교체하지 않는다. HY-MT1.5 1.8B·7B는 앱에서 차단했고 기존 사용자 파일을 보존한다.
 4. 프로젝트 코드·로고·아이콘 재배포 허가와 AniList 보완성, TMDB·AI 기능 결합 조건을 해결하기 전까지 공개 저장소·설치 파일 배포와 실사이트 콘텐츠 요청은 보류한다. 권리 해결 후 검색→상세→회차 재생→자막→이어보기 실제 인수 검증을 계획한다.

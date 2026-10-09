@@ -26,7 +26,7 @@ const MODELS = [
   // Google's general models in its own 4-bit (QAT) files. E4B fits a 4 GB card nearly whole (42 of 43 layers).
   { id: 'gemma-4-e4b', label: 'Gemma 4 E4B', note: '기본 · 5.2GB · 가장 정확하고 빠름', repo: 'google/gemma-4-E4B-it-qat-q4_0-gguf', revision: '4b4a2c1d584be7264f87aac328a1bc739ce81b6c', file: 'gemma-4-E4B_q4_0-it.gguf', sha256: '676c35070db6dbe52f93e9c864ee0fba4eddea94b9c875d9cb10daff453fbaee', size: 5154941280 },
   // Cohere's multilingual model (11, 7/7, no Japanese left, 9 min), half of it on the CPU of a 4 GB card.
-  { id: 'aya-expanse-8b', label: 'Aya Expanse 8B', note: '5.1GB · 정확함 · 비상업용(CC BY-NC 4.0) · 이용 조건 확인', repo: 'bartowski/aya-expanse-8b-GGUF', revision: 'f9d62ed0c58e6f2ae17975df990b1b8a4013b596', file: 'aya-expanse-8b-Q4_K_M.gguf', sha256: '9592bad943fe56cf93200286a0a4b00a158cd84a408f227b9978ec5879002fb8', size: 5056982720 },
+  { id: 'aya-expanse-8b', label: 'Aya Expanse 8B', note: '5.1GB · 정확함 · 비상업용(CC BY-NC 4.0)', licenseAcknowledgementRequired: true, licenseUrl: 'https://cohere.com/cohere-labs-cc-by-nc-license', repo: 'bartowski/aya-expanse-8b-GGUF', revision: 'f9d62ed0c58e6f2ae17975df990b1b8a4013b596', file: 'aya-expanse-8b-Q4_K_M.gguf', sha256: '9592bad943fe56cf93200286a0a4b00a158cd84a408f227b9978ec5879002fb8', size: 5056982720 },
   // 11, 1/7, 10 min.
   { id: 'hy-mt2-7b', label: 'Hy-MT2 7B', note: '4.6GB · 목록에서 빠짐 · 형/누나를 자주 틀림', repo: 'tencent/Hy-MT2-7B-GGUF', revision: 'ab8472660ac61fac25f1af43fac2599d52a8a775', file: 'Hy-MT2-7B-Q4_K_M.gguf', sha256: '9f96256500f3fc1ab4d64336b58f52a949a95ad7516b0c229476eef782f9f77b', size: 4624648896, legacy: true },
   // The 26B and 30B mixtures of experts work about 4B and 3B per word, so they run from memory on the processor.

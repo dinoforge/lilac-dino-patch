@@ -13,5 +13,7 @@
 .local-model-pick .local-model-run.partial { color: #d9a441; }
 .local-model-state { flex: none; color: var(--muted); font-size: 12px; }
 .local-model.selected .local-model-state { color: var(--lilac); font-weight: 700; }
+.local-model-terms { flex: none; border: 0; padding: 6px 0; background: none; color: var(--lilac); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; white-space: nowrap; }
+.local-model-terms:focus-visible { outline: 2px solid var(--lilac); outline-offset: 3px; border-radius: 3px; }
 .local-model-action { flex: none; width: 120px; height: 38px; padding: 0 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel2); color: var(--text); font: inherit; cursor: pointer; }
 .local-model-action:disabled { cursor: default; opacity: .7; }

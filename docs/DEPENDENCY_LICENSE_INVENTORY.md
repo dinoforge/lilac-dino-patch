@@ -85,7 +85,7 @@
 |---|---|---|
 | `google/gemma-4-E4B-it-qat-q4_0-gguf`, `google/gemma-4-26B-A4B-it-qat-q4_0-gguf`, `google/gemma-4-E2B-it-qat-q4_0-gguf` | Google Gemma 4 공식 모델 카드는 Apache-2.0을 표시하고 Google의 license 링크도 Apache License 2.0 본문으로 연결된다. 각 GGUF 파일의 저장소 commit과 SHA-256을 아래 목록에 고정했다. | 코드·패키지의 모델 출처 고지와 앱 전체 공개 배포 권리는 별도 확인 대상이다. |
 | `tencent/Hy-MT2-1.8B-GGUF`, `tencent/Hy-MT2-7B-GGUF`, `tencent/Hy-MT2-30B-A3B-GGUF` | Tencent 공식 GGUF 저장소의 고정 snapshot에는 Apache-2.0 `LICENSE.txt`와 파일 해시가 있다. 세 파일을 해당 저장소 commit과 SHA-256으로 고정했다. | 기존 사용자 파일은 재해시하거나 교체하지 않는다. |
-| `bartowski/aya-expanse-8b-GGUF` | 고정 GGUF snapshot은 CC-BY-NC-4.0이며 `base_model`은 Cohere Aya Expanse 8B다. 고정 README에는 Cohere license/privacy 안내와 비상업 사용 체크 항목이 있으나, Hugging Face API의 snapshot `gated` 값은 false다. 앱의 직접 파일 다운로드에는 이용 조건 동의 확인이 없다. | 모델 목록에 비상업 조건을 표시한다. 사용자는 Cohere License Agreement와 AUP를 확인해야 하며, 이 저장소·설치 파일의 공개 배포는 별도 권리 검토 전까지 막는다. |
+| `bartowski/aya-expanse-8b-GGUF` | 고정 GGUF snapshot은 CC-BY-NC-4.0이며 `base_model`은 Cohere Aya Expanse 8B다. 고정 README에는 Cohere license/privacy 안내와 비상업 사용 체크 항목이 있으나, Hugging Face API의 snapshot `gated` 값은 false다. 앱은 Cohere의 CC-BY-NC 4.0 및 허용 사용 추가 조건 링크와 다운로드 전 확인 창을 제공한다. 확인은 앱이 법적 동의나 열람을 검증·기록하지 않는 사용자 확인이다. | 모델 조건을 지키지 못하면 취소하도록 안내한다. 이 저장소·설치 파일의 공개 배포는 별도 권리 검토 전까지 막는다. |
 | `tencent/HY-MT1.5-7B-GGUF` | 공식 `License.txt`는 EU·영국·대한민국을 적용 지역에서 제외한다. 해당 라이선스에 따른 한국 내 사용 권한을 확인할 수 없다. | 앱의 기본 카탈로그에서 사용·다운로드를 차단했다. 이미 설치된 사용자 파일은 건드리지 않고 설정에서 지역 제한을 표시한다. |
 | `tencent/HY-MT1.5-1.8B-GGUF` | 공식 저장소의 `License.txt`도 EU·영국·대한민국을 적용 지역에서 제외한다. 이 저장소의 빈 `LICENSE` 파일은 별도 권리 허가를 제공하지 않는다. | 앱의 기본 카탈로그에서 사용·다운로드를 차단했다. 이미 설치된 사용자 파일은 건드리지 않고 설정에서 지역 제한을 표시한다. |
 | `hell0ks/ja-ko-vn-7b-v1-gguf` | 고정 GGUF snapshot의 metadata와 README는 Apache-2.0을 선언한다. README는 `hell0ks/ja-ko-vn-7b-v1`에서 양자화했고 TrillionLabs Tri-7B-Base로 fine-tune했다고 설명한다. 두 기반 모델의 Hugging Face model card도 Apache-2.0을 표시한다. 학습 대화 데이터의 출처·권리 설명은 찾지 못했다. | 저작자·기반 모델 출처를 유지하고 학습 자료의 출처/권리는 불명확한 항목으로 기록한다. preset은 기존 설치 파일 호환용 legacy로 유지한다. |
@@ -121,7 +121,7 @@ commit은 파일만의 변경점이 아니라 해당 저장소의 전체 snapsho
 
 1. FFmpeg 현재 Windows 바이너리의 구성 요소·대응 소스·고지·재배포 조건을 실제 배포 방안과 함께 검토한다. 해결 전 설치 파일·릴리스 공개를 보류한다.
 2. JASSUB의 JS, WASM, worker, 글꼴과 전이 구성요소를 패키지 출처까지 추적하고 필요한 LICENSE/NOTICE 파일을 생성 스크립트와 최종 패키지에 포함한다.
-3. Aya Expanse GGUF는 CC-BY-NC-4.0과 Cohere 이용 안내를 목록에 표시한다. `ja-ko-vn` GGUF와 두 기반 모델은 Apache-2.0을 선언하지만 학습 대화 데이터 출처·권리는 확인하지 못했다. 임의 추가 GGUF의 사용 조건은 별도 확인 대상이다. 8개 preset의 새 다운로드는 고정 commit과 SHA-256을 확인하며, 기존 사용자 모델은 재해시하거나 교체하지 않는다. HY-MT1.5 1.8B·7B는 앱에서 다운로드·실행을 막고 기존 사용자 파일을 보존한다.
+3. Aya Expanse GGUF는 CC-BY-NC-4.0과 Cohere 허용 사용 추가 조건의 링크 및 다운로드 전 사용자 확인을 제공한다. 앱은 실제 약관 열람이나 사용자의 법적 적격성을 확인·기록하지 않는다. `ja-ko-vn` GGUF와 두 기반 모델은 Apache-2.0을 선언하지만 학습 대화 자료 출처·권리는 확인하지 못했다. 임의 추가 GGUF의 사용 조건은 별도 확인 대상이다. 8개 preset의 새 다운로드는 고정 commit과 SHA-256을 확인하며, 기존 사용자 모델은 재해시하거나 교체하지 않는다. HY-MT1.5 1.8B·7B는 앱에서 다운로드·실행을 막고 기존 사용자 파일을 보존한다.
 4. 다운로드되는 llama.cpp release와 지원되는 각 Windows 빌드의 네이티브 구성요소 고지를 추적 가능하도록 고정한다.
 5. 프로젝트 원본 코드, 로고, 아이콘의 출처와 재배포 권한을 확인한다. 필요하면 정식 허가된 에셋으로 교체하되 사용자 작업과 기존 데이터는 보존한다.
 

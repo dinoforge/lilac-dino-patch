@@ -1444,6 +1444,7 @@ function renderLocalAi(value){
     const memoryNote=model.lowMemory?`<small class="local-model-run partial">이 PC의 램 ${model.memory}GB로는 부족해요 (${model.ram}GB 이상). 번역이 아주 느리거나 PC가 멈출 수 있어요.</small>`:'';
     row.innerHTML=`<button type="button" class="local-model-pick"><b>${escapeHtml(model.label)}</b><small>${escapeHtml(model.note||'')}</small>${memoryNote}${model.installed&&!model.licenseBlocked&&model.run?`<small class="local-model-run${model.run.layers<model.run.total||!model.run.layers?' partial':''}">${escapeHtml(localRunText(model.run))}</small>`:''}</button><span class="local-model-state">${state}</span><button type="button" class="local-model-action"></button>`;
     const pick=row.querySelector('.local-model-pick'),action=row.querySelector('.local-model-action');pick.disabled=model.licenseBlocked||!model.installed||selected;pick.onclick=()=>{if(!model.lowMemory||confirm(lowMemoryQuestion(model,'쓸까요')))saveTranslation({localModel:model.id})};
+    if(model.licenseUrl){const terms=document.createElement('button');terms.type='button';terms.className='local-model-terms';terms.textContent='Cohere 조건';terms.setAttribute('aria-label',`${model.label} Cohere 이용 조건 열기`);terms.onclick=()=>window.lilac.openExternal(model.licenseUrl).catch(error=>toast(`약관을 열지 못했습니다: ${ipcMessage(error)}`));row.insertBefore(terms,action)}
     // While it downloads the button stops it; a stopped (or broken off) download goes on from where it was.
     if(model.licenseBlocked){action.textContent='라이선스 지역 제한';action.disabled=true}
     else if(progress!=null){action.textContent=`받는 중 ${progress}% · 취소`;action.onclick=()=>window.lilac.cancelLocalModelInstall(model.id)}
@@ -1453,6 +1454,8 @@ function renderLocalAi(value){
   }));
 }
 async function installLocalModel(id){
+  const model=translationSettings?.localModels?.find(item=>item.id===id);
+  if(model?.licenseAcknowledgementRequired&&!confirm(`${model.label}는 CC BY-NC 4.0과 Cohere 허용 사용 추가 조건이 적용됩니다.\n\n먼저 'Cohere 조건' 링크에서 내용을 확인해 주세요. 계속하면 해당 조건을 준수해 비상업 용도로만 사용하는 것을 확인합니다. 아직 읽지 않았다면 취소하세요.\n\n계속 다운로드할까요?`))return;
   localModelProgress[id]=0;renderLocalAi(translationSettings);
   try{const value=await window.lilac.installLocalModel(id);delete localModelProgress[id];const model=(value.localModels||[]).find(item=>item.id===id);renderTranslationSettings(await window.lilac.setGeminiSettings({localModel:id}));toast(`${model?.label||'모델'}을 받았습니다.`)}
   catch(error){delete localModelProgress[id];renderTranslationSettings(await window.lilac.geminiSettings().catch(()=>translationSettings));toast(/받기를 멈췄습니다/.test(ipcMessage(error))?ipcMessage(error):`모델을 받지 못했습니다: ${ipcMessage(error)}`)}
