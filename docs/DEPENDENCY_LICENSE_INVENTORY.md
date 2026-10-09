@@ -42,8 +42,11 @@
 
 ### JASSUB / libass WebAssembly — 고지 대조 필요
 
-- 현재 `jassub@2.5.16` 패키지 메타데이터는 `LGPL-2.1-or-later AND (FTL OR GPL-2.0-or-later) AND MIT AND MIT-Modern-Variant AND ISC AND NTP AND Zlib AND BSL-1.0`이다. 패키지 안의 `LICENSE`는 JASSUB 기여자의 MIT 문구다.
-- `scripts/build-jassub.cjs`는 JavaScript와 worker를 `legalComments: 'inline'`로 묶고, worker WASM 두 개와 `default.woff2`를 복사한다. 별도 파일로는 패키지의 단일 `LICENSE`만 복사한다. 따라서 JavaScript의 인라인 고지, WASM에 들어간 libass 및 다른 구성요소, 폰트의 원저작자·라이선스·고지 의무를 각각 점검해야 한다. 현재 단일 MIT 파일만으로 복합 메타데이터의 모든 조건을 충족한다고 판정하지 않는다.
+- 이 앱은 `package-lock.json`에서 `jassub@2.5.16` npm tarball과 SHA-512 무결성을 고정한다. 잠금 정보에는 upstream Git commit이 없다. 해당 패키지의 SPDX 식은 `LGPL-2.1-or-later AND (FTL OR GPL-2.0-or-later) AND MIT AND MIT-Modern-Variant AND ISC AND NTP AND Zlib AND BSL-1.0`이고, 패키지 `LICENSE` 파일은 JASSUB 기여자의 MIT 문구다.
+- `scripts/build-jassub.cjs`는 JavaScript와 worker를 `legalComments: 'inline'`로 묶고 worker WASM 두 개, `default.woff2`, 단일 `LICENSE`를 복사한다. 실제 생성된 두 JavaScript 파일에는 `/*! ... */` 법적 배너가 없고, 현재 `app.asar`의 JASSUB 파일 목록에도 집계된 `COPYRIGHT`나 `THIRD-PARTY-NOTICES`가 없다. 기존 설정만 보고 인라인 고지가 포함됐다고 판단할 수 없다.
+- `default.woff2`는 현재 145,972바이트이며 JASSUB 코드에서 기본 `liberation sans` 폰트로 사용된다. 이 npm tarball에는 글꼴의 별도 저작권·라이선스 출처를 확인할 자료가 없어 추적이 남았다.
+- 참고한 upstream `main`은 검사 시 `2.5.18`이며 commit은 `b78bc67194d4b63fab8bf82db54be8cec31fa207`이다. 그 고정 소스의 [`Makefile_licence`](https://github.com/ThaUnknown/jassub/blob/b78bc67194d4b63fab8bf82db54be8cec31fa207/Makefile_licence)는 JASSUB와 Brotli·Expat·FreeType·FriBidi·HarfBuzz·libass의 저작권·라이선스를 모아 `dist/license/all`을 만들고 `dist/js/COPYRIGHT`에 복사한다. [`.gitmodules`](https://github.com/ThaUnknown/jassub/blob/b78bc67194d4b63fab8bf82db54be8cec31fa207/.gitmodules)는 일부 소스 저장소를 열거한다. 이는 2.5.16 npm tarball의 정확한 소스·submodule revision이나 폰트 권리를 증명하지 않으므로, 이 파일을 그대로 2.5.16의 고지로 대체하지 않는다. upstream package metadata도 [복합 SPDX 식](https://github.com/ThaUnknown/jassub/blob/b78bc67194d4b63fab8bf82db54be8cec31fa207/package.json)을 표시한다.
+- 공개 전 조치: 2.5.16 산출물에 대응하는 source commit과 각 submodule revision을 확정하거나, 재현 가능한 고지·빌드가 포함된 버전을 선택한다. 글꼴 출처를 확인하고, 검증한 전체 고지를 생성 및 NSIS 패키지에 포함한 뒤 내용을 검사한다. 지금은 라이선스 충족이나 재배포 허가를 결론 내리지 않는다.
 - 현재 `dist/win-unpacked`에는 Electron의 `LICENSE.electron.txt`와 Chromium `LICENSES.chromium.html`이 있다. 이는 해당 로컬 빌드 산출물에서 확인한 사실이며 향후 빌드 산출물까지 자동 보장하는 결과는 아니다.
 
 ### 개발 직접 의존성

@@ -121,6 +121,13 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 파일명 회차 분석에서 `S02E05`·독립 회차 번호를 인식하고 CRC·시즌·해상도·비트 심도·오디오 채널 표기를 걸러낸다. 기존 데이터 형식이나 저장 파일은 변경하지 않는다.
 - `tests/subtitle-matching.test.cjs` 6/6, 전체 `node --test` 136/136, 변경 JavaScript 구문 검사와 `git diff --check`가 통과했다. `npm run dist` Windows NSIS 빌드도 성공했고 `app.asar`에 회차 번호 분석·불일치 차단·자막 없음 처리가 들어간 것을 확인했다. 실제 자막 공급원 응답·게시물 파일명·영상판 일치는 미검증이며 기존 사용자 프로필은 열지 않았다.
 
+## 2026-10-09 JASSUB 고지와 폰트 추적
+
+- 현재 잠금 버전은 `jassub@2.5.16`이며 npm tarball의 SHA-512 무결성은 고정됐지만 Git source commit은 기록되지 않았다. 복합 SPDX 식에는 LGPL·FreeType/GPL 대안 및 MIT·ISC·NTP·Zlib·BSL 조건이 포함된다. 빌드 스크립트는 단일 MIT `LICENSE`만 복사한다.
+- 생성된 JASSUB JS·worker에는 `/*!` 배너가 없고 현재 `app.asar` JASSUB 파일에도 집계된 `COPYRIGHT`/`THIRD-PARTY-NOTICES`가 없다. 포함된 `default.woff2`는 기본 `liberation sans`로 연결되지만 이 npm tarball만으로 권리 출처를 확인하지 못했다.
+- upstream `main`은 점검 시 2.5.18, commit `b78bc67194d4b63fab8bf82db54be8cec31fa207`이며 그 소스는 Brotli·Expat·FreeType·FriBidi·HarfBuzz·libass와 JASSUB의 고지를 모아 `dist/js/COPYRIGHT`를 생성한다. 이는 현재 앱의 2.5.16 tarball과 같은 source/submodule revision이라는 증거가 아니므로 그대로 가져오지 않았다. 상세 근거와 고정 출처 링크를 `docs/DEPENDENCY_LICENSE_INVENTORY.md`에 기록했다.
+- 문서 조사만 진행했으며 앱 코드·기능·사용자 데이터는 바꾸지 않았다. 2.5.16 source/submodule revision과 폰트 권리를 추적해 패키지 고지를 재현하기 전까지 JASSUB 배포 검토는 미완료다.
+
 ## 주요 결정
 
 - 새 앱은 Windows 우선, Android는 후속이다. Chrome·macOS는 제품 범위에서 제외한다.
@@ -133,6 +140,6 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 ## 다음
 
 1. 배포할 FFmpeg 구성을 정한다. 현재 Gyan 빌드의 전체 대응 소스·외부 라이브러리·빌드 조건을 확보해 제공하는 방안과, 다른 허가된 빌드 또는 사용자 제공 실행 파일을 쓰는 방안을 비교한다. 어떤 경로든 다운로드 remux와 OP/ED 지문 기능을 함께 검증한다.
-2. JASSUB의 WASM·글꼴·worker 구성요소 및 각 고지 요구를 소스까지 추적하고, 패키지에 들어가는 최종 라이선스 파일을 확인한다.
+2. JASSUB 2.5.16 npm 산출물에 대응하는 source commit·submodule revision과 `default.woff2` 출처를 확인한다. 검증 가능한 전체 고지를 생성해 NSIS 패키지에 넣고 각 파일이 실제 포함되는지 검사한다.
 3. AI GGUF 모델 저장소별 조건을 완성한다. 대한민국에서 허용되지 않는 HY-MT1.5 7B legacy 항목은 이용 제한 또는 권리 확인 없이는 사용할 수 있다고 안내하지 않는다. 사용자 임의 모델은 별도 경계를 둔다.
 4. 프로젝트 코드·로고·아이콘 재배포 허가와 AniList 보완성, TMDB·AI 기능 결합 조건을 해결하기 전까지 공개 저장소·설치 파일 배포와 실사이트 콘텐츠 요청은 보류한다. 권리 해결 후 검색→상세→회차 재생→자막→이어보기 실제 인수 검증을 계획한다.
