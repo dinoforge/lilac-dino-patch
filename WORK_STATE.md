@@ -128,6 +128,13 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - upstream `main`은 점검 시 2.5.18, commit `b78bc67194d4b63fab8bf82db54be8cec31fa207`이며 그 소스는 Brotli·Expat·FreeType·FriBidi·HarfBuzz·libass와 JASSUB의 고지를 모아 `dist/js/COPYRIGHT`를 생성한다. 이는 현재 앱의 2.5.16 tarball과 같은 source/submodule revision이라는 증거가 아니므로 그대로 가져오지 않았다. 상세 근거와 고정 출처 링크를 `docs/DEPENDENCY_LICENSE_INVENTORY.md`에 기록했다.
 - 문서 조사만 진행했으며 앱 코드·기능·사용자 데이터는 바꾸지 않았다. 2.5.16 source/submodule revision과 폰트 권리를 추적해 패키지 고지를 재현하기 전까지 JASSUB 배포 검토는 미완료다.
 
+## 2026-10-09 JASSUB 한국어 ASS 합성 렌더 확인
+
+- localhost 전용 임시 페이지에서 저장소에 포함된 JASSUB JS·worker·WASM으로 합성 ASS 한 줄을 렌더했다. Windows Malgun Gothic 폰트 파일을 로컬 경로로 제공했고 별도 복사·배포하지 않았다.
+- 브라우저에서 JASSUB가 ASS 이벤트 1개를 읽었고 캔버스에 `한국어 ASS 자막 테스트`가 보이는 것을 화면으로 확인했다. 한국어 글리프의 로컬 렌더 경로는 확인했다.
+- 이 검증은 앱의 Electron `ass-renderer` 연결, 실제 영상 위 오버레이, 자막 출처·작품·판본 매칭을 입증하지 않는다. Re:Anime 실제 재생과 외부 자막의 영상 일치는 아직 확인하지 않았다.
+- 임시 페이지는 loopback 주소만 사용했고 공급원 사이트나 외부 API를 호출하지 않았다. JASSUB 및 기본 `default.woff2`의 배포 권리 추적은 별도 미완료 항목이다.
+
 ## 주요 결정
 
 - 새 앱은 Windows 우선, Android는 후속이다. Chrome·macOS는 제품 범위에서 제외한다.
