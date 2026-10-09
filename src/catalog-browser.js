@@ -1,5 +1,9 @@
 // Detailed filters browse each provider's full catalog independently of home rails.
 const catalogBrowser = (() => {
+  // This script loads before app.js, so keep its DOM helpers local instead of
+  // relying on app.js's later top-level `$` bindings during initialization.
+  const $ = selector => typeof globalThis.$ === 'function' ? globalThis.$(selector) : document.querySelector(selector);
+  const $$ = selector => typeof globalThis.$$ === 'function' ? globalThis.$$(selector) : [...document.querySelectorAll(selector)];
   let taxonomy = null, taxonomyProvider = null, initializing = null, failed = false, filters = {}, page = null, generation = 0;
   const savedFilters = new Map();
   const blankFilters = () => ({ genre: '', format: '', year: '', season: '' });

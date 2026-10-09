@@ -55,6 +55,8 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 2026-10-09 추가 권리 검토에서 Re:Anime·Miruro·Animenosub 공식 소개 페이지, 애니24 홈페이지, 업스트림 저장소, AniList API 이용 조건을 다시 확인해 `docs/RIGHTS_REVIEW.md`에 기록했다. 공식 소개는 앱 연동·오프라인 저장 허가가 아니며, AniList 조건은 대량 수집과 비보완적 유사 서비스 이용을 제한한다. 프로젝트별 허가는 여전히 확인되지 않아 비공개·미배포를 유지한다. 권리자에게 연락하거나 외부 미디어를 내려받지 않았다.
 - 플레이어에 ChatGPT 수동 자막 번역을 추가했다. 선택한 자막의 문장을 최대 24개·약 7,000자 묶음으로 요청하고, 명시적으로 누를 때만 프롬프트를 클립보드에 복사해 `chatgpt.com`을 연다. 사용자가 응답을 붙여넣으면 묶음 ID를 검증하고 원래 VTT 시간·큐 정보를 보존해 번역 자막을 회차별로 저장·적용한다. 자동 로그인·전송과 ChatGPT API 호출은 없다. 전체 `node --test` 73/73 통과, JavaScript 구문 및 `git diff --check` 통과. `npm run dist` Windows NSIS 빌드 성공(설치 파일 124,540,744바이트); 패키지 `app.asar`에서 helper·UI·IPC·저장소 연결을 확인했다. 외부 ChatGPT 왕복과 공급원 재생은 미검증이고, 임시 로컬 영상의 앱 재생은 아래 smoke test에서 확인했다.
 - 2026-10-09 Windows Electron headless smoke test를 임시 `userData`/`sessionData`와 외부 DNS 차단 상태로 실행했다. 가짜 일본어 VTT에서 번역 UI·프롬프트 복사·ChatGPT 열기(시스템 클립보드와 외부 브라우저는 캡처 대체 함수)·결과 적용·회차별 저장을 확인했고, 원래 큐 시간도 보존됐다. 12초 합성 MP4 실제 재생으로 28% 이어보기를 저장하고 앱 재시작 뒤 3.36초 재개를 확인했다. 자막의 활성 문장과 회차 종료 시 완료 100%·수동 다음 화 안내·자동 전환 없음도 확인했다. 상세 근거는 `docs/PHASE1_PLAN.md`와 `docs/FEATURE_GAP.md`에 기록했다. 실제 ChatGPT 왕복과 외부 공급원 연결은 확인하지 않았다. 임시 폴더 `%TEMP%\lilac-smoke-00ad878206974f2bacbb10c1213336e9`는 PowerShell 재귀 삭제가 실행 정책에 막혀 남아 있다.
+- 검색→상세→회차 재생도 임시 프로필·외부 DNS 차단·합성 IPC 응답으로 Electron 창에서 확인했다. `테스트 애니` 검색, 결과 선택, 두 회차 표시, 1화의 12초 MP4 재생과 기록 저장이 통과했고 렌더러 예외와 외부 HTTP(S) 요청은 없었다. 이 과정에서 `catalog-browser.js`의 초기 DOM 함수 참조와 이어보기 진행률 HTML의 누락된 따옴표를 고쳤다. 실제 공급원은 호출하지 않았다.
+- 전체 `node --test` 73/73과 변경 JS 구문 검사·`git diff --check`가 통과했다. Windows `npm run dist`도 성공했고 패키지 `app.asar`에서 두 수정이 들어간 것을 확인했다. 로컬 NSIS 설치 파일은 124,540,629바이트이며 배포하지 않았다.
 
 ## 주요 결정
 
