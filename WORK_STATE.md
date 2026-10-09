@@ -299,8 +299,9 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 - ASS/SSA의 WebVTT 대체본 생성만 UTF-8 고정 읽기를 사용해 CP949·UTF-16 파일에서 한글이 깨질 수 있어, 기존 SRT·SMI와 같은 인코딩 감지 함수로 읽도록 맞췄다. 원본 ASS/SSA 경로를 보존하는 동작은 유지했다.
 - 실제 변환 함수와 `subtitleResult`를 호출하는 임시 파일 테스트에서 UTF-8 BOM SRT, CP949 SMI, UTF-16LE ASS, CP949 SSA 및 VTT 직접 사용을 확인했다. ASS의 `\N` 줄바꿈·쉼표 포함 대사와 SMI 다음 SYNC 기준 종료 시각도 확인했고 4/4 통과했다.
+- 격리 Electron 창에서 실제 `src/ass-renderer.js`·JASSUB WASM에 640×360 합성 영상을 연결하고, Windows `Malgun Gothic` 파일과 한글 ASS cue를 전달했다. 캡처에서 아래쪽 한글 대사가 밝은 픽셀 738개로 렌더됐고 외부 HTTP(S) 요청은 0건이었다. 렌더 완료 전 캡처하면 픽셀 검사가 실패해 대기 후 캡처하도록 했다.
 - 전체 `node --test` 201/201, `electron/main.cjs`·신규 테스트 구문 검사, `git diff --check`가 통과했다. `npm run dist` Windows NSIS 빌드가 성공해 124,555,799바이트 설치 파일을 만들었고, 패키지 `app.asar`에서 ASS/SSA가 공유 인코딩 디코더를 쓰는 코드를 확인했다. 설치 파일은 로컬 산출물로만 두었다.
-- 합성 로컬 파일만 사용했다. 실제 사용자가 가진 자막 파일, SMI SAMI 변형, JASSUB의 스타일·폰트 렌더링 화면, 외부 공급원 자막은 확인하지 않았다.
+- 합성 로컬 파일만 사용했다. 실제 사용자가 가진 자막 파일, SMI SAMI 변형, 설치 NSIS 앱의 설정·화면 동작, 외부 공급원 자막은 확인하지 않았다.
 
 ## 주요 결정
 
