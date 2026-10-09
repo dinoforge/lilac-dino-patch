@@ -187,6 +187,46 @@ app.whenReady().then(async () => {
   await win.loadFile(htmlPath);
 
   await waitFor('initial app render', () => win.webContents.executeJavaScript('Boolean(window.lilac && document.querySelector("#searchButton"))'));
+  const expiredEpisode = {
+    provider: 'reanime', id: 'ra-smoke-episode-1', animeId: items.reanime.id,
+    name: '1', number: 1, title: '1화', url: 'https://reanime.to/watch/ra-smoke?ep=1', playable: true
+  };
+  const migrationHistory = [
+    {
+      key: 'reanime:https://reanime.to/watch/ra-smoke?ep=1',
+      src: 'http://127.0.0.1:41001/__flix/expired-session-one/master.m3u8',
+      name: '통합 검색 테스트 · 1화', subtitleTitle: '통합 검색 테스트', progress: 41, updated: Date.now(),
+      episode: expiredEpisode, anime: { ...items.reanime }
+    },
+    {
+      src: 'http://127.0.0.1:41002/__flix/expired-session-two/master.m3u8',
+      name: '이전 직접 재생 · 1화', subtitleTitle: '이전 직접 재생', progress: 18, updated: Date.now() - 1000,
+      episode: null
+    }
+  ];
+  await win.webContents.executeJavaScript(`localStorage.setItem('history', ${JSON.stringify(JSON.stringify(migrationHistory))})`);
+  const migrationReload = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
+  win.webContents.reload();
+  await migrationReload;
+  const migratedHistory = await waitFor('expired local proxy history migration', async () => {
+    const state = await win.webContents.executeJavaScript(`(() => {
+      const entries = JSON.parse(localStorage.getItem('history') || '[]');
+      return {
+        entries,
+        continueCards: document.querySelectorAll('#continueRail .continue-card').length
+      };
+    })()`);
+    return state.entries.length === 2 && state.entries[0]?.src === '' && state.entries[1]?.src === ''
+      && state.entries[1]?.key === 'expired-flix:expired-session-two' && state.continueCards === 1 ? state : null;
+  });
+  assert.equal(migratedHistory.entries[0].episode.url, expiredEpisode.url,
+    'watch metadata survives while the expired proxy address is removed');
+  assert.equal(migratedHistory.entries[0].progress, 41);
+  assert.equal(migratedHistory.entries[1].playbackSourceExpired, true,
+    'legacy direct-play history remains in storage and records why it cannot resume');
+  assert.equal(migratedHistory.continueCards, 1,
+    'the history without a playable source does not appear in continue watching');
+
   await win.webContents.executeJavaScript(`(() => {
     const input = document.querySelector('#pageSearch');
     input.value = '통합 검색 테스트';
@@ -375,7 +415,7 @@ app.whenReady().then(async () => {
   assert.deepEqual(rendererErrors, [], `renderer console errors: ${rendererErrors.join('; ')}`);
   const searchCalls = ipcCalls.filter(call => ['provider:catalog', 'catalog:search-korean', 'linkkf:search'].includes(call.channel));
   assert.ok(searchCalls.length >= 8, `synthetic provider search calls recorded (${searchCalls.length})`);
-  console.log(`Packaged Phase 1 smoke passed: integrated search, source picker, local episode playback, active Korean VTT, saved progress and continue-watch resume, and user-invoked privacy-filtered diagnostics copy.`);
+  console.log(`Packaged Phase 1 smoke passed: expired proxy history preservation, integrated search, source picker, local episode playback, active Korean VTT, saved progress and continue-watch resume, and user-invoked privacy-filtered diagnostics copy.`);
   console.log(`Synthetic search IPC calls: ${searchCalls.length}; provider resolve calls: ${ipcCalls.filter(call => call.channel === 'provider:resolve').length}; saved progress: ${savedProgress.progress}%; resumed at: ${resumedPlayback.currentTime.toFixed(2)}s.`);
   console.log(`Renderer errors: ${rendererErrors.length}; blocked external request attempts: ${blockedRequests.length}; userData and synthetic media: isolated temp folder.`);
   win.destroy();
