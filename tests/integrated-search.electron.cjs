@@ -47,6 +47,7 @@ app.disableHardwareAcceleration();
 const blockedRequests = [];
 const ipcCalls = [];
 const rendererErrors = [];
+let copiedDiagnostics = '';
 let titleVariantsResolved = false;
 let win;
 
@@ -119,6 +120,8 @@ async function fixture(channel, args) {
       subtitleTracks: [{ url: subtitleUrl, label: '한국어', language: 'ko', format: 'vtt' }],
       servers: [], referer: ''
     };
+    case 'app:diagnostic-info': return { version: '0.5.9', platform: 'win32', arch: 'x64' };
+    case 'clipboard:copy-text': copiedDiagnostics = String(args[0] || ''); return true;
     case 'subtitle-store:list':
     case 'jimaku:list':
     case 'oped:get': return [];
@@ -343,11 +346,36 @@ app.whenReady().then(async () => {
   assert.ok(ipcCalls.some(call => call.channel === 'provider:detail' && call.args[0]?.provider === 'reanime'));
   assert.ok(ipcCalls.some(call => call.channel === 'provider:detail' && call.args[0]?.provider === 'miruro'));
 
+  await win.webContents.executeJavaScript(`(() => {
+    window.showPlayerFailure('합성 재생 실패', {
+      stage: 'hls-playback', mediaType: 'hls', errorCategory: 'networkError',
+      message: 'PRIVATE_DIAGNOSTIC_DETAIL_SHOULD_NOT_COPY',
+      url: 'https://private.example.test/secret.m3u8?token=synthetic-secret'
+    });
+    for (let index = 0; index < 6; index++) {
+      window.recordPlayerFailure({
+        stage: 'hls-playback', mediaType: 'hls', errorCategory: 'networkError',
+        message: 'PRIVATE_DIAGNOSTIC_DETAIL_SHOULD_NOT_COPY'
+      });
+    }
+    document.querySelector('#copyPlayerDiagnostics').click();
+  })()`);
+  await waitFor('diagnostic copy confirmation', async () => {
+    const status = await win.webContents.executeJavaScript('document.querySelector("#playerDiagnosticStatus")?.textContent || ""');
+    return copiedDiagnostics && status.includes('오류 정보가 복사됐어요') ? true : null;
+  });
+  assert.match(copiedDiagnostics, /버전: 0\.5\.9/);
+  assert.match(copiedDiagnostics, /운영체제: win32 x64/);
+  assert.equal((copiedDiagnostics.match(/공급원=reanime/g) || []).length, 5,
+    'the user-invoked report contains no more than the latest five failures');
+  assert.doesNotMatch(copiedDiagnostics, /PRIVATE_DIAGNOSTIC_DETAIL_SHOULD_NOT_COPY|private\.example\.test|secret\.m3u8|synthetic-secret/i,
+    'arbitrary error text and full media URLs are excluded from the copied report');
+
   assert.deepEqual(blockedRequests, [], `unexpected external request attempts were blocked: ${blockedRequests.join(', ')}`);
   assert.deepEqual(rendererErrors, [], `renderer console errors: ${rendererErrors.join('; ')}`);
   const searchCalls = ipcCalls.filter(call => ['provider:catalog', 'catalog:search-korean', 'linkkf:search'].includes(call.channel));
   assert.ok(searchCalls.length >= 8, `synthetic provider search calls recorded (${searchCalls.length})`);
-  console.log(`Packaged Phase 1 smoke passed: integrated search, source picker, local episode playback, active Korean VTT, saved progress and continue-watch resume.`);
+  console.log(`Packaged Phase 1 smoke passed: integrated search, source picker, local episode playback, active Korean VTT, saved progress and continue-watch resume, and user-invoked privacy-filtered diagnostics copy.`);
   console.log(`Synthetic search IPC calls: ${searchCalls.length}; provider resolve calls: ${ipcCalls.filter(call => call.channel === 'provider:resolve').length}; saved progress: ${savedProgress.progress}%; resumed at: ${resumedPlayback.currentTime.toFixed(2)}s.`);
   console.log(`Renderer errors: ${rendererErrors.length}; blocked external request attempts: ${blockedRequests.length}; userData and synthetic media: isolated temp folder.`);
   win.destroy();
