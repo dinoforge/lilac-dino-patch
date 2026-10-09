@@ -211,6 +211,7 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 ## 2026-10-10 패키지 main-process IPC 스모크
 
 - `npm run test:phase1-main`은 `dist/win-unpacked/resources/app.asar`의 실제 main·preload를 불러오고 현재 소스와 바이트가 같은지 확인한다. 격리 Electron 앱의 renderer/preload에서 IPC를 호출하므로 main handler의 테스트용 복제 함수는 사용하지 않는다.
-- `userData`·`sessionData`는 OS 임시 폴더를 사용한다. Node `fetch`와 Electron `net.fetch`는 등록된 Re:Anime fixture만 응답하며 나머지는 503으로 막는다. Chromium 외부 요청도 기본 세션에서 차단한다.
-- 실제 main IPC로 합성 Re:Anime 검색→작품 상세→회차 목록→한국어 자막 트랙 파싱을 확인했다. 서버 없는 합성 회차에서 `provider:resolve`가 사용자 안내 오류를 반환하는 경로도 확인했다. 총 fixture 요청 11회, 알 수 없는 fetch 0회, 브라우저 외부 요청 0회였다.
-- **PASS — 패키지 main/preload IPC 통합(합성 데이터)**. 이것은 실사이트 응답·ID 정확도, 성공 스트림 해석, 실제 자막/영상 매칭 또는 NSIS 설치 UI 검증이 아니다. main handler가 반환한 예상 resolve 오류는 Electron stderr에 기록되며 테스트는 그 오류 문구를 확인한다.
+- `userData`·`sessionData`는 OS 임시 폴더를 사용한다. Node `fetch`와 Electron `net.fetch`는 등록된 Re:Anime·VTT·loopback HLS fixture만 응답하며 나머지는 503으로 막는다. Chromium은 테스트용 loopback 외 모든 요청을 차단한다.
+- 실제 main IPC로 합성 Re:Anime 검색→작품 상세→회차 목록→한국어 자막 트랙 파싱을 확인했다. 서버 없는 합성 회차에서 `provider:resolve`가 사용자 안내 오류를 반환하는 경로도 확인했다.
+- 성공 재생 해석은 Re:Anime 서버 목록과 FlixCloud 플레이어 HTML을 합성 응답으로 만들고, FlixCloud 주소를 로컬 HTTP 서버로만 리다이렉트해 확인했다. resolver는 loopback의 합성 HLS manifest를 관찰하고 앱 로컬 `__flix` 프록시 URL을 반환했으며, 한국어 VTT를 격리 `userData`에 저장했다. 이어 앱 프록시 URL을 loopback으로 열어 HLS manifest 응답과 segment 주소를 자체 프록시 경로로 재작성하는지 확인했다. 합성 네트워크 fixture는 총 14회, FlixCloud 리다이렉트 1회, 브라우저 loopback 요청 2회, 알 수 없는 fetch·차단된 외부 요청은 각각 0회다.
+- **PASS — 패키지 main/preload IPC 통합(합성 데이터)**. 이 검증은 실사이트 응답·ID 정확도, 실제 HLS 영상 재생·segment 다운로드, 실제 자막 매칭 또는 NSIS 설치 UI 검증이 아니다. 서버 없는 경로의 예상 resolve 오류는 Electron stderr에 기록되며 테스트는 사용자 안내 문구를 확인한다.
