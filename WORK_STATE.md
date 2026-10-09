@@ -73,7 +73,7 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 - 작품 상세에서 이어보기 회차를 고르면 위치 선택을 제공한다. 1–94%는 이어보기가 기본이고 처음부터 재생을 선택할 수 있다. 95–99%는 기존 규칙대로 처음부터가 기본이며 이어보기도 명시적으로 고를 수 있다. 미시청·완료 회차에는 보조 선택을 감춘다. 기록 연결은 공급원 경계를 지키고 재생 불가 회차는 건너뛴다.
 - `tests/resume-choice.test.cjs`에 진행률 경계, 공급원별 회차 매칭, 비재생 회차 제외, 두 버튼의 위치 인자 전달 검증을 추가했다. 전체 `node --test` 126/126, `node --check src/app.js`, `node --check tests/resume-choice.test.cjs`, `git diff --check` 통과. `npm run dist` Windows NSIS 빌드 성공(124,545,419바이트); 패키지 `app.asar`에서 helper와 명시적 이어보기 위치 연결을 확인했다.
-- 임시 `userData`·`sessionData`, DNS 차단, 합성 IPC와 12초 로컬 영상으로 Electron 소스 앱 상세 UI를 실행했다. 96% 기록에서 `1화 처음부터`/`1화 이어보기` 표시와 보조 버튼 선택 후 11.5초 seek를 확인했고, 외부 HTTP(S) 요청·렌더러 오류는 0건이다. 결과는 `%TEMP%\lilac-resume-choice-MUEPqw\resume-choice-result.json`에 저장했다. NSIS 설치 앱 UI, 실제 공급원, 기존 프로필은 미검증이다.
+- 임시 `userData`·`sessionData`, DNS 차단, 합성 IPC와 12초 로컬 영상으로 Electron 소스 앱 상세 UI를 실행했다. 96% 기록은 `1화 처음부터`/`1화 이어보기` 표시 후 이어보기 선택이 11.5초에서 재개됐다. 28% 기록은 두 버튼을 표시하고 처음부터 선택 시 기록 0%, 위치 0.006초가 확인됐다. 두 경우 모두 외부 HTTP(S) 요청·렌더러 오류는 0건이다. 결과는 각각 `%TEMP%\lilac-resume-choice-MUEPqw\resume-choice-result.json`, `%TEMP%\lilac-resume-choice-cLxnZw\resume-choice-result.json`에 있다. NSIS 설치 앱 UI, 실제 공급원, 기존 프로필은 미검증이다.
 
 ## 주요 결정
 

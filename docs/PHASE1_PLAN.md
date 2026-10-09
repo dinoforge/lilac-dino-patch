@@ -145,4 +145,5 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 - 저장 회차 매칭은 공급원 경계를 확인하고 재생 불가 회차를 건너뛴다. 명시적인 `이어보기` 선택은 95% 규칙을 해당 회차에 한해 덮어쓰며, 이어보기 카드의 기본 동작은 유지한다. 링크형 회차와 외부 공급원 상세에서 같은 선택 helper를 쓴다.
 - `tests/resume-choice.test.cjs`의 회차 매칭·진행률 경계·버튼 연결 테스트를 포함해 전체 `node --test` 126/126 통과했다. 변경 JS 구문 검사와 `git diff --check` 통과. `npm run dist` Windows NSIS 빌드 성공(설치 파일 124,545,419바이트); 패키지 `app.asar`에서 재생 선택 helper와 명시적 진행 위치 연결을 확인했다.
 - 별도 임시 `userData`·`sessionData`, DNS 차단, 합성 공급원 IPC, 12초 로컬 MP4로 Electron 소스 앱을 실행했다. 96% 시청 기록에서 `1화 처음부터`와 `1화 이어보기`가 표시됐고 보조 이어보기를 누르자 영상이 11.5초에서 멈췄다. 상세 창 닫힘·회차 resolve를 확인했으며 렌더러 오류 0건, 외부 HTTP(S) 요청 0건이다. 결과 파일은 `%TEMP%\lilac-resume-choice-MUEPqw\resume-choice-result.json`에 있다.
-- 검증 한계: Windows NSIS 설치 앱의 창, 실제 공급원·영상, 기존 사용자 프로필은 사용하지 않았다. 1–94%의 `처음부터` 선택은 회귀 테스트에서 확인했고 별도 실앱 런타임으로는 아직 확인하지 않았다.
+- 같은 격리 소스 앱에서 28% 시청 기록을 넣고 `처음부터`를 선택했다. 영상은 0.005885초에서 멈췄고 기록은 0%로 저장됐다. 상세 창 닫힘·회차 resolve를 확인했으며 외부 HTTP(S) 요청과 렌더러 오류는 0건이다. 결과 파일은 `%TEMP%\lilac-resume-choice-cLxnZw\resume-choice-result.json`에 있다.
+- 검증 한계: Windows NSIS 설치 앱의 창, 실제 공급원·영상, 기존 사용자 프로필은 사용하지 않았다. 두 위치 선택은 격리 Electron 소스 앱의 합성 IPC·영상으로 확인했다.
