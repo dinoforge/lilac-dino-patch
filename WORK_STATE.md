@@ -199,6 +199,12 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 같은 esbuild 설정의 metafile에서 main bundle 입력은 `abslink@1.3.0`(Apache-2.0)·`throughput@1.0.2`(MIT), worker 입력은 `abslink@1.3.0`·`lfa-ponyfill@1.1.1`(MIT)로 확인됐다. `rvfc-polyfill@1.0.8`은 native-only alias로 대체됐다. 세 라이선스 문구는 vendor 빌드 산출물에 복사되지 않으며, 기본 폰트 family 표기만으로 `default.woff2`의 출처·라이선스를 확인하지 못했다.
 - 상세 파일 위치와 한계는 `docs/DEPENDENCY_LICENSE_INVENTORY.md`에 기록했다. 이 조사에서는 앱 번들에 notice 파일을 추가하지 않았고, 공개 배포 차단 상태를 유지한다.
 
+## 2026-10-09 로컬 번역 모델 이용 조건 재확인
+
+- Aya Expanse GGUF의 고정 snapshot README와 API metadata를 확인했다. snapshot은 CC-BY-NC-4.0을 선언하며 Cohere license/privacy 안내와 비상업 사용 항목을 표시한다. GGUF 저장소 API의 `gated` 값은 false였고, 앱의 직접 다운로드에는 약관 확인이 없어서 모델 목록에 비상업 경고를 표시했다. 실제 모델 파일을 받거나 약관에 동의하지 않았다.
+- `ja-ko-vn` GGUF의 고정 snapshot과 README는 Apache-2.0을 선언하고 `hell0ks/ja-ko-vn-7b-v1`에서 양자화했다고 밝힌다. 원 모델은 TrillionLabs Tri-7B-Base를 기반으로 fine-tune됐다고 설명하며, 두 저장소의 model card도 Apache-2.0을 표시한다. 학습 대화 자료의 출처·권리 설명은 찾지 못했다. 기존과 같이 성능 검토를 위해 legacy 목록 정책을 유지한다.
+- `node --check electron/local-ai.cjs`, `node --test tests/local-ai-model-pins.test.cjs` 2/2, `git diff --check`가 통과했다. `npm run dist`도 성공해 Windows NSIS 설치 파일 124,546,916바이트를 만들었다. `app.asar`에서 비상업 경고와 JASSUB native callback을 확인했고, GPL fallback marker 및 별도 `node_modules/jassub` 패키지는 없다. 모델·사용자 데이터 파일은 읽거나 변경하지 않았다.
+
 ## 주요 결정
 
 - 새 앱은 Windows 우선, Android는 후속이다. Chrome·macOS는 제품 범위에서 제외한다.
@@ -212,5 +218,5 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 1. FFmpeg는 아직 선택하지 않는다. BtbN의 8.1.3·9.0.2 LGPL shared 후보는 합성 remux/디코딩을 통과했지만 기존 FFmpeg 6.1.1보다 큰 배포 폴더와 미확인 소스·외부 고지가 남았다. 최소 호환 빌드에는 shell 기반 빌드 환경이 필요하지만 현재 Docker·WSL 배포판·Bash·Make가 없어 설치하지 않고 보류했다. 해결 전까지 현행 의존성 유지, 설치 파일 공개 보류를 계속한다.
 2. JASSUB source commit 후보·다섯 submodule SHA와 font 파일 매칭은 확인됐고, GPL-3.0 `rvfc-polyfill` fallback은 앱 빌드에서 제외했다. 다음에는 pinned C/WASM 구성요소와 번들된 `abslink`·`lfa-ponyfill`·`throughput`의 완전한 고지를 만들고 Expat 경로와 font 원 라이선스를 확인한 뒤 app/NSIS 패키지에 넣어 검사한다. upstream generator는 shell 기반이며 이 환경에는 Docker/WSL 배포판이 없어 실행하지 않았다. 전체 재배포 조건은 미해결이다.
-3. Aya Expanse의 비상업 조건, `ja-ko-vn` 양자화 파일의 권리, 임의 GGUF의 조건을 추가 확인한다. 8개 preset 다운로드 pin은 적용됐으며 기존 모델 파일은 새로 검사하거나 교체하지 않는다. HY-MT1.5 1.8B·7B는 앱에서 차단했고 사용자 기존 파일을 보존한다.
+3. Aya Expanse GGUF는 CC-BY-NC-4.0과 Cohere 이용 안내가 고정 README에 있으며 설정에 비상업 조건을 표시한다. `ja-ko-vn` GGUF와 기반 모델 두 저장소는 Apache-2.0을 선언하지만 학습 대화 자료 출처·권리는 확인하지 못했다. 임의 GGUF의 약관은 앱이 검사하지 않는다. 8개 preset 다운로드 pin은 적용됐으며 기존 모델 파일은 새로 검사하거나 교체하지 않는다. HY-MT1.5 1.8B·7B는 앱에서 차단했고 기존 사용자 파일을 보존한다.
 4. 프로젝트 코드·로고·아이콘 재배포 허가와 AniList 보완성, TMDB·AI 기능 결합 조건을 해결하기 전까지 공개 저장소·설치 파일 배포와 실사이트 콘텐츠 요청은 보류한다. 권리 해결 후 검색→상세→회차 재생→자막→이어보기 실제 인수 검증을 계획한다.

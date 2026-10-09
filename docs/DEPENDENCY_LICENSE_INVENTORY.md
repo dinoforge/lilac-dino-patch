@@ -85,10 +85,10 @@
 |---|---|---|
 | `google/gemma-4-E4B-it-qat-q4_0-gguf`, `google/gemma-4-26B-A4B-it-qat-q4_0-gguf`, `google/gemma-4-E2B-it-qat-q4_0-gguf` | Google Gemma 4 공식 모델 카드는 Apache-2.0을 표시하고 Google의 license 링크도 Apache License 2.0 본문으로 연결된다. 각 GGUF 파일의 저장소 commit과 SHA-256을 아래 목록에 고정했다. | 코드·패키지의 모델 출처 고지와 앱 전체 공개 배포 권리는 별도 확인 대상이다. |
 | `tencent/Hy-MT2-1.8B-GGUF`, `tencent/Hy-MT2-7B-GGUF`, `tencent/Hy-MT2-30B-A3B-GGUF` | Tencent 공식 GGUF 저장소의 고정 snapshot에는 Apache-2.0 `LICENSE.txt`와 파일 해시가 있다. 세 파일을 해당 저장소 commit과 SHA-256으로 고정했다. | 기존 사용자 파일은 재해시하거나 교체하지 않는다. |
-| `bartowski/aya-expanse-8b-GGUF` | 저장소는 CC-BY-NC-4.0 및 gated accept를 표시한다. 파일 출처·해시는 고정했지만 비상업 조건을 일반 배포 허가로 확대 해석하지 않는다. | 비상업 조건의 사용자 기능·배포 모델 적용 범위를 확인하고, 필요한 접근 조건·출처 고지를 처리한다. |
+| `bartowski/aya-expanse-8b-GGUF` | 고정 GGUF snapshot은 CC-BY-NC-4.0이며 `base_model`은 Cohere Aya Expanse 8B다. 고정 README에는 Cohere license/privacy 안내와 비상업 사용 체크 항목이 있으나, Hugging Face API의 snapshot `gated` 값은 false다. 앱의 직접 파일 다운로드에는 이용 조건 동의 확인이 없다. | 모델 목록에 비상업 조건을 표시한다. 사용자는 Cohere License Agreement와 AUP를 확인해야 하며, 이 저장소·설치 파일의 공개 배포는 별도 권리 검토 전까지 막는다. |
 | `tencent/HY-MT1.5-7B-GGUF` | 공식 `License.txt`는 EU·영국·대한민국을 적용 지역에서 제외한다. 해당 라이선스에 따른 한국 내 사용 권한을 확인할 수 없다. | 앱의 기본 카탈로그에서 사용·다운로드를 차단했다. 이미 설치된 사용자 파일은 건드리지 않고 설정에서 지역 제한을 표시한다. |
 | `tencent/HY-MT1.5-1.8B-GGUF` | 공식 저장소의 `License.txt`도 EU·영국·대한민국을 적용 지역에서 제외한다. 이 저장소의 빈 `LICENSE` 파일은 별도 권리 허가를 제공하지 않는다. | 앱의 기본 카탈로그에서 사용·다운로드를 차단했다. 이미 설치된 사용자 파일은 건드리지 않고 설정에서 지역 제한을 표시한다. |
-| `hell0ks/ja-ko-vn-7b-v1-gguf` | 양자화 파일의 저장소 commit과 SHA-256은 고정했다. 기본 모델 저장소의 Apache-2.0만으로 이 GGUF 파일의 조건을 증명할 수 없다. | 해당 저장소의 라이선스, 원본 모델과의 파생 관계, 필요한 고지를 확인한다. |
+| `hell0ks/ja-ko-vn-7b-v1-gguf` | 고정 GGUF snapshot의 metadata와 README는 Apache-2.0을 선언한다. README는 `hell0ks/ja-ko-vn-7b-v1`에서 양자화했고 TrillionLabs Tri-7B-Base로 fine-tune했다고 설명한다. 두 기반 모델의 Hugging Face model card도 Apache-2.0을 표시한다. 학습 대화 데이터의 출처·권리 설명은 찾지 못했다. | 저작자·기반 모델 출처를 유지하고 학습 자료의 출처/권리는 불명확한 항목으로 기록한다. preset은 기존 설치 파일 호환용 legacy로 유지한다. |
 | 사용자가 직접 고른 임의 GGUF | 앱에서 외부 모델 파일 선택을 지원한다. | 앱은 임의 GGUF의 라이선스·배포 권리를 검증하지 않는다. 사용자가 적법한 모델을 선택한다는 점과 모델 제공 약관을 분리해 안내해야 한다. |
 
 ### GGUF 다운로드 고정값
@@ -121,7 +121,7 @@ commit은 파일만의 변경점이 아니라 해당 저장소의 전체 snapsho
 
 1. FFmpeg 현재 Windows 바이너리의 구성 요소·대응 소스·고지·재배포 조건을 실제 배포 방안과 함께 검토한다. 해결 전 설치 파일·릴리스 공개를 보류한다.
 2. JASSUB의 JS, WASM, worker, 글꼴과 전이 구성요소를 패키지 출처까지 추적하고 필요한 LICENSE/NOTICE 파일을 생성 스크립트와 최종 패키지에 포함한다.
-3. Aya Expanse의 비상업 조건, `ja-ko-vn` 가중치의 권리, 임의 추가 GGUF의 사용 조건을 별도 검토한다. 8개 preset의 새 다운로드는 고정 commit과 SHA-256을 확인하지만, 기존 사용자 모델을 다시 해시하거나 교체하지 않는다. HY-MT1.5 1.8B·7B는 앱에서 다운로드·실행을 막고 기존 사용자 파일을 보존한다.
+3. Aya Expanse GGUF는 CC-BY-NC-4.0과 Cohere 이용 안내를 목록에 표시한다. `ja-ko-vn` GGUF와 두 기반 모델은 Apache-2.0을 선언하지만 학습 대화 데이터 출처·권리는 확인하지 못했다. 임의 추가 GGUF의 사용 조건은 별도 확인 대상이다. 8개 preset의 새 다운로드는 고정 commit과 SHA-256을 확인하며, 기존 사용자 모델은 재해시하거나 교체하지 않는다. HY-MT1.5 1.8B·7B는 앱에서 다운로드·실행을 막고 기존 사용자 파일을 보존한다.
 4. 다운로드되는 llama.cpp release와 지원되는 각 Windows 빌드의 네이티브 구성요소 고지를 추적 가능하도록 고정한다.
 5. 프로젝트 원본 코드, 로고, 아이콘의 출처와 재배포 권한을 확인한다. 필요하면 정식 허가된 에셋으로 교체하되 사용자 작업과 기존 데이터는 보존한다.
 
@@ -131,6 +131,8 @@ commit은 파일만의 변경점이 아니라 해당 저장소의 전체 snapsho
 - [FFmpeg 법적 안내](https://www.ffmpeg.org/legal.html), [ffmpeg-static 저장소와 Windows 바이너리 출처 설명](https://github.com/eugeneware/ffmpeg-static), [Gyan FFmpeg Windows 빌드와 GPLv3·정적 구성 안내](https://www.gyan.dev/ffmpeg/builds/), [현재 바이너리가 가리키는 FFmpeg 원본 커밋](https://github.com/FFmpeg/FFmpeg/commit/e38092ef93).
 - [JASSUB 저장소 및 태그](https://github.com/ThaUnknown/jassub), [JASSUB 2.5.16 npm package](https://www.npmjs.com/package/jassub/v/2.5.16), [pinned JASSUB license map](https://github.com/ThaUnknown/jassub/blob/656371af1c904be59a1008dcdb93f18dfe5e23d0/build/license_defaults), [abslink 1.3.0](https://www.npmjs.com/package/abslink/v/1.3.0), [lfa-ponyfill 1.1.1](https://www.npmjs.com/package/lfa-ponyfill/v/1.1.1), [throughput 1.0.2](https://www.npmjs.com/package/throughput/v/1.0.2), [rvfc-polyfill 1.0.8 package metadata](https://www.npmjs.com/package/rvfc-polyfill/v/1.0.8), [Electron 38.8.6 with Chromium 140](https://releases.electronjs.org/release/v38.8.6), [Electron 앱 배포 문서](https://www.electronjs.org/docs/latest/tutorial/application-distribution), [llama.cpp 저장소](https://github.com/ggml-org/llama.cpp).
 - [Google Gemma 4 공식 모델 카드](https://ai.google.dev/gemma/docs/core/model_card_4), [Gemma 4 Apache 2.0 license](https://ai.google.dev/gemma/apache_2), [Google 26B QAT GGUF](https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf), [Tencent Hy-MT2 1.8B GGUF license](https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF/blob/main/LICENSE.txt), [Tencent Hy-MT2 7B GGUF license](https://huggingface.co/tencent/Hy-MT2-7B-GGUF/blob/main/LICENSE.txt), [Tencent Hy-MT2 30B GGUF license](https://huggingface.co/tencent/Hy-MT2-30B-A3B-GGUF/blob/main/LICENSE.txt), [Tencent HY-MT1.5 1.8B GGUF](https://huggingface.co/tencent/HY-MT1.5-1.8B-GGUF), [Tencent HY-MT1.5 7B license](https://huggingface.co/tencent/HY-MT1.5-7B-GGUF/blob/main/License.txt), [Aya Expanse GGUF 저장소](https://huggingface.co/bartowski/aya-expanse-8b-GGUF), [ja-ko-vn 기본 모델](https://huggingface.co/hell0ks/ja-ko-vn-7b-v1).
+
+- 이번 model snapshot 검토: [Aya GGUF의 고정 README](https://huggingface.co/bartowski/aya-expanse-8b-GGUF/blob/f9d62ed0c58e6f2ae17975df990b1b8a4013b596/README.md), [Cohere Aya Expanse 8B model card](https://huggingface.co/CohereLabs/aya-expanse-8b), [Cohere usage policy](https://docs.cohere.com/docs/usage-policy/), [ja-ko-vn GGUF의 고정 README](https://huggingface.co/hell0ks/ja-ko-vn-7b-v1-gguf/blob/5460b80a6a6b64b01a862071875375ab40b049d3/README.md), [ja-ko-vn 기반 모델](https://huggingface.co/hell0ks/ja-ko-vn-7b-v1), [TrillionLabs Tri-7B-Base](https://huggingface.co/trillionlabs/Tri-7B-Base).
 
 ### 확인 범위의 한계
 
