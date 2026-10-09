@@ -37,6 +37,12 @@
       "build/icon.ico",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "licenses/Liberation-Fonts-2.00.5-OFL-1.1.txt",
+        "to": "licenses/Liberation-Fonts-2.00.5-OFL-1.1.txt"
+      }
+    ],
     "asarUnpack": [
       "node_modules/ffmpeg-static/**"
     ],
