@@ -185,4 +185,5 @@ test('search UI loads the grouping model before app code and routes source chang
   assert.match(appSource, /const extra=await LilacIntegratedSearch\.searchProviders\(\{\.\.\.searchOptions,query:'',terms:variants,localSearch:async\(\)=>null\}\)/);
   assert.match(appSource, /LilacIntegratedSearch\.chooseSource\(group,\{provider:currentSearchFilter,preferredProvider:state\.source,sourceId\}\)/);
   assert.match(appSource, /openDetail\(button\.dataset\.detailSource,\{groupKey:group\?\.groupKey\|\|'',sourceId:button\.dataset\.detailSource\}\)/);
+  assert.match(appSource, /function showHomeList\(list,label\)\{switchView\('search'\);hideIntegratedSearchFilters\(\);\$\('#filterBar'\)\.classList\.toggle\('hidden',state\.source!=='linkkf'\)/);
 });

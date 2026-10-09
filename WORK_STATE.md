@@ -333,7 +333,8 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 검색 화면에서 RE:Anime·Animenosub·Miruro·애니24·Linkkf를 함께 조회하고, 제목 변형은 최대 3개, 공급원 조회 동시성은 6으로 제한한다. 한국어 검색은 RE:Anime·Animenosub의 한국어 카탈로그 검색을 병행하며, 한국어 검색을 지원하지 않는 Animenosub·Miruro에는 원문 한국어 검색을 보내지 않는다.
 - AniList ID가 같은 결과만 우선 통합하고, MAL ID는 연결 대상 AniList ID가 하나로 확정될 때만 보조 식별자로 쓴다. ID가 없거나 연결이 모호한 결과는 별도 카드다. 공급원 필터와 상세 화면의 원본 공급원 선택을 연결했으며, 내 목록에는 선택된 실제 공급원 항목을 보관한다. 검색 실패 상태와 성공한 빈 결과를 구분한다.
 - 기본 검색 결과를 제목 변형 조회보다 먼저 표시하고, 변형 검색 완료 뒤 합치는 2단계 검색으로 구성했다. 이전 검색 결과의 늦은 응답은 검색 순번으로 무시한다.
-- `tests/integrated-search.test.cjs` 12/12, 전체 `node --test` 219/219, 변경 JS 구문 검사 및 `git diff --check`가 통과했다. `npm run dist` Windows NSIS 빌드 성공(124,555,293바이트). 빌드된 `app.asar`에서 앱 코드·HTML·CSS 포함, 검색 모듈의 앱 코드 선행 로드, 2단계 검색 문구를 확인했다.
+- 통합 검색 때 숨기는 Linkkf 태그 필터는 Linkkf 홈 목록을 다시 열면 복구하도록 했다.
+- `tests/integrated-search.test.cjs` 12/12, 전체 `node --test` 219/219, 변경 JS 구문 검사 및 `git diff --check`가 통과했다. `npm run dist` Windows NSIS 빌드 성공(124,555,418바이트). 빌드된 `app.asar`에서 앱 코드·HTML·CSS 포함, 검색 모듈의 앱 코드 선행 로드, 2단계 검색 문구를 확인했다.
 - 통합 ID 규칙은 합성 데이터로 검증했다. 실제 공급원 응답/ID 품질과 상세·회차·영상은 권리 확인 전이라 조회하지 않았다. NSIS 설치 파일은 실행하거나 배포하지 않았다.
 
 ## 주요 결정

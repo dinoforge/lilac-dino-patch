@@ -1415,7 +1415,7 @@ $('#sourceNotice [data-notice="source"]').onclick=()=>{switchView('settings');wi
 
 $$('.nav').forEach(b=>b.onclick=()=>switchView(b.dataset.view));$$('[data-goto]').forEach(b=>b.onclick=()=>switchView(b.dataset.goto));
 // 홈 > "2026 가을 신작" / "방영 중" > 전체 보기: the whole list in the search view.
-function showHomeList(list,label){switchView('search');hideIntegratedSearchFilters();if(!list?.length)return;$('#pageSearch').value='';$('#filterMore')?.classList.add('hidden');renderCards('#searchGrid',list);$('#searchStatus').textContent=`${label} ${list.length}개 · 인기순`}
+function showHomeList(list,label){switchView('search');hideIntegratedSearchFilters();$('#filterBar').classList.toggle('hidden',state.source!=='linkkf');if(!list?.length)return;$('#pageSearch').value='';$('#filterMore')?.classList.add('hidden');renderCards('#searchGrid',list);$('#searchStatus').textContent=`${label} ${list.length}개 · 인기순`}
 $('#seeAllSeason').onclick=()=>QUARTER_PROVIDERS.includes(state.source)?showHomeList(state.quarterShows,state.quarterSelection?.label||'분기별 작품'):showHomeList(state.current||state.season,'이번 시즌 신작');
 $('#seeAllAiring').onclick=()=>showHomeList(state.airing,'방영 중');
 $('#seeAllLatestEpisodes').onclick=()=>showHomeList(state.latestEpisodes,latestEpisodeSectionTitle(state.source));
