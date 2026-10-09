@@ -1399,14 +1399,16 @@ applyTheme(localStorage.getItem('theme')||'dark');
 $('#openVideo').onclick=async()=>{const src=await window.lilac.chooseVideo();if(src)play(src,decodeURIComponent(src.split('/').pop()))};$('#playUrl').onclick=()=>{const url=$('#streamUrl').value.trim();if(/^https?:\/\//i.test(url))play(url,'직접 스트림');else toast('올바른 https 영상 주소를 입력하세요.')};
 $('#openSubtitle').onclick=async()=>{
   const button=$('#openSubtitle');if(button.disabled)return;button.disabled=true;
-  const requestId=playbackRequestId,selectionRequestId=beginSubtitleSelection();
+  const requestId=playbackRequestId;let selectionRequestId=subtitleSelectionRequestId,selectionStarted=false;
   const isCurrentSelection=()=>requestId===playbackRequestId&&selectionRequestId===subtitleSelectionRequestId;
   try{
+    selectionRequestId=beginSubtitleSelection();
+    selectionStarted=true;
     const file=await window.lilac.chooseSubtitleDetails();
     if(!file||!isCurrentSelection())return;
     currentSubtitlePath=file.path;
     attachSubtitle(file.url,'사용자 자막',{path:file.path,assUrl:file.assUrl,assPath:file.assPath,fonts:file.fonts,source:'user'});
-  }catch{if(isCurrentSelection())toast('사용자 자막을 열지 못했습니다. 파일을 다시 선택해 주세요.')}finally{button.disabled=false}
+  }catch{if(selectionStarted?isCurrentSelection():requestId===playbackRequestId)toast('사용자 자막을 열지 못했습니다. 파일을 다시 선택해 주세요.')}finally{button.disabled=false}
 };
 $('#findSubtitle').onclick=async()=>{const title=$('#skipTitle').value.trim(),episode=Number($('#skipEpisode').value)||1;if(!title){toast('작품명을 확인하지 못했습니다.');return;}beginSubtitleSelection();preferAiSubtitle(false);$('#downloadStatus').textContent='온라인 자막을 찾는 중...';currentPlaybackContext.selectedSubtitleTrack=null;renderSubtitleTracks();onlineSubtitleSearch=null;const found=await ensureSubtitle(null,title,episode,{skipSaved:true});$('#downloadStatus').textContent=found?'자막 적용 완료':'자막을 찾지 못했습니다.'};
 $('#miniPlayer').onclick=()=>togglePictureInPicture();

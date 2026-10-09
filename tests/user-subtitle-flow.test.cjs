@@ -190,3 +190,46 @@ test('user subtitle picker prevents overlapping dialogs and recovers after an IP
   assert.deepEqual(attached, []);
   assert.equal(context.currentSubtitlePath, null);
 });
+
+test('user subtitle picker unlocks after selection setup fails before opening the dialog', async () => {
+  const button = { disabled: false }, messages = [];
+  let calls = 0;
+  const context = vm.createContext({
+    window: { lilac: { chooseSubtitleDetails: async () => { calls++; return null; } } },
+    $: selector => selector === '#openSubtitle' ? button : null,
+    playbackRequestId: 1, subtitleSelectionRequestId: 0, currentSubtitlePath: null,
+    beginSubtitleSelection: () => { throw new Error('synthetic renderer setup failure'); },
+    attachSubtitle() { assert.fail('selection setup failure must not attach a subtitle'); },
+    toast: message => messages.push(message)
+  });
+  vm.runInContext(openSubtitleClick, context);
+
+  await button.onclick();
+  assert.equal(button.disabled, false, 'the picker is re-enabled after setup failure');
+  assert.equal(calls, 0, 'the native dialog is not opened when selection setup fails');
+  assert.deepEqual(messages, ['사용자 자막을 열지 못했습니다. 파일을 다시 선택해 주세요.']);
+  assert.equal(context.currentSubtitlePath, null);
+});
+
+test('user subtitle picker suppresses an error from a superseded selection', async () => {
+  const button = { disabled: false }, messages = [];
+  let rejectDialog;
+  const context = vm.createContext({
+    window: { lilac: { chooseSubtitleDetails: () => new Promise((_, reject) => { rejectDialog = reject; }) } },
+    $: selector => selector === '#openSubtitle' ? button : null,
+    playbackRequestId: 1, subtitleSelectionRequestId: 0, currentSubtitlePath: null,
+    beginSubtitleSelection: () => ++context.subtitleSelectionRequestId,
+    attachSubtitle() { assert.fail('a superseded failed selection must not attach a subtitle'); },
+    toast: message => messages.push(message)
+  });
+  vm.runInContext(openSubtitleClick, context);
+
+  const pending = button.onclick();
+  assert.equal(button.disabled, true);
+  context.subtitleSelectionRequestId++;
+  rejectDialog(new Error('superseded synthetic IPC failure'));
+  await pending;
+  assert.equal(button.disabled, false, 'the picker is re-enabled after the stale error');
+  assert.deepEqual(messages, [], 'a superseded selection does not show a stale error');
+  assert.equal(context.currentSubtitlePath, null);
+});

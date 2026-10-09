@@ -316,6 +316,12 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 고정 패키지 버전의 npm 페이지는 `abslink@1.3.0`을 Apache-2.0, `throughput@1.0.2`와 `lfa-ponyfill@1.1.1`을 MIT로 표시하고, registry `dist.integrity` 세 값은 lockfile과 일치한다. `throughput`·`lfa-ponyfill`에는 `ThaUnknown` author가 있으나 `abslink` package metadata에는 author가 없고, registry metadata는 세 패키지의 `gitHead`를 제공하지 않는다.
 - 세 공식 GitHub 저장소의 현재 기본 브랜치에서 LICENSE/NOTICE를 찾지 못했고 GitHub API도 감지된 라이선스를 반환하지 않았다. 이 브랜치가 lockfile tarball의 정확한 source revision이라는 증거는 없어, 저작권 문구를 추정하거나 새 notice를 생성하지 않았다. 상세 출처와 공개 배포 차단 사유를 `docs/DEPENDENCY_LICENSE_INVENTORY.md`에 추가했다. JASSUB 전체 고지는 계속 미해결이다.
 
+## 2026-10-10 자막 선택 초기화 오류 복구
+
+- 사용자 자막 선택 버튼을 잠근 뒤 `beginSubtitleSelection()` 초기화가 실패하면 기존에는 `finally` 전에 예외가 나 버튼이 계속 잠길 수 있었다. 초기화를 같은 `try/finally`에 넣고 버튼을 항상 복구하며, 오류 토스트는 현재 재생·자막 선택에서만 표시하도록 했다. 오래된 파일 선택 오류는 숨긴다.
+- 초기화 실패·IPC 오류·중복 열기·더 새 선택 뒤의 늦은 오류를 포함한 사용자 자막 회귀 테스트 4/4, 전체 `node --test` 205/205, 수정 파일 구문 및 diff 검사가 통과했다. `npm run dist` Windows NSIS 빌드가 성공해 124,554,569바이트 로컬 설치 파일을 생성했다. 패키지 `app.asar`의 초기화 이동·오류 선택 검사·버튼 복구를 4개 확인 항목으로 검사했다.
+- 설치 파일은 실행·배포하지 않았다. 실제 Windows 파일 대화상자와 외부 공급원은 미검증이다.
+
 ## 주요 결정
 
 - 새 앱은 Windows 우선, Android는 후속이다. Chrome·macOS는 제품 범위에서 제외한다.
