@@ -123,10 +123,10 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 ## 2026-10-09 JASSUB 고지와 폰트 추적
 
-- 현재 잠금 버전은 `jassub@2.5.16`이며 npm tarball의 SHA-512 무결성은 고정됐지만 Git source commit은 기록되지 않았다. 복합 SPDX 식에는 LGPL·FreeType/GPL 대안 및 MIT·ISC·NTP·Zlib·BSL 조건이 포함된다. 빌드 스크립트는 단일 MIT `LICENSE`만 복사한다.
-- 생성된 JASSUB JS·worker에는 `/*!` 배너가 없고 현재 `app.asar` JASSUB 파일에도 집계된 `COPYRIGHT`/`THIRD-PARTY-NOTICES`가 없다. 포함된 `default.woff2`는 기본 `liberation sans`로 연결되지만 이 npm tarball만으로 권리 출처를 확인하지 못했다.
-- upstream `main`은 점검 시 2.5.18, commit `b78bc67194d4b63fab8bf82db54be8cec31fa207`이며 그 소스는 Brotli·Expat·FreeType·FriBidi·HarfBuzz·libass와 JASSUB의 고지를 모아 `dist/js/COPYRIGHT`를 생성한다. 이는 현재 앱의 2.5.16 tarball과 같은 source/submodule revision이라는 증거가 아니므로 그대로 가져오지 않았다. 상세 근거와 고정 출처 링크를 `docs/DEPENDENCY_LICENSE_INVENTORY.md`에 기록했다.
-- 문서 조사만 진행했으며 앱 코드·기능·사용자 데이터는 바꾸지 않았다. 2.5.16 source/submodule revision과 폰트 권리를 추적해 패키지 고지를 재현하기 전까지 JASSUB 배포 검토는 미완료다.
+- 현재 잠금 버전은 `jassub@2.5.16`이며 registry metadata에는 `gitHead`와 provenance attestation이 없다. 뒤이은 blob 대조에서 게시 4분 23초 전 upstream commit `656371a`의 9개 TypeScript·README·LICENSE, 두 WASM, 기본 font와 npm 산출물이 일치하고 package.json은 version만 다름을 확인했다. 다섯 submodule revision도 식별했지만, generated JS의 전체 빌드 provenance는 증명되지 않았다.
+- 복합 SPDX 식에는 LGPL·FTL/GPL 대안 및 MIT·ISC·NTP·Zlib·BSL 조건이 포함된다. app build는 MIT `LICENSE`만 복사하고, 실제 생성된 JASSUB JS/worker에는 주석 블록이 없으며 `app.asar`에 집계된 `COPYRIGHT`/`THIRD-PARTY-NOTICES`가 없다. upstream license generator는 Expat도 열거하지만 pinned `.gitmodules`에는 대응 경로가 없다.
+- 기본 `default.woff2`는 `656371a`의 `src/default.woff2`와 바이트 단위로 일치하고 기본 family는 `liberation sans`지만, 원 저작권자·다운로드 위치·적용 라이선스는 아직 미확인이다. upstream generator와 정확한 해시는 `docs/DEPENDENCY_LICENSE_INVENTORY.md`에 기록했다.
+- 문서 조사만 진행했으며 앱 코드·기능·사용자 데이터는 바꾸지 않았다. 전체 고지·Expat 출처·font 권리를 확인하기 전까지 JASSUB 배포 검토는 미완료다.
 
 ## 2026-10-09 JASSUB 한국어 ASS 합성 렌더 확인
 
@@ -150,9 +150,9 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 ## 2026-10-09 JASSUB npm source 및 기본 폰트 출처 추적
 
-- npm `jassub@2.5.16`은 `2026-09-05T18:49:36.487Z` 게시로 기록됐고 레지스트리 metadata에 `gitHead`가 없다. upstream tags에는 1.8.8만 있었다. 10월 3일의 `c369b0f` commit은 `package.json`에 2.5.16이라고 쓰지만 npm 게시 시점 이후이며, tarball의 주요 TypeScript/worker/WebGL 파일과 일치하지 않아 source commit으로 확정할 수 없다. 그 commit에 기록된 submodule SHA도 tarball의 대응 revision으로 취급하지 않는다.
-- 패키지 `dist/default.woff2`의 SHA-256은 `886929903707C5BB28B07CD2EED69921B3D5EF5C49C73A0DD1E187EBF6546A4C`이며 upstream `src/default.woff2` 파일 blob과 일치한다. JASSUB 코드의 기본 family는 `liberation sans`다. 글꼴의 원 저작권자와 별도 라이선스 출처는 아직 못 찾았다.
-- 출처 확인이 끝나지 않아 JASSUB·libass의 전체 고지를 생성하거나 재배포 허가를 결론 내리지 않았다. 상세 비교와 한계는 `docs/DEPENDENCY_LICENSE_INVENTORY.md`에 반영했다.
+- npm `jassub@2.5.16`은 `2026-09-05T18:49:36.487Z` 게시다. registry metadata에 `gitHead`/attestation은 없지만, 게시 4분 23초 전 commit [`656371a`](https://github.com/ThaUnknown/jassub/commit/656371af1c904be59a1008dcdb93f18dfe5e23d0)와 npm 파일 blob을 비교했다. 11개 경로(LICENSE·README·9개 TypeScript)가 정확히 일치하고 두 WASM 및 `default.woff2`도 해당 commit의 `src/` 자산과 byte-for-byte 일치한다. package.json은 version 2.5.15→2.5.16 변경만 있다. 생성된 `dist` JavaScript는 그 commit 트리에 같은 경로로 없어 전체 tarball의 재현 provenance까지 입증된 것은 아니다.
+- 그 commit의 `.gitmodules`에서 Brotli, FreeType, FriBidi, HarfBuzz, libass의 고정 SHA를 기록했다. `Makefile_licence`는 이 구성요소와 Expat의 고지를 수집하지만, Expat은 해당 `.gitmodules`/tree에서 찾지 못했다. npm tarball과 앱 산출물에는 집계 고지가 없고, `build-jassub.cjs`는 MIT `LICENSE`만 복사한다.
+- `dist/default.woff2` SHA-256 `886929903707C5BB28B07CD2EED69921B3D5EF5C49C73A0DD1E187EBF6546A4C`는 pinned `src/default.woff2`와 일치한다. 기본 family는 `liberation sans`지만 원 저작권자·별도 라이선스는 미확인이다. Docker/WSL 배포판이 없어 upstream shell 기반 고지 generator를 실행하지 않았다. 전체 고지·font 권리를 해결하지 않아 배포 허가는 미결정이다.
 
 ## 2026-10-09 자막 트랙 빈 결과·조회 실패 상태 보정
 
@@ -180,7 +180,7 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 ## 다음
 
-1. FFmpeg는 아직 선택하지 않는다. BtbN의 8.1.3·9.0.2 LGPL shared 후보는 합성 remux/디코딩을 통과했지만 기존 FFmpeg 6.1.1보다 큰 배포 폴더와 미확인 소스·외부 고지가 남았다. 다음에는 앱이 쓰는 기능만 포함하는 호환 LGPL 구성의 크기와 소스·빌드 재현 자료를 조사한다. 해결 전까지 현행 의존성 유지, 설치 파일 공개 보류를 계속한다.
-2. JASSUB 2.5.16 npm 산출물에 대응하는 source commit·submodule revision과 `default.woff2` 출처를 확인한다. 검증 가능한 전체 고지를 생성해 NSIS 패키지에 넣고 각 파일이 실제 포함되는지 검사한다.
+1. FFmpeg는 아직 선택하지 않는다. BtbN의 8.1.3·9.0.2 LGPL shared 후보는 합성 remux/디코딩을 통과했지만 기존 FFmpeg 6.1.1보다 큰 배포 폴더와 미확인 소스·외부 고지가 남았다. 최소 호환 빌드에는 shell 기반 빌드 환경이 필요하지만 현재 Docker·WSL 배포판·Bash·Make가 없어 설치하지 않고 보류했다. 해결 전까지 현행 의존성 유지, 설치 파일 공개 보류를 계속한다.
+2. JASSUB source commit 후보·다섯 submodule SHA와 font 파일 매칭은 확인됐다. 다음에는 고정된 전체 license notice를 만들고 Expat 경로를 해소한 뒤 app/NSIS 빌드에 넣어 실제 산출물까지 검사한다. upstream generator는 shell 기반이며 이 환경에는 Docker/WSL 배포판이 없어 실행하지 않았다. font의 원 라이선스와 전체 재배포 조건도 미해결이다.
 3. AI GGUF 모델 저장소별 조건을 완성한다. 대한민국에서 허용되지 않는 HY-MT1.5 7B legacy 항목은 이용 제한 또는 권리 확인 없이는 사용할 수 있다고 안내하지 않는다. 사용자 임의 모델은 별도 경계를 둔다.
 4. 프로젝트 코드·로고·아이콘 재배포 허가와 AniList 보완성, TMDB·AI 기능 결합 조건을 해결하기 전까지 공개 저장소·설치 파일 배포와 실사이트 콘텐츠 요청은 보류한다. 권리 해결 후 검색→상세→회차 재생→자막→이어보기 실제 인수 검증을 계획한다.
