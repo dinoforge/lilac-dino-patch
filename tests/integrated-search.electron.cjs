@@ -95,9 +95,11 @@ async function fixture(channel, args) {
     case 'catalog:search-korean': return args[0] === 'reanime' ? [{ ...items.reanime }]
       : args[0] === 'animenosub' ? [{ ...items.animenosub }] : [];
     case 'titles:variants':
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      titleVariantsResolved = true;
-      return ['Unified Search Test'];
+      if (args[0] === '통합 검색 테스트') {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        titleVariantsResolved = true;
+      }
+      return args[0] === '경합 확인 테스트' ? [] : ['Unified Search Test'];
     case 'titles:resolve': return [];
     case 'catalog:index:state': return { sources: [], tmdb: false };
     case 'tmdb:get': return { key: '' };
@@ -166,6 +168,36 @@ app.whenReady().then(async () => {
   });
   assert.equal(titleVariantsResolved, false, 'first-page cards appear while title-variant lookup is still pending');
 
+  const staleVariantSearchesBefore = ipcCalls.filter(call => call.channel === 'provider:catalog' && call.args[1] === 'Unified Search Test').length;
+  await win.webContents.executeJavaScript(`(() => {
+    const input = document.querySelector('#pageSearch');
+    input.value = '경합 확인 테스트';
+    document.querySelector('#searchButton').click();
+  })()`);
+  const replacementSearch = await waitFor('replacement results without title variants', async () => {
+    const state = await win.webContents.executeJavaScript(`({
+      cards: document.querySelectorAll('#searchGrid .anime-card').length,
+      status: document.querySelector('#searchStatus')?.textContent || ''
+    })`);
+    return state.cards === 3 && state.status.includes('경합 확인 테스트') && !state.status.includes('다른 제목 표기 준비 중') ? state : null;
+  });
+  assert.ok(replacementSearch.status.includes('경합 확인 테스트'));
+  await waitFor('stale title variants completion', () => titleVariantsResolved);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const afterStaleResponse = await win.webContents.executeJavaScript(`({
+    cards: document.querySelectorAll('#searchGrid .anime-card').length,
+    status: document.querySelector('#searchStatus')?.textContent || ''
+  })`);
+  assert.equal(afterStaleResponse.cards, 3);
+  assert.ok(afterStaleResponse.status.includes('경합 확인 테스트'), 'a late previous search cannot replace the current query');
+  assert.equal(ipcCalls.filter(call => call.channel === 'provider:catalog' && call.args[1] === 'Unified Search Test').length, staleVariantSearchesBefore,
+    'the stale title variant is never sent to providers after the search was superseded');
+
+  await win.webContents.executeJavaScript(`(() => {
+    const input = document.querySelector('#pageSearch');
+    input.value = '제목 변형 검색';
+    document.querySelector('#searchButton').click();
+  })()`);
   await waitFor('merged variant results', async () => {
     const state = await win.webContents.executeJavaScript(`({
       cards: document.querySelectorAll('#searchGrid .anime-card').length,
@@ -202,7 +234,7 @@ app.whenReady().then(async () => {
   assert.deepEqual(rendererErrors, [], `renderer console errors: ${rendererErrors.join('; ')}`);
   const searchCalls = ipcCalls.filter(call => ['provider:catalog', 'catalog:search-korean', 'linkkf:search'].includes(call.channel));
   assert.ok(searchCalls.length >= 8, `synthetic provider search calls recorded (${searchCalls.length})`);
-  console.log(`Packaged integrated search passed: first results shown before title variants; 3 final groups; provider filter and source picker worked.`);
+  console.log(`Packaged integrated search passed: first results, stale-query guard, empty-variant cleanup, merged groups, provider filter and source picker.`);
   console.log(`Synthetic search IPC calls: ${searchCalls.length}; renderer errors: ${rendererErrors.length}; blocked external request attempts: ${blockedRequests.length}; userData: isolated temp profile.`);
   win.destroy();
   app.quit();
