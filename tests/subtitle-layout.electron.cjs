@@ -1,4 +1,4 @@
-// Native pixel regression: node node_modules/electron/cli.js tests/subtitle-layout.electron.cjs
+// Native pixel regression: npm run test:phase1-subtitle-layout
 // VTTCue property tests cannot detect Chromium's percentage-position layout behavior.
 process.on('uncaughtException', fail);
 process.on('unhandledRejection', fail);

@@ -1,6 +1,6 @@
 {
   "name": "lilacanime-desktop",
-  "version": "0.5.6",
+  "version": "0.5.9",
   "description": "LilacAnime inspired desktop anime library and player",
   "main": "electron/main.cjs",
   "author": "LilacAnime Desktop",
@@ -8,6 +8,7 @@
   "scripts": {
     "test": "node --test",
     "test:phase1-electron": "node node_modules/electron/cli.js tests/integrated-search.electron.cjs",
+    "test:phase1-subtitle-layout": "node node_modules/electron/cli.js tests/subtitle-layout.electron.cjs",
     "vendor": "node scripts/build-jassub.cjs",
     "prestart": "npm run vendor",
     "start": "electron .",
