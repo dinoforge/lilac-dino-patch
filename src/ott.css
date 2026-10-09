@@ -69,7 +69,10 @@ main{padding-bottom:0}
 @keyframes hero-progress{to{width:100%}}
 .hero-pick:focus-visible{outline:2px solid var(--lilac);outline-offset:3px}
 #homeView .hero h1{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;font-size:clamp(38px,4.6vw,68px);font-weight:900;line-height:1.04;letter-spacing:-.035em;margin:0 0 14px;padding-bottom:.06em;text-shadow:0 2px 18px #00000080}
+.anime-original-title[hidden]{display:none!important}
+#homeView .hero p.hero-original-title{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;margin:-8px 0 10px;font-size:13px;line-height:1.35;color:#ffffffb3}
 .hero-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin:0 0 14px;font-size:14px;font-weight:600;color:#ffffffd9}
+.player-heading .player-original-title{margin:0 0 2px;font-size:12px;color:#ffffffb3}
 .hero-meta:empty{display:none}
 .hero-meta .hero-score{color:#f4cf72}
 .hero-meta .hero-badge{padding:1px 7px;border:1px solid #ffffff80;border-radius:3px;font-size:12px}
@@ -110,6 +113,7 @@ body.light .rail-arrow{color:var(--text)}
 #homeView .anime-card:hover{z-index:3}
 #homeView .anime-card:hover .poster{transform:scale(1.06);box-shadow:0 14px 34px #000000b3}
 .anime-card h3{margin:9px 1px 3px;font-size:14px;font-weight:600}
+.anime-card .anime-card-native{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0 1px 3px;font-size:11px;line-height:1.25;color:var(--muted)}
 .anime-card:focus{outline:0}
 .anime-card:focus-visible{outline:2px solid var(--lilac);outline-offset:4px;border-radius:var(--ott-radius)}
 .anime-card p{margin:0 1px}
@@ -120,7 +124,7 @@ body.light .rail-arrow{color:var(--text)}
    The full list is behind 전체 보기. */
 #topRail{counter-reset:rank;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(5,auto);grid-auto-flow:column;grid-auto-columns:auto;gap:4px 28px;overflow:visible;padding:6px 0 0}
 #topRail.loading-cards{min-height:420px}
-#topRail .anime-card{counter-increment:rank;display:grid;grid-template-columns:34px 54px minmax(0,1fr);grid-template-rows:1fr auto auto 1fr;column-gap:14px;align-items:center;padding:8px 12px 8px 6px;border-radius:8px;transition:background-color .14s}
+#topRail .anime-card{counter-increment:rank;display:grid;grid-template-columns:34px 54px minmax(0,1fr);grid-template-rows:1fr auto auto auto 1fr;column-gap:14px;align-items:center;padding:8px 12px 8px 6px;border-radius:8px;transition:background-color .14s}
 #topRail .anime-card:nth-child(n+11){display:none}
 #topRail .anime-card:hover{background:color-mix(in srgb,var(--text) 6%,transparent)}
 #topRail .anime-card::before{content:counter(rank);grid-column:1;grid-row:1/-1;justify-self:center;font-size:21px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--muted)}
@@ -129,7 +133,8 @@ body.light .rail-arrow{color:var(--text)}
 #topRail .anime-card .poster::after,#topRail .anime-card :is(.score,.heart){display:none}
 #homeView #topRail .anime-card:hover .poster{transform:none;box-shadow:none}
 #topRail .anime-card h3{grid-column:3;grid-row:2;margin:0 0 4px;font-size:15px}
-#topRail .anime-card p{grid-column:3;grid-row:3;margin:0}
+#topRail .anime-card .anime-card-native{grid-column:3;grid-row:3;margin:0 0 3px}
+#topRail .anime-card p{grid-column:3;grid-row:4;margin:0}
 #topRail .anime-card:hover h3{color:var(--lilac)}
 @media(min-width:1101px){
   #topRail{grid-template-columns:minmax(0,1.1fr) repeat(2,minmax(0,1fr))}
@@ -139,9 +144,10 @@ body.light .rail-arrow{color:var(--text)}
   #topRail .anime-card:first-child .poster::after{display:block;inset:30% 0 0;background:linear-gradient(transparent,#000000e6)}
   #topRail .anime-card:first-child .score{display:block;top:16px;right:16px}
   #topRail .anime-card:first-child::before{position:absolute;z-index:2;left:22px;top:14px;font-size:64px;line-height:1;letter-spacing:-.04em;color:var(--lilac);text-shadow:0 2px 16px #00000080;pointer-events:none}
-  #topRail .anime-card:first-child h3,#topRail .anime-card:first-child p{position:absolute;z-index:2;left:24px;right:24px;margin:0;color:#fff;pointer-events:none}
-  #topRail .anime-card:first-child h3{bottom:48px;font-size:24px;font-weight:800;white-space:normal}
-  #topRail .anime-card:first-child p{bottom:24px;font-size:13px;color:#ffffffbf}
+  #topRail .anime-card:first-child h3,#topRail .anime-card:first-child .anime-card-native,#topRail .anime-card:first-child p{position:absolute;z-index:2;left:24px;right:24px;margin:0;color:#fff;pointer-events:none}
+  #topRail .anime-card:first-child h3{bottom:70px;font-size:24px;font-weight:800;white-space:normal}
+  #topRail .anime-card:first-child .anime-card-native{bottom:43px;font-size:12px;color:#ffffffb3}
+  #topRail .anime-card:first-child p{bottom:22px;font-size:13px;color:#ffffffbf}
   #homeView #topRail .anime-card:first-child:hover .poster{transform:scale(1.03)}
 }
 
@@ -159,7 +165,10 @@ body.light .rail-arrow{color:var(--text)}
 #homeView #continueSection .section-title h2{font-size:16px}
 #homeView #continueSection .continue-card{flex:0 0 clamp(150px,13vw,190px)}
 #homeView #continueSection .continue-card b{font-size:12px}
+#homeView #continueSection .continue-card>.continue-original{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;font-size:10px;color:var(--muted)}
 #homeView #continueSection .continue-card>span{font-size:10px}
+.history-card .history-original{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;color:var(--muted);font-size:11px}
+.download-copy>.download-original{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;color:var(--muted);font-size:11px}
 
 .poster-grid{grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:30px 12px}
 /* 전체: the sort beside the title, one height and radius with the other chips. */

@@ -50,7 +50,7 @@
       <section id="homeView" class="view active">
         <div id="sourceNotice" class="source-notice hidden" role="status"><p></p><div class="source-notice-actions"><button type="button" data-notice="retry">다시 시도</button><button type="button" data-notice="source">소스 바꾸기</button></div></div>
         <div id="continueSection" class="content-section hidden"><div class="section-title"><div><h2>이어서 보기</h2></div></div><div id="continueRail" class="continue-rail"></div></div>
-        <div id="hero" class="hero skeleton"><div class="hero-backdrop"></div><div class="hero-shade"></div><div class="hero-copy"><div class="hero-kicker"><span class="hero-label">이번 시즌 추천</span><span class="hero-count"></span></div><h1>오늘의 애니메이션</h1><div class="hero-meta"></div><p>새로운 이야기를 불러오는 중입니다.</p><div class="hero-actions"><button class="primary"><svg class="info-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5v.5"/></svg><span>자세히 보기</span></button><button class="ghost library-toggle"><svg class="library-heart-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 9c0 5-8.5 10-8.5 10S3.5 14 3.5 9A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 8.5 2Z"/></svg><span>내 목록</span></button></div></div><div class="hero-picks" aria-label="추천 작품"></div></div>
+        <div id="hero" class="hero skeleton"><div class="hero-backdrop"></div><div class="hero-shade"></div><div class="hero-copy"><div class="hero-kicker"><span class="hero-label">이번 시즌 추천</span><span class="hero-count"></span></div><h1>오늘의 애니메이션</h1><p id="heroOriginalTitle" class="hero-original-title anime-original-title" hidden></p><div class="hero-meta"></div><p>새로운 이야기를 불러오는 중입니다.</p><div class="hero-actions"><button class="primary"><svg class="info-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5v.5"/></svg><span>자세히 보기</span></button><button class="ghost library-toggle"><svg class="library-heart-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 9c0 5-8.5 10-8.5 10S3.5 14 3.5 9A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 8.5 2Z"/></svg><span>내 목록</span></button></div></div><div class="hero-picks" aria-label="추천 작품"></div></div>
         <div id="latestEpisodeSection" class="content-section hidden"><div class="section-title"><div><h2 id="latestEpisodeTitle">최신 방영 회차</h2><p id="latestEpisodeStatus" class="latest-episode-status" role="status" aria-live="polite"></p></div><div class="latest-episode-actions"><button id="latestEpisodeRetry" class="text-btn hidden" type="button">다시 불러오기</button><button id="seeAllLatestEpisodes" class="text-btn hidden" type="button">전체 보기 →</button></div></div><div id="latestEpisodeRail" class="poster-rail"></div></div>
         <div id="scheduleSection" class="content-section hidden"><div class="section-title"><div><h2>요일별 방영표</h2></div><button id="scheduleRetry" class="text-btn hidden" type="button">일정 다시 불러오기</button></div><div id="scheduleTabs" class="chip-row" role="tablist"></div><div id="scheduleRail" class="poster-rail"></div></div>
         <div id="pvSection" class="content-section hidden"><div class="section-title"><div><h2>PV · 트레일러</h2></div></div><div id="pvRail" class="poster-rail"></div></div>
@@ -111,7 +111,7 @@
           <div class="player-shade player-shade-top"></div><div class="player-shade player-shade-bottom"></div>
           <header class="player-top">
             <button id="playerBack" class="player-icon" aria-label="뒤로"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></button>
-            <div class="player-heading"><h1 id="playerTitle">재생 준비 중</h1><p id="playerMeta">LilacAnime</p></div>
+            <div class="player-heading"><h1 id="playerTitle">재생 준비 중</h1><p id="playerOriginalTitle" class="player-original-title anime-original-title" hidden></p><p id="playerMeta">LilacAnime</p></div>
             <span id="downloadStatus" class="player-status">연결 중</span>
             <button id="playerSettingsButton" class="player-icon" aria-label="플레이어 설정" aria-expanded="false" aria-controls="playerSettings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg></button>
           </header>
@@ -220,7 +220,7 @@
         </nav>
         <div class="android-settings">
           <section class="settings-group" data-settings-pane="general" role="tabpanel"><h2>일반</h2>
-            <div class="setting-block"><b>작품 제목 표시</b><div class="choice-row" id="titleLanguageChoices"><button data-value="ko">한국어</button><button data-value="en">영어</button></div><select id="titleLanguage" class="setting-native"><option value="ko">한국어</option><option value="en">영어</option></select><p>번역된 제목은 TMDB, AniList, Wikidata에서 찾습니다. 찾지 못한 작품은 원래 제목으로 표시합니다.</p></div>
+            <div class="setting-block"><b>작품 제목 표시</b><p>한국어 제목을 우선 표시하고 확인된 원제는 보조로 표시합니다. 한국어 제목은 TMDB, AniList, Wikidata 순으로 찾으며, 없으면 원제로 표시합니다.</p></div>
             <div class="setting-block"><b>테마</b><div class="choice-row" id="themeChoices"><button data-value="system">시스템 설정</button><button data-value="light">라이트 모드</button><button data-value="dark">다크 모드</button></div><select id="themeSelect" class="setting-native"><option value="system">시스템 설정</option><option value="light">라이트 모드</option><option value="dark">다크 모드</option></select></div>
           </section>
           <section class="settings-group" data-settings-pane="playback" role="tabpanel"><h2>재생</h2>
@@ -259,6 +259,7 @@
   <div id="toast" class="toast"></div>
   <script src="../node_modules/hls.js/dist/hls.min.js"></script>
   <script src="anime-metadata.js"></script>
+  <script src="title-display.js"></script>
   <script src="home-discovery.js"></script>
   <script src="catalog-browser.js"></script>
   <script src="manual-subtitle-translation.js"></script>
