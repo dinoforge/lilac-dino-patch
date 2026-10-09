@@ -4,6 +4,7 @@ process.on('uncaughtException', fail);
 process.on('unhandledRejection', fail);
 
 const { app, BrowserWindow, net, session } = require('electron');
+const { execFileSync } = require('node:child_process');
 const asar = require('@electron/asar');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -25,12 +26,32 @@ assert.deepEqual(
   fs.readFileSync(path.join(repo, 'electron', 'preload.cjs')),
   'the packaged preload matches the current source'
 );
+for (const file of ['src/app.js', 'src/player.js']) {
+  assert.deepEqual(
+    asar.extractFile(appAsar, file),
+    fs.readFileSync(path.join(repo, file)),
+    `the packaged renderer ${file} matches the current source`
+  );
+}
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lilac-phase1-main-'));
 const userData = path.join(tempRoot, 'profile');
 const sessionData = path.join(tempRoot, 'session');
 fs.mkdirSync(userData);
 fs.mkdirSync(sessionData);
+const hlsManifestPath = path.join(tempRoot, 'synthetic.m3u8');
+const hlsSegmentPath = path.join(tempRoot, 'segment000.ts');
+execFileSync(require('ffmpeg-static'), [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=320x180:r=24',
+  '-t', '4', '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '96', '-keyint_min', '96',
+  '-sc_threshold', '0', '-pix_fmt', 'yuv420p', '-f', 'hls', '-hls_time', '10', '-hls_list_size', '0',
+  '-hls_segment_filename', path.join(tempRoot, 'segment%03d.ts'), hlsManifestPath
+], { stdio: 'pipe' });
+const syntheticManifest = fs.readFileSync(hlsManifestPath, 'utf8');
+const syntheticSegment = fs.readFileSync(hlsSegmentPath);
+assert.match(syntheticManifest, /segment000\.ts/);
+assert.ok(syntheticSegment.length >= 376, 'the synthetic HLS segment is long enough to contain MPEG-TS sync bytes');
+assert.ok([0, 188, 376].every(offset => syntheticSegment[offset] === 0x47), 'the synthetic HLS segment has MPEG-TS sync bytes');
 app.setPath('userData', userData);
 app.setPath('sessionData', sessionData);
 app.commandLine.appendSwitch('disable-background-networking');
@@ -43,12 +64,14 @@ const fixtureRequests = [];
 const deniedBrowserRequests = [];
 const redirectedFlixRequests = [];
 const localBrowserRequests = [];
+const allowedLoopbackBrowserRequests = [];
 const localProxyRequests = [];
 const deniedUnknownFetches = [];
 const guardedSessions = new WeakSet();
 const SEARCH_TITLE = '메인 처리기 검증 작품';
 const SLUG = 'phase1-main-fixture';
 let localBase = '';
+const allowedBrowserOrigins = new Set();
 const localPlayerServer = http.createServer((request, response) => {
   localBrowserRequests.push(request.url || '/');
   response.setHeader('access-control-allow-origin', '*');
@@ -67,7 +90,12 @@ const localPlayerServer = http.createServer((request, response) => {
   }
   if (request.url === '/master.m3u8') {
     response.writeHead(200, { 'content-type': 'application/vnd.apple.mpegurl' });
-    response.end('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nsegment.ts\n#EXT-X-ENDLIST\n');
+    response.end(syntheticManifest);
+    return;
+  }
+  if (request.url === '/segment000.ts') {
+    response.writeHead(200, { 'content-type': 'video/mp2t' });
+    response.end(syntheticSegment);
     return;
   }
   response.writeHead(404).end();
@@ -138,13 +166,17 @@ function fixtureResponse(rawUrl) {
     fixtureRequests.push(url.href);
     return response('WEBVTT\n\n00:00:01.000 --> 00:00:03.000\n합성 한국어 자막\n', 200, 'text/vtt');
   }
+  if (url.hostname === 'api.aniskip.com' && url.pathname.startsWith('/v2/skip-times/')) {
+    fixtureRequests.push(url.href);
+    return response({ found: true, results: [] });
+  }
   if (localBase && url.origin === localBase && url.pathname === '/master.m3u8') {
     fixtureRequests.push(url.href);
-    return response('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nsegment.ts\n#EXT-X-ENDLIST\n', 200, 'application/vnd.apple.mpegurl');
+    return response(syntheticManifest, 200, 'application/vnd.apple.mpegurl');
   }
-  if (localBase && url.origin === localBase && url.pathname === '/segment.ts') {
+  if (localBase && url.origin === localBase && url.pathname === '/segment000.ts') {
     fixtureRequests.push(url.href);
-    return response(Buffer.alloc(188, 0x47), 200, 'video/mp2t');
+    return response(syntheticSegment, 200, 'video/mp2t');
   }
   deniedUnknownFetches.push(url.href);
   return response('blocked by phase1-main fixture', 503, 'text/plain');
@@ -166,8 +198,8 @@ function blockSessionRequests(ses) {
   guardedSessions.add(ses);
   ses.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
     const url = new URL(details.url);
-    const loopback = localBase && url.origin === localBase;
-    if (loopback) { callback({ cancel: false }); return; }
+    const loopback = url.hostname === '127.0.0.1' && allowedBrowserOrigins.has(url.origin);
+    if (loopback) { allowedLoopbackBrowserRequests.push(`${url.origin}${url.pathname}`); callback({ cancel: false }); return; }
     if (url.hostname === 'flixcloud.cc' && url.pathname === `/e/${SLUG}`) {
       redirectedFlixRequests.push(details.url);
       callback({ redirectURL: `${localBase}${url.pathname}` });
@@ -206,7 +238,10 @@ function requestLoopback(urlText) {
     http.get(url, response => {
       const chunks = [];
       response.on('data', chunk => chunks.push(Buffer.from(chunk)));
-      response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+      response.on('end', () => {
+        const body = Buffer.concat(chunks);
+        resolve({ status: response.statusCode, body, text: body.toString('utf8') });
+      });
     }).on('error', reject);
   });
 }
@@ -218,8 +253,8 @@ require(path.join(appAsar, 'electron', 'main.cjs'));
 app.whenReady().then(async () => {
   try {
     await new Promise((resolve, reject) => {
-      if (localPlayerServer.listening) { localBase = `http://127.0.0.1:${localPlayerServer.address().port}`; resolve(); return; }
-      localPlayerServer.once('listening', () => { localBase = `http://127.0.0.1:${localPlayerServer.address().port}`; resolve(); });
+      if (localPlayerServer.listening) { localBase = `http://127.0.0.1:${localPlayerServer.address().port}`; allowedBrowserOrigins.add(localBase); resolve(); return; }
+      localPlayerServer.once('listening', () => { localBase = `http://127.0.0.1:${localPlayerServer.address().port}`; allowedBrowserOrigins.add(localBase); resolve(); });
       localPlayerServer.once('error', reject);
     });
     const win = await waitFor('packaged app window', () => BrowserWindow.getAllWindows().find(item => !item.isDestroyed()));
@@ -267,34 +302,82 @@ app.whenReady().then(async () => {
     const streamUrl = new URL(resolvedStream.url);
     assert.equal(streamUrl.hostname, '127.0.0.1', 'FlixCloud resolve returns the app-owned loopback proxy');
     assert.match(streamUrl.pathname, /^\/__flix\/[a-f0-9]+\//);
+    allowedBrowserOrigins.add(streamUrl.origin);
     assert.ok(resolvedStream.subtitlePath && fs.existsSync(resolvedStream.subtitlePath), `the synthetic Korean VTT is saved under isolated userData: ${JSON.stringify({ resolvedStream, fixtureRequests, redirectedFlixRequests, localBrowserRequests, deniedBrowserRequests })}`);
     assert.match(resolvedStream.subtitlePath, new RegExp(`^${userData.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    assert.match(resolvedStream.subtitleUrl, /^file:\/\//i);
     assert.equal(resolvedStream.subtitleTracks[0].language, 'ko');
     const proxiedManifest = await requestLoopback(resolvedStream.url);
     assert.equal(proxiedManifest.status, 200);
-    assert.match(proxiedManifest.body, /^#EXTM3U/);
-    assert.match(proxiedManifest.body, /#EXTINF:4,[\r\n]+http:\/\/127\.0\.0\.1:\d+\/__flix\//,
+    assert.match(proxiedManifest.text, /^#EXTM3U/);
+    assert.match(proxiedManifest.text, /#EXTINF:[\d.]+,[\r\n]+http:\/\/127\.0\.0\.1:\d+\/__flix\//,
       'the app proxy rewrites the fixture manifest segment to its own loopback route');
-    const segmentUrl = proxiedManifest.body.split(/\r?\n/).find(line => line.startsWith('http://127.0.0.1:') && line.includes('/__flix/'));
+    const segmentUrl = proxiedManifest.text.split(/\r?\n/).find(line => line.startsWith('http://127.0.0.1:') && line.includes('/__flix/'));
     assert.ok(segmentUrl, 'the synthetic manifest has a rewritten segment URL');
     const proxiedSegment = await requestLoopback(segmentUrl);
     assert.equal(proxiedSegment.status, 200);
-    assert.equal(proxiedSegment.body, 'G'.repeat(188), 'the app proxy returned the synthetic MPEG-TS segment bytes');
+    assert.deepEqual(proxiedSegment.body, syntheticSegment, 'the app proxy returned the playable synthetic MPEG-TS segment bytes');
+
+    const fixtureEpisode = JSON.stringify(detail.episodes[0]);
+    const playbackTitle = `${animeFixture.title.english} · 1화`;
+    const playbackStarted = await win.webContents.executeJavaScript(`(async () => {
+      if (typeof window.resolveIntoPlayer !== 'function') return false;
+      const episode = ${fixtureEpisode};
+      await window.resolveIntoPlayer(
+        () => window.lilac.providerResolve(episode),
+        ${JSON.stringify(playbackTitle)},
+        { episode, serverOverride: 'HD-2' },
+        ${JSON.stringify(animeFixture.title.english)},
+        1
+      );
+      return true;
+    })()`);
+    assert.equal(playbackStarted, true, 'the packaged renderer resolved the episode through its production player flow');
+    await waitFor('packaged HLS video decode and Korean cue', async () => win.webContents.executeJavaScript(`(() => {
+      const video = document.querySelector('#video');
+      const cueText = [...(video?.textTracks?.[0]?.activeCues || [])].map(cue => cue.text).join(' ');
+      const ready = video?.readyState >= 2 && video.videoWidth === 320 && video.videoHeight === 180
+        && video.currentTime >= 1 && cueText.includes('합성 한국어 자막');
+      if (ready) video.pause();
+      return ready;
+    })()`), 25000);
+    const playbackState = await win.webContents.executeJavaScript(`(() => {
+      const video = document.querySelector('#video');
+      return {
+        readyState: video.readyState,
+        currentTime: video.currentTime,
+        duration: video.duration,
+        width: video.videoWidth,
+        height: video.videoHeight,
+        subtitleMode: video.textTracks[0]?.mode || '',
+        activeCueText: [...(video.textTracks[0]?.activeCues || [])].map(cue => cue.text).join(' ')
+      };
+    })()`);
+    assert.equal(playbackState.width, 320);
+    assert.equal(playbackState.height, 180);
+    assert.ok(playbackState.currentTime >= 1 && playbackState.currentTime < 3, JSON.stringify(playbackState));
+    assert.equal(playbackState.subtitleMode, 'showing');
+    assert.match(playbackState.activeCueText, /합성 한국어 자막/);
 
     assert.ok(fixtureRequests.some(url => new URL(url).searchParams.get('q') === SEARCH_TITLE), 'search reached the synthetic Re:Anime API');
+    assert.ok(fixtureRequests.some(url => new URL(url).hostname === 'api.aniskip.com'), 'the player received an empty synthetic AniSkip response');
     assert.ok(fixtureRequests.some(url => url.includes(`/api/v1/anime/${SLUG}/episodes`)), 'detail reached the synthetic episode API');
     assert.ok(fixtureRequests.some(url => url.includes(`/api/watch/${SLUG}/1`)), 'subtitle lookup reached the synthetic episode-server API');
     assert.ok(fixtureRequests.some(url => url.includes(`/api/watch/${SLUG}/99`)), 'unavailable resolve reached the synthetic episode-server API');
     assert.ok(fixtureRequests.some(url => url === 'https://subtitles.invalid/phase1-ko.vtt'), 'resolved stream downloaded the synthetic Korean VTT');
     assert.ok(fixtureRequests.some(url => localBase && url === `${localBase}/master.m3u8`), 'the app proxy fetched only the synthetic loopback manifest');
-    assert.ok(fixtureRequests.some(url => localBase && url === `${localBase}/segment.ts`), 'the app proxy fetched only the synthetic loopback segment');
-    assert.equal(redirectedFlixRequests.length, 1, 'the FlixCloud page was redirected before external network access');
+    assert.ok(fixtureRequests.some(url => localBase && url === `${localBase}/segment000.ts`), 'the app proxy fetched only the synthetic loopback segment');
+    assert.equal(redirectedFlixRequests.length, 2, 'both FlixCloud fixture loads were redirected before external network access');
     assert.ok(localBrowserRequests.includes(`/e/${SLUG}`), 'the resolver loaded the local player fixture');
     assert.ok(localBrowserRequests.includes('/master.m3u8'), 'the resolver observed the synthetic HLS manifest request');
+    const rendererProxyRequests = allowedLoopbackBrowserRequests.filter(url => url.startsWith(`${streamUrl.origin}/__flix/`));
+    assert.ok(rendererProxyRequests.length >= 2, 'the packaged renderer fetched the HLS manifest and media segment through the app proxy');
     assert.ok(fetchAttempts.length > 0, 'the test exercised the packaged main process network boundary');
+    assert.equal(deniedUnknownFetches.length, 0, `no unregistered main-process URL was requested: ${deniedUnknownFetches.join(', ')}`);
+    assert.equal(deniedBrowserRequests.length, 0, `no external browser request was allowed or attempted: ${deniedBrowserRequests.join(', ')}`);
 
-    console.log('Packaged Phase 1 main-process smoke passed: actual main IPC search/detail/episodes, Korean subtitle parsing and save, unavailable-server feedback, and successful loopback-only HLS proxy resolution.');
-    console.log(`Synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: ${deniedUnknownFetches.length}; blocked browser requests: ${deniedBrowserRequests.length}; external network calls: 0.`);
+    console.log('Packaged Phase 1 main-process smoke passed: actual main IPC search/detail/episodes, Korean subtitle parsing and save, unavailable-server feedback, loopback HLS proxy, packaged Hls.js video decode, and Korean WebVTT cue display.');
+    console.log(`Playback: ${playbackState.width}x${playbackState.height} at ${playbackState.currentTime.toFixed(2)}s; cue: ${playbackState.activeCueText}; synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; renderer proxy requests: ${rendererProxyRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: 0; blocked browser requests: 0; external network calls: 0.`);
     await new Promise(resolve => localPlayerServer.close(resolve));
     app.quit();
   } catch (error) { fail(error); }
