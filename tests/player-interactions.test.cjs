@@ -6,6 +6,7 @@ const path = require('node:path');
 
 const appSource = fs.readFileSync(path.join(__dirname, '../src/app.js'), 'utf8');
 const source = fs.readFileSync(path.join(__dirname, '../src/player.js'), 'utf8');
+const playerCss = fs.readFileSync(path.join(__dirname, '../src/player-android.css'), 'utf8');
 const mainSource = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
 const indexHtml = fs.readFileSync(path.join(__dirname, '../src/index.html'), 'utf8');
 function appSection(start, end) {
@@ -23,13 +24,16 @@ function classList(...initial) {
   return { contains: value => values.has(value), add: value => values.add(value), remove: value => values.delete(value), toggle(value, on) { on ? values.add(value) : values.delete(value); } };
 }
 function setup() {
-  const events = {}, timers = new Map(), storage = new Map();
+  const events = {}, playerEvents = {}, timers = new Map(), storage = new Map();
   let timerId = 0, now = 0;
-  const player = { classList: classList('controls-visible'), contains: () => false, clientWidth: 2100, clientHeight: 900 };
+  const player = { classList: classList('controls-visible'), contains: () => false, clientWidth: 2100, clientHeight: 900,
+    addEventListener: (name, fn) => { (playerEvents[name] ||= []).push(fn); } };
   const video = { playbackRate: 1.5, paused: false, ended: false, style: {}, playCount: 0, pauseCount: 0,
     play() { this.paused = false; this.playCount++; return Promise.resolve(); },
     pause() { this.paused = true; this.pauseCount++; events['video:pause']?.(); },
-    addEventListener: (name, fn) => { events[`video:${name}`] = fn; } };
+    addEventListener: (name, fn) => { events[`video:${name}`] = fn; },
+    setPointerCapture(id) { this.capturedPointer = id; }, hasPointerCapture(id) { return this.capturedPointer === id; },
+    releasePointerCapture(id) { if (this.capturedPointer === id) this.capturedPointer = null; } };
   const indicator = { classList: classList('hidden') }, stage = { style: {} };
   const document = { body: { classList: classList('player-mode') }, activeElement: { tagName: 'BODY', matches: () => false }, addEventListener: (name, fn) => { events[name] = fn; } };
   const context = vm.createContext({ document, window: { addEventListener: (name, fn) => { events[name] = fn; } },
@@ -40,7 +44,7 @@ function setup() {
   vm.runInContext(section('// Delay the short-press', '// Outside the player'), context);
   const key = (repeat = false) => ({ key: ' ', code: 'Space', repeat, preventDefault() { this.prevented = true; } });
   const advance = ms => { now += ms; for (const [id, timer] of [...timers]) if (timer.at <= now) { timers.delete(id); timer.fn(); } };
-  return { context, video, player, indicator, events, storage, stage, key, advance, document };
+  return { context, video, player, playerEvents, indicator, events, storage, stage, key, advance, document };
 }
 
 test('short Space press toggles once on release despite repeated keydown', () => {
@@ -86,6 +90,51 @@ test('settings, text inputs and modified Space retain their native behavior', ()
 test('a manually selected speed during a boost is kept', () => {
   const h = setup(); h.context.handlePlayerKey(h.key()); h.advance(400); h.video.playbackRate = 1.25; h.events.keyup(h.key());
   assert.equal(h.video.playbackRate, 1.25);
+});
+
+test('holding the left mouse button on the playing video temporarily boosts to 2x and suppresses the click', () => {
+  const h = setup(), pointer = { pointerId: 7, pointerType: 'mouse', button: 0, isPrimary: true, target: h.video };
+  h.playerEvents.pointerdown[0](pointer); h.advance(400);
+  assert.equal(h.video.playbackRate, 2); assert.equal(h.indicator.classList.contains('hidden'), false);
+  h.events.pointerup({ pointerId: 7 });
+  assert.equal(h.video.playbackRate, 1.5); assert.equal(h.indicator.classList.contains('hidden'), true);
+  assert.equal(h.video.capturedPointer, null);
+  const click = { pointerId: 7, button: 0, detail: 1, prevented: false, stopped: false,
+    preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; } };
+  h.playerEvents.click[0](click);
+  assert.equal(click.prevented, true); assert.equal(click.stopped, true);
+});
+
+test('a short video click keeps its normal action and mouse holds ignore controls, touch, and paused video', () => {
+  const h = setup(), click = { button: 0, detail: 1, prevented: false, preventDefault() { this.prevented = true; }, stopImmediatePropagation() {} };
+  h.playerEvents.pointerdown[0]({ pointerId: 1, pointerType: 'mouse', button: 0, isPrimary: true, target: h.video });
+  h.events.pointerup({ pointerId: 1 }); h.playerEvents.click[0](click);
+  assert.equal(click.prevented, false); assert.equal(h.video.playbackRate, 1.5);
+
+  for (const [label, configure] of [
+    ['control target', event => { event.target = {}; }],
+    ['touch', event => { event.pointerType = 'touch'; }],
+    ['right button', event => { event.button = 2; }],
+    ['non-primary pointer', event => { event.isPrimary = false; }],
+    ['paused video', (event, video) => { video.paused = true; }]
+  ]) {
+    const next = setup(), event = { pointerId: 2, pointerType: 'mouse', button: 0, isPrimary: true, target: next.video };
+    configure(event, next.video); next.playerEvents.pointerdown[0](event); next.advance(500);
+    assert.equal(next.video.playbackRate, 1.5, label);
+  }
+});
+
+test('mouse speed hold cancels when the pointer is released or the window loses focus', () => {
+  for (const finish of [
+    h => h.events.pointercancel({ pointerId: 8 }),
+    h => h.events.blur(),
+    h => h.events.pointermove({ pointerId: 8, buttons: 0 })
+  ]) {
+    const h = setup();
+    h.playerEvents.pointerdown[0]({ pointerId: 8, pointerType: 'mouse', button: 0, isPrimary: true, target: h.video });
+    h.advance(400); assert.equal(h.video.playbackRate, 2);
+    finish(h); assert.equal(h.video.playbackRate, 1.5); assert.equal(h.indicator.classList.contains('hidden'), true);
+  }
 });
 
 test('speed shortcuts reach 3x and 4x, respect the upper limit and step back', () => {
@@ -136,7 +185,8 @@ test('VTT dialogue stays centered within a safe width and retains sync and top p
   h.video.textTracks = [{ cues }]; h.context.flattenVttCues = () => {}; h.context.vttBaseline = () => 85;
   vm.runInContext(section('function applyVttLayout()', '// Android subtitle source chips'), h.context);
   h.storage.set('subtitleSync', '500'); h.context.applyVttLayout(); h.context.applyVttLayout();
-  for (const cue of cues) { assert.equal(cue.size, 90); assert.equal(cue.position, 50); assert.equal(cue.positionAlign, 'center'); assert.equal(cue.align, 'center'); }
+  for (const cue of cues) { assert.equal(cue.size, 100); assert.equal(cue.position, 50); assert.equal(cue.positionAlign, 'center'); assert.equal(cue.align, 'center'); }
+  assert.match(playerCss, /#video::-webkit-media-text-track-display\s*\{[^}]*padding-inline:\s*5%;[^}]*box-sizing:\s*border-box/s);
   assert.equal(cues[0].startTime, 1.5); assert.equal(cues[0].line, 85); assert.equal(cues[0].lineAlign, 'end');
   assert.equal(cues[1].line, 5); assert.equal(cues[1].lineAlign, 'start');
 });
