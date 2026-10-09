@@ -11,6 +11,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
+const zlib = require('node:zlib');
 
 const repo = path.resolve(__dirname, '..');
 const appAsar = path.join(repo, 'dist', 'win-unpacked', 'resources', 'app.asar');
@@ -120,10 +121,24 @@ const animeFixture = {
   status: 'RELEASING',
   description: '합성 main-process 테스트 작품'
 };
+const miruroQuarterFixture = {
+  id: 'phase1-miruro-quarter',
+  title: { english: 'Miruro Quarter Fixture', native: '미루로 분기 합성작', romaji: 'Miruro Quarter Fixture' },
+  format: 'TV', season: 'FALL', season_year: 2026, started_on: '2026-10-01',
+  episode_count: 12, episode_counts: { raw: 2, sub: 2 }, status: 'RELEASING',
+  external_ids: { anilist: [62005], mal: [72005] }, cover_url: ''
+};
 
 function response(body, status = 200, contentType = 'application/json') {
   const text = typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body);
   return new Response(text, { status, headers: { 'content-type': contentType } });
+}
+
+function miruroResponse(body) {
+  const data = zlib.gzipSync(Buffer.from(JSON.stringify(body)));
+  const key = Buffer.from('miruro/catalog');
+  for (let index = 0; index < data.length; index++) data[index] ^= key[index % key.length];
+  return new Response(data, { headers: { 'content-type': 'application/octet-stream' } });
 }
 
 function fixtureResponse(rawUrl, requestInit = {}) {
@@ -157,9 +172,29 @@ function fixtureResponse(rawUrl, requestInit = {}) {
     fixtureRequests.push(url.href);
     return response('<article class="bs"><a href="/anime/phase1-update-series"><img alt="합성 Animenosub 최신작" src="/poster.jpg"><span class="epx">12화</span></a></article>', 200, 'text/html; charset=utf-8');
   }
+  if (url.hostname === 'animenosub.to' && url.pathname === '/anime/'
+    && url.searchParams.get('season[0]') === 'fall-2026' && url.searchParams.get('order') === 'popular') {
+    fixtureRequests.push(url.href);
+    return response('<article class="bs"><a href="/anime/phase1-quarter-series"><img alt="합성 Animenosub 분기작" src="/poster.jpg"><span class="epx">4화</span></a></article><article class="bs"><a href="/anime/phase1-upcoming-series"><img alt="합성 예정작" src="/upcoming.jpg"><span class="epx">1화</span><span class="ans-status-ribbon">Upcoming</span></a></article>', 200, 'text/html; charset=utf-8');
+  }
   if (url.hostname === 'www.ohli24.net' && url.pathname === '/ing') {
     fixtureRequests.push(url.href);
     return response('<div class="show-item"><a class="show-item-img-link" href="/81002/phase1-update.html"><img src="/poster.jpg" title="합성 애니24 최신작"></a><div class="show-item-title">합성 애니24 최신작</div><span class="show-item-eps">13화</span></div>', 200, 'text/html; charset=utf-8');
+  }
+  if (url.hostname === 'www.miruro.to' && url.pathname === '/api/v1/anime') {
+    fixtureRequests.push(url.href);
+    const selectedQuarter = url.searchParams.get('season') === 'FALL' && url.searchParams.get('season_year') === '2026';
+    return miruroResponse({ data: selectedQuarter ? [miruroQuarterFixture, {
+      ...miruroQuarterFixture, id: 'phase1-miruro-empty', episode_counts: { raw: 1 }, external_ids: { anilist: [62006] }
+    }] : [], has_more: false, next_cursor: null });
+  }
+  if (url.hostname === 'www.miruro.to' && url.pathname === '/api/v1/anime/phase1-miruro-quarter/episodes') {
+    fixtureRequests.push(url.href);
+    return miruroResponse({ data: [{ episode_number: 1, kind: 'regular', aired_on: '2026-10-09' }] });
+  }
+  if (url.hostname === 'www.miruro.to' && url.pathname === '/api/v1/anime/phase1-miruro-empty/episodes') {
+    fixtureRequests.push(url.href);
+    return miruroResponse({ data: [] });
   }
   if (url.hostname === 'reanime.to' && url.pathname === '/api/v1/search') {
     fixtureRequests.push(url.href);
@@ -309,6 +344,29 @@ app.whenReady().then(async () => {
       && url.pathname === '/api/v1/search' && url.searchParams.get('season') === 'FALL'
       && url.searchParams.get('year') === '2026');
     assert.ok(quarterRequest, 'the real main handler requested the selected RE:Anime season and year');
+
+    const miruroQuarter = await win.webContents.executeJavaScript(
+      "window.lilac.providerQuarter('miruro', 2026, 4)"
+    );
+    assert.equal(miruroQuarter.label, '2026년 4분기');
+    assert.equal(miruroQuarter.data.length, 1, 'Miruro quarter excludes series without a playable episode');
+    assert.equal(miruroQuarter.data[0].id, 'phase1-miruro-quarter');
+    assert.equal(miruroQuarter.data[0].provider, 'miruro');
+    assert.equal(miruroQuarter.data[0].availableEpisodes, 2);
+    assert.ok(fixtureRequests.some(rawUrl => {
+      const url = new URL(rawUrl);
+      return url.hostname === 'www.miruro.to' && url.pathname === '/api/v1/anime'
+        && url.searchParams.get('season') === 'FALL' && url.searchParams.get('season_year') === '2026';
+    }), 'Miruro main handler requested the selected season and year');
+
+    const animenosubQuarter = await win.webContents.executeJavaScript(
+      "window.lilac.providerQuarter('animenosub', 2026, 4)"
+    );
+    assert.equal(animenosubQuarter.label, '2026년 4분기');
+    assert.equal(animenosubQuarter.data.length, 1, 'Animenosub quarter excludes Upcoming cards');
+    assert.equal(animenosubQuarter.data[0].provider, 'animenosub');
+    assert.equal(animenosubQuarter.data[0].title, '합성 Animenosub 분기작');
+    assert.equal(animenosubQuarter.data[0].availableEpisodes, 4);
 
     const latestCandidates = [
       { provider: 'reanime', anilistId: 62001, subbed: 2, dubbed: 0, title: '합성 최신 방영작' },
@@ -573,6 +631,15 @@ app.whenReady().then(async () => {
       && new URL(url).pathname === '/anime/' && new URL(url).searchParams.get('order') === 'update'), 'Animenosub latest updates reached its update-sorted feed');
     assert.ok(fixtureRequests.some(url => new URL(url).hostname === 'www.ohli24.net'
       && new URL(url).pathname === '/ing'), 'Ani24 latest updates reached its airing feed');
+    assert.ok(fixtureRequests.some(rawUrl => {
+      const url = new URL(rawUrl);
+      return url.hostname === 'animenosub.to' && url.pathname === '/anime/'
+        && url.searchParams.get('season[0]') === 'fall-2026' && url.searchParams.get('order') === 'popular';
+    }), 'Animenosub quarter listing reached its selected-season page');
+    assert.ok(fixtureRequests.some(rawUrl => {
+      const url = new URL(rawUrl);
+      return url.hostname === 'www.miruro.to' && url.pathname === '/api/v1/anime/phase1-miruro-quarter/episodes';
+    }), 'Miruro checked episode availability for the selected-quarter candidates');
     assert.ok(fixtureRequests.some(url => new URL(url).hostname === 'api.aniskip.com'), 'the player received an empty synthetic AniSkip response');
     assert.ok(fixtureRequests.some(url => url.includes(`/api/v1/anime/${SLUG}/episodes`)), 'detail reached the synthetic episode API');
     assert.ok(fixtureRequests.some(url => url.includes(`/api/watch/${SLUG}/1`)), 'subtitle lookup reached the synthetic episode-server API');
@@ -590,7 +657,7 @@ app.whenReady().then(async () => {
     assert.equal(deniedUnknownFetches.length, 0, `no unregistered main-process URL was requested: ${deniedUnknownFetches.join(', ')}`);
     assert.equal(deniedBrowserRequests.length, 0, `no external browser request was allowed or attempted: ${deniedBrowserRequests.join(', ')}`);
 
-    console.log('Packaged Phase 1 main-process smoke passed: actual main IPC quarter catalog, Re:Anime/Miruro latest airing, weekday schedule, Animenosub/Ani24 update feeds, search/detail/episodes, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
+    console.log('Packaged Phase 1 main-process smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs, Re:Anime/Miruro latest airing, weekday schedule, Animenosub/Ani24 update feeds, search/detail/episodes, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
     console.log(`Playback: ${playbackState.width}x${playbackState.height} at ${playbackState.currentTime.toFixed(2)}s; resume: ${resumeState.currentTime.toFixed(2)}s from saved 50%; fallback: ${fallbackState.server} at ${fallbackState.currentTime.toFixed(2)}s with selected subtitle; synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; renderer proxy requests: ${rendererProxyRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: 0; blocked browser requests: 0; external network calls: 0.`);
     await new Promise(resolve => localPlayerServer.close(resolve));
     app.quit();
