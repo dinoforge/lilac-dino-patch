@@ -415,5 +415,6 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 - `tests/phase1-main.electron.cjs`에서 패키지의 실제 renderer 정렬 버튼을 눌러 Animenosub `최근 업데이트` 화면을 표시했다. `catalog:updates` 실제 main/preload IPC가 합성 업데이트 HTML을 처리했고 카드 제목 `합성 Animenosub 최신작`, `업로드 12화`, 업데이트 안내 문구와 선택된 정렬 상태를 확인했다.
 - 같은 renderer에서 연도 선택을 2025년으로 바꾸고 4분기 카드가 나타나는 것, 이어 3분기 탭을 눌러 제목·선택 표시·카드가 변경되는 것을 확인했다. 두 분기 요청은 패키지 `provider:quarter` main IPC까지 도달했다.
-- `npm run test:phase1-main` 통과: 합성 fixture 요청 61회, 미등록 fetch·차단된 브라우저 요청·외부 네트워크 0회. 전체 `npm test` 221/221과 `npm run test:phase1-electron`도 통과했고, 테스트 파일 구문 검사와 `git diff --check` 통과.
-- 공급원 선택 상태는 격리 테스트에서 Animenosub으로 설정했다. 실제 사이트 응답, 사용자 설정 전환/재시작, 설치 NSIS 화면은 확인하지 않았다.
+- Re:Anime 최신 방영 줄은 실제 패키지 `provider:latest-episodes` IPC의 별도 합성 ID 응답을 받아 `EP.4` 카드와 상태 문구를 표시했다. Linkkf `loadLinkkfHome`은 현재 요일을 선택하고 `요일별 방영표`의 월요일 탭을 누르면 월요일 합성 카드로 전환됐다. 홈 탭 요청 7개가 패키지 `linkkf:schedule` handler를 통과했다.
+- `npm run test:phase1-main` 통과: 합성 fixture 요청 72회, 미등록 fetch·차단된 브라우저 요청·외부 네트워크 0회. 전체 `npm test` 221/221과 `npm run test:phase1-electron`도 통과했고, 테스트 파일 구문 검사와 `git diff --check` 통과.
+- 공급원 상태는 격리 renderer 테스트에서 Animenosub·RE:Anime·Linkkf로 설정했다. 실제 사이트 응답, 사용자 설정 전환/재시작, 설치 NSIS 화면은 확인하지 않았다.

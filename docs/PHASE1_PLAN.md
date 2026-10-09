@@ -222,8 +222,9 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 - `tests/phase1-main.electron.cjs`에서 패키지 main/preload가 실제 등록한 IPC를 호출하고 API 응답은 합성 fixture로 처리했다. RE:Anime `provider:quarter`에 2026년 4분기를 전달해 `season=FALL&year=2026` 요청과 `2026년 4분기` 결과를 확인했다.
 - Miruro `provider:quarter`에서 API 응답의 gzip/XOR 복호화를 확인하고, `FALL/2026` 요청 후보 중 실제 회차 목록이 빈 작품을 홈 결과에서 제외했다. Animenosub은 `season[0]=fall-2026` 페이지를 요청하고 `Upcoming` 표시가 있는 작품을 제외했다.
 - `provider:latest-episodes`는 합성 AniList GraphQL 요청을 RE:Anime와 Miruro에 따로 보내 각 공급원의 후보 ID만 전달했다. 가용 화수를 넘는 회차·미래 회차를 제외해 RE:Anime 2화와 Miruro 3화를 골랐다. Re:Anime 반복 요청은 캐시에서 반환했고 지원하지 않는 Linkkf 요청은 네트워크 호출을 추가하지 않았다.
-- Linkkf `linkkf:schedule` 실제 main IPC는 월~일 일곱 API 분할을 호출해 월요일 합성 작품 1개와 다른 여섯 빈 요일을 반환했다. Wikidata 제목 보강 조회는 빈 fixture로 응답했다. 총 fixture 요청은 61회, 미등록 fetch·차단된 브라우저 요청·외부 호출은 0회다.
+- Linkkf `linkkf:schedule` 실제 main IPC는 월~일 일곱 API 분할을 호출해 월요일 합성 작품 1개와 다른 여섯 빈 요일을 반환했다. Wikidata 제목 보강 조회는 빈 fixture로 응답했다. 총 fixture 요청은 72회, 미등록 fetch·차단된 브라우저 요청·외부 호출은 0회다.
 - `catalog:updates` 실제 main IPC는 Animenosub의 `order=update&page=1` HTML 응답에서 12화 작품과 다음 offset을 만들고 캐시 재사용을 확인했다. 애니24 `/ing` 응답에서는 13화 작품·정규 상세 URL·마지막 페이지 상태를 만들었다.
 - 이어서 renderer의 실제 `최근 업데이트순` 버튼을 눌러 Animenosub 카드 제목, `업로드 12화`, 안내 문구와 정렬 선택 상태가 표시되는 것을 확인했다. 카드 데이터는 같은 패키지의 `catalog:updates` main IPC에서 전달됐다.
 - 같은 renderer에서 연도 선택을 2025년으로 바꾸고 4분기 목록을 확인한 뒤 3분기 탭을 눌러 제목·선택 표시·카드 전환을 확인했다. 두 선택 모두 패키지 `provider:quarter` main IPC를 호출해 분기에 맞는 요청을 보냈다.
+- Re:Anime의 최신 방영 줄은 별도 AniList 합성 작품 ID를 `provider:latest-episodes` IPC에 보내고 반환한 4화 결과를 카드·상태 문구로 표시했다. Linkkf 홈에서는 현재 요일 탭 선택을 확인하고 월요일 탭을 눌러 월요일 합성 작품 카드로 전환했다. `loadLinkkfHome`이 `linkkf:schedule` 일곱 요청과 계절 레일 요청을 실제 main handler로 보냈다.
 - **PASS — 패키지 main/preload 홈 탐색 경로(합성 데이터)**. `npm run test:phase1-main`, `npm run test:phase1-electron`, `npm test` 221/221이 통과했다. 라이브 AniList·Re:Anime·Miruro·Linkkf·Animenosub·애니24 정보, 최신 회차 정확성 및 설치 NSIS UI는 검증하지 않았다.

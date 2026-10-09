@@ -155,6 +155,7 @@ function fixtureResponse(rawUrl, requestInit = {}) {
       { episode: 1, airingAt: now - 13 * 24 * 60 * 60, media: { id: 62001 } },
       { episode: 3, airingAt: now - 100, media: { id: 62004 } },
       { episode: 5, airingAt: now - 20, media: { id: 62004 } },
+      { episode: 4, airingAt: now - 10, media: { id: 62008 } },
       { episode: 1, airingAt: now - 60, media: { id: 62002 } }
     ] } } });
   }
@@ -514,6 +515,77 @@ app.whenReady().then(async () => {
       catalogUpdateUI.renderHome();
     })()`);
 
+    const latestUiCandidate = [{
+      provider: 'reanime', id: 'phase1-latest-ui', mal_id: 'reanime:phase1-latest-ui',
+      anilistId: 62008, title: '합성 최신 방영 UI 카드', subbed: 4, dubbed: 0
+    }];
+    await win.webContents.executeJavaScript(`(() => {
+      state.source = 'reanime';
+      localStorage.removeItem('latestEpisodeCache:v1:reanime');
+      return loadLatestEpisodeRail('reanime', ${JSON.stringify(latestUiCandidate)});
+    })()`);
+    const latestUi = await win.webContents.executeJavaScript(`(() => ({
+      title: document.querySelector('#latestEpisodeTitle')?.textContent,
+      status: document.querySelector('#latestEpisodeStatus')?.textContent,
+      cards: [...document.querySelectorAll('#latestEpisodeRail .anime-card')].map(card => ({
+        title: card.querySelector('h3')?.textContent,
+        episode: card.querySelector('.latest-episode-badge')?.textContent
+      }))
+    }))()`);
+    assert.equal(latestUi.title, '최신 방영 회차');
+    assert.match(latestUi.status, /최근 14일 방영 회차 1개/);
+    assert.deepEqual(latestUi.cards, [{ title: '합성 최신 방영 UI 카드', episode: 'EP.4' }]);
+    assert.deepEqual(anilistRequests.at(-1).variables.ids, [62008], 'the latest-airing UI called the real packaged IPC for its selected provider candidate');
+
+    const scheduleRequestsBeforeUI = fixtureRequests.filter(rawUrl => {
+      const url = new URL(rawUrl);
+      return url.hostname === 'linkkf1.5imgdarr.top' && url.pathname === '/api/singlefilter.php'
+        && url.searchParams.has('categorytagid');
+    }).length;
+    const expectedScheduleIndex = (new Date().getDay() + 6) % 7 + 1;
+    const scheduleLabels = ['UP', '월', '화', '수', '목', '금', '토', '일'];
+    await win.webContents.executeJavaScript(`(() => {
+      state.source = 'linkkf';
+      switchView('home');
+      return loadLinkkfHome();
+    })()`);
+    const selectedToday = await waitFor('today weekday tab and Linkkf schedule rendered through packaged main IPC', () =>
+      win.webContents.executeJavaScript(`(() => {
+        const tabs = [...document.querySelectorAll('#scheduleTabs button')];
+        const selected = tabs.findIndex(button => button.getAttribute('aria-selected') === 'true');
+        const rail = document.querySelector('#scheduleRail');
+        if (selected !== ${expectedScheduleIndex} || !rail || rail.classList.contains('loading-cards')) return null;
+        return { label: tabs[selected]?.textContent, railText: rail.textContent, tabCount: tabs.length };
+      })()`)
+    );
+    assert.equal(selectedToday.label, scheduleLabels[expectedScheduleIndex]);
+    assert.equal(selectedToday.tabCount, 8);
+    await win.webContents.executeJavaScript(`document.querySelectorAll('#scheduleTabs button')[1].click()`);
+    const mondayCard = await waitFor('Monday Linkkf card rendered after selecting the weekday tab', () =>
+      win.webContents.executeJavaScript(`(() => {
+        const card = document.querySelector('#scheduleRail .anime-card');
+        if (card?.querySelector('h3')?.textContent !== '합성 월요일 방영작') return null;
+        return {
+          title: card.querySelector('h3').textContent,
+          selected: document.querySelectorAll('#scheduleTabs button')[1]?.getAttribute('aria-selected')
+        };
+      })()`)
+    );
+    assert.equal(mondayCard.selected, 'true');
+    const scheduleRequestsAfterUI = fixtureRequests.filter(rawUrl => {
+      const url = new URL(rawUrl);
+      return url.hostname === 'linkkf1.5imgdarr.top' && url.pathname === '/api/singlefilter.php'
+        && url.searchParams.has('categorytagid');
+    }).length;
+    assert.equal(scheduleRequestsAfterUI - scheduleRequestsBeforeUI, 7, 'the home schedule UI reached all seven real Linkkf main IPC queries');
+    await win.webContents.executeJavaScript(`(() => {
+      state.source = ${JSON.stringify(previousHomeSource)};
+      document.querySelector('#scheduleSection').classList.add('hidden');
+      document.querySelector('#latestEpisodeSection').classList.add('hidden');
+      setupQuarterControls(state.source);
+      catalogUpdateUI.renderHome();
+    })()`);
+
     const animenosubUpdates = await win.webContents.executeJavaScript("window.lilac.catalogUpdates('animenosub', 0)");
     assert.equal(animenosubUpdates.data.length, 1);
     assert.equal(animenosubUpdates.data[0].provider, 'animenosub');
@@ -760,7 +832,7 @@ app.whenReady().then(async () => {
     assert.equal(deniedUnknownFetches.length, 0, `no unregistered main-process URL was requested: ${deniedUnknownFetches.join(', ')}`);
     assert.equal(deniedBrowserRequests.length, 0, `no external browser request was allowed or attempted: ${deniedBrowserRequests.join(', ')}`);
 
-    console.log('Packaged Phase 1 smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs and Re:Anime quarter selection UI, Re:Anime/Miruro latest airing, weekday schedule, Animenosub/Ani24 update feeds and Animenosub recent-updates home card, search/detail/episodes, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
+    console.log('Packaged Phase 1 smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs and Re:Anime quarter selection UI, Re:Anime latest-airing UI, Linkkf current-day/weekday schedule UI, Animenosub/Ani24 update feeds and Animenosub recent-updates home card, search/detail/episodes, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
     console.log(`Playback: ${playbackState.width}x${playbackState.height} at ${playbackState.currentTime.toFixed(2)}s; resume: ${resumeState.currentTime.toFixed(2)}s from saved 50%; fallback: ${fallbackState.server} at ${fallbackState.currentTime.toFixed(2)}s with selected subtitle; synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; renderer proxy requests: ${rendererProxyRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: 0; blocked browser requests: 0; external network calls: 0.`);
     await new Promise(resolve => localPlayerServer.close(resolve));
     app.quit();
