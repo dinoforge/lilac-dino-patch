@@ -260,7 +260,6 @@ body.light #homeView .hero-actions .primary{background:#1c1b1f;color:#fff}
 .android-settings .settings-group[hidden]{display:none}
 .android-settings .settings-group>h2{margin:0 0 10px;font-size:22px;font-weight:800;letter-spacing:-.01em}
 .android-settings .settings-group>p{max-width:76ch;margin:0 0 6px;color:var(--muted);font-size:13px;line-height:1.6}
-.android-settings .settings-group>p.tmdb-credit{margin-top:4px;font-size:11px}
 .android-settings .settings-group>.setting-note{margin:0;padding:12px 16px;border:0;border-left:3px solid var(--lilac);border-radius:var(--ott-radius);background:color-mix(in srgb,var(--lilac) 9%,transparent);color:var(--text)}
 .android-settings .settings-group>.setting-note:empty{display:none}
 .android-settings :is(.setting-block,.setting-switch,.settings-about){margin:0;padding:16px 20px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
@@ -304,6 +303,9 @@ body.light #homeView .hero-actions .primary{background:#1c1b1f;color:#fff}
 .android-settings .setting-switch input:checked::after{transform:translateX(20px)}
 .android-settings .settings-about{display:flex;align-items:center;justify-content:space-between;gap:16px}
 .android-settings .settings-about b{font-size:14px}
+.android-settings .tmdb-attribution{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:14px;margin-top:8px;padding:16px 20px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.android-settings .tmdb-attribution img{display:block;width:54px;height:auto}
+.android-settings .tmdb-attribution p{margin:0;color:var(--muted);font-size:12px;line-height:1.5}
 @media(prefers-reduced-motion:reduce){.android-settings .setting-switch input,.android-settings .setting-switch input::after{transition:none}}
 
 @media(max-width:1100px){

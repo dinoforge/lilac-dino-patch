@@ -12,6 +12,7 @@ const { createFlixProxyUrl, createFlixAvProxyUrl, closeFlixProxy } = require('./
 const { detectOpEd } = require('./oped-fingerprint.cjs');
 const { DownloadManager } = require('./download-manager.cjs');
 const { Updater } = require('./updater.cjs');
+const { DAY_MS, TITLE_CANDIDATE_TTL_MS, DISPLAY_TITLE_TTL_MS, CATALOG_TITLE_TTL_MS, isFreshTimestamp, pruneTimestampedRecords, pruneKoreanTitleRecords } = require('./metadata-cache.cjs');
 const { SubtitleStore } = require('./subtitle-store.cjs');
 const { createTranslator } = require('./subtitle-translator.cjs');
 const { QUARTER_PROVIDERS, quarterForDate, quarterPeriod, quarterQuery } = require('./quarter-catalog.cjs');
@@ -862,8 +863,15 @@ async function analyzeOfflineOpEd({title,episode,currentUrl,duration,candidates,
 // TMDB API key (설정 > 한국어 제목 검색), then AniList and Wikidata. Seasons are read from the original title,
 // so the series name is enough.
 const koreanTitleCache=new Map();
+const koreanTitleCacheTimes=new Map();
 function koreanTitleCacheFile(){return path.join(app.getPath('userData'),'korean-title-cache.json')}
-function readKoreanTitleCache(){try{return JSON.parse(fs.readFileSync(koreanTitleCacheFile(),'utf8'))||{}}catch{return {}}}
+function readKoreanTitleCache(){
+  try{
+    const file=koreanTitleCacheFile(),raw=JSON.parse(fs.readFileSync(file,'utf8')),fresh=pruneKoreanTitleRecords(raw);
+    if(JSON.stringify(raw)!==JSON.stringify(fresh))fs.writeFileSync(file,JSON.stringify(fresh),'utf8');
+    return fresh;
+  }catch{return {}}
+}
 function tmdbSettingsFile(){return path.join(app.getPath('userData'),'tmdb.json')}
 function tmdbKey(){try{return String(JSON.parse(fs.readFileSync(tmdbSettingsFile(),'utf8')).key||'').trim()}catch{return ''}}
 // A v4 "API Read Access Token" is a JWT sent as a bearer token; a v3 "API Key" goes in the query string.
@@ -950,8 +958,9 @@ const tmdbOverviewFile=()=>path.join(app.getPath('userData'),'tmdb-overview-cach
 async function tmdbOverview(anime={}){
   if(!tmdbKey())return '';
   const key=`${anime.provider||'jikan'}:${anime.id??anime.mal_id}`;
-  tmdbOverviewDisk||=(()=>{try{return JSON.parse(fs.readFileSync(tmdbOverviewFile(),'utf8'))||{}}catch{return {}}})();
-  const cached=tmdbOverviewDisk[key];if(cached&&Date.now()-cached.time<(cached.text?30:7)*86400000)return cached.text;
+  if(!tmdbOverviewDisk)tmdbOverviewDisk=readTmdbOverviewCache();else pruneTmdbOverviewCache();
+  const cached=tmdbOverviewDisk[key],ttl=cached?.text?30*DAY_MS:7*DAY_MS;
+  if(cached&&isFreshTimestamp(cached.time,ttl))return cached.text;
   // A film is looked for among films first; a work found without a Korean overview gives way to the next match.
   const title=String(anime.title_english||anime.title||'').trim(),kinds=/movie|film|극장/i.test(String(anime.type||''))?['movie','tv']:['tv','movie'];let text='';
   find:for(const query of tmdbQueries([anime.title_english,anime.title,anime.romaji,anime.title_japanese])){
@@ -970,6 +979,19 @@ async function tmdbOverview(anime={}){
   if(!hasHangul(text))text='';
   tmdbOverviewDisk[key]={text,time:Date.now()};try{fs.writeFileSync(tmdbOverviewFile(),JSON.stringify(tmdbOverviewDisk),'utf8')}catch{}
   return text;
+}
+function tmdbOverviewCacheTtl(record){return record?.text?30*DAY_MS:7*DAY_MS}
+function pruneTmdbOverviewCache(){
+  const fresh=pruneTimestampedRecords(tmdbOverviewDisk,tmdbOverviewCacheTtl);
+  if(JSON.stringify(fresh)!==JSON.stringify(tmdbOverviewDisk)){
+    tmdbOverviewDisk=fresh;
+    try{fs.writeFileSync(tmdbOverviewFile(),JSON.stringify(tmdbOverviewDisk),'utf8')}catch{}
+  }
+}
+function readTmdbOverviewCache(){
+  try{tmdbOverviewDisk=JSON.parse(fs.readFileSync(tmdbOverviewFile(),'utf8'))||{}}catch{tmdbOverviewDisk={}}
+  pruneTmdbOverviewCache();
+  return tmdbOverviewDisk;
 }
 // Fallbacks when TMDB has no Korean name (or no key is set): AniList's Korean synonyms, then the Korean
 // Wikidata labels of the work and its series, looked up by MAL/AniList ID.
@@ -992,9 +1014,10 @@ async function wikidataKoreanTitles(malId,anilistId){
 // Order: TMDB (needs the user's key), then AniList, then Wikidata; each is only asked when the previous
 // one found nothing.
 async function koreanTitleCandidates(title,anime={}){
+  pruneMemoryKoreanTitleCache();
   const original=String(title||'').trim();if(!original||/[가-힣]/.test(original))return original?[original]:[];
   const tmdb=Boolean(tmdbKey()),key=`${tmdb?'tmdb':'free'}:${anime.id||original}`;if(koreanTitleCache.has(key))return koreanTitleCache.get(key);
-  const disk=readKoreanTitleCache();if(Array.isArray(disk[key])&&disk[key].length){koreanTitleCache.set(key,disk[key]);return disk[key]}
+  const disk=readKoreanTitleCache(),saved=disk[key];if(Array.isArray(saved?.titles)&&saved.titles.length){koreanTitleCache.set(key,saved.titles);koreanTitleCacheTimes.set(key,saved.time);return saved.titles}
   const found=[],add=value=>{const clean=String(value||'').replace(/\((?:애니메이션|TV|애니)[^)]*\)/g,'').replace(/\s+/g,' ').trim();if(/[가-힣]{2}/.test(clean)&&!found.includes(clean))found.push(clean)};
   if(tmdb){
     // Re:ANIME and Miruro also know the Japanese title, which TMDB matches as the original name.
@@ -1006,17 +1029,40 @@ async function koreanTitleCandidates(title,anime={}){
   let media=null;
   if(!found.length){media=await anilistMedia(original,anime).catch(()=>null);(media?.synonyms||[]).forEach(add)}
   if(!found.length){const malId=Number(anime.malId)||media?.idMal||null,anilistId=Number(anime.anilistId)||media?.id||null;(await wikidataKoreanTitles(malId,anilistId).catch(()=>[])).forEach(add)}
-  const result=found.length?found:[original];koreanTitleCache.set(key,result);
-  if(found.length){disk[key]=found;try{fs.writeFileSync(koreanTitleCacheFile(),JSON.stringify(disk),'utf8')}catch{}}
+  const result=found.length?found:[original],time=Date.now();koreanTitleCache.set(key,result);koreanTitleCacheTimes.set(key,time);
+  if(found.length){disk[key]={titles:found,time};try{fs.writeFileSync(koreanTitleCacheFile(),JSON.stringify(disk),'utf8')}catch{}}
   return result;
+}
+function pruneMemoryKoreanTitleCache(now=Date.now()){
+  for(const [key,time] of koreanTitleCacheTimes)if(!isFreshTimestamp(time,TITLE_CANDIDATE_TTL_MS,now)){koreanTitleCache.delete(key);koreanTitleCacheTimes.delete(key)}
 }
 // Display titles (설정 > 작품 제목 표시). Korean names come from the same TMDB → AniList → Wikidata lookup as the
 // subtitle search, English names from the provider, AniList (by ID) or TMDB. Results, misses included, are
 // kept on disk for a week so lists do not repeat the lookups.
-const DISPLAY_TITLE_TTL=7*24*60*60*1000;
+const DAY=DAY_MS;
+const DISPLAY_TITLE_TTL=DISPLAY_TITLE_TTL_MS,CATALOG_TITLE_TTL=CATALOG_TITLE_TTL_MS;
 let displayTitleDisk=null;
 function displayTitleFile(){return path.join(app.getPath('userData'),'display-title-cache.json')}
-function displayTitleStore(){if(!displayTitleDisk){try{displayTitleDisk=JSON.parse(fs.readFileSync(displayTitleFile(),'utf8'))||{}}catch{displayTitleDisk={}}}return displayTitleDisk}
+function displayTitleCacheTtl(record){return record?.src==='tmdb'||record?.src==='wikidata'?CATALOG_TITLE_TTL:DISPLAY_TITLE_TTL}
+function pruneDisplayTitleDisk(){
+  const fresh=pruneTimestampedRecords(displayTitleDisk,displayTitleCacheTtl);
+  if(JSON.stringify(fresh)!==JSON.stringify(displayTitleDisk)){
+    displayTitleDisk=fresh;
+    try{fs.writeFileSync(displayTitleFile(),JSON.stringify(displayTitleDisk),'utf8')}catch{}
+  }
+}
+function displayTitleStore(){
+  if(!displayTitleDisk){try{displayTitleDisk=JSON.parse(fs.readFileSync(displayTitleFile(),'utf8'))||{}}catch{displayTitleDisk={}};pruneDisplayTitleDisk()}
+  else pruneDisplayTitleDisk();
+  return displayTitleDisk;
+}
+const metadataCacheCleanupTimer=setInterval(()=>{
+  pruneMemoryKoreanTitleCache();
+  readKoreanTitleCache();
+  if(tmdbOverviewDisk)pruneTmdbOverviewCache();
+  if(displayTitleDisk)pruneDisplayTitleDisk();
+},DAY);
+metadataCacheCleanupTimer.unref?.();
 let displayTitleSaveTimer=null;
 function saveDisplayTitles(){clearTimeout(displayTitleSaveTimer);displayTitleSaveTimer=setTimeout(()=>{try{fs.writeFileSync(displayTitleFile(),JSON.stringify(displayTitleStore()),'utf8')}catch{}},1000)}
 const hasHangul=value=>/[가-힣]/.test(String(value||''));
@@ -1050,7 +1096,7 @@ async function resolveDisplayTitle(anime={}){
   // Names are shown cleaned and with their season (see withSeason). TMDB's name comes first: one filled in from Wikidata
   // by the catalog index, or kept from before names said where they came from, is looked up again once (with a TMDB key).
   const stale=cached&&!hasHangul(title)&&tmdbKey()&&(!cached.src||cached.src==='wikidata');
-  if(cached&&!stale&&Date.now()-cached.time<DISPLAY_TITLE_TTL)return {key,ko:withSeason(cached.ko||'',title,anime.type),en:cached.en||''};
+  if(cached&&!stale&&isFreshTimestamp(cached.time,displayTitleCacheTtl(cached)))return {key,ko:withSeason(cached.ko||'',title,anime.type),en:cached.en||''};
   const ko=hasHangul(title)?title:await displayKoreanTitle(title,anime).catch(()=>'');
   const en=await englishTitleFor(anime).catch(()=>'');
   const merged={ko:ko||cached?.ko||'',en:en||cached?.en||''};
@@ -1063,7 +1109,6 @@ async function resolveDisplayTitle(anime={}){
 // the display-title store: Wikidata in one query by AniList id (Re:Anime), then a TMDB lookup for each remaining
 // entry (needs the key), in catalog order, in the background. Lists are refreshed daily; every entry is looked up
 // once (misses again after 30 days). Kept on disk per source.
-const DAY=24*60*60*1000;
 const CATALOGS={
   // Re:Anime: about 20,000 entries, 100 per request, most popular first.
   reanime:{label:'Re:Anime',fetch:fetchReanimeCatalog,wikidata:true},
@@ -1130,7 +1175,7 @@ async function sortedCatalog(provider,sort,offset){
   }
   throw new Error('이 소스는 정렬을 지원하지 않습니다.');
 }
-const indexKorean=(provider,item)=>withSeason(displayTitleStore()[`${provider}:${item.id}`]?.ko||'',item.title,item.type);
+const indexKorean=(provider,item)=>{const cached=displayTitleStore()[`${provider}:${item.id}`];return isFreshTimestamp(cached?.time,CATALOG_TITLE_TTL)?withSeason(cached?.ko||'',item.title,item.type):''};
 function catalogIndexState(){return {tmdb:Boolean(tmdbKey()),sources:Object.entries(CATALOGS).filter(([provider])=>provider===activeCatalogSource).map(([provider,{label,korean}])=>{const index=catalogIndex(provider);return {provider,label,status:index.status,total:index.items.length,korean:korean===false?null:index.items.filter(item=>indexKorean(provider,item)).length}})}}
 function reportCatalogIndex(provider,status){
   catalogIndex(provider).status=status;const state=catalogIndexState();
@@ -1202,7 +1247,7 @@ async function refreshCatalogList(provider){
 // TMDB, six entries at a time (well under its request limit).
 async function lookupCatalogKorean(provider){
   if(CATALOGS[provider].korean===false)return;
-  const index=catalogIndex(provider),queue=index.items.filter(item=>!indexKorean(provider,item)&&!(Date.now()-(index.tried[item.id]||0)<30*DAY));
+  const index=catalogIndex(provider),queue=index.items.filter(item=>!indexKorean(provider,item)&&!isFreshTimestamp(index.tried[item.id],30*DAY));
   let done=0,titled=false;
   while(tmdbKey()&&queue.length&&activeCatalogSource===provider){
     reportCatalogIndex(provider,'tmdb');
@@ -1816,6 +1861,10 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // Old or unversioned metadata is disposable cache, not watch/download history.
+  readKoreanTitleCache();
+  tmdbOverviewDisk=readTmdbOverviewCache();
+  displayTitleStore();
   const broadcast=(channel,value)=>BrowserWindow.getAllWindows().forEach(win=>{if(!win.isDestroyed())win.webContents.send(channel,value)});
   const subtitleStore=new SubtitleStore({app});
   // Same order as the player's ensureSubtitle: the preferred source's saved file, the stream's own

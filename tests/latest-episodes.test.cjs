@@ -49,6 +49,43 @@ test('AniList request is cached briefly and only trusted provider IDs are sent',
   assert.equal(second.fromCache, true);
 });
 
+test('AniList 429 honors Retry-After and reuses stale results without sending more requests', async () => {
+  clearLatestEpisodeCache();
+  const candidates = [anime(131, 6)], firstNow = now;
+  let requests = 0;
+  const fetchImpl = async () => {
+    requests++;
+    if (requests === 1) return { status: 200, ok: true, json: async () => ({ data: { Page: { airingSchedules: [{ media: { id: 131 }, episode: 5, airingAt: Math.floor(firstNow / 1000) - 30 }] } } }) };
+    if (requests === 2) return { status: 429, ok: false, headers: { get: name => name === 'Retry-After' ? '20' : null } };
+    const retriedNow = firstNow + 16 * 60 * 1000;
+    return { status: 200, ok: true, json: async () => ({ data: { Page: { airingSchedules: [{ media: { id: 131 }, episode: 6, airingAt: Math.floor(retriedNow / 1000) - 30 }] } } }) };
+  };
+  const first = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: firstNow });
+  const limitedAt = firstNow + 16 * 60 * 1000;
+  const limited = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: limitedAt });
+  assert.equal(limited.rateLimited, true);
+  assert.equal(limited.retryAfterAt, limitedAt + 20_000);
+  assert.equal(limited.data[0].episode, first.data[0].episode);
+  const deferred = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: limitedAt + 10_000 });
+  assert.equal(deferred.rateLimited, true);
+  assert.equal(requests, 2);
+  const retried = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: limited.retryAfterAt });
+  assert.equal(retried.rateLimited, undefined);
+  assert.equal(retried.data[0].episode, 6);
+  assert.equal(requests, 3);
+});
+
+test('AniList 429 without a usable Retry-After waits for its documented one-minute window', async () => {
+  clearLatestEpisodeCache();
+  let requests = 0;
+  const fetchImpl = async () => { requests++; return { status: 429, headers: { get: () => null } }; };
+  const limited = await fetchLatestEpisodes('reanime', [{ provider: 'reanime', anilistId: 132, subbed: 3 }], { fetchImpl, now });
+  assert.equal(limited.retryAfterAt, now + 60_000);
+  const deferred = await fetchLatestEpisodes('reanime', [{ provider: 'reanime', anilistId: 132, subbed: 3 }], { fetchImpl, now: now + 30_000 });
+  assert.equal(deferred.rateLimited, true);
+  assert.equal(requests, 1);
+});
+
 test('unsupported sources return an explicit unsupported result without a network call', async () => {
   let requests = 0;
   const result = await fetchLatestEpisodes('animenosub', [anime(40, 4)], { fetchImpl: async () => { requests++; } });

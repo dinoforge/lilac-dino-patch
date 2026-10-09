@@ -4,6 +4,7 @@ const CACHE_TTL = 15 * 60 * 1000;
 const MAX_CANDIDATES = 120;
 const MAX_RESULTS = 30;
 const AIRING_WINDOW_SECONDS = 14 * 24 * 60 * 60;
+const RATE_LIMIT_FALLBACK_MS = 60 * 1000;
 const QUERY = `query ($ids: [Int], $after: Int!, $now: Int!) {
   Page(perPage: 50) {
     airingSchedules(
@@ -59,6 +60,15 @@ function cacheKey(provider, byId) {
   return `${provider}:${[...byId].map(([id, entry]) => `${id}-${entry.available}`).sort().join(',')}`;
 }
 
+function retryAt(response, now) {
+  const value = String(response?.headers?.get?.('Retry-After') || '').trim();
+  const seconds = Number(value);
+  if (value && Number.isFinite(seconds) && seconds >= 0) return now + Math.max(1000, seconds * 1000);
+  const date = Date.parse(value);
+  if (value && Number.isFinite(date) && date > now) return date;
+  return now + RATE_LIMIT_FALLBACK_MS;
+}
+
 async function fetchLatestEpisodes(provider, candidates, { fetchImpl = globalThis.fetch, now = Date.now() } = {}) {
   if (!SUPPORTED_PROVIDERS.has(provider)) return { supported: false, data: [] };
   const byId = validCandidates(provider, candidates);
@@ -66,6 +76,7 @@ async function fetchLatestEpisodes(provider, candidates, { fetchImpl = globalThi
 
   const key = cacheKey(provider, byId), current = cache.get(key);
   if (current && current.expiresAt > now) return { supported: true, data: current.data, fromCache: true };
+  if (current && current.retryAfterAt > now) return { supported: true, data: current.data, fromCache: true, rateLimited: true, retryAfterAt: current.retryAfterAt };
 
   const nowSeconds = Math.floor(now / 1000), after = nowSeconds - AIRING_WINDOW_SECONDS;
   const response = await fetchImpl(ANILIST_API, {
@@ -74,6 +85,12 @@ async function fetchLatestEpisodes(provider, candidates, { fetchImpl = globalThi
     body: JSON.stringify({ query: QUERY, variables: { ids: [...byId.keys()], after, now: nowSeconds } }),
     signal: AbortSignal.timeout(15000)
   });
+  if (response.status === 429) {
+    const retryAfterAt = retryAt(response, now), data = current?.data || [];
+    cache.set(key, { data, expiresAt: current?.expiresAt || 0, retryAfterAt });
+    while (cache.size > 8) cache.delete(cache.keys().next().value);
+    return { supported: true, data, fromCache: Boolean(current), rateLimited: true, retryAfterAt };
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`AniList HTTP ${response.status}`);
   if (payload.errors?.length) throw new Error(String(payload.errors[0]?.message || 'AniList 조회 실패'));

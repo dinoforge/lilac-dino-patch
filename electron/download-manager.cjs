@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const { pathToFileURL, fileURLToPath } = require('url');
+const { hasFreshDownloadTitleMetadata, hasCompleteDownloadTitleMetadata, expireDownloadTitleMetadata } = require('./metadata-cache.cjs');
 
 function safeName(value = '') {
   return String(value).normalize('NFKC').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').trim().slice(0, 120) || 'episode';
@@ -37,15 +38,21 @@ class DownloadManager {
     this.broadcast = broadcast;
     this.resolving = Promise.resolve();
     this.active = new Map(); // job id -> {job, process}; Android runs up to 2 downloads at once.
-    this.jobs = this.read().map(job => ['downloading', 'resolving'].includes(job.status) ? {...job, status:'queued'} : job.stage ? {...job, stage:''} : job);
+    const recovered = this.read();
+    expireDownloadTitleMetadata(recovered);
+    this.jobs = recovered.map(job => ['downloading', 'resolving'].includes(job.status) ? {...job, status:'queued'} : job.stage ? {...job, stage:''} : job);
     fs.mkdirSync(this.root, { recursive: true });
     this.relink();
     this.save();
+    this.titleMetadataCleanupTimer = setInterval(() => {
+      if (expireDownloadTitleMetadata(this.jobs)) this.save();
+    }, 24 * 60 * 60 * 1000);
+    this.titleMetadataCleanupTimer.unref?.();
     setImmediate(() => { this.pump(); this.backfillSubtitles(); });
   }
 
   read() { try { const value = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')); return Array.isArray(value) ? value : []; } catch { return []; } }
-  save() { fs.mkdirSync(path.dirname(this.stateFile), { recursive: true }); fs.writeFileSync(this.stateFile, JSON.stringify(this.jobs, null, 2)); this.broadcast('downloads:changed', this.list()); }
+  save() { expireDownloadTitleMetadata(this.jobs); fs.mkdirSync(path.dirname(this.stateFile), { recursive: true }); fs.writeFileSync(this.stateFile, JSON.stringify(this.jobs, null, 2)); this.broadcast('downloads:changed', this.list()); }
   // missing: a finished episode whose video is not where it was saved (the folder moved, the drive not plugged in).
   list() { return this.jobs.slice().sort((a,b) => (b.updated || 0) - (a.updated || 0)).map(job => job.status === 'completed' && !fs.existsSync(job.filePath || '') ? { ...job, missing: true } : job); }
 
@@ -361,11 +368,17 @@ class DownloadManager {
 
   // Korean and English titles, stored with the job so the download is labelled correctly offline.
   async attachTitles(job) {
-    if (!job.anime || job.displayTitles?.ko && job.displayTitles?.en) return;
+    if (!job.anime) return;
+    const previous = hasFreshDownloadTitleMetadata(job) ? job.displayTitles : null;
+    if (hasCompleteDownloadTitleMetadata(job)) return;
+    if (!previous) { delete job.displayTitles; delete job.displayTitlesAt; }
     try {
       const titles = await this.resolveTitles?.({ ...job.anime, title: job.anime.title || job.title });
-      if (titles && (titles.ko || titles.en)) { job.displayTitles = { ko: titles.ko || '', en: titles.en || '' }; this.save(); }
-    } catch { /* titles stay as they were */ }
+      if (titles && (titles.ko || titles.en)) { job.displayTitles = { ko: titles.ko || previous?.ko || '', en: titles.en || previous?.en || '' }; job.displayTitlesAt = Date.now(); this.save(); }
+      else if (!previous) this.save();
+    } catch {
+      if (!previous) this.save();
+    }
   }
 
   // OP/ED timestamps for offline playback. A failed lookup is not stored, so the analyzer can fill it later.
@@ -389,7 +402,7 @@ class DownloadManager {
         job.stage = 'subtitle'; this.save(); await this.attachSubtitle(job, null); job.stage = ''; job.updated = Date.now(); this.save();
       }
       for (const job of this.jobs.filter(item => item.status === 'completed' && !item.skipChecked && fs.existsSync(item.filePath || ''))) await this.attachSkips(job);
-      for (const job of this.jobs.filter(item => item.status === 'completed' && item.anime && !(item.displayTitles?.ko && item.displayTitles?.en))) await this.attachTitles(job);
+      for (const job of this.jobs.filter(item => item.status === 'completed' && item.anime && !hasCompleteDownloadTitleMetadata(item))) await this.attachTitles(job);
       for (const job of this.jobs.filter(item => item.status === 'completed' && item.image && !item.posterChecked && fs.existsSync(item.filePath || ''))) await this.attachPoster(job);
     } finally { this.backfilling = false; }
   }
