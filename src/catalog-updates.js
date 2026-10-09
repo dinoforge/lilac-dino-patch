@@ -3,6 +3,7 @@ const catalogUpdateUI = (() => {
   const supported = ['reanime', 'miruro', 'animenosub', 'ohli24'];
   const cache = new Map();
   let homeOrder = 'season', libraryOrder = 'saved', homeRequest = 0, libraryRequest = 0;
+  const baselineStorageKey = 'libraryUpdateBaselines';
 
   function select(container, value) {
     $$(container + ' button').forEach(button => {
@@ -15,6 +16,83 @@ const catalogUpdateUI = (() => {
   function note(selector, text) {
     $(selector).textContent = text;
     $(selector).classList.toggle('hidden', !text);
+  }
+
+  function availableEpisodes(item) {
+    const values = item?.provider === 'reanime' ? [item.availableEpisodes, item.subbed, item.dubbed]
+      : item?.provider === 'miruro' ? [item.availableEpisodes ?? (Number(item.availableEpisodeCount) > 0 ? item.availableEpisodeCount : null)]
+        : ['animenosub', 'ohli24'].includes(item?.provider) ? [item.availableEpisodes] : [];
+    const numbers = values.filter(value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) && Number(value) >= 0).map(Number);
+    return numbers.length ? Math.max(...numbers) : null;
+  }
+
+  function episodeNumber(episode) {
+    const direct = Number(episode?.number);
+    if (Number.isFinite(direct) && direct > 0) return direct;
+    const match = String(episode?.name || '').match(/(?:EP\.?\s*)?(\d+(?:\.\d+)?)(?:\s*화)?/i);
+    return match ? Number(match[1]) : 0;
+  }
+
+  function readBaselines() {
+    try {
+      const value = JSON.parse(localStorage.getItem(baselineStorageKey) || '{}');
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    } catch { return {}; }
+  }
+
+  function baselineKey(anime) { return `${anime?.provider || ''}:${anime?.mal_id ?? anime?.id ?? ''}`; }
+
+  function saveBaseline(anime, number) {
+    if (!anime || !Number.isFinite(number) || number < 0) return;
+    try {
+      const values = readBaselines(), key = baselineKey(anime);
+      values[key] = Math.max(Number(values[key]) || 0, number);
+      localStorage.setItem(baselineStorageKey, JSON.stringify(values));
+    } catch {}
+  }
+
+  function forgetBaseline(anime) {
+    if (!anime) return;
+    try {
+      const values = readBaselines();
+      delete values[baselineKey(anime)];
+      localStorage.setItem(baselineStorageKey, JSON.stringify(values));
+    } catch {}
+  }
+
+  function reconcileLibraryUpdates(entries) {
+    const byId = new Map(entries.map(entry => [String(entry.item.mal_id), entry]));
+    const baselines = readBaselines(); let changed = false;
+    const rows = state.library.map((saved, index) => {
+      const freshEntry = byId.get(String(saved.mal_id)), fresh = freshEntry?.item;
+      if (!fresh) return { item: saved, index, fresh: null, isNew: false };
+      const latest = availableEpisodes(fresh), savedCount = availableEpisodes(saved), key = baselineKey(saved);
+      let baseline = Number(baselines[key]);
+      if (!Number.isFinite(baseline) || baseline < 0) baseline = null;
+      if (savedCount !== null) baseline = Math.max(baseline ?? 0, savedCount);
+      else if (baseline === null && latest !== null) {
+        baseline = latest;
+        baselines[key] = latest;
+        changed = true;
+      }
+      if (baseline !== null && savedCount !== null && Number(baselines[key]) !== baseline) {
+        baselines[key] = baseline;
+        changed = true;
+      }
+      const watched = (state.history || []).reduce((max, record) => {
+        const watchedAnime = record.anime;
+        if (!watchedAnime || String(watchedAnime.mal_id ?? watchedAnime.id) !== String(saved.mal_id ?? saved.id)) return max;
+        if (watchedAnime.provider && saved.provider && watchedAnime.provider !== saved.provider) return max;
+        if (!(Number(record.progress) > 0)) return max;
+        return Math.max(max, episodeNumber(record.episode));
+      }, 0);
+      const item = { ...saved, ...fresh };
+      return { item, index, fresh: freshEntry, isNew: latest !== null && baseline !== null && latest > baseline && latest > watched };
+    });
+    if (changed) {
+      try { localStorage.setItem(baselineStorageKey, JSON.stringify(baselines)); } catch {}
+    }
+    return rows;
   }
 
   async function recent(provider, pages = 1) {
@@ -73,10 +151,8 @@ const catalogUpdateUI = (() => {
 
   let libraryItems = new Map();
   function drawLibrary() {
-    const list = state.library.map((saved, index) => {
-      const fresh = libraryItems.get(String(saved.mal_id));
-      return { item: fresh ? { ...saved, ...fresh.item } : saved, index, fresh };
-    });
+    const list = reconcileLibraryUpdates([...libraryItems.values()]);
+    list.forEach(entry => { if (entry.isNew) entry.item.libraryUpdateNew = true; });
     if (libraryOrder === 'updated') list.sort((a, b) => {
       if (Boolean(a.fresh) !== Boolean(b.fresh)) return a.fresh ? -1 : 1;
       if (!a.fresh) return a.index - b.index;
@@ -93,19 +169,20 @@ const catalogUpdateUI = (() => {
     const request = ++libraryRequest;
     select('#libraryOrder', libraryOrder);
     drawLibrary();
-    if (libraryOrder !== 'updated') { note('#libraryOrderNote', ''); return; }
+    if (!$('#libraryView').classList.contains('active')) { note('#libraryOrderNote', ''); return; }
     const providers = [...new Set(state.library.map(item => item.provider))];
     const available = providers.filter(provider => supported.includes(provider));
-    if (!state.library.length) { note('#libraryOrderNote', ''); return; }
-    note('#libraryOrderNote', '저장한 작품의 최근 회차 목록을 확인하는 중…');
+    if (!state.library.length || !available.length) { note('#libraryOrderNote', ''); return; }
+    if (libraryOrder === 'updated') note('#libraryOrderNote', '저장한 작품의 최근 회차 목록을 확인하는 중…');
     const results = await Promise.allSettled(available.map(async provider => ({ provider, ...(await recent(provider, 8)) })));
-    if (request !== libraryRequest || libraryOrder !== 'updated') return;
+    if (request !== libraryRequest) return;
     libraryItems = new Map(); const failures = [];
     results.forEach((result, at) => {
       if (result.status === 'rejected') failures.push(SOURCE_LABELS[available[at]] || available[at]);
       else result.value.items.forEach((item, rank) => libraryItems.set(String(item.mal_id), { item, rank }));
     });
     drawLibrary();
+    if (libraryOrder !== 'updated') { note('#libraryOrderNote', ''); return; }
     const unsupported = providers.filter(provider => !supported.includes(provider)).map(provider => SOURCE_LABELS[provider] || '기타 소스');
     note('#libraryOrderNote', '소스별 최근 회차 목록에 있는 작품을 먼저 표시합니다. 목록 밖 작품은 저장순을 유지합니다.'
       + (unsupported.length ? ' ' + unsupported.join('·') + ': 업데이트순 미지원.' : '')
@@ -132,5 +209,12 @@ const catalogUpdateUI = (() => {
     switchView('all');
   };
 
-  return { renderHome, renderLibrary };
+  function markEpisodeSeen(anime, episode) {
+    if (!anime || !state.library.some(item => String(item.mal_id) === String(anime.mal_id) && item.provider === anime.provider)) return;
+    saveBaseline(anime, episodeNumber(episode));
+  }
+
+  function forgetAnime(anime) { forgetBaseline(anime); }
+
+  return { renderHome, renderLibrary, markEpisodeSeen, forgetAnime };
 })();

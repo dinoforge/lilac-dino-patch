@@ -131,3 +131,21 @@ test('Animenosub counts the newest uploaded episode across duplicate listing car
     + '<article><a href="/anime/series"><img alt="작품" src="/poster.jpg"><span class="epx">12화</span></a></article>';
   assert.equal(context.parse(html)[0].availableEpisodes, 12);
 });
+
+test('Re:Anime keeps missing uploaded-episode counts unknown while preserving an explicit zero', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
+  const start = source.indexOf('function reanimeItems('), end = source.indexOf('\nfunction absoluteUrl', start);
+  assert.ok(start >= 0 && end > start);
+  const context = vm.createContext({ REANIME_WEB: 'https://reanime.test' });
+  vm.runInContext(source.slice(start, end) + '\nglobalThis.parse = reanimeItems;', context);
+
+  const [unknown, zero, known] = context.parse([
+    { anime_id: 'unknown', title: 'Unknown', episodes: 12 },
+    { anime_id: 'zero', title: 'Zero', subbed: 0, dubbed: 0 },
+    { anime_id: 'known', title: 'Known', subbed: 8, dubbed: 10 }
+  ]);
+  assert.equal(unknown.availableEpisodes, null);
+  assert.equal(unknown.totalEpisodes, 12);
+  assert.equal(zero.availableEpisodes, 0);
+  assert.equal(known.availableEpisodes, 10);
+});

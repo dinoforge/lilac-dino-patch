@@ -2,5 +2,6 @@
 .latest-episode-actions{display:flex;align-items:center;gap:12px}
 .latest-episode-card .poster{outline:1px solid color-mix(in srgb,var(--lilac) 24%,transparent)}
 .latest-episode-badge{position:absolute;z-index:2;left:8px;bottom:8px;padding:5px 8px;border:1px solid #ffffff2b;border-radius:7px;background:#111e;color:#fff;font-size:10px;font-weight:800;letter-spacing:.4px;pointer-events:none}
+.library-new-badge{position:absolute;z-index:2;top:8px;left:8px;padding:5px 8px;border:1px solid color-mix(in srgb,var(--lilac) 70%,transparent);border-radius:7px;background:var(--lilac);color:#1c1b1f;font-size:10px;font-weight:850;letter-spacing:.45px;pointer-events:none}
 .latest-episode-card:hover .latest-episode-badge{background:var(--lilac);color:#1c1b1f}
 .latest-episode-card:focus-visible{outline:2px solid var(--lilac);outline-offset:4px;border-radius:13px}

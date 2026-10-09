@@ -213,7 +213,8 @@ function reanimeItems(root) {
     const genresRaw = a.genres || raw.genres || [];
     const genres = (Array.isArray(genresRaw) ? genresRaw : Object.values(genresRaw)).map(x => ({name: typeof x === 'string' ? x : x.name || x.title || ''})).filter(x=>x.name);
     const episodeCount=Number(a.episodes||0)||Math.max(Number(a.subbed||0),Number(a.dubbed||0))||0;
-    const metadata={season:a.season||'',aired:a.start_date||a.started_on||'',totalEpisodes:Number(a.episodes)||null,availableEpisodes:Math.max(Number(a.subbed)||0,Number(a.dubbed)||0),updatedAt:a.episode?.aired||''};
+    const hasUploadedCounts=[a.subbed,a.dubbed].some(value=>value!=null&&value!==''&&Number.isFinite(Number(value)));
+    const metadata={season:a.season||'',aired:a.start_date||a.started_on||'',totalEpisodes:Number(a.episodes)||null,availableEpisodes:hasUploadedCounts?Math.max(Number(a.subbed)||0,Number(a.dubbed)||0):null,updatedAt:a.episode?.aired||''};
     return {...metadata,provider:'reanime',id:slug,mal_id:`reanime:${slug}`,title,title_english:'',images:{webp:{large_image_url:imageUrl}},score:Number(a.average_score||a.score||0)/10||null,year:a.season_year||a.year||'',type:a.format||'Anime',episodes:episodeCount||null,status:a.status||'',synopsis:a.description||a.synopsis||'',genres,studios:[],url:`${REANIME_WEB}/anime/${slug}`,anilistId:Number(a.anilist_id||a.anilistId||a.anilist||0)||null,malId:Number(a.mal_id||0)||null,canWatch:a.can_watch!==false,subbed:Number(a.subbed||0),dubbed:Number(a.dubbed||0)};
   }).filter(x => x.title && x.id);
 }
@@ -292,6 +293,8 @@ function reanimeRelated(list,selfSlug){
 function reanimeMediaFromJson(root,original){
   const title=root.title||{},description=String(root.description||'').replace(/<br\s*\/?>/gi,'\n').replace(/<[^>]+>/g,'').trim();
   const start=reanimeDate(root.start_date),end=reanimeDate(root.end_date);
+  const subbed=root.subbed==null?original.subbed:Number(root.subbed),dubbed=root.dubbed==null?original.dubbed:Number(root.dubbed);
+  const hasUploadedCounts=[subbed,dubbed].some(value=>value!=null&&value!==''&&Number.isFinite(Number(value)));
   return {...original,
     title:original.title||title.english||title.romaji||title.native,title_japanese:title.native||original.title_japanese||'',romaji:title.romaji||'',english:title.english||'',
     synopsis:description||original.synopsis,images:{webp:{large_image_url:root.cover_image?.extra_large||imageOfMain(original)}},
@@ -302,7 +305,7 @@ function reanimeMediaFromJson(root,original){
     score:Number(root.average_score)?Number(root.average_score)/10:original.score,
     anilistId:Number(root.anilist_id)||original.anilistId||null,malId:Number(root.mal_id)||original.malId||null,
     episodes:Number(root.episodes_total)||original.episodes,totalEpisodes:Number(root.episodes_total)||original.totalEpisodes||null,
-    availableEpisodes:Math.max(Number(root.subbed??original.subbed)||0,Number(root.dubbed??original.dubbed)||0),subbed:root.subbed==null?original.subbed:Number(root.subbed),dubbed:root.dubbed==null?original.dubbed:Number(root.dubbed),
+    availableEpisodes:hasUploadedCounts?Math.max(Number(subbed)||0,Number(dubbed)||0):Number(original.availableEpisodes)>0?Number(original.availableEpisodes):null,subbed,dubbed,
     related:reanimeRelated(root.relations,original.id)};
 }
 function reanimeMediaFromHtml(html,original){

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-function setup({ source = 'reanime', current = [], quarterShows = [], quarterSelection = null, library = [], feed = async () => ({ data: [], nextOffset: 36, done: true }) } = {}) {
+function setup({ source = 'reanime', current = [], quarterShows = [], quarterSelection = null, library = [], history = [], feed = async () => ({ data: [], nextOffset: 36, done: true }) } = {}) {
   const elements = new Map(), calls = [], storage = new Map();
   function element(id) {
     const classes = new Set();
@@ -22,13 +22,14 @@ function setup({ source = 'reanime', current = [], quarterShows = [], quarterSel
       click() { this.clickCount = (this.clickCount || 0) + 1; this.onclick?.(); }
     };
   }
-  const ids = ['homeOrder', 'homeOrderNote', 'seasonTitle', 'seasonRail', 'libraryOrder', 'libraryOrderNote', 'libraryGrid', 'seeAllSeason', 'catalogFilterReset'];
+  const ids = ['homeOrder', 'homeOrderNote', 'seasonTitle', 'seasonRail', 'libraryView', 'libraryOrder', 'libraryOrderNote', 'libraryGrid', 'seeAllSeason', 'catalogFilterReset'];
   for (const id of ids) elements.set(id, element(id));
+  elements.get('libraryView').classList.add('active');
   const section = element('homeSection');
   elements.get('seasonRail').section = section;
   const homeButtons = ['season', 'updated'].map(order => { const button = element('home-' + order); button.dataset.order = order; return button; });
   const libraryButtons = ['saved', 'updated'].map(order => { const button = element('library-' + order); button.dataset.order = order; return button; });
-  const state = { source, current, season: current, quarterShows, quarterSelection, currentLabel: '', library };
+  const state = { source, current, season: current, quarterShows, quarterSelection, currentLabel: '', library, history };
   const context = vm.createContext({
     state,
     QUARTER_PROVIDERS: ['reanime', 'animenosub', 'miruro'],
@@ -107,6 +108,78 @@ test('switching back to saved order ignores an older pending library response', 
   await pending;
   assert.deepEqual(h.elements.get('libraryGrid').items.map(item => item.mal_id), ['first', 'second']);
   assert.equal(h.elements.get('libraryOrderNote').textContent, '');
+});
+
+test('library NEW markers compare uploaded episode counts for every supported source without mutating saved items', async () => {
+  const saved = [
+    { provider: 'reanime', mal_id: 'reanime:one', availableEpisodes: 6 },
+    { provider: 'miruro', mal_id: 'miruro:two', availableEpisodeCount: 6 },
+    { provider: 'animenosub', mal_id: 'animenosub:three', availableEpisodes: 6 },
+    { provider: 'ohli24', mal_id: 'ohli24:four', availableEpisodes: 6 }
+  ];
+  const updates = {
+    reanime: { provider: 'reanime', mal_id: 'reanime:one', availableEpisodes: 7, subbed: 7, dubbed: 6 },
+    miruro: { provider: 'miruro', mal_id: 'miruro:two', availableEpisodeCount: 7 },
+    animenosub: { provider: 'animenosub', mal_id: 'animenosub:three', availableEpisodes: 7 },
+    ohli24: { provider: 'ohli24', mal_id: 'ohli24:four', availableEpisodes: 7 }
+  };
+  const h = setup({ library: saved, feed: async provider => ({ data: [updates[provider]], nextOffset: 36, done: true }) });
+
+  await h.context.api.renderLibrary();
+
+  assert.deepEqual(h.elements.get('libraryGrid').items.map(item => item.libraryUpdateNew), [true, true, true, true]);
+  assert.deepEqual(h.state.library, saved);
+});
+
+test('unknown legacy episode baselines are initialized once and later episode growth is marked NEW', async () => {
+  const saved = { provider: 'ohli24', mal_id: 'ohli24:legacy', title: '기존 작품' };
+  const update = { provider: 'ohli24', mal_id: saved.mal_id, availableEpisodes: 12 };
+  const h = setup({ library: [saved], feed: async () => ({ data: [update], nextOffset: 36, done: true }) });
+
+  await h.context.api.renderLibrary();
+  assert.equal(h.elements.get('libraryGrid').items[0].libraryUpdateNew, undefined);
+  assert.equal(JSON.parse(h.storage.get('libraryUpdateBaselines'))['ohli24:ohli24:legacy'], 12);
+
+  update.availableEpisodes = 13;
+  await h.context.api.renderLibrary();
+  assert.equal(h.elements.get('libraryGrid').items[0].libraryUpdateNew, true);
+});
+
+test('watching a newly available episode advances its baseline and hides NEW', async () => {
+  const saved = { provider: 'animenosub', mal_id: 'animenosub:show', availableEpisodes: 6 };
+  const update = { provider: 'animenosub', mal_id: saved.mal_id, availableEpisodes: 7 };
+  const h = setup({ library: [saved], feed: async () => ({ data: [update], nextOffset: 2, done: true }) });
+
+  await h.context.api.renderLibrary();
+  assert.equal(h.elements.get('libraryGrid').items[0].libraryUpdateNew, true);
+  h.context.api.markEpisodeSeen(saved, { number: 7 });
+  await h.context.api.renderLibrary();
+  assert.equal(h.elements.get('libraryGrid').items[0].libraryUpdateNew, undefined);
+});
+
+test('library update sources are queried only while the library view is active', async () => {
+  const h = setup({ library: [{ provider: 'reanime', mal_id: 'reanime:show', availableEpisodes: 1 }] });
+  h.elements.get('libraryView').classList.remove('active');
+
+  await h.context.api.renderLibrary();
+
+  assert.deepEqual(h.calls, []);
+});
+
+test('a watched latest episode suppresses NEW but another provider history does not', async () => {
+  const saved = { provider: 'reanime', mal_id: 'reanime:show', availableEpisodes: 6 };
+  const update = { provider: 'reanime', mal_id: saved.mal_id, availableEpisodes: 7 };
+  const h = setup({
+    library: [saved],
+    history: [{ anime: { provider: 'miruro', mal_id: saved.mal_id }, episode: { number: 7 }, progress: 80 }],
+    feed: async () => ({ data: [update], nextOffset: 36, done: true })
+  });
+
+  await h.context.api.renderLibrary();
+  assert.equal(h.elements.get('libraryGrid').items[0].libraryUpdateNew, true);
+  h.state.history[0].anime.provider = 'reanime';
+  await h.context.api.renderLibrary();
+  assert.equal(h.elements.get('libraryGrid').items[0].libraryUpdateNew, undefined);
 });
 
 test('unsupported provider hides home update ordering and recent see-all opens the updated catalog', async () => {
