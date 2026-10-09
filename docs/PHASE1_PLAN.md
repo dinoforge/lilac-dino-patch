@@ -162,3 +162,12 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 - 실제 packaged renderer/preload/main 흐름에서 `테스트 애니` 검색 후 작품 상세를 열고 `1화 이어보기`를 눌렀다. 미리 심은 96% 기록에 대해 처음부터/이어보기 선택지가 모두 보였고, 합성 12초 MP4가 11.5초에서 멈췄으며 기록은 96%로 유지됐다.
 - 회차의 합성 VTT에서 `language=ko`, `mode=showing`, 활성 cue `한국어 합성 자막`을 확인했다. 이 결과는 Chromium 트랙 상태 증거이며 픽셀 캡처나 실제 영상·자막 검증은 아니다.
 - 검증 한계: 공급원 IPC·MP4·VTT는 모두 합성이다. 실제 Re:Anime 응답, 외부 스트림, 회차·영상판 자막 일치, NSIS 설치 앱, 기존 프로필은 확인하지 않았다. 외부 네트워크 요청은 시도되지 않았다.
+
+## 2026-10-09 홈 발견·내 목록 패키지 UI 스모크
+
+- `dist/win-unpacked`의 사본을 격리 폴더에서 실행했다. `LilacAnime.exe` 바이너리는 원본과 SHA-256이 같고, 테스트 ASAR는 main 진입점을 harness로 바꿔 실제 `electron/main.cjs`를 불렀다. 별도 `userData`·`sessionData`를 사용했다.
+- renderer를 열기 전 `provider:catalog`·`provider:quarter`·`provider:airing`·`provider:latest-episodes`·`catalog:updates`·`linkkf:home`·`linkkf:schedule` mock 등록을 확인했다. 요청 차단기를 설치했으며 성공 실행의 차단 기록·렌더러 예외는 모두 0건이다.
+- Re:Anime: 2026년 4분기 작품과 `최신 방영 회차` EP.8·`방영 중` 카드 표시, 1분기 탭 선택 후 2026년 1분기 제목과 카드 전환을 확인했다.
+- Animenosub: 소스를 바꾸자 `최신 업데이트 회차` 줄에 EP.12 합성 작품이 나타났다. Linkkf: UP·월~일 탭 8개, 현재 금요일 자동 선택과 금요일 작품 표시, 월요일 클릭 뒤 선택 상태·작품 전환을 확인했다.
+- 내 목록: 격리 프로필에 7화 기준 작품을 넣고 12화 합성 업데이트를 반환하자 `NEW` 배지가 표시됐다. 모든 결과는 packaged renderer의 DOM 상태에서 확인했다.
+- 검증 한계: 실제 공급원 응답·작품/회차 일치·사이트 영상, 설치 NSIS 앱과 픽셀 레이아웃은 검증하지 않았다. 데이터는 합성이고 기존 프로필은 사용하지 않았다.
