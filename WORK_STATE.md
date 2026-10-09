@@ -431,3 +431,10 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - `npm run test:phase1-source-restart`가 패키지 Electron 앱을 같은 임시 프로필로 두 번 실행한다. 첫 프로세스에서 설정 버튼으로 Animenosub을 고르고 renderer 재로드를 확인한 다음 프로세스를 종료했다. 두 번째 프로세스는 localStorage 설정값·공급원 선택 UI·Animenosub 분기 홈 카드를 다시 읽었다.
 - 첫 실행은 합성 fixture 17회, 재시작 뒤 실행은 7회였고, 두 실행 모두 미등록 main fetch와 외부 브라우저 요청이 없었다. 프로필은 OS 임시 폴더에서 만들고 두 프로세스 종료 뒤 제거했다.
 - 검증: `npm run test:phase1-source-restart`, `npm run test:phase1-main`(fixture 82회), `npm run test:phase1-electron`, `npm test`(221/221), 두 테스트 파일 `node --check`, `git diff --check` 통과. 기존 사용자 프로필과 설치 NSIS UI는 사용하지 않았다.
+
+## 2026-10-10 패키지 검색 UI에서 회차 재생까지
+
+- `tests/phase1-main.electron.cjs`가 실제 패키지 renderer의 검색 입력과 검색 버튼을 눌러 Re:Anime 검색 결과를 만들고, 작품 카드→상세→1화 버튼으로 재생한다. 검색·상세·회차 해석은 패키지 preload와 main IPC를 통과하며, 한국어 제목·회차 버튼·`provider:resolve` 호출 증가를 확인한다.
+- 재생 검증은 합성 320×180 HLS와 합성 한국어 VTT cue를 사용했다. 영상 디코드·cue 표시, 50% 이어보기 저장 후 약 2초 위치 복원, HD-2 오류 뒤 HD-1 대체 재생과 선택 자막 복구가 통과했다. 앱 프로세스·프로필은 격리했고 Kairan/Csora/Anissia 자동 검색은 이 경로에서 호출하지 않았다.
+- 최종 `npm run test:phase1-main` 결과: 합성 HTTP fixture 89회, FlixCloud 요청 4회가 로컬 fixture로 리디렉션, 알 수 없는 fetch 0, 외부 브라우저 요청 0, 외부 네트워크 0. `npm run test:phase1-electron`, `npm test`(221/221), `node --check tests/phase1-main.electron.cjs`, `git diff --check`도 통과했다.
+- 기능 코드는 바꾸지 않았고 검증 스크립트·`WORK_STATE.md`·`docs/FEATURE_GAP.md`만 수정했다. 실제 공급원 응답·작품/회차/영상판 일치·커뮤니티 자막 매칭·설치 NSIS UI는 여전히 미검증이다.

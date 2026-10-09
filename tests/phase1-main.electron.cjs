@@ -280,6 +280,14 @@ function fixtureResponse(rawUrl, requestInit = {}) {
     fixtureRequests.push(url.href);
     return response('WEBVTT\n\n00:00:01.000 --> 00:00:03.000\n합성 한국어 자막\n', 200, 'text/vtt');
   }
+  if (url.hostname === 'jimaku.cc' && url.pathname === '/') {
+    fixtureRequests.push(url.href);
+    return response(`<!doctype html><html><body><div class="entry" data-extra='{"anilist_id":62001}'><a href="/entry/62001">Fixture</a></div></body></html>`, 200, 'text/html; charset=utf-8');
+  }
+  if (url.hostname === 'jimaku.cc' && url.pathname === '/entry/62001') {
+    fixtureRequests.push(url.href);
+    return response('<!doctype html><html><body></body></html>', 200, 'text/html; charset=utf-8');
+  }
   if (url.hostname === 'api.aniskip.com' && url.pathname.startsWith('/v2/skip-times/')) {
     fixtureRequests.push(url.href);
     return response({ found: true, results: [] });
@@ -741,19 +749,57 @@ app.whenReady().then(async () => {
 
     const fixtureEpisode = JSON.stringify(detail.episodes[0]);
     const playbackTitle = `${animeFixture.title.english} · 1화`;
-    const playbackStarted = await win.webContents.executeJavaScript(`(async () => {
-      if (typeof window.resolveIntoPlayer !== 'function') return false;
-      const episode = ${fixtureEpisode};
-      await window.resolveIntoPlayer(
-        () => window.lilac.providerResolve(episode),
-        ${JSON.stringify(playbackTitle)},
-        { episode, serverOverride: 'HD-2' },
-        ${JSON.stringify(animeFixture.title.english)},
-        1
-      );
-      return true;
+    const uiSearchCallsBefore = fixtureRequests.filter(rawUrl => new URL(rawUrl).searchParams.get('q') === SEARCH_TITLE).length;
+    await win.webContents.executeJavaScript(`(() => {
+      LilacIntegratedSearch.PROVIDERS.splice(0, LilacIntegratedSearch.PROVIDERS.length, 'reanime');
+      const searchProviders = LilacIntegratedSearch.searchProviders;
+      LilacIntegratedSearch.searchProviders = options => searchProviders({ ...options, localSearch: async () => null });
+      window.onlineSubtitleFor = async () => null;
+      document.querySelector('#pageSearch').value = ${JSON.stringify(SEARCH_TITLE)};
+      document.querySelector('#searchButton').click();
     })()`);
-    assert.equal(playbackStarted, true, 'the packaged renderer resolved the episode through its production player flow');
+    const uiSearchResult = await waitFor('packaged search UI result from actual Re:Anime IPC', () =>
+      win.webContents.executeJavaScript(`(() => {
+        const cards = [...document.querySelectorAll('#searchGrid .anime-card')];
+        const card = cards.find(item => item.textContent.includes(${JSON.stringify(animeFixture.title.english)}));
+        return card ? { count: cards.length, text: card.textContent } : null;
+      })()`), 25000);
+    assert.equal(uiSearchResult.count, 1, 'the renderer search button and actual Re:Anime IPC produced one isolated fixture result');
+    assert.match(uiSearchResult.text, /Main Handler Fixture/);
+    assert.ok(fixtureRequests.filter(rawUrl => new URL(rawUrl).searchParams.get('q') === SEARCH_TITLE).length > uiSearchCallsBefore,
+      'the renderer search button reached the packaged Re:Anime catalog handler');
+    const uiDetailCallsBefore = fixtureRequests.filter(url => url.includes(`/api/v1/anime/${SLUG}/episodes`)).length;
+    await win.webContents.executeJavaScript("document.querySelector('#searchGrid .anime-card').click()");
+    await waitFor('packaged detail dialog opened from the search result click', () =>
+      win.webContents.executeJavaScript("Boolean(document.querySelector('#detailDialog')?.open)"), 5000);
+    const uiDetail = await waitFor('packaged detail dialog and episode from the actual Re:Anime handler', () =>
+      win.webContents.executeJavaScript(`(() => {
+        const episode = document.querySelector('#episodeBlock .episode-btn');
+        const content = document.querySelector('#detailContent')?.textContent || '';
+        if (!document.querySelector('#detailDialog')?.open || content.includes('작품 정보를 불러오는 중')) return null;
+        return {
+          episode: episode?.textContent.trim() || '',
+          title: document.querySelector('#detailContent h1')?.textContent.trim() || '',
+          error: content.slice(0, 500)
+        };
+      })()`), 25000);
+    assert.match(uiDetail.title, /메인 처리기 검증 작품/, JSON.stringify(uiDetail));
+    assert.ok(uiDetail.episode, `the detail UI should render an episode button: ${JSON.stringify(uiDetail)}`);
+    assert.ok(fixtureRequests.filter(url => url.includes(`/api/v1/anime/${SLUG}/episodes`)).length > uiDetailCallsBefore,
+      'clicking the search result reached the packaged Re:Anime detail handler');
+    const resolveCallsBeforeUiPlay = fixtureRequests.filter(url => url.includes(`/api/watch/${SLUG}/1`)).length;
+    await win.webContents.executeJavaScript("document.querySelector('#episodeBlock .episode-btn').click()");
+    await waitFor('episode button playback through packaged provider:resolve IPC and Korean subtitle', async () =>
+      win.webContents.executeJavaScript(`(() => {
+        const video = document.querySelector('#video');
+        const cueText = [...(video?.textTracks?.[0]?.activeCues || [])].map(cue => cue.text).join(' ');
+        const ready = video?.readyState >= 2 && video.videoWidth === 320 && video.videoHeight === 180
+          && video.currentTime >= 1 && cueText.includes('합성 한국어 자막');
+        if (ready) video.pause();
+        return ready;
+      })()`), 25000);
+    const resolveCallsAfterUiPlay = fixtureRequests.filter(url => url.includes(`/api/watch/${SLUG}/1`)).length;
+    assert.ok(resolveCallsAfterUiPlay > resolveCallsBeforeUiPlay, 'clicking the actual episode button reached the packaged main process resolver');
     await waitFor('packaged HLS video decode and Korean cue', async () => win.webContents.executeJavaScript(`(() => {
       const video = document.querySelector('#video');
       const cueText = [...(video?.textTracks?.[0]?.activeCues || [])].map(cue => cue.text).join(' ');
@@ -958,7 +1004,7 @@ app.whenReady().then(async () => {
     assert.equal(deniedUnknownFetches.length, 0, `no unregistered main-process URL was requested: ${deniedUnknownFetches.join(', ')}`);
     assert.equal(deniedBrowserRequests.length, 0, `no external browser request was allowed or attempted: ${deniedBrowserRequests.join(', ')}`);
 
-    console.log('Packaged Phase 1 smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs and Re:Anime quarter selection UI, Re:Anime latest-airing UI, Linkkf current-day/weekday schedule UI, Animenosub/Ani24 update feeds and Animenosub recent-updates home card, settings source selection and reload into the Animenosub home, search/detail/episodes, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
+    console.log('Packaged Phase 1 smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs and Re:Anime quarter selection UI, Re:Anime latest-airing UI, Linkkf current-day/weekday schedule UI, Animenosub/Ani24 update feeds and Animenosub recent-updates home card, settings source selection and reload into the Animenosub home, renderer search button → result card → detail → episode button → packaged resolver playback, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
     console.log(`Playback: ${playbackState.width}x${playbackState.height} at ${playbackState.currentTime.toFixed(2)}s; resume: ${resumeState.currentTime.toFixed(2)}s from saved 50%; fallback: ${fallbackState.server} at ${fallbackState.currentTime.toFixed(2)}s with selected subtitle; synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; renderer proxy requests: ${rendererProxyRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: 0; blocked browser requests: 0; external network calls: 0.`);
     await new Promise(resolve => localPlayerServer.close(resolve));
     app.quit();
