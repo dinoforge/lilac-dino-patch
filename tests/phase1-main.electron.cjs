@@ -401,9 +401,107 @@ async function runSourceRestartProbe(win) {
     };
   })()`), 25000);
   assert.equal(restored.selected, true, 'the selected provider is reflected in settings after the renderer starts');
+  let resumeState = null;
+  if (restartMode === 'seed') {
+    const search = await win.webContents.executeJavaScript(
+      `window.lilac.providerCatalog('reanime', ${JSON.stringify(SEARCH_TITLE)}, 0, '')`
+    );
+    assert.equal(search.data.length, 1, 'the seed process found the Re:Anime restart fixture');
+    const detail = await win.webContents.executeJavaScript(
+      `window.lilac.providerDetail(${JSON.stringify(search.data[0])})`
+    );
+    assert.equal(detail.episodes.length, 1, 'the seed process loaded the restart fixture episode');
+    const episode = JSON.stringify(detail.episodes[0]);
+    const anime = JSON.stringify(detail.data);
+    const stream = await win.webContents.executeJavaScript(`window.lilac.providerResolve(${episode})`);
+    const proxyOrigin = new URL(stream.url).origin;
+    assert.equal(new URL(stream.url).hostname, '127.0.0.1', 'the seed playback resolves to the app-owned loopback proxy');
+    allowedBrowserOrigins.add(proxyOrigin);
+    await win.webContents.executeJavaScript(`(async () => {
+      const episode = ${episode}, anime = ${anime};
+      await window.resolveIntoPlayer(
+        () => window.lilac.providerResolve(episode),
+        ${JSON.stringify(`${animeFixture.title.english} · 1화`)},
+        { episode, anime, serverOverride: 'HD-2' },
+        ${JSON.stringify(animeFixture.title.english)},
+        1
+      );
+      return true;
+    })()`);
+    await waitFor('seed process decodes the fixture episode before saving progress', () =>
+      win.webContents.executeJavaScript(`(() => {
+        const video = document.querySelector('#video');
+        return video?.readyState >= 2 && video.videoWidth === 320 && video.videoHeight === 180;
+      })()`), 20000).catch(async error => {
+        const playback = await win.webContents.executeJavaScript(`(() => ({
+          view: document.querySelector('.view.active')?.id || '',
+          readyState: document.querySelector('#video')?.readyState || 0,
+          currentTime: document.querySelector('#video')?.currentTime || 0,
+          width: document.querySelector('#video')?.videoWidth || 0,
+          height: document.querySelector('#video')?.videoHeight || 0,
+          server: currentPlaybackContext?.videoServer || '',
+          url: currentPlaybackContext?.currentUrl || '',
+          resolving: Boolean(currentPlaybackContext?.resolving),
+          playerMeta: document.querySelector('#playerMeta')?.textContent || '',
+          downloadStatus: document.querySelector('#downloadStatus')?.textContent || ''
+        }))()`);
+        throw new Error(`${error.message}; seed player snapshot: ${JSON.stringify(playback)}; recent fixture requests: ${JSON.stringify(fixtureRequests.slice(-12))}; denied fetches: ${JSON.stringify(deniedUnknownFetches)}`);
+      });
+    const savedPosition = await win.webContents.executeJavaScript(`(() => {
+      const video = document.querySelector('#video');
+      video.currentTime = 2;
+      video.dispatchEvent(new Event('timeupdate'));
+      video.pause();
+      return { currentTime: video.currentTime, duration: video.duration };
+    })()`);
+    assert.ok(savedPosition.duration >= 3.8 && savedPosition.duration <= 4.2, JSON.stringify(savedPosition));
+    const savedCard = await waitFor('50 percent progress saved before the Electron process exits', () =>
+      win.webContents.executeJavaScript("document.querySelector('#continueRail .continue-card')?.innerText || ''"), 10000);
+    assert.match(savedCard, /EP\.1\s*·\s*50%/, savedCard);
+    resumeState = { savedCard, savedPosition };
+  } else {
+    const persistedCard = await waitFor('saved 50 percent watch history after a full app restart', () =>
+      win.webContents.executeJavaScript(`(() => {
+        const text = document.querySelector('#continueRail .continue-card')?.innerText || '';
+        return /EP\\.1\\s*·\\s*50%/.test(text) ? text : '';
+      })()`), 15000);
+    assert.match(persistedCard, /EP\.1\s*·\s*50%/, persistedCard);
+    const resolveCallsBeforeResume = fixtureRequests.filter(url => url.includes(`/api/watch/${SLUG}/1`)).length;
+    const savedEpisode = await win.webContents.executeJavaScript(`(() => {
+      const item = state.history.find(entry => entry.episode?.provider === 'reanime');
+      return item?.episode || null;
+    })()`);
+    assert.ok(savedEpisode, 'the restarted app restored the saved Re:Anime episode metadata');
+    const stream = await win.webContents.executeJavaScript(`window.lilac.providerResolve(${JSON.stringify(savedEpisode)})`);
+    const proxyOrigin = new URL(stream.url).origin;
+    assert.equal(new URL(stream.url).hostname, '127.0.0.1', 'the resumed episode resolves to the app-owned loopback proxy');
+    allowedBrowserOrigins.add(proxyOrigin);
+    await win.webContents.executeJavaScript(`(() => {
+      window.onlineSubtitleFor = async () => null;
+      document.querySelector('#continueRail .continue-card').click();
+    })()`);
+    await waitFor('continue card resumes the saved episode after process restart', () =>
+      win.webContents.executeJavaScript(`(() => {
+        const video = document.querySelector('#video');
+        const cues = [...(video?.textTracks?.[0]?.activeCues || [])].map(cue => cue.text).join(' ');
+        const ready = video?.readyState >= 2 && video.videoWidth === 320 && video.currentTime >= 1.8
+          && video.currentTime < 2.8 && cues.includes('합성 한국어 자막');
+        if (ready) video.pause();
+        return ready;
+      })()`), 25000);
+    const resolveCallsAfterResume = fixtureRequests.filter(url => url.includes(`/api/watch/${SLUG}/1`)).length;
+    assert.ok(resolveCallsAfterResume > resolveCallsBeforeResume, 'the restarted app resolved the saved episode through main IPC');
+    resumeState = await win.webContents.executeJavaScript(`(() => {
+      const video = document.querySelector('#video');
+      return { currentTime: video.currentTime, duration: video.duration,
+        cue: [...(video.textTracks?.[0]?.activeCues || [])].map(item => item.text).join(' ') };
+    })()`);
+    assert.ok(resumeState.currentTime >= 1.8 && resumeState.currentTime < 2.8, JSON.stringify(resumeState));
+    assert.match(resumeState.cue, /합성 한국어 자막/);
+  }
   assert.equal(deniedUnknownFetches.length, 0, `the source restart used only registered fixture URLs: ${deniedUnknownFetches.join(', ')}`);
   assert.equal(deniedBrowserRequests.length, 0, `the source restart made no browser requests outside local fixtures: ${deniedBrowserRequests.join(', ')}`);
-  console.log(`Source restart ${restartMode} passed: ${restored.source}, ${restored.title}; fixture calls: ${fixtureRequests.length}; unknown fetches: 0; blocked browser requests: 0.`);
+  console.log(`Source restart ${restartMode} passed: ${restored.source}, ${restored.title}; resume evidence: ${JSON.stringify(resumeState)}; fixture calls: ${fixtureRequests.length}; unknown fetches: 0; blocked browser requests: 0.`);
 }
 
 app.on('session-created', blockSessionRequests);

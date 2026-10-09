@@ -54,7 +54,7 @@ function runProcess(mode) {
     console.log(seeded);
     const restored = await runProcess('verify');
     console.log(restored);
-    console.log('Packaged source setting survived a full Electron process exit and restart with the same isolated profile.');
+    console.log('Packaged source setting and 50 percent playback progress survived a full Electron process exit and restart; the saved episode resumed with its Korean subtitle cue.');
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
