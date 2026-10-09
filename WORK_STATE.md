@@ -103,7 +103,7 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 - `docs/DEPENDENCY_LICENSE_INVENTORY.md`를 추가했다. `package-lock.json` 기준 프로덕션 의존성 45개, 직접 개발 의존성, FFmpeg/JASSUB 번들, 첫 실행 시 내려받는 llama.cpp 및 GGUF 모델, 추적 가능한 이미지 에셋을 항목별로 정리했다.
 - 최우선 배포 차단은 설치 패키지에 포함되는 GPLv3 FFmpeg 바이너리의 정확한 대응 소스·고지·배포 조건이다. JASSUB는 여러 라이선스가 결합된 메타데이터와 단일 MIT 파일 복사 사이의 고지 범위를 대조해야 한다.
-- Gyan/FFmpeg 공식 안내와 현재 unpacked 앱도 대조했다. 바이너리 README·GPL 텍스트는 패키지에 있지만, 해당 빌드 전체의 대응 소스 아카이브와 재현 가능한 빌드 묶음은 없다. Gyan은 정적 Windows essentials 빌드를 GPLv3로 표시하고 `libx264`·`libx265`를 열거한다. 이로부터 Electron 앱 전체의 라이선스를 추정하지 않는다.
+- `ffmpeg-static@5.3.0`의 현재 Windows 바이너리를 직접 실행해 6.1.1 essentials/GPL v3, `--enable-gpl`, 정적 구성과 FFmpeg 본체 커밋 `e38092ef93`을 확인했다. README에는 외부 라이브러리 버전도 나열돼 있다. 실행 파일 SHA-256은 `04E1307997530F9CF2FE35CBA2CA7E8875CA91DA02F89D6C7243DF819C94AD00`이며, `node_modules`와 unpacked 앱 바이너리가 일치한다. 패키지에는 README·GPL 고지가 있지만 전체 Gyan 빌드 레시피와 외부 라이브러리 source snapshot/patch는 없다. FFmpeg 별도 프로세스가 앱에 미치는 법적 효과는 여기서 결론 내리지 않는다.
 - 모델 사용 조건도 확정되지 않았다. HY-MT1.5 7B 저장소는 대한민국을 적용 지역에서 제외하며, Aya Expanse GGUF는 CC-BY-NC-4.0을 표시한다. Gemma 4, ja-ko-vn 및 legacy GGUF 저장소별 조건은 추가 확인이 필요하다. 모델 파일은 내려받거나 변경하지 않았다.
 - 로고·아이콘 파일 해시를 기록했지만 출처·재배포 권한은 미확인이다. 현재 unpacked Electron 앱에서 Electron/Chromium 라이선스 파일을 확인했다.
 - 문서 전용 변경이므로 앱 테스트와 패키징은 실행하지 않았다. `git diff --check`로 문서 패치만 확인한다. 외부 영상·자막 요청, 기존 사용자 데이터 접근, 릴리스 배포는 하지 않았다.
@@ -146,7 +146,7 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 ## 다음
 
-1. 배포할 FFmpeg 구성을 정한다. 현재 Gyan 빌드의 전체 대응 소스·외부 라이브러리·빌드 조건을 확보해 제공하는 방안과, 다른 허가된 빌드 또는 사용자 제공 실행 파일을 쓰는 방안을 비교한다. 어떤 경로든 다운로드 remux와 OP/ED 지문 기능을 함께 검증한다.
+1. 배포할 FFmpeg 구성을 정한다. 현재 번들은 FFmpeg 6.1.1 Gyan essentials 정적 GPLv3 빌드이며, README에 본체 커밋·설정·외부 라이브러리 버전이 기록돼 있다. 앱 코드는 `-c copy` remux와 오디오 디코딩만 호출한다. 기존 빌드의 완전한 대응 소스·빌드 자료를 함께 제공하는 방안, `--enable-gpl`·`--enable-nonfree` 없이 구성한 후보 빌드, 사용자 제공 실행 파일을 비교하고, 선택한 빌드로 다운로드 remux와 OP/ED 지문을 검증한다. FFmpeg 본체 라이선스만으로 앱 전체를 단정하지 않는다.
 2. JASSUB 2.5.16 npm 산출물에 대응하는 source commit·submodule revision과 `default.woff2` 출처를 확인한다. 검증 가능한 전체 고지를 생성해 NSIS 패키지에 넣고 각 파일이 실제 포함되는지 검사한다.
 3. AI GGUF 모델 저장소별 조건을 완성한다. 대한민국에서 허용되지 않는 HY-MT1.5 7B legacy 항목은 이용 제한 또는 권리 확인 없이는 사용할 수 있다고 안내하지 않는다. 사용자 임의 모델은 별도 경계를 둔다.
 4. 프로젝트 코드·로고·아이콘 재배포 허가와 AniList 보완성, TMDB·AI 기능 결합 조건을 해결하기 전까지 공개 저장소·설치 파일 배포와 실사이트 콘텐츠 요청은 보류한다. 권리 해결 후 검색→상세→회차 재생→자막→이어보기 실제 인수 검증을 계획한다.
