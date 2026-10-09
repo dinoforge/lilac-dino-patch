@@ -1749,7 +1749,7 @@ async function findAnissiaSubtitle(title,episode,{originalTitle='',offsets=[],ma
       // The post Anissia links belongs to this anime even when the maker spells the title differently
       // ("후리렌 1기(完)" for 장송의 프리렌), so it is ranked under the Anissia title.
       const naver=naverBlogRef(caption.website);
-      const linked=naver?(naver.logNo?await naverPost(naver.blogId,naver.logNo).then(post=>({...post,title:`${anime.subject} ${post.pageTitle}`.trim()})).catch(()=>null):null):await anissiaLinkedPost(caption.website,anime.subject,origin);
+      const linked=naver?(naver.logNo?await naverPost(naver.blogId,naver.logNo).then(post=>({...post,title:`${anime.subject} ${post.pageTitle}`.trim()})).catch(error=>{lastError=error;return null}):null):await anissiaLinkedPost(caption.website,anime.subject,origin);
       if(/\.blogspot\.com$/i.test(host)){
         const posts=[...await communityPosts(origin),...(linked?[linked]:[])];
         for(const name of [anime.subject,title])if(!match)match=rankCommunityPosts(posts,name,episode,originalTitle,{offsets})[0];
@@ -1764,7 +1764,7 @@ async function findAnissiaSubtitle(title,episode,{originalTitle='',offsets=[],ma
         const numbered=post=>{const postSeason=communitySeason(communityPostTitle(post.title)),episodes=communityPostEpisodes(post.title);return ((postSeason??1)===season&&episodes.has(episode))||(season>1&&postSeason==null&&offsets.some(offset=>episodes.has(episode+offset)))};
         const base=value=>communityTitle(value).replace(/\s*(?:\d+\s*기|season\s*\d+|시즌\s*\d+)\s*$/i,'');
         const likely=listed.filter(post=>numbered(post)&&Math.max(communityScore(base(anime.subject),communityPostTitle(post.title)),communityScore(base(title),communityPostTitle(post.title)))>=.52).slice(0,4);
-        for(const post of likely){try{post.html=naver?(await naverPost(naver.blogId,post.logNo)).html:await providerFetch(post.url,{referer:`${origin}/`})}catch{post.html=''}}
+        for(const post of likely){try{post.html=naver?(await naverPost(naver.blogId,post.logNo)).html:await providerFetch(post.url,{referer:`${origin}/`})}catch(error){post.html='';lastError=error}}
         const posts=[...likely.filter(post=>post.html),...(linked&&!likely.some(post=>post.url===linked.url)?[linked]:[])];
         for(const name of [anime.subject,title])if(!match)match=rankCommunityPosts(posts,name,episode,originalTitle,{offsets})[0];
         // No download link: the files may be packed into the post's image (WinPNG). The episode's own posts first,
@@ -1772,7 +1772,7 @@ async function findAnissiaSubtitle(title,episode,{originalTitle='',offsets=[],ma
         if(!match&&/\.tistory\.com$/i.test(host)){
           const episodePosts=new Set(likely.map(post=>post.url));
           for(const url of [...new Set([...episodePosts,linked?.url||caption.website].filter(Boolean))].slice(0,3)){
-            const result=await winPngSubtitle(url,anime.subject,episode,{matched:episodePosts.has(url)}).catch(()=>null);
+            let result=null;try{result=await winPngSubtitle(url,anime.subject,episode,{matched:episodePosts.has(url)})}catch(error){lastError=error}
             if(result)return {...result,maker:caption.name,anissiaTitle:anime.subject};
           }
         }

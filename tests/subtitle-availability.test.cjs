@@ -84,7 +84,7 @@ test('the next title variant can still return a matching subtitle', async () => 
   assert.equal(result.searchTitle, '제목 B');
 });
 
-function createAnissiaContext(tistoryPosts, { captions, linkedPost } = {}) {
+function createAnissiaContext(tistoryPosts, { captions, linkedPost, fetchPost, extractWinPng } = {}) {
   const context = vm.createContext({
     URL,
     anissiaMakers: async () => ({ anime: { subject: '테스트 작품' }, captions: captions || [{ website: 'https://maker.tistory.com/post', name: 'maker' }] }),
@@ -98,8 +98,8 @@ function createAnissiaContext(tistoryPosts, { captions, linkedPost } = {}) {
     communityTitle: value => value,
     communityPostTitle: post => post.title || '',
     rankCommunityPosts: posts => posts.length ? [{ links: [] }] : [],
-    providerFetch: async () => 'fixture',
-    winPngSubtitle: async () => null,
+    providerFetch: fetchPost || (async () => 'fixture'),
+    winPngSubtitle: extractWinPng || (async () => null),
     downloadCommunityMatch: async () => ({ path: 'found.vtt' })
   });
   vm.runInContext(`${failureHelpers}\n${anissiaFinder}\nthis.findAnissiaSubtitle = findAnissiaSubtitle;`, context);
@@ -137,6 +137,28 @@ test('Anissia continues to later makers after an earlier maker fails', async () 
   const result = await context.findAnissiaSubtitle('테스트 작품', 1);
   assert.equal(result.path, 'found.vtt');
   assert.equal(result.maker, 'second');
+});
+
+test('Anissia preserves a post-body fetch error as a failed check', async () => {
+  const context = createAnissiaContext(async () => [{ title: '테스트 작품 1화', url: 'https://maker.tistory.com/post', html: 'index' }], {
+    fetchPost: async () => { throw new Error('Tistory post HTTP 503'); }
+  });
+
+  await assert.rejects(
+    context.findAnissiaSubtitle('테스트 작품', 1),
+    error => error.message === 'Tistory post HTTP 503' && helpers.subtitleAvailabilityStatusFromError(error) === 'error'
+  );
+});
+
+test('Anissia preserves an image subtitle extraction error as a failed check', async () => {
+  const context = createAnissiaContext(async () => [], {
+    extractWinPng: async () => { throw new Error('WinPNG HTTP 502'); }
+  });
+
+  await assert.rejects(
+    context.findAnissiaSubtitle('테스트 작품', 1),
+    error => error.message === 'WinPNG HTTP 502' && helpers.subtitleAvailabilityStatusFromError(error) === 'error'
+  );
 });
 
 test('per-episode source chips are connected to online checks and retain the selected provider', () => {
