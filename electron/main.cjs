@@ -1441,9 +1441,17 @@ function communityLinks(post,episode){
   return {links:chosen?withFonts([chosen]):[],episode:number,strict:Boolean(chosen&&!chosen.episodes.list.includes(number))};
 }
 // "S02E05" counts as episode 5 only, and a CRC tag ("[5A2B3C4D]") is not an episode number.
-function communityFileMatches(file,episode){
-  const name=path.basename(file).normalize('NFKC').replace(/\.[^.]+$/,'').replace(/\b(?:s\d+|season\s*\d+|\d{3,4}p|x26[45]|h\.?26[45]|(?:19|20)\d{2})\b|\bs\d{1,2}(?=e\d)|\[[0-9a-f]{8}\]|\d+\s*기/gi,' ');
-  return new RegExp(`(?:^|[^0-9])(?:e|ep|episode)?\\s*0*${episode}(?:v\\d)?(?:[^0-9]|$)`,'i').test(name);
+function communityFileEpisodeNumbers(file){
+  const name=path.basename(file).normalize('NFKC').replace(/\.[^.]+$/,'').replace(/\b\d+\.\d+\b|\b\d+\s*[- ]?bit\b/gi,' ').replace(/\b(?:s\d+|season\s*\d+|\d{3,4}p|x26[45]|h\.?26[45]|(?:19|20)\d{2})\b|\bs\d{1,2}(?=e\d)|\[[0-9a-f]{8}\]|\d+\s*기/gi,' ');
+  return new Set([...name.matchAll(/(?:\b(?:episode|ep|e)\s*0*(\d{1,3})(?:v\d)?\b|(?<![\p{L}\p{N}])0*(\d{1,3})(?:v\d)?(?![\p{L}\p{N}]))/giu)].map(match=>Number(match[1]||match[2])).filter(number=>number>0));
+}
+function communityFileMatches(file,episode){return communityFileEpisodeNumbers(file).has(Number(episode))}
+function selectCommunitySubtitleCandidate(candidates,episode,strict=false,fileSize=file=>fs.statSync(file).size){
+  const exact=candidates.find(file=>communityFileMatches(file,episode));if(exact)return exact;
+  // A direct post may point to an unnumbered subtitle, but a file explicitly numbered for another episode is never a fallback.
+  if(candidates.some(file=>communityFileEpisodeNumbers(file).size))return null;
+  if(strict)return Number(episode)===1?candidates.slice().sort((a,b)=>fileSize(b)-fileSize(a))[0]||null:null;
+  return candidates[0]||null;
 }
 const COMMUNITY_FILE=/\.(ass|ssa|srt|vtt|smi|ttf|otf|ttc)$/i;
 function communityFileName(name){return path.basename(String(name).replace(/\\/g,'/')).normalize('NFC').replace(/[^\p{L}\p{N}._ -]/gu,'_')}
@@ -1542,9 +1550,7 @@ async function downloadCommunityMatch(match,source,title,episode){
       const out=path.join(dir,`${source}_${Date.now()}_${candidates.length}${ext}`);fs.writeFileSync(out,buffer);candidates.push(out);
     }catch{/* Try remaining links. */}
   }
-  // A movie bundle has no numbered files (the main script, an MV, an older version...): take the largest.
-  const unnumbered=episode===1&&!candidates.some(x=>communityFileMatches(x,2)),largest=()=>candidates.slice().sort((a,b)=>fs.statSync(b).size-fs.statSync(a).size)[0];
-  const selected=candidates.find(x=>communityFileMatches(x,match.episode))||(!match.strict?candidates[0]:unnumbered?largest():null);if(!selected)throw new Error('사용 가능한 자막 파일을 추출하지 못했습니다.');return subtitleResult(selected,{source,post:match.post.url,postTitle:match.post.title,all:candidates});
+  const selected=selectCommunitySubtitleCandidate(candidates,match.episode,Boolean(match.strict));if(!selected)throw subtitleNotFoundError('요청한 회차에 맞는 자막 파일을 찾지 못했습니다.');return subtitleResult(selected,{source,post:match.post.url,postTitle:match.post.title,all:candidates});
 }
 // Some makers pack their subtitles into the post's image instead of linking a file (WinPNG,
 // https://github.com/harnenim/WinPNG). The blog's own viewer decodes the image and converts Jamaker projects (.jmk) to
