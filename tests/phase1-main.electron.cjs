@@ -359,6 +359,55 @@ app.whenReady().then(async () => {
     assert.equal(playbackState.subtitleMode, 'showing');
     assert.match(playbackState.activeCueText, /합성 한국어 자막/);
 
+    await new Promise(resolve => setTimeout(resolve, 5200));
+    const progressCardText = await win.webContents.executeJavaScript(`(() => {
+      const video = document.querySelector('#video');
+      video.currentTime = 2;
+      video.dispatchEvent(new Event('timeupdate'));
+      return document.querySelector('#continueRail .continue-card')?.innerText || '';
+    })()`);
+    assert.match(progressCardText, /EP\.1\s*·\s*50%/, `the actual player stored the two-second HLS position: ${progressCardText}`);
+    await new Promise(resolve => setTimeout(resolve, 200));
+    const reloadFinished = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
+    win.webContents.reload();
+    await reloadFinished;
+    await waitFor('packaged preload after history reload', () => win.webContents.executeJavaScript('Boolean(window.lilac && window.lilac.providerResolve)'));
+    const persistedProgressText = await waitFor('continue card after history reload', async () => win.webContents.executeJavaScript(
+      "document.querySelector('#continueRail .continue-card')?.innerText || ''"
+    ), 8000);
+    assert.match(persistedProgressText, /EP\.1\s*·\s*50%/, `the updated HLS progress survives reload: ${persistedProgressText}`);
+    const resumed = await win.webContents.executeJavaScript(`(async () => {
+      const episode = ${fixtureEpisode};
+      await window.resolveIntoPlayer(
+        () => window.lilac.providerResolve(episode),
+        ${JSON.stringify(playbackTitle)},
+        { episode, serverOverride: 'HD-2', resumeProgress: 50 },
+        ${JSON.stringify(animeFixture.title.english)},
+        1
+      );
+      return true;
+    })()`);
+    assert.equal(resumed, true, 'the packaged player accepted the persisted HLS resume position');
+    await waitFor('packaged HLS playback resumed from its saved position', async () => win.webContents.executeJavaScript(`(() => {
+      const video = document.querySelector('#video');
+      const cueText = [...(video?.textTracks?.[0]?.activeCues || [])].map(cue => cue.text).join(' ');
+      const ready = video?.readyState >= 2 && video.videoWidth === 320 && video.currentTime >= 1.8
+        && video.currentTime < 2.8 && cueText.includes('합성 한국어 자막');
+      if (ready) video.pause();
+      return ready;
+    })()`), 25000);
+    const resumeState = await win.webContents.executeJavaScript(`(() => {
+      const video = document.querySelector('#video');
+      return { currentTime: video.currentTime, width: video.videoWidth, height: video.videoHeight,
+        subtitleMode: video.textTracks[0]?.mode || '',
+        activeCueText: [...(video.textTracks[0]?.activeCues || [])].map(cue => cue.text).join(' ') };
+    })()`);
+    assert.ok(resumeState.currentTime >= 1.8 && resumeState.currentTime < 2.8, JSON.stringify(resumeState));
+    assert.equal(resumeState.width, 320);
+    assert.equal(resumeState.height, 180);
+    assert.equal(resumeState.subtitleMode, 'showing');
+    assert.match(resumeState.activeCueText, /합성 한국어 자막/);
+
     assert.ok(fixtureRequests.some(url => new URL(url).searchParams.get('q') === SEARCH_TITLE), 'search reached the synthetic Re:Anime API');
     assert.ok(fixtureRequests.some(url => new URL(url).hostname === 'api.aniskip.com'), 'the player received an empty synthetic AniSkip response');
     assert.ok(fixtureRequests.some(url => url.includes(`/api/v1/anime/${SLUG}/episodes`)), 'detail reached the synthetic episode API');
@@ -367,17 +416,17 @@ app.whenReady().then(async () => {
     assert.ok(fixtureRequests.some(url => url === 'https://subtitles.invalid/phase1-ko.vtt'), 'resolved stream downloaded the synthetic Korean VTT');
     assert.ok(fixtureRequests.some(url => localBase && url === `${localBase}/master.m3u8`), 'the app proxy fetched only the synthetic loopback manifest');
     assert.ok(fixtureRequests.some(url => localBase && url === `${localBase}/segment000.ts`), 'the app proxy fetched only the synthetic loopback segment');
-    assert.equal(redirectedFlixRequests.length, 2, 'both FlixCloud fixture loads were redirected before external network access');
+    assert.equal(redirectedFlixRequests.length, 3, 'all FlixCloud fixture loads were redirected before external network access');
     assert.ok(localBrowserRequests.includes(`/e/${SLUG}`), 'the resolver loaded the local player fixture');
     assert.ok(localBrowserRequests.includes('/master.m3u8'), 'the resolver observed the synthetic HLS manifest request');
     const rendererProxyRequests = allowedLoopbackBrowserRequests.filter(url => url.startsWith(`${streamUrl.origin}/__flix/`));
-    assert.ok(rendererProxyRequests.length >= 2, 'the packaged renderer fetched the HLS manifest and media segment through the app proxy');
+    assert.ok(rendererProxyRequests.length >= 4, 'the packaged renderer fetched HLS manifests and media segments for initial play and resume');
     assert.ok(fetchAttempts.length > 0, 'the test exercised the packaged main process network boundary');
     assert.equal(deniedUnknownFetches.length, 0, `no unregistered main-process URL was requested: ${deniedUnknownFetches.join(', ')}`);
     assert.equal(deniedBrowserRequests.length, 0, `no external browser request was allowed or attempted: ${deniedBrowserRequests.join(', ')}`);
 
     console.log('Packaged Phase 1 main-process smoke passed: actual main IPC search/detail/episodes, Korean subtitle parsing and save, unavailable-server feedback, loopback HLS proxy, packaged Hls.js video decode, and Korean WebVTT cue display.');
-    console.log(`Playback: ${playbackState.width}x${playbackState.height} at ${playbackState.currentTime.toFixed(2)}s; cue: ${playbackState.activeCueText}; synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; renderer proxy requests: ${rendererProxyRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: 0; blocked browser requests: 0; external network calls: 0.`);
+    console.log(`Playback: ${playbackState.width}x${playbackState.height} at ${playbackState.currentTime.toFixed(2)}s; resume: ${resumeState.currentTime.toFixed(2)}s from saved 50%; cue: ${resumeState.activeCueText}; synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; renderer proxy requests: ${rendererProxyRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: 0; blocked browser requests: 0; external network calls: 0.`);
     await new Promise(resolve => localPlayerServer.close(resolve));
     app.quit();
   } catch (error) { fail(error); }

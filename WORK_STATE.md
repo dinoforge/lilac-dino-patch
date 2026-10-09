@@ -385,7 +385,7 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 ## 2026-10-10 패키지 HLS 재생과 자막 자동 적용 검증
 
 - `tests/phase1-main.electron.cjs`를 확장해 현재 소스와 패키지 `app.asar`의 renderer 파일 일치도 확인한다. FFmpeg로 4초짜리 합성 HLS/MPEG-TS를 만들고, 실제 패키지 main·preload·renderer의 `resolveIntoPlayer` 경로에서 영상과 Re:Anime 한국어 자막을 연결한다. AniSkip 응답은 빈 합성 fixture로 처리한다.
-- `npm run test:phase1-main` 통과: Hls.js가 합성 segment를 실제 `<video>`에서 320×180으로 디코딩했고, 재생 1.01초에 `합성 한국어 자막` cue가 `showing` 상태였다. main renderer가 앱 소유 HLS 프록시에서 manifest와 segment를 요청했다. FlixCloud 페이지 요청 2회는 loopback으로 리다이렉트했고, 미등록 main fetch 0회·차단된 외부 browser 요청 0회였다. 테스트 전용 프로필과 media는 임시 폴더에서 사용·정리했다. 미재생 99화 오류 로그는 예상한 실패 경로다.
+- `npm run test:phase1-main` 통과: Hls.js가 합성 segment를 실제 `<video>`에서 320×180으로 디코딩했고, 재생 1.02초에 `합성 한국어 자막` cue가 `showing` 상태였다. 50% 진행률이 reload 뒤 이어보기 카드에 남았고, 다시 재생했을 때 2.03초부터 같은 한국어 cue와 함께 복구됐다. main renderer는 앱 소유 HLS 프록시에서 초기 재생·이어보기 manifest와 segment를 요청했다. FlixCloud 페이지 요청 3회는 loopback으로 리다이렉트했고, 미등록 main fetch 0회·차단된 외부 browser 요청 0회였다. 테스트 전용 프로필과 media는 임시 폴더에서 사용·정리했다. 미재생 99화 오류 로그는 예상한 실패 경로다.
 - 회귀 확인: `npm run test:phase1-electron` 통과(통합 검색·자막·이어보기, 27% 저장 및 3.27초 복구, renderer 오류 0회·외부 요청 0회); `npm test` 221/221 통과. 이는 합성 공급원/영상의 패키지 renderer 검증이며 실제 Re:Anime 콘텐츠, 실제 자막 일치, 설치 NSIS 앱과 사용자 프로필은 검증하지 않는다.
 
 ## 주요 결정
