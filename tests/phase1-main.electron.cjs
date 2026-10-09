@@ -170,7 +170,7 @@ function fixtureResponse(rawUrl, requestInit = {}) {
   if (url.hostname === 'animenosub.to' && url.pathname === '/anime/'
     && url.searchParams.get('order') === 'update' && url.searchParams.get('page') === '1') {
     fixtureRequests.push(url.href);
-    return response('<article class="bs"><a href="/anime/phase1-update-series"><img alt="합성 Animenosub 최신작" src="/poster.jpg"><span class="epx">12화</span></a></article>', 200, 'text/html; charset=utf-8');
+    return response('<article class="bs"><a href="/anime/phase1-update-series"><img alt="합성 Animenosub 최신작" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="><span class="epx">12화</span></a></article>', 200, 'text/html; charset=utf-8');
   }
   if (url.hostname === 'animenosub.to' && url.pathname === '/anime/'
     && url.searchParams.get('season[0]') === 'fall-2026' && url.searchParams.get('order') === 'popular') {
@@ -410,6 +410,38 @@ app.whenReady().then(async () => {
     assert.equal(schedule.days[0][0].provider, 'linkkf');
     assert.equal(schedule.days[0][0].title, '합성 월요일 방영작');
     assert.equal(schedule.days.slice(1).reduce((total, day) => total + day.length, 0), 0);
+
+    const previousHomeSource = await win.webContents.executeJavaScript('state.source');
+    await win.webContents.executeJavaScript(`(() => {
+      state.source = 'animenosub';
+      switchView('home');
+      document.querySelector('#homeOrder [data-order="updated"]').click();
+    })()`);
+    const recentUpdateCard = await waitFor('recent-update card rendered from packaged main IPC', () =>
+      win.webContents.executeJavaScript(`(() => {
+        const card = document.querySelector('#seasonRail .anime-card');
+        const note = document.querySelector('#homeOrderNote')?.textContent || '';
+        if (document.querySelector('#seasonTitle')?.textContent !== '최근 업데이트'
+          || card?.querySelector('h3')?.textContent !== '합성 Animenosub 최신작'
+          || note !== '소스의 최근 회차 업데이트 목록입니다.') return null;
+        return {
+          title: card.querySelector('h3').textContent,
+          episode: card.querySelector('p')?.textContent || '',
+          note,
+          selected: document.querySelector('#homeOrder [data-order="updated"]')?.getAttribute('aria-checked')
+        };
+      })()`)
+    );
+    assert.match(recentUpdateCard.episode, /업로드 12화/);
+    assert.equal(recentUpdateCard.selected, 'true', 'the recent-updates sort control remains selected after rendering');
+    assert.equal(fixtureRequests.filter(rawUrl => {
+      const url = new URL(rawUrl);
+      return url.hostname === 'animenosub.to' && url.pathname === '/anime/' && url.searchParams.get('order') === 'update';
+    }).length, 1, 'the home renderer reached the real packaged catalog:updates IPC and its Animenosub feed');
+    await win.webContents.executeJavaScript(`(() => {
+      state.source = ${JSON.stringify(previousHomeSource)};
+      document.querySelector('#homeOrder [data-order="season"]').click();
+    })()`);
 
     const animenosubUpdates = await win.webContents.executeJavaScript("window.lilac.catalogUpdates('animenosub', 0)");
     assert.equal(animenosubUpdates.data.length, 1);
@@ -657,7 +689,7 @@ app.whenReady().then(async () => {
     assert.equal(deniedUnknownFetches.length, 0, `no unregistered main-process URL was requested: ${deniedUnknownFetches.join(', ')}`);
     assert.equal(deniedBrowserRequests.length, 0, `no external browser request was allowed or attempted: ${deniedBrowserRequests.join(', ')}`);
 
-    console.log('Packaged Phase 1 main-process smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs, Re:Anime/Miruro latest airing, weekday schedule, Animenosub/Ani24 update feeds, search/detail/episodes, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
+    console.log('Packaged Phase 1 smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs, Re:Anime/Miruro latest airing, weekday schedule, Animenosub/Ani24 update feeds and Animenosub recent-updates home card, search/detail/episodes, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
     console.log(`Playback: ${playbackState.width}x${playbackState.height} at ${playbackState.currentTime.toFixed(2)}s; resume: ${resumeState.currentTime.toFixed(2)}s from saved 50%; fallback: ${fallbackState.server} at ${fallbackState.currentTime.toFixed(2)}s with selected subtitle; synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; renderer proxy requests: ${rendererProxyRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: 0; blocked browser requests: 0; external network calls: 0.`);
     await new Promise(resolve => localPlayerServer.close(resolve));
     app.quit();

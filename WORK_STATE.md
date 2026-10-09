@@ -410,3 +410,9 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 2. JASSUB source commit 후보·다섯 submodule SHA를 확인했고, GPL-3.0 `rvfc-polyfill` fallback은 앱 빌드에서 제외했다. 기본 font는 공식 Liberation Sans 2.00.5와 glyph·metrics를 대조했고 OFL notice를 unpacked Windows 앱의 `resources/licenses`에 넣어 원본 파일과 해시가 같은 것을 확인했다. NSIS 빌드도 성공했다. 남은 항목은 pinned C/WASM source의 완전한 고지, upstream generator의 Expat 입력 불일치/실제 포함 여부, 세 번들 JS 보조 패키지의 원본 고지다. 이 환경에는 Docker/WSL 배포판, Bash, Make, `licensecheck`가 없어 upstream shell generator를 실행하지 않았다. 전체 재배포 조건은 미해결이다.
 3. Aya Expanse GGUF는 설정의 Cohere 조건 링크와 다운로드 전 사용자 확인을 제공한다. 앱이 약관 열람·법적 동의나 자격을 검증하지는 않는다. `ja-ko-vn` GGUF와 기반 모델 두 저장소는 Apache-2.0을 선언하지만 학습 대화 자료 출처·권리는 확인하지 못했다. 임의 GGUF의 약관은 앱이 검사하지 않는다. 8개 preset 다운로드 pin은 적용됐으며 기존 모델 파일은 새로 검사하거나 교체하지 않는다. HY-MT1.5 1.8B·7B는 앱에서 차단했고 기존 사용자 파일을 보존한다.
 4. 프로젝트 코드·로고·아이콘 재배포 허가와 AniList 보완성, TMDB·AI 기능 결합 조건을 해결하기 전까지 공개 저장소·설치 파일 배포와 실사이트 콘텐츠 요청은 보류한다. 권리 해결 후 검색→상세→회차 재생→자막→이어보기 실제 인수 검증을 계획한다. 그 전에는 합성·로컬 검증이 가능한 Phase 1 안정화 작업을 이어간다.
+
+## 2026-10-10 홈 최근 업데이트 화면과 패키지 IPC 연결
+
+- `tests/phase1-main.electron.cjs`에서 패키지의 실제 renderer 정렬 버튼을 눌러 Animenosub `최근 업데이트` 화면을 표시했다. `catalog:updates` 실제 main/preload IPC가 합성 업데이트 HTML을 처리했고 카드 제목 `합성 Animenosub 최신작`, `업로드 12화`, 업데이트 안내 문구와 선택된 정렬 상태를 확인했다.
+- `npm run test:phase1-main` 통과: 합성 fixture 요청 59회, 미등록 fetch·차단된 브라우저 요청·외부 네트워크 0회. 전체 `npm test` 221/221과 `npm run test:phase1-electron`도 통과했고, 테스트 파일 구문 검사와 `git diff --check` 통과.
+- 공급원 선택 상태는 격리 테스트에서 Animenosub으로 설정했다. 실제 사이트 응답, 사용자 설정 전환/재시작, 설치 NSIS 화면은 확인하지 않았다.
