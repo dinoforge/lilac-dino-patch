@@ -1010,10 +1010,12 @@ function renderManualChatgptPanel(){
   panel.classList.toggle('hidden',!state||!manualChatgptPanelOpen);
   $('#translateChatgpt').textContent=state?'ChatGPT 번역 계속':'ChatGPT 수동 번역';
   if(!state)return;
-  $('#manualChatgptProgress').textContent=`묶음 ${state.index+1}/${state.batches.length}`;
-  $('#manualChatgptCopyOpen').disabled=state.busy;
+  const saving=state.index>=state.batches.length;
+  $('#manualChatgptProgress').textContent=saving?'번역 완료 · 저장 대기':`묶음 ${state.index+1}/${state.batches.length}`;
+  $('#manualChatgptCopyOpen').disabled=state.busy||saving;
   $('#manualChatgptApply').disabled=state.busy;
-  $('#manualChatgptAnswer').disabled=state.busy;
+  $('#manualChatgptApply').textContent=saving?'번역 자막 저장 재시도':'결과 확인';
+  $('#manualChatgptAnswer').disabled=state.busy||saving;
 }
 async function startManualChatgptTranslation(){
   if(manualChatgptTranslation&&manualChatgptIsCurrent()){manualChatgptPanelOpen=true;renderManualChatgptPanel();return}
@@ -1040,14 +1042,8 @@ async function copyManualChatgptPrompt(){
     catch{$('#manualChatgptStatus').textContent='요청을 복사했습니다. ChatGPT를 열어 직접 붙여넣으세요.'}
   }catch(error){$('#manualChatgptStatus').textContent=`복사하지 못했습니다: ${error.message}`}
 }
-async function applyManualChatgptBatch(){
-  const state=manualChatgptTranslation;if(!manualChatgptIsCurrent(state)||state.busy)return;
-  const batch=state.batches[state.index];if(!batch)return;
-  let translated;
-  try{translated=window.LilacManualSubtitle.parseResponse($('#manualChatgptAnswer').value,batch.map(item=>item.id))}
-  catch(error){$('#manualChatgptStatus').textContent=error.message;return}
-  Object.assign(state.translations,translated);state.index++;$('#manualChatgptAnswer').value='';
-  if(state.index<state.batches.length){$('#manualChatgptStatus').textContent=`확인 완료. 다음 묶음 ${state.index+1}/${state.batches.length} 요청을 복사해 주세요.`;renderManualChatgptPanel();return}
+async function saveManualChatgptResult(state){
+  if(!manualChatgptIsCurrent(state)||state.busy)return;
   state.busy=true;$('#manualChatgptStatus').textContent='번역 자막을 저장하고 적용하는 중…';renderManualChatgptPanel();
   try{
     const text=window.LilacManualSubtitle.renderWebVtt(state.parsed,state.translations);
@@ -1056,7 +1052,18 @@ async function applyManualChatgptBatch(){
     manualChatgptTranslation=null;manualChatgptPanelOpen=false;currentSubtitlePath=result.path;
     attachSubtitle(result.url,'ChatGPT 수동 번역',{path:result.path,source:'chatgpt',from:state.sourcePath,fromName:state.sourceLabel,saved:true});
     $('#subtitleState').textContent='ChatGPT 수동 번역을 적용했습니다.';
-  }catch(error){state.busy=false;$('#manualChatgptStatus').textContent=`저장하지 못했습니다: ${error.message}`;renderManualChatgptPanel()}
+  }catch(error){state.busy=false;$('#manualChatgptStatus').textContent=`저장하지 못했습니다: ${error.message} 번역 결과는 보관되어 있어 다시 시도할 수 있습니다.`;renderManualChatgptPanel()}
+}
+async function applyManualChatgptBatch(){
+  const state=manualChatgptTranslation;if(!manualChatgptIsCurrent(state)||state.busy)return;
+  if(state.index>=state.batches.length)return saveManualChatgptResult(state);
+  const batch=state.batches[state.index];if(!batch)return;
+  let translated;
+  try{translated=window.LilacManualSubtitle.parseResponse($('#manualChatgptAnswer').value,batch.map(item=>item.id))}
+  catch(error){$('#manualChatgptStatus').textContent=error.message;return}
+  Object.assign(state.translations,translated);state.index++;$('#manualChatgptAnswer').value='';
+  if(state.index<state.batches.length){$('#manualChatgptStatus').textContent=`확인 완료. 다음 묶음 ${state.index+1}/${state.batches.length} 요청을 복사해 주세요.`;renderManualChatgptPanel();return}
+  return saveManualChatgptResult(state);
 }
 $('#translateChatgpt').onclick=startManualChatgptTranslation;
 $('#manualChatgptCopyOpen').onclick=copyManualChatgptPrompt;

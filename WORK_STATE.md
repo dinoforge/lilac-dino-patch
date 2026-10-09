@@ -217,8 +217,13 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 - 제목 언어 설정을 제거하고 한국어 제목을 우선 표시하도록 통일했다. 번역 제목이 없으면 확인 가능한 일본어·원제를 표시한다. 홈 추천·작품 카드·이어보기·시청 기록·다운로드 목록·상세 화면·플레이어에 원제를 보조로 붙였다.
 - 다운로드 기록에 영어 표시 제목만 저장돼 있더라도 한국어 제목 조회를 건너뛰지 않도록 세션 내 조회 상태를 캐시와 분리했다. 예전 `titleLanguage` 설정값은 읽거나 삭제하지 않으며, 라이브러리·시청 기록·다운로드 데이터도 변경하지 않았다.
-- 검증: `node --test` 150/150, `node --check src/app.js`, `node --check src/title-display.js`, `git diff --check` 통과. `npm run dist`로 124,548,760바이트의 Windows NSIS 설치 파일을 만들고 `app.asar`에 새 제목 모듈·renderer·마크업·스타일이 포함된 것을 확인했다. 설치 파일은 로컬 산출물이며 배포하지 않았다.
+- 검증: `node --test` 151/151, `node --check src/app.js`, `node --check src/title-display.js`, `git diff --check` 통과. `npm run dist`로 124,548,760바이트의 Windows NSIS 설치 파일을 만들고 `app.asar`에 새 제목 모듈·renderer·마크업·스타일이 포함된 것을 확인했다. 설치 파일은 로컬 산출물이며 배포하지 않았다.
 - 한계: 실 TMDB 키를 이용한 제목 조회, 실제 작품별 시즌·판본 매칭, 설치 앱의 화면·외부 영상은 이번 변경에서 검증하지 않았다.
+
+## 2026-10-09 ChatGPT 수동 자막 번역 저장 재시도
+
+- ChatGPT 번역 결과의 마지막 저장이 실패해도 검증된 문장을 유지하고 저장만 재시도할 수 있게 했다. 다시 번역을 붙여넣을 필요가 없고, 같은 자막 원본·회차인지 확인하는 기존 안전 검사는 유지한다.
+- `node --test tests/manual-subtitle-translation.test.cjs tests/manual-subtitle-translation-ui.test.cjs` 9/9 통과. 첫 저장 실패 뒤 재시도 성공, 재붙여넣기 없이 한 번만 파싱하는 동작을 시험했다. `npm run dist` 성공(124,548,604바이트); `app.asar`에서 저장 재시도 UI와 흐름을 확인했다. 실제 ChatGPT 왕복과 번역 품질은 미검증이다.
 
 ## 주요 결정
 
