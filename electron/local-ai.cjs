@@ -10,6 +10,7 @@ const os = require('os');
 const { spawn } = require('child_process');
 const AdmZip = require('adm-zip');
 const { characterTerms, termsFor, speakerTerms } = require('./anime-glossary.cjs');
+const LOCAL_AI_LICENSE_ERROR = '이 모델의 라이선스는 대한민국을 적용 지역에서 제외하므로 이 앱에서 받거나 실행할 수 없습니다. 기존 모델 파일은 삭제하지 않았습니다.';
 
 // Best first (the settings list them in this order), by Horimiya episode 1 (October 2026) on a GTX 1050 Ti + Ryzen 5
 // 5600 + 32 GB: all 425 lines translated the way the app does, 16 scenes graded (a slip half a point), then the faster
@@ -38,8 +39,8 @@ const MODELS = [
   { id: 'gemma-4-e2b', label: 'Gemma 4 E2B', note: '3.4GB · 가볍고 빠름 · 가끔 뜻을 틀림', repo: 'google/gemma-4-E2B-it-qat-q4_0-gguf', file: 'gemma-4-E2B_q4_0-it.gguf', size: 3350e6 },
   // 5.5, 0/7, 2 min.
   { id: 'hy-mt2-1.8b', label: 'Hy-MT2 1.8B', note: '1.1GB · 가장 가볍고 빠름 · 존댓말이 섞이고 자주 틀림', repo: 'tencent/Hy-MT2-1.8B-GGUF', file: 'Hy-MT2-1.8B-Q4_K_M.gguf', size: 1133e6 },
-  { id: 'hy-mt-7b', label: 'HY-MT1.5 7B', note: '이전 버전 · Gemma 4 E4B를 권장', repo: 'tencent/HY-MT1.5-7B-GGUF', file: 'HY-MT1.5-7B-Q4_K_M.gguf', size: 4620e6, legacy: true },
-  { id: 'hy-mt-1.8b', label: 'HY-MT1.5 1.8B', note: '이전 버전 · Hy-MT2 1.8B를 권장', repo: 'tencent/HY-MT1.5-1.8B-GGUF', file: 'HY-MT1.5-1.8B-Q4_K_M.gguf', size: 1133e6, legacy: true }
+  { id: 'hy-mt-7b', label: 'HY-MT1.5 7B', note: '대한민국은 라이선스 적용 지역에서 제외 · 기존 파일 보존', repo: 'tencent/HY-MT1.5-7B-GGUF', file: 'HY-MT1.5-7B-Q4_K_M.gguf', size: 4620e6, legacy: true, licenseBlocked: true },
+  { id: 'hy-mt-1.8b', label: 'HY-MT1.5 1.8B', note: '대한민국은 라이선스 적용 지역에서 제외 · 기존 파일 보존', repo: 'tencent/HY-MT1.5-1.8B-GGUF', file: 'HY-MT1.5-1.8B-Q4_K_M.gguf', size: 1133e6, legacy: true, licenseBlocked: true }
 ];
 // llama.cpp builds: Vulkan runs on any graphics card (and falls back to the CPU); the others are made for one maker's
 // cards and tried first on them, Vulkan taking over when they do not start or find no card:
@@ -139,9 +140,9 @@ function createLocalAi(userData) {
   const memory = Math.round(os.totalmem() / 2 ** 30);
   const models = () => {
     const ran = runs();
-    return [...MODELS, ...added().map(item => ({ id: `file:${item.path}`, label: path.basename(item.path), note: '직접 추가한 파일', path: item.path, size: item.size }))]
+    return [...MODELS, ...added().map(item => ({ id: `file:${item.path}`, label: path.basename(item.path), note: '직접 추가한 파일 · 제공처에서 사용 조건을 확인해 주세요', path: item.path, size: item.size }))]
       .map(model => ({ ...model, installed: fs.existsSync(modelPath(model)), downloading: downloads.has(model.id) ? { done: downloads.get(model.id).done, total: downloads.get(model.id).total } : null, partial: !model.path && !downloads.has(model.id) ? partialSize(model) : 0, run: ran[modelPath(model)] || null, ...(model.ram ? { memory, lowMemory: memory < model.ram } : {}) }))
-      .filter(model => !model.legacy || model.installed);
+      .filter(model => model.licenseBlocked || !model.legacy || model.installed);
   };
   const partialSize = model => { try { return fs.statSync(`${modelPath(model)}.part`).size; } catch { return 0; } };
   function addFile(file) {
@@ -318,6 +319,7 @@ function createLocalAi(userData) {
   }
   async function installModel(id, progress = () => {}) {
     const model = MODELS.find(item => item.id === id); if (!model) throw new Error('모델을 찾지 못했습니다.');
+    if (model.licenseBlocked) throw new Error(LOCAL_AI_LICENSE_ERROR);
     if (downloads.has(id)) throw new Error('이미 받는 중입니다.');
     const abort = new AbortController();
     downloads.set(id, { done: 0, total: model.size, abort });
@@ -366,6 +368,7 @@ function createLocalAi(userData) {
     return smaller.length ? `설정 > 자막 자동 번역 > 로컬 AI 모델에서 더 작은 모델(${smaller.join(', ')})로 바꿔 보세요. ${others}도 도움이 됩니다.` : `가장 작은 모델이에요. ${others.replace(/는 것$/, '고')} 다시 해 보세요.`;
   }
   async function start(model, status = () => {}) {
+    if (model.licenseBlocked) throw new Error(LOCAL_AI_LICENSE_ERROR);
     const file = modelPath(model);
     if (server?.model === file && !server.child.killed) { touch(); return server; }
     if (starting?.model === file) return starting.promise;
@@ -516,7 +519,9 @@ function createLocalAi(userData) {
   // to translate next (undefined when none is left), asked as each slot frees up, so the lines follow where the episode
   // is playing (and where it jumps to); the lines before a line are still its neighbours. Without it, in order.
   async function translateLines(texts, { modelId, progress = () => {}, status = () => {}, onLine = () => {}, context = {}, signal = null, pick = null } = {}) {
-    const model = models().find(item => item.id === modelId) || models().find(item => item.installed);
+    const available = models(), requested = available.find(item => item.id === modelId);
+    if (requested?.licenseBlocked) throw new Error(LOCAL_AI_LICENSE_ERROR);
+    const model = requested || available.find(item => item.installed && !item.licenseBlocked);
     if (!model) throw new Error('로컬 AI 모델이 없습니다. 설정 > 자막 자동 번역에서 모델을 받아 주세요.');
     const { port, template } = await start(model, status);
     const names = characterTerms(context.characters || []), kind = modelKind(model, template);
@@ -560,4 +565,4 @@ function createLocalAi(userData) {
 // translations made with the old one).
 const promptVersion = model => !model ? '' : modelKind(model) === 'hy-mt2' ? '+context-1' : modelKind(model) === 'gemma' ? '+gemma-3' : '';
 
-module.exports = { createLocalAi, LOCAL_AI_MODELS: MODELS, promptVersion };
+module.exports = { createLocalAi, LOCAL_AI_MODELS: MODELS, LOCAL_AI_LICENSE_ERROR, promptVersion };

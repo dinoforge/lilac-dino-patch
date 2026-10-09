@@ -78,13 +78,12 @@
 
 | 코드의 모델 저장소 | 상태·확인된 조건 | 남은 조치 |
 |---|---|---|
-| `google/gemma-4-E4B-it-qat-q4_0-gguf` | 저장소 카드에는 Apache-2.0으로 표시되지만 Google 공식 Gemma 4 안내는 별도 Gemma 4 라이선스를 가리킨다. | 해당 GGUF 파일의 배포 조건과 공식 Gemma 4 조건의 관계를 확인할 때까지 미확정으로 둔다. E2B·26B GGUF는 저장소별로 별도 확인한다. |
-| `tencent/Hy-MT2-1.8B-GGUF` | 정확한 GGUF 저장소는 Apache-2.0으로 표시된다. | 사용하는 정확한 파일·리비전·고지를 기록한다. 7B·30B GGUF를 같은 조건으로 간주하지 않는다. |
+| `google/gemma-4-E4B-it-qat-q4_0-gguf`, `google/gemma-4-26B-A4B-it-qat-q4_0-gguf` | Google Gemma 4 공식 모델 카드는 Apache-2.0을 표시하고, 26B GGUF 저장소도 Apache-2.0으로 표시한다. Google Gemma 4 license 링크는 Apache License 2.0 본문으로 연결된다. | 현재 표시는 확인했지만 앱은 Hugging Face `resolve/main`에서 파일을 받아 commit SHA·GGUF SHA-256을 고정하지 않는다. 배포 전 모델 파일 리비전과 실제 체크섬을 고정한다. |
+| `tencent/Hy-MT2-1.8B-GGUF`, `tencent/Hy-MT2-7B-GGUF`, `tencent/Hy-MT2-30B-A3B-GGUF` | Tencent 공식 GGUF 저장소의 현재 `LICENSE.txt`는 각 모델 파일에 Apache-2.0을 명시한다. 7B·30B의 main 라이선스 파일도 현재 Apache-2.0이다. | 앱은 `resolve/main`에서 파일을 받으므로 정확한 commit SHA·GGUF SHA-256은 고정되지 않았다. 각 preset의 다운로드 리비전과 체크섬을 고정하고 실제로 내려받은 파일을 대조한다. |
 | `bartowski/aya-expanse-8b-GGUF` | 저장소는 CC-BY-NC-4.0 및 gated accept를 표시한다. 비상업 조건을 일반 배포 허가로 확대 해석하지 않는다. | 비상업 조건의 사용자 기능·배포 모델 적용 범위를 확인하고, 필요한 접근 조건·출처 고지를 처리한다. |
-| `tencent/HY-MT1.5-7B-GGUF` | 라이선스 문구는 EU, 영국, 대한민국을 적용 지역에서 제외한다. 현재 사용 지역이 대한민국이므로 이 모델을 한국에서 사용·배포할 수 있다는 허가를 확인하지 못했다. 코드는 기존 설치 모델 호환용 legacy 항목으로 남긴다. | 사용을 제공하려면 별도 권한을 확인하거나 한국 환경에서 해당 legacy 모델을 차단하는 결정을 내려야 한다. 기존 사용자 모델 파일은 이 문서 작업에서 열거나 변경하지 않았다. |
-| `tencent/HY-MT1.5-1.8B-GGUF` | 코드가 legacy 저장소로 가리키나 정확한 저장소의 조건을 이번 검토에서 확인하지 못했다. | 정확한 라이선스·지역 적용을 확인한다. |
-| `hell0ks/ja-ko-vn-7b-v1-gguf` | 코드가 양자화 저장소를 가리킨다. 기본 모델 저장소의 Apache-2.0만으로 GGUF 파일의 조건을 증명할 수 없다. | 정확한 양자화 저장소의 라이선스와 필수 고지를 확인한다. |
-| `tencent/Hy-MT2-7B-GGUF`, `tencent/Hy-MT2-30B-A3B-GGUF`, `google/gemma-4-26B-A4B-it-qat-q4_0-gguf` | legacy 항목. 정확한 GGUF 저장소별 조건을 이 인벤토리에서 확정하지 않았다. | 각 정확한 저장소·파일을 별도 조사한다. |
+| `tencent/HY-MT1.5-7B-GGUF` | 공식 `License.txt`는 EU·영국·대한민국을 적용 지역에서 제외한다. 해당 라이선스에 따른 한국 내 사용 권한을 확인할 수 없다. | 앱의 기본 카탈로그에서 사용·다운로드를 차단했다. 이미 설치된 사용자 파일은 건드리지 않고 설정에서 지역 제한을 표시한다. |
+| `tencent/HY-MT1.5-1.8B-GGUF` | 공식 저장소의 `License.txt`도 EU·영국·대한민국을 적용 지역에서 제외한다. 이 저장소의 빈 `LICENSE` 파일은 별도 권리 허가를 제공하지 않는다. | 앱의 기본 카탈로그에서 사용·다운로드를 차단했다. 이미 설치된 사용자 파일은 건드리지 않고 설정에서 지역 제한을 표시한다. |
+| `hell0ks/ja-ko-vn-7b-v1-gguf` | 코드가 양자화 저장소를 가리킨다. 기본 모델 저장소의 Apache-2.0만으로 GGUF 파일의 조건을 증명할 수 없다. | 해당 저장소의 라이선스, 원본 모델과의 파생 관계, 필요한 고지를 확인한다. |
 | 사용자가 직접 고른 임의 GGUF | 앱에서 외부 모델 파일 선택을 지원한다. | 앱은 임의 GGUF의 라이선스·배포 권리를 검증하지 않는다. 사용자가 적법한 모델을 선택한다는 점과 모델 제공 약관을 분리해 안내해야 한다. |
 
 ## 이미지 에셋과 프로젝트 라이선스
@@ -102,7 +101,7 @@
 
 1. FFmpeg 현재 Windows 바이너리의 구성 요소·대응 소스·고지·재배포 조건을 실제 배포 방안과 함께 검토한다. 해결 전 설치 파일·릴리스 공개를 보류한다.
 2. JASSUB의 JS, WASM, worker, 글꼴과 전이 구성요소를 패키지 출처까지 추적하고 필요한 LICENSE/NOTICE 파일을 생성 스크립트와 최종 패키지에 포함한다.
-3. AI 모델의 정확한 GGUF 저장소·파일 리비전마다 라이선스를 확인한다. 한국에서 사용할 수 없는 HY-MT1.5 7B legacy 항목은 권리 확인 또는 지역 제한 결정을 하기 전까지 사용 가능하다고 표시하지 않는다.
+3. AI 모델 preset별 정확한 GGUF 파일 리비전과 SHA-256을 고정한다. HY-MT1.5 1.8B·7B는 앱에서 다운로드·실행을 막았고 기존 사용자 파일은 보존한다. Aya Expanse의 비상업 조건, `ja-ko-vn` 가중치의 권리, 임의 추가 GGUF의 사용 조건은 별도 검토한다.
 4. 다운로드되는 llama.cpp release와 지원되는 각 Windows 빌드의 네이티브 구성요소 고지를 추적 가능하도록 고정한다.
 5. 프로젝트 원본 코드, 로고, 아이콘의 출처와 재배포 권한을 확인한다. 필요하면 정식 허가된 에셋으로 교체하되 사용자 작업과 기존 데이터는 보존한다.
 
@@ -111,7 +110,7 @@
 - 로컬: `package.json`, `package-lock.json`, `node_modules/*/package.json` 및 각 패키지 고지 파일, `scripts/build-jassub.cjs`, `electron/local-ai.cjs`, `electron/download-manager.cjs`, `electron/oped-fingerprint.cjs`, 현재 `dist/win-unpacked`.
 - [FFmpeg 법적 안내](https://www.ffmpeg.org/legal.html), [ffmpeg-static 저장소와 Windows 바이너리 출처 설명](https://github.com/eugeneware/ffmpeg-static), [Gyan FFmpeg Windows 빌드와 GPLv3·정적 구성 안내](https://www.gyan.dev/ffmpeg/builds/), [현재 바이너리가 가리키는 FFmpeg 원본 커밋](https://github.com/FFmpeg/FFmpeg/commit/e38092ef93).
 - [JASSUB 저장소 및 태그](https://github.com/ThaUnknown/jassub), [JASSUB 2.5.16 npm package](https://www.npmjs.com/package/jassub/v/2.5.16), [JASSUB tags](https://github.com/ThaUnknown/jassub/tags), [Electron 앱 배포 문서](https://www.electronjs.org/docs/latest/tutorial/application-distribution), [llama.cpp 저장소](https://github.com/ggml-org/llama.cpp).
-- [Gemma 4 QAT GGUF 카드](https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf), [Google Gemma 조건](https://ai.google.dev/gemma/terms), [Tencent Hy-MT2 1.8B 저장소](https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF), [Aya Expanse GGUF 저장소](https://huggingface.co/bartowski/aya-expanse-8b-GGUF), [Tencent HY-MT1.5 라이선스](https://huggingface.co/tencent/HY-MT1.5-7B-GGUF/blob/main/License.txt), [ja-ko-vn 기본 모델](https://huggingface.co/hell0ks/ja-ko-vn-7b-v1).
+- [Google Gemma 4 공식 모델 카드](https://ai.google.dev/gemma/docs/core/model_card_4), [Gemma 4 Apache 2.0 license](https://ai.google.dev/gemma/apache_2), [Google 26B QAT GGUF](https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf), [Tencent Hy-MT2 1.8B GGUF license](https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF/blob/main/LICENSE.txt), [Tencent Hy-MT2 7B GGUF license](https://huggingface.co/tencent/Hy-MT2-7B-GGUF/blob/main/LICENSE.txt), [Tencent Hy-MT2 30B GGUF license](https://huggingface.co/tencent/Hy-MT2-30B-A3B-GGUF/blob/main/LICENSE.txt), [Tencent HY-MT1.5 1.8B GGUF](https://huggingface.co/tencent/HY-MT1.5-1.8B-GGUF), [Tencent HY-MT1.5 7B license](https://huggingface.co/tencent/HY-MT1.5-7B-GGUF/blob/main/License.txt), [Aya Expanse GGUF 저장소](https://huggingface.co/bartowski/aya-expanse-8b-GGUF), [ja-ko-vn 기본 모델](https://huggingface.co/hell0ks/ja-ko-vn-7b-v1).
 
 ### 확인 범위의 한계
 

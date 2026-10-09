@@ -1439,13 +1439,14 @@ function renderLocalAi(value){
   if(!value)return;
   $('#localModelList').replaceChildren(...(value.localModels||[]).map(model=>{
     // Only a model on disk can be in use; one not downloaded yet shows what it needs instead.
-    const row=document.createElement('div'),progress=localModelProgress[model.id],selected=model.installed&&model.id===value.localModel;row.className=`local-model${selected?' selected':''}`;
-    const state=selected?'사용 중':model.installed?'받음 · 눌러서 사용':progress!=null?'받는 중':'받지 않음';
+    const row=document.createElement('div'),progress=localModelProgress[model.id],selected=model.installed&&!model.licenseBlocked&&model.id===value.localModel;row.className=`local-model${selected?' selected':''}`;
+    const state=model.licenseBlocked?'대한민국 사용 제한':selected?'사용 중':model.installed?'받음 · 눌러서 사용':progress!=null?'받는 중':'받지 않음';
     const memoryNote=model.lowMemory?`<small class="local-model-run partial">이 PC의 램 ${model.memory}GB로는 부족해요 (${model.ram}GB 이상). 번역이 아주 느리거나 PC가 멈출 수 있어요.</small>`:'';
-    row.innerHTML=`<button type="button" class="local-model-pick"><b>${escapeHtml(model.label)}</b><small>${escapeHtml(model.note||'')}</small>${memoryNote}${model.installed&&model.run?`<small class="local-model-run${model.run.layers<model.run.total||!model.run.layers?' partial':''}">${escapeHtml(localRunText(model.run))}</small>`:''}</button><span class="local-model-state">${state}</span><button type="button" class="local-model-action"></button>`;
-    const pick=row.querySelector('.local-model-pick'),action=row.querySelector('.local-model-action');pick.disabled=!model.installed||selected;pick.onclick=()=>{if(!model.lowMemory||confirm(lowMemoryQuestion(model,'쓸까요')))saveTranslation({localModel:model.id})};
+    row.innerHTML=`<button type="button" class="local-model-pick"><b>${escapeHtml(model.label)}</b><small>${escapeHtml(model.note||'')}</small>${memoryNote}${model.installed&&!model.licenseBlocked&&model.run?`<small class="local-model-run${model.run.layers<model.run.total||!model.run.layers?' partial':''}">${escapeHtml(localRunText(model.run))}</small>`:''}</button><span class="local-model-state">${state}</span><button type="button" class="local-model-action"></button>`;
+    const pick=row.querySelector('.local-model-pick'),action=row.querySelector('.local-model-action');pick.disabled=model.licenseBlocked||!model.installed||selected;pick.onclick=()=>{if(!model.lowMemory||confirm(lowMemoryQuestion(model,'쓸까요')))saveTranslation({localModel:model.id})};
     // While it downloads the button stops it; a stopped (or broken off) download goes on from where it was.
-    if(progress!=null){action.textContent=`받는 중 ${progress}% · 취소`;action.onclick=()=>window.lilac.cancelLocalModelInstall(model.id)}
+    if(model.licenseBlocked){action.textContent='라이선스 지역 제한';action.disabled=true}
+    else if(progress!=null){action.textContent=`받는 중 ${progress}% · 취소`;action.onclick=()=>window.lilac.cancelLocalModelInstall(model.id)}
     else if(model.installed){action.textContent=model.path?'목록에서 빼기':'삭제';action.onclick=async()=>{if(!confirm(`${model.label} 모델을 ${model.path?'목록에서 뺄까요':'삭제할까요'}?`))return;renderTranslationSettings(await window.lilac.removeLocalModel(model.id))}}
     else{action.textContent=model.partial?`이어 받기 · ${Math.round(model.partial/model.size*100)}% 받음`:`받기 · ${(model.size/1e9).toFixed(1)}GB`;action.onclick=()=>{if(!model.lowMemory||confirm(lowMemoryQuestion(model,'받을까요')))installLocalModel(model.id)}}
     return row;

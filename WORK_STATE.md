@@ -170,6 +170,13 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 버전 차이가 더 작은 8.1.3 LGPL shared도 같은 고정 릴리스에서 받아 체크섬을 확인했다. 같은 합성 미디어 작업은 통과했지만 전체 추출물 201,293,642바이트, `bin` 186,729,472바이트로 9.0.2보다도 컸다. 따라서 더 낮은 버전도 패키지 크기 대안은 되지 않았다.
 - 의존성이나 설치 빌드를 바꾸지 않았으며 후보는 미채택이다. 상세 증거와 다음 배포 차단 항목은 `docs/DEPENDENCY_LICENSE_INVENTORY.md`, `docs/RIGHTS_REVIEW.md`에 기록했다.
 
+## 2026-10-09 로컬 AI 모델 라이선스 적용
+
+- Tencent 공식 HY-MT1.5 1.8B·7B `License.txt`는 대한민국을 적용 지역에서 제외한다. 두 preset은 앱의 기본 목록에서 사용·다운로드를 차단하고, 차단 상태와 근거를 설정에 표시한다. 설치된 기존 GGUF 파일은 읽거나 이동·수정·삭제하지 않는다.
+- 기존 번역 설정이 HY-MT1.5를 선택하고 있어도 허용된 기본 모델로 안전하게 전환한다. local AI 준비 상태와 실행 직전에도 제한 모델을 거부한다. 직접 추가하는 임의 GGUF는 라이선스를 판별할 수 없다는 안내를 추가했다.
+- 공식 Gemma 4 자료와 Tencent Hy-MT2 1.8B·7B·30B GGUF 저장소의 최신 라이선스 파일은 Apache-2.0을 표시한다. 하지만 앱 다운로드 주소는 `resolve/main`으로 고정 revision/hash가 없다. 모델 파일 리비전·SHA-256 고정은 다음 작업으로 남긴다. Aya Expanse의 비상업 조건과 `ja-ko-vn` 가중치 권리는 계속 확인 대상이다.
+- 새 라이선스 회귀 테스트 2/2, 전체 `node --test` 141/141 통과. 변경된 JavaScript `node --check`와 `git diff --check`도 통과했다. `npm run dist` Windows NSIS 빌드 성공; `dist/LilacAnime-Setup.exe`는 124,545,583바이트다. 패키지 `app.asar`에서 main·translator·renderer에 차단 처리가 포함된 것을 확인했다. 검증은 격리 임시 프로필을 사용했으며 실제 사용자 프로필·설치 앱 창·모델 실행은 열지 않았다.
+
 ## 주요 결정
 
 - 새 앱은 Windows 우선, Android는 후속이다. Chrome·macOS는 제품 범위에서 제외한다.
@@ -183,5 +190,5 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 1. FFmpeg는 아직 선택하지 않는다. BtbN의 8.1.3·9.0.2 LGPL shared 후보는 합성 remux/디코딩을 통과했지만 기존 FFmpeg 6.1.1보다 큰 배포 폴더와 미확인 소스·외부 고지가 남았다. 최소 호환 빌드에는 shell 기반 빌드 환경이 필요하지만 현재 Docker·WSL 배포판·Bash·Make가 없어 설치하지 않고 보류했다. 해결 전까지 현행 의존성 유지, 설치 파일 공개 보류를 계속한다.
 2. JASSUB source commit 후보·다섯 submodule SHA와 font 파일 매칭은 확인됐다. 다음에는 고정된 전체 license notice를 만들고 Expat 경로를 해소한 뒤 app/NSIS 빌드에 넣어 실제 산출물까지 검사한다. upstream generator는 shell 기반이며 이 환경에는 Docker/WSL 배포판이 없어 실행하지 않았다. font의 원 라이선스와 전체 재배포 조건도 미해결이다.
-3. AI GGUF 모델 저장소별 조건을 완성한다. 대한민국에서 허용되지 않는 HY-MT1.5 7B legacy 항목은 이용 제한 또는 권리 확인 없이는 사용할 수 있다고 안내하지 않는다. 사용자 임의 모델은 별도 경계를 둔다.
+3. AI GGUF preset의 모델별 다운로드 revision과 SHA-256을 고정한다. HY-MT1.5 1.8B·7B는 앱에서 차단했고 사용자 기존 파일을 보존한다. Aya Expanse의 비상업 조건, `ja-ko-vn` 양자화 파일의 권리, 임의 GGUF의 조건을 추가 확인한다.
 4. 프로젝트 코드·로고·아이콘 재배포 허가와 AniList 보완성, TMDB·AI 기능 결합 조건을 해결하기 전까지 공개 저장소·설치 파일 배포와 실사이트 콘텐츠 요청은 보류한다. 권리 해결 후 검색→상세→회차 재생→자막→이어보기 실제 인수 검증을 계획한다.

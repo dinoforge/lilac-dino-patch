@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { createLocalAi, promptVersion } = require('./local-ai.cjs');
+const { createLocalAi, LOCAL_AI_LICENSE_ERROR, promptVersion } = require('./local-ai.cjs');
 const { characterTerms } = require('./anime-glossary.cjs');
 
 const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta';
@@ -32,7 +32,11 @@ function createTranslator(userData) {
   if (!fs.existsSync(settingsFile) && fs.existsSync(oldSettingsFile)) try { fs.renameSync(oldSettingsFile, settingsFile); } catch { /* read from the old name below */ }
   const local = createLocalAi(userData);
   // The picked model, or the first one on disk when the picked one is not (never downloaded, or deleted).
-  const installedModel = id => { const models = local.models(); return models.some(model => model.id === id && model.installed) ? id : models.find(model => model.installed)?.id || id; };
+  const installedModel = id => {
+    const models = local.models(), requested = models.find(model => model.id === id);
+    if (requested?.licenseBlocked) return models.find(model => model.installed && !model.licenseBlocked)?.id || models.find(model => !model.licenseBlocked)?.id || 'gemma-4-e4b';
+    return requested?.installed ? id : models.find(model => model.installed && !model.licenseBlocked)?.id || id;
+  };
   const read = () => {
     let value = {}; try { value = JSON.parse(fs.readFileSync(fs.existsSync(settingsFile) ? settingsFile : oldSettingsFile, 'utf8')) || {}; } catch { /* defaults */ }
     const text = name => String(value[name] || '').trim(), list = name => Array.isArray(value[name]) ? value[name] : [];
@@ -59,7 +63,7 @@ function createTranslator(userData) {
   // The player has a button for each provider. Translations nobody asks for (downloads) use the API when its key is
   // set, otherwise the local AI when its model is on disk; either way the other one takes over when it stops.
   const providerOf = provider => provider === 'gemini' ? 'cloud' : provider;
-  const ready = provider => { const value = read(); provider = providerOf(provider); return provider === 'local' ? local.models().some(model => model.id === value.localModel && model.installed) : provider === 'cloud' ? Boolean(cloudKey(value)) : Boolean(autoProvider()); };
+  const ready = provider => { const value = read(); provider = providerOf(provider); return provider === 'local' ? local.models().some(model => model.id === value.localModel && model.installed && !model.licenseBlocked) : provider === 'cloud' ? Boolean(cloudKey(value)) : Boolean(autoProvider()); };
   const autoProvider = () => ready('cloud') ? 'cloud' : ready('local') ? 'local' : null;
   const write = value => { fs.mkdirSync(path.dirname(settingsFile), { recursive: true }); fs.writeFileSync(settingsFile, JSON.stringify(value), 'utf8'); return value; };
 
@@ -160,7 +164,12 @@ function createTranslator(userData) {
         Object.assign(next, { qwenModels: models, qwenModel: models.includes('qwen-plus') ? 'qwen-plus' : models.find(id => /plus/.test(id)) || models[0] || 'qwen-plus' });
       }
     }
-    if ('localModel' in change) next.localModel = String(change.localModel || current.localModel);
+    if ('localModel' in change) {
+      const id = String(change.localModel || current.localModel), model = local.models().find(item => item.id === id);
+      if (!model) throw new Error('로컬 AI 모델을 찾지 못했습니다.');
+      if (model.licenseBlocked) throw new Error(LOCAL_AI_LICENSE_ERROR);
+      next.localModel = id;
+    }
     if ('model' in change && next.models.includes(change.model)) next.model = change.model;
     if ('key' in change && String(change.key || '').trim() !== current.key) {
       next.key = String(change.key || '').trim();
