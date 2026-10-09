@@ -10,6 +10,7 @@ const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 const { createFlixProxyUrl, createFlixAvProxyUrl, closeFlixProxy } = require('./flix-proxy.cjs');
 const { detectOpEd } = require('./oped-fingerprint.cjs');
+const { requestAniListGraphQL } = require('./anilist-client.cjs');
 const { DownloadManager } = require('./download-manager.cjs');
 const { Updater } = require('./updater.cjs');
 const { DAY_MS, TITLE_CANDIDATE_TTL_MS, DISPLAY_TITLE_TTL_MS, CATALOG_TITLE_TTL_MS, isFreshTimestamp, pruneTimestampedRecords, pruneKoreanTitleRecords } = require('./metadata-cache.cjs');
@@ -63,7 +64,9 @@ async function coverDataUrl(rawUrl){
 
 async function resolveMalIdFromAniList(anilistId){
   const id=Number(anilistId);if(!id)return null;if(malIdCache.has(id))return malIdCache.get(id);
-  const response=await fetch('https://graphql.anilist.co',{signal:AbortSignal.timeout(25000),method:'POST',headers:{Accept:'application/json','Content-Type':'application/json','User-Agent':'LilacAnime Android'},body:JSON.stringify({query:'query ($id: Int) { Media(id: $id, type: ANIME) { idMal } }',variables:{id}})});
+  let response;
+  try{response=await requestAniListGraphQL('query ($id: Int) { Media(id: $id, type: ANIME) { idMal } }',{id},{timeoutMs:25000})}
+  catch(error){if(error?.code==='ANILIST_RATE_LIMITED')return null;throw error}
   if(!response.ok)return null;const malId=Number((await response.json())?.data?.Media?.idMal)||null;if(malId)malIdCache.set(id,malId);return malId;
 }
 
@@ -615,15 +618,13 @@ function ohliItems(html){
 // The AniList entry of a 애니24 series, by its original (Japanese) title and air year: AniSkip finds OP/ED times by it
 // (and MAL id). AniList also matches native titles; an exact match of the same year wins, then the same title, then
 // the same year. Remembered for the session; a lookup that failed (AniList allows only so many requests a minute, and
-// answers 429 past that: waited for once) is not, so playing the episode asks again.
+// answers 429 past that) is not. All AniList GraphQL paths share one Retry-After cooldown.
 const ohliAnilistCache=new Map();
 async function ohliAnilist(native,year){
   const key=`${native}|${year}`;if(!native)return null;if(ohliAnilistCache.has(key))return ohliAnilistCache.get(key);
   const query='query($search:String){Page(perPage:10){media(search:$search,type:ANIME){id idMal seasonYear startDate{year} title{native}}}}';
-  const ask=()=>fetch('https://graphql.anilist.co',{signal:AbortSignal.timeout(20000),method:'POST',headers:{Accept:'application/json','Content-Type':'application/json','User-Agent':'LilacAnime Android'},body:JSON.stringify({query,variables:{search:native}})});
   const lookup=(async()=>{
-    let response=await ask();
-    if(response.status===429){await new Promise(resolve=>setTimeout(resolve,Math.min(15,Number(response.headers.get('retry-after'))||5)*1000));response=await ask()}
+    const response=await requestAniListGraphQL(query,{search:native},{timeoutMs:20000});
     if(!response.ok)throw new Error(`AniList HTTP ${response.status}`);
     const list=(await response.json())?.data?.Page?.media||[],same=item=>titleCompareKey(item.title?.native||'')===titleCompareKey(native),inYear=item=>Number(year)&&(item.seasonYear||item.startDate?.year)===Number(year);
     const found=list.find(item=>same(item)&&inYear(item))||list.find(same)||list.find(inYear)||null;
@@ -1001,7 +1002,7 @@ async function anilistMedia(title,anime){
   // ("Frieren" returns the mini anime first).
   const id=Number(anime.anilistId)||null;
   const query=`query($id:Int,$search:String){Page(perPage:5){media(id:$id,search:$search,type:ANIME,sort:SEARCH_MATCH){id idMal format synonyms title{romaji english}}}}`;
-  const response=await fetch('https://graphql.anilist.co',{signal:AbortSignal.timeout(25000),method:'POST',headers:{Accept:'application/json','Content-Type':'application/json','User-Agent':'LilacAnime Android'},body:JSON.stringify({query,variables:id?{id}:{search:title.replace(/…/g,'...')}})});
+  const response=await requestAniListGraphQL(query,id?{id}:{search:title.replace(/…/g,'...')},{timeoutMs:25000});
   const list=response.ok?(await response.json())?.data?.Page?.media||[]:[],same=value=>titleCompareKey(value||'')===titleCompareKey(title);
   return list.find(item=>same(item.title?.english)||same(item.title?.romaji))||list.find(item=>item.format==='TV')||list[0]||null;
 }
@@ -1507,7 +1508,9 @@ async function previousSeasonEpisodes(anime={},title=''){
   const counts=[];let current=id;
   for(let depth=0;depth<8&&current;depth++){
     const query=`query($id:Int){Media(id:$id,type:ANIME){relations{edges{relationType node{id format episodes}}}}}`;
-    const response=await fetch('https://graphql.anilist.co',{signal:AbortSignal.timeout(25000),method:'POST',headers:{Accept:'application/json','Content-Type':'application/json','User-Agent':'LilacAnime Android'},body:JSON.stringify({query,variables:{id:current}})}).catch(()=>null);
+    let response=null;
+    try{response=await requestAniListGraphQL(query,{id:current},{timeoutMs:25000})}
+    catch(error){if(error?.code==='ANILIST_RATE_LIMITED')return [];}
     const edges=response?.ok?(await response.json())?.data?.Media?.relations?.edges||[]:[];
     const prequel=edges.find(edge=>edge.relationType==='PREQUEL'&&['TV','TV_SHORT','ONA'].includes(edge.node?.format)&&edge.node?.episodes);
     if(!prequel)break;counts.push(prequel.node.episodes);current=prequel.node.id;
@@ -1672,7 +1675,7 @@ const anilistStoryCache=new Map();
 async function anilistStory(anilistId){
   const id=Number(anilistId);if(!id)return null;if(anilistStoryCache.has(id))return anilistStoryCache.get(id);
   const query='query($id:Int){Media(id:$id,type:ANIME){genres description(asHtml:false) characters(perPage:25,sort:[ROLE,RELEVANCE]){nodes{name{full native first last} gender}}}}';
-  const response=await fetch('https://graphql.anilist.co',{signal:AbortSignal.timeout(15000),method:'POST',headers:{Accept:'application/json','Content-Type':'application/json','User-Agent':'LilacAnime Android'},body:JSON.stringify({query,variables:{id}})});
+  const response=await requestAniListGraphQL(query,{id},{timeoutMs:15000});
   if(!response.ok)return null;
   const media=(await response.json())?.data?.Media||{};
   const characters=(media.characters?.nodes||[]).map(node=>({name:String(node?.name?.full||''),native:String(node?.name?.native||''),first:String(node?.name?.first||''),last:String(node?.name?.last||''),gender:String(node?.gender||'')})).filter(item=>item.name||item.native);
