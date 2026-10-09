@@ -195,3 +195,11 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 - 통합 검색에서 감춘 Linkkf 태그 필터는 Linkkf 홈 목록을 다시 열 때 복구한다.
 - `tests/integrated-search.test.cjs`의 식별자·모호한 연결·공급원 필터·오류/빈 검색 구분·한국어 검색·동시성·상세 출처 선택·두 검색 단계 병합 테스트 12/12, 전체 `node --test` 219/219, JS 구문 검사와 `git diff --check`가 통과했다. Windows NSIS 빌드가 성공해 `dist/win-unpacked/resources/app.asar`의 검색 코드·스타일·HTML 스크립트 순서·두 단계 검색 연결을 확인했다. 설치 파일은 124,555,418바이트다.
 - 검증 한계: ID 매칭 테스트의 작품 데이터는 합성이다. 실제 공급원 ID의 정확성, 검색 응답·상세·회차·재생은 권리 확인 전이라 조회하지 않았다. NSIS 설치 파일은 실행하거나 배포하지 않았다.
+
+## 2026-10-10 패키지 통합 검색·자막·이어보기 스모크
+
+- `tests/integrated-search.electron.cjs`는 빌드된 `app.asar`의 실제 renderer와 preload를 격리 Electron 창에서 실행한다. 검색·상세의 IPC 응답, 영상 resolve는 테스트 전용 합성 fixture로 제공하며 Chromium 외부 요청은 실행 전에 차단한다. 이 검증은 앱 `electron/main.cjs`나 실제 공급원 네트워크를 호출하지 않는다.
+- 기존 검색 경합·통합 ID·Miruro 필터·상세 공급원 선택 검사 뒤 Re:Anime 회차 목록에서 1화를 연다. 테스트 폴더에서 만든 12초 MP4와 2개 cue 한국어 VTT를 사용해 영상 metadata, `srclang=ko`, `showing` 상태 및 활성 한국어 문장을 확인한다.
+- 영상을 3.25초로 옮기면 27% 진행률이 로컬 이력에 저장된다. 같은 격리 세션에서 페이지를 새로고침한 다음 이어보기 카드를 눌러 회차 재조회·재생·3.26초 복구·한국어 자막 재적용을 확인한다.
+- 결과: 검색 IPC 22회, 영상 resolve 2회, 렌더러 오류 0건, 외부 요청 시도 0건. 전체 `node --test` 219/219, 스모크 구문 검사와 `git diff --check` 통과.
+- **PASS — 패키지 renderer/preload UI의 검색→상세→합성 영상→한국어 자막→새로고침 이어보기 흐름**. 실제 사이트의 회차·영상/자막 일치, 앱 main handler와 설치 NSIS 앱, 사용자 프로필은 미검증이다. 테스트 전용 변경으로 이번 검증에서는 패키지를 다시 빌드하지 않았다.

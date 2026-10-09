@@ -1,13 +1,15 @@
-// Packaged renderer smoke test with synthetic IPC only; run with:
+// Packaged renderer/preload Phase 1 smoke test with synthetic IPC only; run with:
 // node node_modules/electron/cli.js tests/integrated-search.electron.cjs
 process.on('uncaughtException', fail);
 process.on('unhandledRejection', fail);
 
 const { app, BrowserWindow, ipcMain, session } = require('electron');
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const asar = require('@electron/asar');
 
 const repo = path.resolve(__dirname, '..');
@@ -28,6 +30,16 @@ const userData = path.join(tempRoot, 'profile');
 const downloadsRoot = path.join(tempRoot, 'downloads');
 fs.mkdirSync(downloadsRoot);
 assert.equal(path.dirname(tempRoot), os.tmpdir(), 'Electron user data is isolated under the OS temp folder');
+
+const videoPath = path.join(tempRoot, 'synthetic-episode.mp4');
+const subtitlePath = path.join(tempRoot, 'synthetic-korean.vtt');
+execFileSync(require('ffmpeg-static'), [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=320x180:r=24',
+  '-t', '12', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', videoPath
+], { stdio: 'pipe' });
+fs.writeFileSync(subtitlePath, 'WEBVTT\n\n00:00:00.500 --> 00:00:04.000\n한국어 합성 자막 첫 문장\n\n00:00:04.500 --> 00:00:08.000\n한국어 합성 자막 두 번째 문장\n');
+const videoUrl = pathToFileURL(videoPath).href;
+const subtitleUrl = pathToFileURL(subtitlePath).href;
 
 app.setPath('userData', userData);
 app.disableHardwareAcceleration();
@@ -78,6 +90,14 @@ function linkkfSearch(query) {
   return String(query || '').trim() ? [{ ...items.linkkf }] : [];
 }
 
+function reanimeEpisodes() {
+  return [1, 2].map(number => ({
+    provider: 'reanime', id: `ra-smoke-episode-${number}`, animeId: items.reanime.id,
+    name: String(number), number, title: `${number}화`,
+    url: `https://reanime.to/watch/${items.reanime.id}?ep=${number}`, playable: true
+  }));
+}
+
 async function fixture(channel, args) {
   ipcCalls.push({ channel, args });
   switch (channel) {
@@ -90,7 +110,19 @@ async function fixture(channel, args) {
     case 'provider:quarter': return { items: [], label: '모의 분기' };
     case 'provider:airing':
     case 'provider:latest-episodes': return { data: [] };
-    case 'provider:detail': return { data: { ...args[0], synopsis: '모의 상세 정보' }, episodes: [], unavailable: false };
+    case 'provider:detail': return {
+      data: { ...args[0], synopsis: '모의 상세 정보' },
+      episodes: args[0]?.provider === 'reanime' ? reanimeEpisodes() : [], unavailable: false
+    };
+    case 'provider:resolve': return {
+      url: videoUrl, subtitleUrl, subtitleLabel: 'Re:Anime 한국어 자막',
+      subtitleTracks: [{ url: subtitleUrl, label: '한국어', language: 'ko', format: 'vtt' }],
+      servers: [], referer: ''
+    };
+    case 'subtitle-store:list':
+    case 'jimaku:list':
+    case 'oped:get': return [];
+    case 'subtitle:find': return null;
     case 'linkkf:search': return linkkfSearch(args[0]);
     case 'catalog:search-korean': return args[0] === 'reanime' ? [{ ...items.reanime }]
       : args[0] === 'animenosub' ? [{ ...items.animenosub }] : [];
@@ -227,6 +259,87 @@ app.whenReady().then(async () => {
   await waitFor('selected Re:Anime detail refresh', async () => win.webContents.executeJavaScript(`
     document.querySelector('#detailContent [data-detail-source="${items.reanime.mal_id}"]')?.getAttribute('aria-pressed') === 'true'
   `));
+  await waitFor('Re:Anime episode list', () => win.webContents.executeJavaScript('Boolean(document.querySelector("#detailContent .episode-btn"))'));
+  await win.webContents.executeJavaScript('document.querySelector("#detailContent .episode-btn").click()');
+
+  let lastPlaybackState = null;
+  const firstPlayback = await waitFor('local MP4 and Korean track metadata', async () => {
+    lastPlaybackState = await win.webContents.executeJavaScript(`(() => {
+      const video = document.querySelector('#video'), track = video?.querySelector('track');
+      return {
+        readyState: video?.readyState, duration: video?.duration, currentSrc: video?.currentSrc,
+        videoError: video?.error ? { code: video.error.code, message: video.error.message } : null,
+        subtitleState: document.querySelector('#subtitleState')?.textContent || '',
+        trackCount: video?.textTracks?.length || 0, trackReadyState: track?.readyState,
+        language: track?.srclang, mode: track?.track?.mode
+      };
+    })()`);
+    return lastPlaybackState.readyState >= 1 && lastPlaybackState.duration >= 11.9 && lastPlaybackState.trackReadyState === 2
+      ? { duration: lastPlaybackState.duration, language: lastPlaybackState.language, mode: lastPlaybackState.mode }
+      : null;
+  }, 8000).catch(error => {
+    const resolved = ipcCalls.filter(call => call.channel === 'provider:resolve').length;
+    throw new Error(`${error.message}; media=${JSON.stringify(lastPlaybackState)}; providerResolve calls=${resolved}; blocked requests=${blockedRequests.length}; renderer errors=${rendererErrors.join(' | ')}`);
+  });
+  assert.equal(firstPlayback.language, 'ko');
+  assert.equal(firstPlayback.mode, 'showing');
+
+  await win.webContents.executeJavaScript(`(async () => {
+    const video = document.querySelector('#video');
+    video.pause();
+    const seeked = new Promise(resolve => video.addEventListener('seeked', resolve, { once: true }));
+    video.currentTime = 1.2;
+    await Promise.race([seeked, new Promise(resolve => setTimeout(resolve, 1000))]);
+  })()`);
+  const firstCue = await waitFor('active Korean subtitle cue', () => win.webContents.executeJavaScript(`(() => {
+    const track = document.querySelector('#video')?.textTracks?.[0];
+    const cue = track?.activeCues?.[0]?.text || '';
+    return cue.includes('한국어 합성 자막') ? cue : null;
+  })()`));
+  assert.ok(firstCue.includes('첫 문장'));
+
+  await win.webContents.executeJavaScript(`(async () => {
+    const video = document.querySelector('#video');
+    const seeked = new Promise(resolve => video.addEventListener('seeked', resolve, { once: true }));
+    video.currentTime = 3.25;
+    await Promise.race([seeked, new Promise(resolve => setTimeout(resolve, 1000))]);
+    video.dispatchEvent(new Event('timeupdate'));
+    video.pause();
+    video.dispatchEvent(new Event('pause'));
+  })()`);
+  const savedProgress = await win.webContents.executeJavaScript(`(() => {
+    const history = JSON.parse(localStorage.getItem('history') || '[]');
+    const item = history.find(entry => entry.episode?.provider === 'reanime');
+    return item ? { progress: item.progress, number: item.episode.number } : null;
+  })()`);
+  assert.ok(savedProgress, 'playing an episode writes its watch history');
+  assert.equal(savedProgress.number, 1);
+  assert.ok(savedProgress.progress >= 24 && savedProgress.progress <= 29, `saved resume progress is near 27% (${savedProgress.progress}%)`);
+
+  const reloaded = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
+  win.webContents.reload();
+  await reloaded;
+  const expectedProgressText = `${savedProgress.progress}%`;
+  const continueCard = await waitFor('continue card restored after page reload', () => win.webContents.executeJavaScript(`(() => {
+    const card = document.querySelector('#continueRail .continue-card');
+    return card?.textContent?.includes('EP.1') && card.textContent.includes(${JSON.stringify(expectedProgressText)}) ? card.textContent : null;
+  })()`));
+  assert.ok(continueCard.includes('EP.1'));
+  const resolveCountBeforeContinue = ipcCalls.filter(call => call.channel === 'provider:resolve').length;
+  await win.webContents.executeJavaScript('document.querySelector("#continueRail .continue-card").click()');
+  const resumedPlayback = await waitFor('continued local MP4 restored near saved position', () => win.webContents.executeJavaScript(`(() => {
+    const video = document.querySelector('#video'), track = video?.querySelector('track');
+    const cue = video?.textTracks?.[0]?.activeCues?.[0]?.text || '';
+    return video?.readyState >= 1 && video.duration >= 11.9 && video.currentTime >= 2.6
+      && track?.track?.mode === 'showing' && cue.includes('한국어 합성 자막')
+      ? { currentTime: video.currentTime, language: track.srclang, mode: track.track.mode, cue }
+      : null;
+  })()`), 8000);
+  assert.ok(ipcCalls.filter(call => call.channel === 'provider:resolve').length > resolveCountBeforeContinue,
+    'continue card resolves the saved episode again');
+  assert.ok(resumedPlayback.currentTime <= 4, `resumed position is near 3.25s (${resumedPlayback.currentTime}s)`);
+  assert.equal(resumedPlayback.language, 'ko');
+  assert.equal(resumedPlayback.mode, 'showing');
   assert.ok(ipcCalls.some(call => call.channel === 'provider:detail' && call.args[0]?.provider === 'reanime'));
   assert.ok(ipcCalls.some(call => call.channel === 'provider:detail' && call.args[0]?.provider === 'miruro'));
 
@@ -234,8 +347,9 @@ app.whenReady().then(async () => {
   assert.deepEqual(rendererErrors, [], `renderer console errors: ${rendererErrors.join('; ')}`);
   const searchCalls = ipcCalls.filter(call => ['provider:catalog', 'catalog:search-korean', 'linkkf:search'].includes(call.channel));
   assert.ok(searchCalls.length >= 8, `synthetic provider search calls recorded (${searchCalls.length})`);
-  console.log(`Packaged integrated search passed: first results, stale-query guard, empty-variant cleanup, merged groups, provider filter and source picker.`);
-  console.log(`Synthetic search IPC calls: ${searchCalls.length}; renderer errors: ${rendererErrors.length}; blocked external request attempts: ${blockedRequests.length}; userData: isolated temp profile.`);
+  console.log(`Packaged Phase 1 smoke passed: integrated search, source picker, local episode playback, active Korean VTT, saved progress and continue-watch resume.`);
+  console.log(`Synthetic search IPC calls: ${searchCalls.length}; provider resolve calls: ${ipcCalls.filter(call => call.channel === 'provider:resolve').length}; saved progress: ${savedProgress.progress}%; resumed at: ${resumedPlayback.currentTime.toFixed(2)}s.`);
+  console.log(`Renderer errors: ${rendererErrors.length}; blocked external request attempts: ${blockedRequests.length}; userData and synthetic media: isolated temp folder.`);
   win.destroy();
   app.quit();
 }).catch(fail);
