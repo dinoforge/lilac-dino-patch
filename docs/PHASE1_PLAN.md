@@ -207,3 +207,10 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 - `test:phase1-electron`은 기존 `dist/win-unpacked/resources/app.asar`를 실행하므로 앱 코드를 바꿨다면 먼저 `npm run dist`로 패키지를 새로 만들어야 한다.
 - **PASS — 패키지 renderer/preload UI의 만료 로컬 주소 정리와 기록 보존, 검색→상세→합성 영상→한국어 자막→새로고침 이어보기 흐름**. 실제 사이트의 회차·영상/자막 일치, 앱 main handler와 설치 NSIS 앱, 사용자 프로필은 미검증이다. 앱 renderer를 갱신해 NSIS 패키지를 다시 빌드했지만 설치 파일은 실행하지 않았다.
 - 같은 패키지 UI 스모크는 재생 오류 상태에서 오류 진단 복사 버튼을 눌러 성공 안내와 최근 5개 제한, 개인정보 필터를 확인한다. 앱 버전과 클립보드 IPC 응답은 합성 fixture이므로 실제 main handler·시스템 클립보드·설치 UI는 검증 범위에 포함되지 않는다.
+
+## 2026-10-10 패키지 main-process IPC 스모크
+
+- `npm run test:phase1-main`은 `dist/win-unpacked/resources/app.asar`의 실제 main·preload를 불러오고 현재 소스와 바이트가 같은지 확인한다. 격리 Electron 앱의 renderer/preload에서 IPC를 호출하므로 main handler의 테스트용 복제 함수는 사용하지 않는다.
+- `userData`·`sessionData`는 OS 임시 폴더를 사용한다. Node `fetch`와 Electron `net.fetch`는 등록된 Re:Anime fixture만 응답하며 나머지는 503으로 막는다. Chromium 외부 요청도 기본 세션에서 차단한다.
+- 실제 main IPC로 합성 Re:Anime 검색→작품 상세→회차 목록→한국어 자막 트랙 파싱을 확인했다. 서버 없는 합성 회차에서 `provider:resolve`가 사용자 안내 오류를 반환하는 경로도 확인했다. 총 fixture 요청 11회, 알 수 없는 fetch 0회, 브라우저 외부 요청 0회였다.
+- **PASS — 패키지 main/preload IPC 통합(합성 데이터)**. 이것은 실사이트 응답·ID 정확도, 성공 스트림 해석, 실제 자막/영상 매칭 또는 NSIS 설치 UI 검증이 아니다. main handler가 반환한 예상 resolve 오류는 Electron stderr에 기록되며 테스트는 그 오류 문구를 확인한다.

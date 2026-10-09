@@ -373,6 +373,13 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 반복 실행을 위해 `npm test`(전체 단위 테스트)와 `npm run test:phase1-electron`(패키지 UI 스모크)을 추가했다. 두 명령 모두 통과했고 전체 테스트는 219/219다. Electron 스모크는 검색 IPC 22회·`provider:resolve` 2회·렌더러 오류 0건·외부 요청 시도 0건이다. 사용자 프로필은 사용하지 않았다.
 - **PASS — 패키지 renderer/preload 검색→상세→로컬 회차 재생→한국어 자막→새로고침 후 이어보기(합성 데이터)**. 이 스모크는 앱 main handler와 라이브 공급원 응답, 실제 영상·자막 매칭, 설치 NSIS 앱 및 기존 프로필을 검증하지 않는다. 테스트 코드만 바뀌어 이번에는 패키지를 다시 빌드하지 않았다.
 
+## 2026-10-10 패키지 main-process IPC 스모크
+
+- 반복 가능한 `npm run test:phase1-main`과 `tests/phase1-main.electron.cjs`를 추가했다. 빌드된 `dist/win-unpacked/resources/app.asar`의 main/preload 바이트가 현재 소스와 일치하는지 확인한 뒤 실제 패키지 main·preload와 앱 renderer를 격리 Electron 프로세스에서 연결한다.
+- 테스트 전용 `userData`·`sessionData`를 사용한다. Node `fetch`·Electron `net.fetch`는 Re:Anime 합성 응답만 반환하고, 알 수 없는 요청은 503으로 거부한다. Chromium 세션은 외부 요청을 차단한다.
+- 실제 `provider:catalog` 검색, `provider:detail` 메타데이터·회차 정규화, `provider:subtitle-tracks`의 한국어 VTT 트랙 파싱, 서버가 없는 회차의 `provider:resolve` 안내를 확인했다. 합성 네트워크 fixture 11회, 알 수 없는 fetch 0회, 차단된 브라우저 요청 0회, 실제 외부 네트워크 요청 0회다. 서버 없음 경로는 main IPC가 예상 오류를 reject하며 Electron이 오류 로그를 출력하지만 검증은 통과한다.
+- 전체 `npm test` 221/221과 기존 `npm run test:phase1-electron` 검색→합성 영상·한국어 자막→이어보기 스모크가 통과했다. 변경 JS 구문 검사와 `git diff --check`도 통과했다. 실제 공급원 응답·영상 resolve 성공·설치 NSIS UI·사용자 프로필은 확인하지 않았다. 설치 패키지는 테스트에서만 읽었고 재빌드·실행·배포하지 않았다.
+
 ## 주요 결정
 
 - 새 앱은 Windows 우선, Android는 후속이다. Chrome·macOS는 제품 범위에서 제외한다.
