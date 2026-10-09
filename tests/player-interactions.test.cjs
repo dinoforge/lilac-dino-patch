@@ -473,6 +473,49 @@ test('automatic subtitle lookup yields when the user changes the subtitle source
   assert.equal(await pending, false);
 });
 
+function koreanSubtitleOfferHarness() {
+  let resolveSearch;
+  const currentSubtitle = { source: 'provider', url: 'provider-subtitle.vtt' };
+  const box = { classList: classList('hidden') }, offerText = { textContent: '' }, applyButton = { textContent: '', onclick: null }, dismissButton = { onclick: null }, attached = [];
+  const context = vm.createContext({
+    playbackRequestId: 3, subtitleSelectionRequestId: 6, currentSubtitle,
+    onlineSubtitleFor: () => new Promise(resolve => { resolveSearch = resolve; }),
+    subtitleSearchAnime: () => ({ provider: 'reanime', id: 'test' }),
+    communityLabel: () => 'Kairan 자막',
+    clearTimeout() {}, setTimeout: () => 1,
+    $: selector => ({ '#subtitleOffer': box, '#subtitleOfferText': offerText, '#subtitleOfferApply': applyButton, '#subtitleOfferDismiss': dismissButton }[selector]),
+    preferAiSubtitle() {}, attachOnlineSubtitle: result => attached.push(result)
+  });
+  vm.runInContext(appSection('async function offerKoreanSubtitle(', 'async function ensureSubtitle('), context);
+  return { context, box, offerText, applyButton, currentSubtitle, attached, resolveSearch: result => resolveSearch(result) };
+}
+
+test('a late Korean subtitle offer is suppressed after the user starts a new source selection', async () => {
+  const h = koreanSubtitleOfferHarness();
+  const pending = h.context.offerKoreanSubtitle('테스트 애니', 1, 3, 6, h.currentSubtitle);
+  h.context.subtitleSelectionRequestId++;
+  h.resolveSearch({ source: 'kairan', result: {} });
+  await pending;
+
+  assert.equal(h.box.classList.contains('hidden'), true);
+  assert.equal(h.offerText.textContent, '');
+  assert.equal(h.applyButton.onclick, null);
+  assert.deepEqual(h.attached, []);
+});
+
+test('a visible Korean subtitle offer cannot replace a source selected after it appeared', async () => {
+  const h = koreanSubtitleOfferHarness();
+  const pending = h.context.offerKoreanSubtitle('테스트 애니', 1, 3, 6, h.currentSubtitle);
+  h.resolveSearch({ source: 'kairan', result: {} });
+  await pending;
+  assert.equal(h.box.classList.contains('hidden'), false);
+
+  h.context.subtitleSelectionRequestId++;
+  h.applyButton.onclick();
+  assert.equal(h.box.classList.contains('hidden'), true);
+  assert.deepEqual(h.attached, []);
+});
+
 test('an explicit subtitle choice invalidates and cancels pending translations', () => {
   const offer = { classList: classList() }, cloud = { dataset: { run: '2' } }, local = { dataset: { run: '3' } }, cancelled = [];
   const context = vm.createContext({

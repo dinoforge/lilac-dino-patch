@@ -782,13 +782,14 @@ function onlineSubtitleFor(title,episode,anime){
 function attachOnlineSubtitle({source,result}){currentSubtitlePath=result.path;attachSubtitle(result.url,communityLabel(source,result),{path:result.path,assUrl:result.assUrl,assPath:result.assPath,fonts:result.fonts,source})}
 // The subtitle playing is not Korean (a saved Jimaku file, a saved stream subtitle): offer a Korean one when it
 // turns up. A Korean one already playing (the stream's own track, a saved or translated file) is left alone.
-async function offerKoreanSubtitle(title,episode,requestId,current){
+async function offerKoreanSubtitle(title,episode,requestId,selectionRequestId,current){
+  const isCurrentOffer=()=>requestId===playbackRequestId&&selectionRequestId===subtitleSelectionRequestId&&currentSubtitle===current;
   const found=await onlineSubtitleFor(title,episode,subtitleSearchAnime());
-  if(!found||requestId!==playbackRequestId||currentSubtitle!==current)return;
+  if(!found||!isCurrentOffer())return;
   const name=communityLabel(found.source,found.result).replace(/ 자막$/,'');
   const box=$('#subtitleOffer');$('#subtitleOfferText').textContent=`한국어 자막(${name})을 찾았어요. 바꿀까요?`;
   box.classList.remove('hidden');clearTimeout(offerKoreanSubtitle.timer);offerKoreanSubtitle.timer=setTimeout(()=>box.classList.add('hidden'),20000);
-  $('#subtitleOfferApply').textContent='바꾸기';$('#subtitleOfferApply').onclick=()=>{box.classList.add('hidden');if(requestId===playbackRequestId){preferAiSubtitle(false);attachOnlineSubtitle(found)}};
+  $('#subtitleOfferApply').textContent='바꾸기';$('#subtitleOfferApply').onclick=()=>{box.classList.add('hidden');if(isCurrentOffer()){preferAiSubtitle(false);attachOnlineSubtitle(found)}};
   $('#subtitleOfferDismiss').onclick=()=>box.classList.add('hidden');
 }
 async function ensureSubtitle(stream,title,episode,{skipSaved=false}={}){
@@ -806,7 +807,7 @@ async function ensureSubtitle(stream,title,episode,{skipSaved=false}={}){
   }
   // Same order as Android: the preferred source's saved file, the stream's own subtitle, any saved file, then online search.
   // Only a subtitle that is not Korean gets the online Korean offer; fansubs and the user's own files are final.
-  const offerAfter=(source,korean)=>{if(!korean&&!['kairan','csora','anissia','user','gemini','chatgpt'].includes(source))offerKoreanSubtitle(title,episode,requestId,currentSubtitle)};
+  const offerAfter=(source,korean)=>{if(!korean&&!['kairan','csora','anissia','user','gemini','chatgpt'].includes(source))offerKoreanSubtitle(title,episode,requestId,selectionRequestId,currentSubtitle)};
   // Re:ANIME and Miruro: like Android only a Korean track is applied by itself; any other language is left for the user
   // to pick from the track list while the Korean search runs.
   const reanime=currentPlaybackContext.episode?.provider==='reanime',koreanUrl=url=>/(?:^|[^a-z])(?:kor|korean|ko)(?:[^a-z]|$)|한국/i.test(decodeURIComponent(String(url||'')));
