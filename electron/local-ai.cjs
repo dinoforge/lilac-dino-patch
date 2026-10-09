@@ -5,6 +5,7 @@
 // a few seconds).
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const net = require('net');
 const os = require('os');
 const { spawn } = require('child_process');
@@ -23,22 +24,22 @@ const LOCAL_AI_LICENSE_ERROR = '이 모델의 라이선스는 대한민국을 �
 // 7.8B (6.5, speaker names turned into 호칭) and Seed-X PPO 7B (0.5: it takes no names or context).
 const MODELS = [
   // Google's general models in its own 4-bit (QAT) files. E4B fits a 4 GB card nearly whole (42 of 43 layers).
-  { id: 'gemma-4-e4b', label: 'Gemma 4 E4B', note: '기본 · 5.2GB · 가장 정확하고 빠름', repo: 'google/gemma-4-E4B-it-qat-q4_0-gguf', file: 'gemma-4-E4B_q4_0-it.gguf', size: 5150e6 },
+  { id: 'gemma-4-e4b', label: 'Gemma 4 E4B', note: '기본 · 5.2GB · 가장 정확하고 빠름', repo: 'google/gemma-4-E4B-it-qat-q4_0-gguf', revision: '4b4a2c1d584be7264f87aac328a1bc739ce81b6c', file: 'gemma-4-E4B_q4_0-it.gguf', sha256: '676c35070db6dbe52f93e9c864ee0fba4eddea94b9c875d9cb10daff453fbaee', size: 5154941280 },
   // Cohere's multilingual model (11, 7/7, no Japanese left, 9 min), half of it on the CPU of a 4 GB card.
-  { id: 'aya-expanse-8b', label: 'Aya Expanse 8B', note: '5.1GB · 정확함 · 형/누나를 잘 맞춤 · 그래픽카드 메모리 6GB 이상이면 빠름', repo: 'bartowski/aya-expanse-8b-GGUF', file: 'aya-expanse-8b-Q4_K_M.gguf', size: 5057e6 },
+  { id: 'aya-expanse-8b', label: 'Aya Expanse 8B', note: '5.1GB · 정확함 · 형/누나를 잘 맞춤 · 그래픽카드 메모리 6GB 이상이면 빠름', repo: 'bartowski/aya-expanse-8b-GGUF', revision: 'f9d62ed0c58e6f2ae17975df990b1b8a4013b596', file: 'aya-expanse-8b-Q4_K_M.gguf', sha256: '9592bad943fe56cf93200286a0a4b00a158cd84a408f227b9978ec5879002fb8', size: 5056982720 },
   // 11, 1/7, 10 min.
-  { id: 'hy-mt2-7b', label: 'Hy-MT2 7B', note: '4.6GB · 목록에서 빠짐 · 형/누나를 자주 틀림', repo: 'tencent/Hy-MT2-7B-GGUF', file: 'Hy-MT2-7B-Q4_K_M.gguf', size: 4620e6, legacy: true },
+  { id: 'hy-mt2-7b', label: 'Hy-MT2 7B', note: '4.6GB · 목록에서 빠짐 · 형/누나를 자주 틀림', repo: 'tencent/Hy-MT2-7B-GGUF', revision: 'ab8472660ac61fac25f1af43fac2599d52a8a775', file: 'Hy-MT2-7B-Q4_K_M.gguf', sha256: '9f96256500f3fc1ab4d64336b58f52a949a95ad7516b0c229476eef782f9f77b', size: 4624648896, legacy: true },
   // The 26B and 30B mixtures of experts work about 4B and 3B per word, so they run from memory on the processor.
   // 11, 0/7, 12 min.
-  { id: 'gemma-4-26b-a4b', label: 'Gemma 4 26B-A4B', note: '14.4GB · 목록에서 빠짐 · E4B보다 느리고 형/누나를 틀림', repo: 'google/gemma-4-26B-A4B-it-qat-q4_0-gguf', file: 'gemma-4-26B_q4_0-it.gguf', size: 14440e6, ram: 24, legacy: true },
+  { id: 'gemma-4-26b-a4b', label: 'Gemma 4 26B-A4B', note: '14.4GB · 목록에서 빠짐 · E4B보다 느리고 형/누나를 틀림', repo: 'google/gemma-4-26B-A4B-it-qat-q4_0-gguf', revision: 'd1c082be9cf3c8a514acf63b8761f4b41935842e', file: 'gemma-4-26B_q4_0-it.gguf', sha256: '3eca3b8f6d7baf218a7dd6bba5fb59a56ee25fe2d567b6f5f589b4f697eca51d', size: 14439363584, ram: 24, legacy: true },
   // 10, 1/7, names wrong in 21 lines, 6 min.
-  { id: 'ja-ko-vn-7b', label: 'ja-ko-vn 7B', note: '4.6GB · 목록에서 빠짐 · 이름을 자주 틀림', repo: 'hell0ks/ja-ko-vn-7b-v1-gguf', file: 'model-Q4_K_M.gguf', size: 4630e6, legacy: true },
+  { id: 'ja-ko-vn-7b', label: 'ja-ko-vn 7B', note: '4.6GB · 목록에서 빠짐 · 이름을 자주 틀림', repo: 'hell0ks/ja-ko-vn-7b-v1-gguf', revision: '5460b80a6a6b64b01a862071875375ab40b049d3', file: 'model-Q4_K_M.gguf', sha256: '2b781aa981bec4af64597a12ed51e15b8903da502a0378a13bec8126bd96ec12', size: 4629997792, legacy: true },
   // 8.5, 1/7, 7 min.
-  { id: 'hy-mt2-30b-a3b', label: 'Hy-MT2 30B-A3B', note: '18GB · 목록에서 빠짐 · 존댓말이 섞임', repo: 'tencent/Hy-MT2-30B-A3B-GGUF', file: 'Hy-MT2-30B-A3B-Q4_K_M.gguf', size: 18240e6, ram: 24, legacy: true },
+  { id: 'hy-mt2-30b-a3b', label: 'Hy-MT2 30B-A3B', note: '18GB · 목록에서 빠짐 · 존댓말이 섞임', repo: 'tencent/Hy-MT2-30B-A3B-GGUF', revision: 'fd3dcbb6b31e9e03923ef4f9f42500f74c3851c3', file: 'Hy-MT2-30B-A3B-Q4_K_M.gguf', sha256: 'bb44b11bb0f7cd3d1321645b41e911cd3de2e473731227fc6bf37aa18b543f88', size: 18236702880, ram: 24, legacy: true },
   // 7.5, 3/7, 3 min.
-  { id: 'gemma-4-e2b', label: 'Gemma 4 E2B', note: '3.4GB · 가볍고 빠름 · 가끔 뜻을 틀림', repo: 'google/gemma-4-E2B-it-qat-q4_0-gguf', file: 'gemma-4-E2B_q4_0-it.gguf', size: 3350e6 },
+  { id: 'gemma-4-e2b', label: 'Gemma 4 E2B', note: '3.4GB · 가볍고 빠름 · 가끔 뜻을 틀림', repo: 'google/gemma-4-E2B-it-qat-q4_0-gguf', revision: '675cff42a74c774d6cb76f76d8eacb49b48c9b93', file: 'gemma-4-E2B_q4_0-it.gguf', sha256: 'fa401b55b07ee70a54c6dae3903c783a6e65064312529ea57175cb5f8dec6634', size: 3349516256 },
   // 5.5, 0/7, 2 min.
-  { id: 'hy-mt2-1.8b', label: 'Hy-MT2 1.8B', note: '1.1GB · 가장 가볍고 빠름 · 존댓말이 섞이고 자주 틀림', repo: 'tencent/Hy-MT2-1.8B-GGUF', file: 'Hy-MT2-1.8B-Q4_K_M.gguf', size: 1133e6 },
+  { id: 'hy-mt2-1.8b', label: 'Hy-MT2 1.8B', note: '1.1GB · 가장 가볍고 빠름 · 존댓말이 섞이고 자주 틀림', repo: 'tencent/Hy-MT2-1.8B-GGUF', revision: 'a0c709d9fac510f2c807aa3af52872340dc37a4a', file: 'Hy-MT2-1.8B-Q4_K_M.gguf', sha256: 'dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699', size: 1133080448 },
   { id: 'hy-mt-7b', label: 'HY-MT1.5 7B', note: '대한민국은 라이선스 적용 지역에서 제외 · 기존 파일 보존', repo: 'tencent/HY-MT1.5-7B-GGUF', file: 'HY-MT1.5-7B-Q4_K_M.gguf', size: 4620e6, legacy: true, licenseBlocked: true },
   { id: 'hy-mt-1.8b', label: 'HY-MT1.5 1.8B', note: '대한민국은 라이선스 적용 지역에서 제외 · 기존 파일 보존', repo: 'tencent/HY-MT1.5-1.8B-GGUF', file: 'HY-MT1.5-1.8B-Q4_K_M.gguf', size: 1133e6, legacy: true, licenseBlocked: true }
 ];
@@ -201,25 +202,32 @@ function createLocalAi(userData) {
 
   // Into target.part first: a download cut short (network, the app closed, cancelled) keeps what came and goes on
   // from there the next time (an HTTP range request); one that ends short of its length is not taken as the file.
-  async function download(url, target, progress, signal = null) {
+  async function download(url, target, progress, signal = null, expectedSha256 = null) {
     const partial = `${target}.part`;
     let have = 0; try { have = fs.statSync(partial).size; } catch { /* nothing yet */ }
     const response = await fetch(url, { headers: { 'User-Agent': 'LilacAnime-Desktop', ...(have ? { Range: `bytes=${have}-` } : {}) }, redirect: 'follow', signal });
     // Nothing left to send for that range (the kept part is stale or already whole): it starts over.
-    if (have && response.status === 416) { try { fs.unlinkSync(partial); } catch {} return download(url, target, progress, signal); }
+    if (have && response.status === 416) { try { fs.unlinkSync(partial); } catch {} return download(url, target, progress, signal, expectedSha256); }
     if (!response.ok || !response.body) throw new Error(`다운로드 HTTP ${response.status}`);
     if (response.status !== 206) have = 0;
     const total = (Number(response.headers.get('content-length')) || 0) + have;
+    const hash = expectedSha256 ? crypto.createHash('sha256') : null;
+    if (hash && have) for await (const chunk of fs.createReadStream(partial)) hash.update(chunk);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     const out = fs.createWriteStream(partial, { flags: have ? 'a' : 'w' }); let done = have, last = 0;
     try {
       for await (const chunk of response.body) {
         if (!out.write(chunk)) await new Promise(resolve => out.once('drain', resolve));
+        hash?.update(chunk);
         done += chunk.length; if (Date.now() - last > 500) { last = Date.now(); progress(done, total); }
       }
       await new Promise((resolve, reject) => out.end(error => error ? reject(error) : resolve()));
     } catch (error) { out.destroy(); throw error; }
     if (total > have && done !== total) throw new Error(`다운로드가 중간에 끊겼습니다 (${Math.round(done / total * 100)}%). 다시 받으면 이어서 받습니다.`);
+    if (hash && hash.digest('hex') !== expectedSha256) {
+      try { fs.unlinkSync(partial); } catch {}
+      throw new Error('받은 모델 파일의 SHA-256이 고정값과 일치하지 않아 설치하지 않았습니다. 다시 시도해 주세요.');
+    }
     fs.renameSync(partial, target); progress(done, total || done);
   }
   // The newest llama.cpp release that has every file of the build (CUDA: the program and the CUDA runtime it needs),
@@ -324,7 +332,7 @@ function createLocalAi(userData) {
     const abort = new AbortController();
     downloads.set(id, { done: 0, total: model.size, abort });
     try {
-      await download(`https://huggingface.co/${model.repo}/resolve/main/${encodeURIComponent(model.file)}?download=true`, modelPath(model), (done, total) => { downloads.set(id, { done, total: total || model.size, abort }); progress(done, total || model.size); }, abort.signal);
+      await download(`https://huggingface.co/${model.repo}/resolve/${model.revision}/${encodeURIComponent(model.file)}?download=true`, modelPath(model), (done, total) => { downloads.set(id, { done, total: total || model.size, abort }); progress(done, total || model.size); }, abort.signal, model.sha256);
     } catch (error) {
       if (abort.signal.aborted) throw Object.assign(new Error('받기를 멈췄습니다. 다시 받으면 이어서 받습니다.'), { cancelled: true });
       throw error;

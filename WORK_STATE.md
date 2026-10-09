@@ -174,8 +174,17 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 - Tencent 공식 HY-MT1.5 1.8B·7B `License.txt`는 대한민국을 적용 지역에서 제외한다. 두 preset은 앱의 기본 목록에서 사용·다운로드를 차단하고, 차단 상태와 근거를 설정에 표시한다. 설치된 기존 GGUF 파일은 읽거나 이동·수정·삭제하지 않는다.
 - 기존 번역 설정이 HY-MT1.5를 선택하고 있어도 허용된 기본 모델로 안전하게 전환한다. local AI 준비 상태와 실행 직전에도 제한 모델을 거부한다. 직접 추가하는 임의 GGUF는 라이선스를 판별할 수 없다는 안내를 추가했다.
-- 공식 Gemma 4 자료와 Tencent Hy-MT2 1.8B·7B·30B GGUF 저장소의 최신 라이선스 파일은 Apache-2.0을 표시한다. 하지만 앱 다운로드 주소는 `resolve/main`으로 고정 revision/hash가 없다. 모델 파일 리비전·SHA-256 고정은 다음 작업으로 남긴다. Aya Expanse의 비상업 조건과 `ja-ko-vn` 가중치 권리는 계속 확인 대상이다.
-- 새 라이선스 회귀 테스트 2/2, 전체 `node --test` 141/141 통과. 변경된 JavaScript `node --check`와 `git diff --check`도 통과했다. `npm run dist` Windows NSIS 빌드 성공; `dist/LilacAnime-Setup.exe`는 124,545,583바이트다. 패키지 `app.asar`에서 main·translator·renderer에 차단 처리가 포함된 것을 확인했다. 검증은 격리 임시 프로필을 사용했으며 실제 사용자 프로필·설치 앱 창·모델 실행은 열지 않았다.
+- 공식 Gemma 4 자료와 Tencent Hy-MT2 1.8B·7B·30B GGUF 저장소의 라이선스는 Apache-2.0을 표시한다. 8개 다운로드 가능 preset의 revision·SHA-256 고정은 아래 후속 작업에서 완료했다. Aya Expanse의 비상업 조건과 `ja-ko-vn` 가중치 권리는 계속 확인 대상이다.
+- 당시 새 라이선스 회귀 테스트 2/2, 전체 `node --test` 141/141 통과. 변경된 JavaScript `node --check`와 `git diff --check`도 통과했다. `npm run dist` Windows NSIS 빌드 성공; `dist/LilacAnime-Setup.exe`는 124,545,583바이트다. 패키지 `app.asar`에서 main·translator·renderer에 차단 처리가 포함된 것을 확인했다. 검증은 격리 임시 프로필을 사용했으며 실제 사용자 프로필·설치 앱 창·모델 실행은 열지 않았다.
+
+## 2026-10-09 AI 모델 다운로드 revision·무결성 고정
+
+- Hugging Face 공식 API에서 Gemma 4 E2B·E4B·26B-A4B, Aya Expanse 8B, Hy-MT2 1.8B·7B·30B-A3B, `ja-ko-vn` 7B의 저장소 전체 commit SHA, GGUF LFS SHA-256, 정확한 파일 크기를 조회했다. 고정한 각 commit snapshot에서 같은 파일 SHA-256·크기를 다시 대조했다. 값과 commit 링크는 `docs/DEPENDENCY_LICENSE_INVENTORY.md`에 있다.
+- 앱은 `resolve/main` 대신 저장소 commit URL을 사용한다. 새 파일은 내려받는 청크와 이어받은 `.part`를 함께 SHA-256으로 검증하고 일치할 때만 최종 파일명으로 옮긴다. 검증 실패 시 `.part`만 제거한다.
+- 기존 `userData/local-ai` 모델 파일은 다시 읽거나 해시 계산·교체·삭제하지 않았다. 한국 적용 지역이 불허된 HY-MT1.5 두 preset은 계속 다운로드·실행을 차단한다.
+- 신규 격리 테스트는 8개 preset의 pin, 고정 URL, 처음 받기, 이어받기, 해시 불일치 중단을 확인한다. 실제 수 GB 모델은 내려받지 않는다.
+- 신규 로컬 AI 테스트 4/4, 전체 `node --test` 143/143, 변경 파일 `node --check`, `git diff --check`가 통과했다. `npm run dist` Windows NSIS 빌드 성공(124,547,978바이트); `app.asar`에서 고정 revision·SHA-256 검사 코드가 포함된 것을 확인했다.
+- 실사용 모델 다운로드와 추론은 하지 않았다. 모델 다운로드 기능 검증은 격리 테스트의 합성 바이트만 사용했으며, 실제 Re:Anime 영상·자막 재생도 이번 변경에서는 검증하지 않았다.
 
 ## 주요 결정
 
@@ -190,5 +199,5 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 1. FFmpeg는 아직 선택하지 않는다. BtbN의 8.1.3·9.0.2 LGPL shared 후보는 합성 remux/디코딩을 통과했지만 기존 FFmpeg 6.1.1보다 큰 배포 폴더와 미확인 소스·외부 고지가 남았다. 최소 호환 빌드에는 shell 기반 빌드 환경이 필요하지만 현재 Docker·WSL 배포판·Bash·Make가 없어 설치하지 않고 보류했다. 해결 전까지 현행 의존성 유지, 설치 파일 공개 보류를 계속한다.
 2. JASSUB source commit 후보·다섯 submodule SHA와 font 파일 매칭은 확인됐다. 다음에는 고정된 전체 license notice를 만들고 Expat 경로를 해소한 뒤 app/NSIS 빌드에 넣어 실제 산출물까지 검사한다. upstream generator는 shell 기반이며 이 환경에는 Docker/WSL 배포판이 없어 실행하지 않았다. font의 원 라이선스와 전체 재배포 조건도 미해결이다.
-3. AI GGUF preset의 모델별 다운로드 revision과 SHA-256을 고정한다. HY-MT1.5 1.8B·7B는 앱에서 차단했고 사용자 기존 파일을 보존한다. Aya Expanse의 비상업 조건, `ja-ko-vn` 양자화 파일의 권리, 임의 GGUF의 조건을 추가 확인한다.
+3. Aya Expanse의 비상업 조건, `ja-ko-vn` 양자화 파일의 권리, 임의 GGUF의 조건을 추가 확인한다. 8개 preset 다운로드 pin은 적용됐으며 기존 모델 파일은 새로 검사하거나 교체하지 않는다. HY-MT1.5 1.8B·7B는 앱에서 차단했고 사용자 기존 파일을 보존한다.
 4. 프로젝트 코드·로고·아이콘 재배포 허가와 AniList 보완성, TMDB·AI 기능 결합 조건을 해결하기 전까지 공개 저장소·설치 파일 배포와 실사이트 콘텐츠 요청은 보류한다. 권리 해결 후 검색→상세→회차 재생→자막→이어보기 실제 인수 검증을 계획한다.

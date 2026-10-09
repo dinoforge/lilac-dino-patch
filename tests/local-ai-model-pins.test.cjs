@@ -1,0 +1,75 @@
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+const { createLocalAi, LOCAL_AI_MODELS } = require('../electron/local-ai.cjs');
+
+function temporaryUserData(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lilac-local-ai-pins-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+test('every downloadable preset has a fixed revision and SHA-256', () => {
+  const presets = LOCAL_AI_MODELS.filter(model => !model.licenseBlocked);
+  assert.equal(presets.length, 8);
+  for (const model of presets) {
+    assert.match(model.revision, /^[a-f0-9]{40}$/, `${model.id} revision`);
+    assert.match(model.sha256, /^[a-f0-9]{64}$/, `${model.id} SHA-256`);
+    assert.ok(model.size > 0, `${model.id} expected size`);
+  }
+});
+
+test('model download pins the URL and verifies fresh, resumed, and mismatched files', async t => {
+  const userData = temporaryUserData(t);
+  const model = LOCAL_AI_MODELS.find(item => item.id === 'hy-mt2-1.8b');
+  const expectedSha256 = model.sha256;
+  const originalFetch = global.fetch;
+  const full = Buffer.from('synthetic pinned model bytes');
+  const prefix = Buffer.from('synthetic pinned ');
+  const suffix = full.subarray(prefix.length);
+  const urlCalls = [];
+  const local = createLocalAi(userData);
+  const target = local.modelPath(model);
+
+  t.after(() => {
+    global.fetch = originalFetch;
+    model.sha256 = expectedSha256;
+  });
+
+  try {
+    model.sha256 = crypto.createHash('sha256').update(full).digest('hex');
+    global.fetch = async url => {
+      urlCalls.push(String(url));
+      return new Response(full, { status: 200 });
+    };
+    await local.installModel(model.id);
+    assert.match(urlCalls.at(-1), new RegExp(`/resolve/${model.revision}/`));
+    assert.equal(fs.readFileSync(target).toString(), full.toString());
+
+    fs.unlinkSync(target);
+    fs.writeFileSync(`${target}.part`, prefix);
+    global.fetch = async (url, options) => {
+      urlCalls.push(String(url));
+      assert.equal(options.headers.Range, `bytes=${prefix.length}-`);
+      return new Response(suffix, { status: 206 });
+    };
+    await local.installModel(model.id);
+    assert.equal(fs.readFileSync(target).toString(), full.toString());
+
+    fs.unlinkSync(target);
+    model.sha256 = '0'.repeat(64);
+    global.fetch = async url => {
+      urlCalls.push(String(url));
+      return new Response(full, { status: 200 });
+    };
+    await assert.rejects(local.installModel(model.id), /SHA-256/);
+    assert.equal(fs.existsSync(target), false);
+    assert.equal(fs.existsSync(`${target}.part`), false);
+  } finally {
+    global.fetch = originalFetch;
+    model.sha256 = expectedSha256;
+  }
+});

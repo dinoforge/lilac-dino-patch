@@ -76,15 +76,32 @@
 
 현재 모델 카탈로그는 기본 목록과 기존 설치 모델 호환용 legacy 항목을 함께 보유한다. 모델 가중치는 설치 파일에 번들되지 않지만, 앱이 특정 모델 저장소에서 내려받도록 연결되어 있다.
 
+다운로드 가능한 8개 preset은 Hugging Face 저장소의 현재 commit SHA와 파일별 SHA-256을 고정한다. 앱은 고정 commit URL에서 이어받고, `.part` 파일을 포함한 전체 바이트의 SHA-256이 일치할 때만 최종 모델 파일로 옮긴다. 불일치하면 해당 `.part`만 지우며 기존 설치 파일이나 임의 추가 파일은 검사·수정하지 않는다. 차단된 HY-MT1.5 2개 preset에는 다운로드 핀이 없다.
+
 | 코드의 모델 저장소 | 상태·확인된 조건 | 남은 조치 |
 |---|---|---|
-| `google/gemma-4-E4B-it-qat-q4_0-gguf`, `google/gemma-4-26B-A4B-it-qat-q4_0-gguf` | Google Gemma 4 공식 모델 카드는 Apache-2.0을 표시하고, 26B GGUF 저장소도 Apache-2.0으로 표시한다. Google Gemma 4 license 링크는 Apache License 2.0 본문으로 연결된다. | 현재 표시는 확인했지만 앱은 Hugging Face `resolve/main`에서 파일을 받아 commit SHA·GGUF SHA-256을 고정하지 않는다. 배포 전 모델 파일 리비전과 실제 체크섬을 고정한다. |
-| `tencent/Hy-MT2-1.8B-GGUF`, `tencent/Hy-MT2-7B-GGUF`, `tencent/Hy-MT2-30B-A3B-GGUF` | Tencent 공식 GGUF 저장소의 현재 `LICENSE.txt`는 각 모델 파일에 Apache-2.0을 명시한다. 7B·30B의 main 라이선스 파일도 현재 Apache-2.0이다. | 앱은 `resolve/main`에서 파일을 받으므로 정확한 commit SHA·GGUF SHA-256은 고정되지 않았다. 각 preset의 다운로드 리비전과 체크섬을 고정하고 실제로 내려받은 파일을 대조한다. |
-| `bartowski/aya-expanse-8b-GGUF` | 저장소는 CC-BY-NC-4.0 및 gated accept를 표시한다. 비상업 조건을 일반 배포 허가로 확대 해석하지 않는다. | 비상업 조건의 사용자 기능·배포 모델 적용 범위를 확인하고, 필요한 접근 조건·출처 고지를 처리한다. |
+| `google/gemma-4-E4B-it-qat-q4_0-gguf`, `google/gemma-4-26B-A4B-it-qat-q4_0-gguf`, `google/gemma-4-E2B-it-qat-q4_0-gguf` | Google Gemma 4 공식 모델 카드는 Apache-2.0을 표시하고 Google의 license 링크도 Apache License 2.0 본문으로 연결된다. 각 GGUF 파일의 저장소 commit과 SHA-256을 아래 목록에 고정했다. | 코드·패키지의 모델 출처 고지와 앱 전체 공개 배포 권리는 별도 확인 대상이다. |
+| `tencent/Hy-MT2-1.8B-GGUF`, `tencent/Hy-MT2-7B-GGUF`, `tencent/Hy-MT2-30B-A3B-GGUF` | Tencent 공식 GGUF 저장소의 고정 snapshot에는 Apache-2.0 `LICENSE.txt`와 파일 해시가 있다. 세 파일을 해당 저장소 commit과 SHA-256으로 고정했다. | 기존 사용자 파일은 재해시하거나 교체하지 않는다. |
+| `bartowski/aya-expanse-8b-GGUF` | 저장소는 CC-BY-NC-4.0 및 gated accept를 표시한다. 파일 출처·해시는 고정했지만 비상업 조건을 일반 배포 허가로 확대 해석하지 않는다. | 비상업 조건의 사용자 기능·배포 모델 적용 범위를 확인하고, 필요한 접근 조건·출처 고지를 처리한다. |
 | `tencent/HY-MT1.5-7B-GGUF` | 공식 `License.txt`는 EU·영국·대한민국을 적용 지역에서 제외한다. 해당 라이선스에 따른 한국 내 사용 권한을 확인할 수 없다. | 앱의 기본 카탈로그에서 사용·다운로드를 차단했다. 이미 설치된 사용자 파일은 건드리지 않고 설정에서 지역 제한을 표시한다. |
 | `tencent/HY-MT1.5-1.8B-GGUF` | 공식 저장소의 `License.txt`도 EU·영국·대한민국을 적용 지역에서 제외한다. 이 저장소의 빈 `LICENSE` 파일은 별도 권리 허가를 제공하지 않는다. | 앱의 기본 카탈로그에서 사용·다운로드를 차단했다. 이미 설치된 사용자 파일은 건드리지 않고 설정에서 지역 제한을 표시한다. |
-| `hell0ks/ja-ko-vn-7b-v1-gguf` | 코드가 양자화 저장소를 가리킨다. 기본 모델 저장소의 Apache-2.0만으로 GGUF 파일의 조건을 증명할 수 없다. | 해당 저장소의 라이선스, 원본 모델과의 파생 관계, 필요한 고지를 확인한다. |
+| `hell0ks/ja-ko-vn-7b-v1-gguf` | 양자화 파일의 저장소 commit과 SHA-256은 고정했다. 기본 모델 저장소의 Apache-2.0만으로 이 GGUF 파일의 조건을 증명할 수 없다. | 해당 저장소의 라이선스, 원본 모델과의 파생 관계, 필요한 고지를 확인한다. |
 | 사용자가 직접 고른 임의 GGUF | 앱에서 외부 모델 파일 선택을 지원한다. | 앱은 임의 GGUF의 라이선스·배포 권리를 검증하지 않는다. 사용자가 적법한 모델을 선택한다는 점과 모델 제공 약관을 분리해 안내해야 한다. |
+
+### GGUF 다운로드 고정값
+
+commit은 파일만의 변경점이 아니라 해당 저장소의 전체 snapshot을 가리킨다. SHA-256은 Hugging Face 파일 metadata의 LFS object hash이며, 각 고정 snapshot에서 같은 값과 파일 크기를 재확인했다.
+
+| preset | 파일 | 저장소 commit | SHA-256 |
+|---|---|---|---|
+| `gemma-4-e4b` | `gemma-4-E4B_q4_0-it.gguf` | [4b4a2c1d](https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/commit/4b4a2c1d584be7264f87aac328a1bc739ce81b6c) | `676c35070db6dbe52f93e9c864ee0fba4eddea94b9c875d9cb10daff453fbaee` |
+| `aya-expanse-8b` | `aya-expanse-8b-Q4_K_M.gguf` | [f9d62ed0](https://huggingface.co/bartowski/aya-expanse-8b-GGUF/commit/f9d62ed0c58e6f2ae17975df990b1b8a4013b596) | `9592bad943fe56cf93200286a0a4b00a158cd84a408f227b9978ec5879002fb8` |
+| `hy-mt2-7b` | `Hy-MT2-7B-Q4_K_M.gguf` | [ab847266](https://huggingface.co/tencent/Hy-MT2-7B-GGUF/commit/ab8472660ac61fac25f1af43fac2599d52a8a775) | `9f96256500f3fc1ab4d64336b58f52a949a95ad7516b0c229476eef782f9f77b` |
+| `gemma-4-26b-a4b` | `gemma-4-26B_q4_0-it.gguf` | [d1c082be](https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf/commit/d1c082be9cf3c8a514acf63b8761f4b41935842e) | `3eca3b8f6d7baf218a7dd6bba5fb59a56ee25fe2d567b6f5f589b4f697eca51d` |
+| `ja-ko-vn-7b` | `model-Q4_K_M.gguf` | [5460b80a](https://huggingface.co/hell0ks/ja-ko-vn-7b-v1-gguf/commit/5460b80a6a6b64b01a862071875375ab40b049d3) | `2b781aa981bec4af64597a12ed51e15b8903da502a0378a13bec8126bd96ec12` |
+| `hy-mt2-30b-a3b` | `Hy-MT2-30B-A3B-Q4_K_M.gguf` | [fd3dcbb6](https://huggingface.co/tencent/Hy-MT2-30B-A3B-GGUF/commit/fd3dcbb6b31e9e03923ef4f9f42500f74c3851c3) | `bb44b11bb0f7cd3d1321645b41e911cd3de2e473731227fc6bf37aa18b543f88` |
+| `gemma-4-e2b` | `gemma-4-E2B_q4_0-it.gguf` | [675cff42](https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/commit/675cff42a74c774d6cb76f76d8eacb49b48c9b93) | `fa401b55b07ee70a54c6dae3903c783a6e65064312529ea57175cb5f8dec6634` |
+| `hy-mt2-1.8b` | `Hy-MT2-1.8B-Q4_K_M.gguf` | [a0c709d9](https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF/commit/a0c709d9fac510f2c807aa3af52872340dc37a4a) | `dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699` |
 
 ## 이미지 에셋과 프로젝트 라이선스
 
@@ -101,7 +118,7 @@
 
 1. FFmpeg 현재 Windows 바이너리의 구성 요소·대응 소스·고지·재배포 조건을 실제 배포 방안과 함께 검토한다. 해결 전 설치 파일·릴리스 공개를 보류한다.
 2. JASSUB의 JS, WASM, worker, 글꼴과 전이 구성요소를 패키지 출처까지 추적하고 필요한 LICENSE/NOTICE 파일을 생성 스크립트와 최종 패키지에 포함한다.
-3. AI 모델 preset별 정확한 GGUF 파일 리비전과 SHA-256을 고정한다. HY-MT1.5 1.8B·7B는 앱에서 다운로드·실행을 막았고 기존 사용자 파일은 보존한다. Aya Expanse의 비상업 조건, `ja-ko-vn` 가중치의 권리, 임의 추가 GGUF의 사용 조건은 별도 검토한다.
+3. Aya Expanse의 비상업 조건, `ja-ko-vn` 가중치의 권리, 임의 추가 GGUF의 사용 조건을 별도 검토한다. 8개 preset의 새 다운로드는 고정 commit과 SHA-256을 확인하지만, 기존 사용자 모델을 다시 해시하거나 교체하지 않는다. HY-MT1.5 1.8B·7B는 앱에서 다운로드·실행을 막고 기존 사용자 파일을 보존한다.
 4. 다운로드되는 llama.cpp release와 지원되는 각 Windows 빌드의 네이티브 구성요소 고지를 추적 가능하도록 고정한다.
 5. 프로젝트 원본 코드, 로고, 아이콘의 출처와 재배포 권한을 확인한다. 필요하면 정식 허가된 에셋으로 교체하되 사용자 작업과 기존 데이터는 보존한다.
 
