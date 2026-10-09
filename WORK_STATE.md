@@ -77,6 +77,13 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 빌드된 `dist/win-unpacked/resources/app.asar`의 renderer와 실제 preload를 임시 Electron harness에서 실행했다. 합성 IPC 88개와 12초 MP4로 상세 UI의 `1화 이어보기`/`1화 처음부터`, 회차 resolve, 처음부터 선택 뒤 0.01363초·기록 0%, 상세 닫힘을 확인했다. renderer 오류와 외부 HTTP(S) 요청은 0건이다. 결과는 `%TEMP%\lilac-packaged-ui-yFofCR\packaged-ui-result.json`에 있다.
 - `dist/win-unpacked/LilacAnime.exe`도 임시 프로필로 headless 실행해 창 생성은 확인했지만, 상세 UI CDP 대기가 시간 초과됐다. 이 실행에는 IPC mock 호출·네트워크 차단 기록이 없어 패키지 exe의 실제 main 통합 검증으로 계산하지 않는다. 초기 화면은 카탈로그 IPC를 시작하고 `provider:catalog` handler는 RE:Anime `providerFetch`로 연결되므로, 이 시도에서 실제 외부 요청이 없었다고 확인할 수도 없다. 격리를 입증하지 못한 상태에서 재시도하지 않았다. 다음 패키지 검증은 main handler mock과 네트워크 차단이 실제로 먼저 적용됐다는 기록을 남기는 harness 준비 후 진행한다.
 
+## 2026-10-09 패키지 exe 통합·한국어 자막 스모크
+
+- `dist/win-unpacked`를 ignored 임시 폴더에 복사해 실제 `LilacAnime.exe`를 실행했다. exe SHA-256은 원본과 같았다. 격리용 테스트 `app.asar`는 실행 진입점만 harness로 바꾸고 실제 `electron/main.cjs`를 불러왔으며, 기존 앱 프로필과 별도인 임시 `userData`·`sessionData`를 사용했다.
+- renderer를 열기 전에 `provider:catalog`·`provider:detail`·`provider:resolve` IPC 응답을 합성 데이터로 대체하고, 앱의 네트워크 차단을 설치했다. 테스트 기록에서 세 IPC의 등록과 호출, renderer 네트워크 차단기 설치를 확인했다. 외부 차단 기록 0건, 렌더러 예외 0건이다.
+- 실제 packaged renderer/preload/main 경로로 `테스트 애니` 검색 → 작품 선택 → `1화 이어보기` 선택을 실행했다. 96% 기록은 `1화 처음부터`와 `1화 이어보기` 선택지를 보였고, 이어보기 후 합성 12초 MP4의 11.5초에서 멈췄으며 기록은 96%로 유지됐다. 한국어 합성 VTT 트랙은 `ko`·`showing`이고 현재 cue `한국어 합성 자막`이 활성화됐다.
+- 검증 한계: 테스트 전용 ASAR 변경·합성 IPC·로컬 영상과 자막으로 확인했다. 실제 공급원 검색·스트림·자막의 작품·회차·영상판 일치, 설치 NSIS 앱, 자막 픽셀 렌더링, 이용 허가는 확인하지 않았다. 기존 사용자 프로필은 열지 않았다.
+
 ## 주요 결정
 
 - 새 앱은 Windows 우선, Android는 후속이다. Chrome·macOS는 제품 범위에서 제외한다.

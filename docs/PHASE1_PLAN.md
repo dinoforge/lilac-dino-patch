@@ -154,3 +154,11 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 - 작품 상세에서 `1화 이어보기`와 보조 `1화 처음부터`가 표시됐다. 처음부터를 고르면 회차 resolve가 실행되고 상세가 닫혔으며, 영상 위치 0.01363초·이어보기 기록 0%를 확인했다. renderer 오류와 외부 HTTP(S) 요청은 0건이다. 결과 JSON: `%TEMP%\lilac-packaged-ui-yFofCR\packaged-ui-result.json`.
 - 별도 headless 실행으로 `dist/win-unpacked/LilacAnime.exe` 창 생성은 확인했지만, 상세 UI를 기다리던 CDP 호출은 시간 초과됐다. 임시 실행에 IPC mock 호출 또는 요청 차단 기록이 없어 이 exe 실행을 통합 통과로 보지 않는다. 초기 화면은 카탈로그 IPC를 시작하며 `provider:catalog`가 실제 RE:Anime fetch에 연결되므로, 이 실행에서 외부 요청이 없었다고 판단할 수도 없다. 네트워크 격리가 입증되지 않은 상태에서 추가 재시도하지 않았다.
 - 다음 검증은 패키지 main handler mock의 설치 여부와 네트워크 차단을 실행 전에 확인하고, 확인 기록이 남은 경우에만 exe UI를 연다. 현재까지 패키지 renderer/preload는 확인됐지만, 패키지 exe의 main-process 통합과 실제 공급원·영상·자막은 미검증이다.
+
+## 2026-10-09 패키지 exe main·한국어 자막 스모크
+
+- 이전 headless 시도와 별도로, `dist/win-unpacked` 사본을 task 전용 격리 폴더에서 실행했다. `LilacAnime.exe` SHA-256은 원본과 일치했다. 테스트 전용 ASAR의 진입점은 격리 harness로 바뀌었고, harness가 앱의 실제 `electron/main.cjs`를 불렀다. `userData`·`sessionData`는 별도 임시 폴더를 썼다.
+- BrowserWindow를 열기 전에 실제 main 코드의 `provider:catalog`·`provider:detail`·`provider:resolve` 등록을 확인하고 응답을 합성 fixture로 대체했다. global/Electron 네트워크 호출과 Chromium renderer 요청을 차단하도록 구성했다. 실행 결과는 IPC 등록 3개, 호출 4회(`catalog` 2회, `detail`·`resolve` 각 1회), renderer 차단기 설치, 차단 로그 0건, 렌더러 오류 0건이다.
+- 실제 packaged renderer/preload/main 흐름에서 `테스트 애니` 검색 후 작품 상세를 열고 `1화 이어보기`를 눌렀다. 미리 심은 96% 기록에 대해 처음부터/이어보기 선택지가 모두 보였고, 합성 12초 MP4가 11.5초에서 멈췄으며 기록은 96%로 유지됐다.
+- 회차의 합성 VTT에서 `language=ko`, `mode=showing`, 활성 cue `한국어 합성 자막`을 확인했다. 이 결과는 Chromium 트랙 상태 증거이며 픽셀 캡처나 실제 영상·자막 검증은 아니다.
+- 검증 한계: 공급원 IPC·MP4·VTT는 모두 합성이다. 실제 Re:Anime 응답, 외부 스트림, 회차·영상판 자막 일치, NSIS 설치 앱, 기존 프로필은 확인하지 않았다. 외부 네트워크 요청은 시도되지 않았다.
