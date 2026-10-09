@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-function setup({ source = 'reanime', current = [], quarterShows = [], quarterSelection = null, library = [], history = [], feed = async () => ({ data: [], nextOffset: 36, done: true }) } = {}) {
+function setup({ source = 'reanime', current = [], quarterShows = [], quarterSelection = null, library = [], history = [], feed = async () => ({ data: [], nextOffset: 36, done: true }), linkkfEpisodes = async () => [] } = {}) {
   const elements = new Map(), calls = [], storage = new Map();
   function element(id) {
     const classes = new Set();
@@ -34,7 +34,10 @@ function setup({ source = 'reanime', current = [], quarterShows = [], quarterSel
     state,
     QUARTER_PROVIDERS: ['reanime', 'animenosub', 'miruro'],
     SOURCE_LABELS: { reanime: 'RE:Anime', miruro: 'Miruro', animenosub: 'Animenosub', ohli24: '애니24', linkkf: 'Linkkf' },
-    window: { lilac: { catalogUpdates: (provider, offset) => { calls.push({ provider, offset }); return feed(provider, offset); } } },
+    window: { lilac: {
+      catalogUpdates: (provider, offset) => { calls.push({ provider, offset }); return feed(provider, offset); },
+      linkkfEpisodes: id => { calls.push({ provider: 'linkkf', id }); return linkkfEpisodes(id); }
+    } },
     localStorage: { setItem: (key, value) => storage.set(key, value), getItem: key => storage.get(key) },
     $: selector => {
       if (selector === '#homeOrder [data-order="season"]') return homeButtons[0];
@@ -164,6 +167,30 @@ test('library update sources are queried only while the library view is active',
   await h.context.api.renderLibrary();
 
   assert.deepEqual(h.calls, []);
+});
+
+test('Linkkf favorites use cached episode lists with no more than three concurrent lookups', async () => {
+  const library = Array.from({ length: 7 }, (_, index) => ({
+    provider: 'linkkf', id: String(index + 1), mal_id: `linkkf:${index + 1}`, availableEpisodes: 6
+  }));
+  let active = 0, maximum = 0, lookups = 0;
+  const h = setup({
+    source: 'linkkf', library,
+    linkkfEpisodes: async () => {
+      lookups++; active++; maximum = Math.max(maximum, active);
+      await Promise.resolve(); active--;
+      return [{ episodes: [{ name: '7화', number: 7 }] }];
+    }
+  });
+
+  await h.context.api.renderLibrary();
+  assert.deepEqual(h.elements.get('libraryGrid').items.map(item => item.libraryUpdateNew), Array(7).fill(true));
+  assert.ok(maximum <= 3);
+  assert.equal(lookups, 7);
+  await h.context.api.renderLibrary();
+  assert.equal(lookups, 7);
+  h.context.api.renderHome();
+  assert.equal(h.elements.get('homeOrder').classList.contains('hidden'), true);
 });
 
 test('a watched latest episode suppresses NEW but another provider history does not', async () => {

@@ -1,7 +1,9 @@
 // Update order uses each provider's own recent-episode feed. Saved library data is never reordered in storage.
 const catalogUpdateUI = (() => {
   const supported = ['reanime', 'miruro', 'animenosub', 'ohli24'];
+  const librarySupported = [...supported, 'linkkf'];
   const cache = new Map();
+  const linkkfEpisodeCache = new Map();
   let homeOrder = 'season', libraryOrder = 'saved', homeRequest = 0, libraryRequest = 0;
   const baselineStorageKey = 'libraryUpdateBaselines';
 
@@ -21,7 +23,7 @@ const catalogUpdateUI = (() => {
   function availableEpisodes(item) {
     const values = item?.provider === 'reanime' ? [item.availableEpisodes, item.subbed, item.dubbed]
       : item?.provider === 'miruro' ? [item.availableEpisodes ?? (Number(item.availableEpisodeCount) > 0 ? item.availableEpisodeCount : null)]
-        : ['animenosub', 'ohli24'].includes(item?.provider) ? [item.availableEpisodes] : [];
+        : ['animenosub', 'ohli24', 'linkkf'].includes(item?.provider) ? [item.availableEpisodes] : [];
     const numbers = values.filter(value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) && Number(value) >= 0).map(Number);
     return numbers.length ? Math.max(...numbers) : null;
   }
@@ -65,7 +67,7 @@ const catalogUpdateUI = (() => {
     const baselines = readBaselines(); let changed = false;
     const rows = state.library.map((saved, index) => {
       const freshEntry = byId.get(String(saved.mal_id)), fresh = freshEntry?.item;
-      if (!fresh) return { item: saved, index, fresh: null, isNew: false };
+      if (!fresh) return { item: saved, index, fresh: null, sortFresh: null, isNew: false };
       const latest = availableEpisodes(fresh), savedCount = availableEpisodes(saved), key = baselineKey(saved);
       let baseline = Number(baselines[key]);
       if (!Number.isFinite(baseline) || baseline < 0) baseline = null;
@@ -87,7 +89,7 @@ const catalogUpdateUI = (() => {
         return Math.max(max, episodeNumber(record.episode));
       }, 0);
       const item = { ...saved, ...fresh };
-      return { item, index, fresh: freshEntry, isNew: latest !== null && baseline !== null && latest > baseline && latest > watched };
+      return { item, index, fresh: freshEntry, sortFresh: fresh.provider === 'linkkf' ? null : freshEntry, isNew: latest !== null && baseline !== null && latest > baseline && latest > watched };
     });
     if (changed) {
       try { localStorage.setItem(baselineStorageKey, JSON.stringify(baselines)); } catch {}
@@ -113,6 +115,35 @@ const catalogUpdateUI = (() => {
     const entry = { time: Date.now(), promise }; cache.set(key, entry);
     try { return await promise; }
     catch (error) { if (cache.get(key) === entry) cache.delete(key); throw error; }
+  }
+
+  async function linkkfEpisodeUpdate(anime) {
+    const key = String(anime.id ?? anime.mal_id), previous = linkkfEpisodeCache.get(key);
+    if (previous && Date.now() - previous.time < 5 * 60 * 1000) return previous.promise;
+    const promise = Promise.resolve().then(async () => {
+      const servers = await window.lilac.linkkfEpisodes(anime.id);
+      const episodes = (servers || []).flatMap(server => server.episodes || []);
+      const numbers = episodes.map(episode => Number(episode.number) || Number(String(episode.name || '').match(/\d+(?:\.\d+)?/)?.[0]) || 0);
+      return { ...anime, availableEpisodes: Math.max(0, ...numbers) };
+    });
+    const entry = { time: Date.now(), promise };
+    linkkfEpisodeCache.set(key, entry);
+    try { return await promise; }
+    catch (error) { if (linkkfEpisodeCache.get(key) === entry) linkkfEpisodeCache.delete(key); throw error; }
+  }
+
+  async function recentLinkkf() {
+    const saved = state.library.filter(item => item.provider === 'linkkf');
+    const items = new Array(saved.length); let next = 0, failures = 0;
+    const workers = Array.from({ length: Math.min(3, saved.length) }, async () => {
+      while (next < saved.length) {
+        const at = next++;
+        try { items[at] = await linkkfEpisodeUpdate(saved[at]); }
+        catch { failures++; }
+      }
+    });
+    await Promise.all(workers);
+    return { items: items.filter(Boolean), failures, note: '저장한 Linkkf 작품의 회차 목록을 확인했습니다.' };
   }
 
   function homeItems() {
@@ -154,13 +185,13 @@ const catalogUpdateUI = (() => {
     const list = reconcileLibraryUpdates([...libraryItems.values()]);
     list.forEach(entry => { if (entry.isNew) entry.item.libraryUpdateNew = true; });
     if (libraryOrder === 'updated') list.sort((a, b) => {
-      if (Boolean(a.fresh) !== Boolean(b.fresh)) return a.fresh ? -1 : 1;
-      if (!a.fresh) return a.index - b.index;
+      if (Boolean(a.sortFresh) !== Boolean(b.sortFresh)) return a.sortFresh ? -1 : 1;
+      if (!a.sortFresh) return a.index - b.index;
       const timeA = Date.parse(a.item.updatedAt), timeB = Date.parse(b.item.updatedAt);
       if (Number.isFinite(timeA) !== Number.isFinite(timeB)) return Number.isFinite(timeA) ? -1 : 1;
       if (Number.isFinite(timeA)) return timeB - timeA || a.index - b.index;
       if (a.item.provider !== b.item.provider) return String(a.item.provider || '').localeCompare(String(b.item.provider || ''));
-      return a.fresh.rank - b.fresh.rank || a.index - b.index;
+      return a.sortFresh.rank - b.sortFresh.rank || a.index - b.index;
     });
     renderCards('#libraryGrid', list.map(entry => entry.item));
   }
@@ -171,15 +202,18 @@ const catalogUpdateUI = (() => {
     drawLibrary();
     if (!$('#libraryView').classList.contains('active')) { note('#libraryOrderNote', ''); return; }
     const providers = [...new Set(state.library.map(item => item.provider))];
-    const available = providers.filter(provider => supported.includes(provider));
+    const available = providers.filter(provider => librarySupported.includes(provider));
     if (!state.library.length || !available.length) { note('#libraryOrderNote', ''); return; }
     if (libraryOrder === 'updated') note('#libraryOrderNote', '저장한 작품의 최근 회차 목록을 확인하는 중…');
-    const results = await Promise.allSettled(available.map(async provider => ({ provider, ...(await recent(provider, 8)) })));
+    const results = await Promise.allSettled(available.map(async provider => ({ provider, ...(provider === 'linkkf' ? await recentLinkkf() : await recent(provider, 8)) })));
     if (request !== libraryRequest) return;
     libraryItems = new Map(); const failures = [];
     results.forEach((result, at) => {
       if (result.status === 'rejected') failures.push(SOURCE_LABELS[available[at]] || available[at]);
-      else result.value.items.forEach((item, rank) => libraryItems.set(String(item.mal_id), { item, rank }));
+      else {
+        result.value.items.forEach((item, rank) => libraryItems.set(String(item.mal_id), { item, rank }));
+        if (result.value.failures) failures.push('Linkkf 일부 작품');
+      }
     });
     drawLibrary();
     if (libraryOrder !== 'updated') { note('#libraryOrderNote', ''); return; }
