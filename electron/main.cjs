@@ -1263,11 +1263,18 @@ async function lookupTitleVariants(text){
   if(media?.title?.english)variants.add(media.title.english);
   return [...variants].filter(value=>titleCompareKey(value)!==key).slice(0,30);
 }
-// Tries each Korean title until a Kairan/Csora post matches.
+function subtitleNotFoundError(message){const error=new Error(message);error.code='SUBTITLE_NOT_FOUND';return error}
+function isSubtitleNotFoundError(error){return error?.code==='SUBTITLE_NOT_FOUND'}
+// Tries each Korean title until a Kairan/Csora post matches. A failed lookup for one title must not be
+// overwritten by a later title's genuine no-match result.
 async function findCommunitySubtitleByTitles(source,titles,episode,options){
-  let lastError=null;
-  for(const title of titles){try{return {...await (source==='anissia'?findAnissiaSubtitle(title,episode,options):findCommunitySubtitle(source,title,episode,options)),searchTitle:title}}catch(error){lastError=error}}
-  throw lastError||new Error('자막 게시물을 찾지 못했습니다.');
+  let lastNotFound=null,lastFailure=null;
+  for(const title of titles){
+    try{return {...await (source==='anissia'?findAnissiaSubtitle(title,episode,options):findCommunitySubtitle(source,title,episode,options)),searchTitle:title}}
+    catch(error){if(isSubtitleNotFoundError(error))lastNotFound=error;else lastFailure=error}
+  }
+  if(lastFailure)throw lastFailure;
+  throw lastNotFound||subtitleNotFoundError('자막 게시물을 찾지 못했습니다.');
 }
 // Blogger feeds return at most 150 posts per request, so the whole blog is paged in. Like Android the index is
 // kept on disk for a day, a failed refresh falls back to the stale copy, and a miss refreshes once (below).
@@ -1468,7 +1475,7 @@ async function findCommunitySubtitle(source,title,episode,{originalTitle='',offs
   // A cached index can predate the episode (Csora adds links to existing posts), so a miss refreshes once.
   let match=rankCommunityPosts(await communityPosts(blog),title,episode,originalTitle,{offsets})[0];
   if(!match)match=rankCommunityPosts(await communityPosts(blog,{force:true}),title,episode,originalTitle,{offsets})[0];
-  if(!match)throw new Error(`${label} 자막 게시물을 찾지 못했습니다.`);
+  if(!match)throw subtitleNotFoundError(`${label} 자막 게시물을 찾지 못했습니다.`);
   return downloadCommunityMatch(match,source,title,episode);
 }
 // Downloads a ranked post's links (Drive, zip/7z/RAR, subtitle files) and picks the episode's file.
@@ -1729,9 +1736,9 @@ async function anissiaMakers(title,originalTitle=''){
   return {anime,captions};
 }
 async function findAnissiaSubtitle(title,episode,{originalTitle='',offsets=[],maker=''}={}){
-  const found=await anissiaMakers(title,originalTitle);if(!found)throw new Error('Anissia에서 작품을 찾지 못했습니다.');
+  const found=await anissiaMakers(title,originalTitle);if(!found)throw subtitleNotFoundError('Anissia에서 작품을 찾지 못했습니다.');
   // A maker picked in the player is the only one tried.
-  const anime=found.anime,captions=maker?found.captions.filter(item=>item.name===maker):found.captions;
+  const anime=found.anime,captions=maker?found.captions.filter(item=>item.name===maker):found.captions;let lastError=null;
   for(const caption of captions){
     let origin;try{origin=new URL(caption.website).origin}catch{continue}
     const host=new URL(origin).hostname;
@@ -1771,9 +1778,10 @@ async function findAnissiaSubtitle(title,episode,{originalTitle='',offsets=[],ma
         }
       }
       if(match){const result=await downloadCommunityMatch(match,'anissia',anime.subject,episode);return {...result,maker:caption.name,anissiaTitle:anime.subject}}
-    }catch{/* next maker */}
+    }catch(error){lastError=error}
   }
-  throw new Error('Anissia 자막을 찾지 못했습니다.');
+  if(lastError)throw lastError;
+  throw subtitleNotFoundError('Anissia 자막을 찾지 못했습니다.');
 }
 async function downloadHls(url,filePath,event){
   let playlistUrl=url;let text=await providerFetch(playlistUrl,{referer:new URL(url).origin+'/'});
