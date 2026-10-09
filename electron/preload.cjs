@@ -54,6 +54,8 @@ contextBridge.exposeInMainWorld('lilac', {
   remoteSubtitle: (url, referer) => ipcRenderer.invoke('subtitle:remote', url, referer),
   savedSubtitles: key => ipcRenderer.invoke('subtitle-store:list', key),
   saveSubtitle: (key, entry) => ipcRenderer.invoke('subtitle-store:save', key, entry),
+  saveManualSubtitle: input => ipcRenderer.invoke('subtitle:manual-save', input),
+  copyText: text => ipcRenderer.invoke('clipboard:copy-text', text),
   removeSavedSubtitle: (key, id) => ipcRenderer.invoke('subtitle-store:remove', key, id),
   subtitleCacheUsage: () => ipcRenderer.invoke('subtitle-cache:usage'),
   cleanSubtitleCache: () => ipcRenderer.invoke('subtitle-cache:clean'),

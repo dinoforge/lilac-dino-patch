@@ -143,6 +143,15 @@
 .ps-body .sheet-tracks > .sheet-button, .ps-body .sheet-tracks > .sheet-button-row { margin-top: 10px; }
 .ps-pane > .sheet-button-row { margin-top: 8px; }
 .ps-pane > .sheet-button-row + .ps-note { margin-top: 6px; }
+.manual-translation-panel { display: grid; gap: 8px; margin-top: 10px; padding: 12px; border: 1px solid #ffffff20; border-radius: 12px; background: #ffffff08; }
+.manual-translation-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.manual-translation-head span, .manual-translation-panel > p { color: #ffffffa8; font-size: 12px; line-height: 1.45; }
+.manual-translation-panel > p { margin: 0; }
+.manual-translation-panel > label { font-size: 12px; font-weight: 700; }
+.manual-translation-panel textarea { box-sizing: border-box; width: 100%; min-height: 130px; resize: vertical; padding: 9px; border: 1px solid #ffffff25; border-radius: 9px; background: #101010; color: #fff; font: inherit; font-size: 12px; line-height: 1.5; }
+.manual-translation-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.manual-translation-actions .sheet-button { margin: 0; }
+.manual-translation-panel [aria-live] { min-height: 1em; }
 .ps-body .track-list { max-height: 260px; }
 .ps-body .track-option { font: inherit; font-size: 13px; }
 .ps-body .track-option > span { display: grid; gap: 1px; min-width: 0; }

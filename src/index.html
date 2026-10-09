@@ -158,7 +158,17 @@
               <div class="ps-pane" data-ps-pane="subtitle" role="tabpanel">
                 <label class="ps-switch"><span><b>자막 표시</b><small>끄면 자막을 숨깁니다</small></span><input id="subtitleEnabled" type="checkbox" checked></label>
                 <p id="subtitleState" class="ps-state">자막을 찾는 중...</p>
-                <div id="subtitleTranslateRow" class="sheet-button-row hidden"><button id="translateNow" type="button" class="sheet-button" data-provider="cloud">Gemini로 한국어 번역</button><button id="translateNowLocal" type="button" class="sheet-button" data-provider="local">내 PC(로컬 AI)로 번역</button></div>
+                <div id="manualChatgptRow" class="sheet-button-row hidden"><button id="translateChatgpt" type="button" class="sheet-button">ChatGPT 직접 번역 · API 키 없음</button></div>
+                <div id="subtitleTranslateRow" class="sheet-button-row hidden"><button id="translateNow" type="button" class="sheet-button" data-provider="cloud">Gemini API로 한국어 번역</button><button id="translateNowLocal" type="button" class="sheet-button" data-provider="local">내 PC(로컬 AI)로 번역</button></div>
+                <section id="manualChatgptPanel" class="manual-translation-panel hidden" aria-label="ChatGPT 수동 자막 번역">
+                  <div class="manual-translation-head"><b>ChatGPT 수동 번역</b><span id="manualChatgptProgress"></span></div>
+                  <p>요청을 복사해 ChatGPT에 직접 붙여넣고, 결과를 아래에 붙여넣으세요. 앱이 자막 번호와 원래 시간을 확인합니다.</p>
+                  <button id="manualChatgptCopyOpen" type="button" class="sheet-button">요청 복사하고 ChatGPT 열기</button>
+                  <label for="manualChatgptAnswer">ChatGPT 번역 결과</label>
+                  <textarea id="manualChatgptAnswer" rows="6" spellcheck="false" placeholder="ChatGPT 답변을 여기에 붙여넣으세요"></textarea>
+                  <div class="manual-translation-actions"><button id="manualChatgptApply" type="button" class="sheet-button">결과 확인</button><button id="manualChatgptClose" type="button" class="sheet-button">접기</button><button id="manualChatgptCancel" type="button" class="sheet-button">취소</button></div>
+                  <p id="manualChatgptStatus" role="status" aria-live="polite"></p>
+                </section>
                 <p class="ps-group">자막 가져올 곳</p>
                 <small class="ps-note">누르면 그곳의 자막으로 바꾸고, 다음 화부터도 그곳을 먼저 찾습니다.</small>
                 <div id="psSubtitleSources" class="ps-chips ps-sources"><button type="button" data-source="linkkf"><b>Linkkf</b><small>사이트 한국어 자막</small></button><button type="button" data-source="reanime"><b>Re:Anime</b><small>사이트 자막 트랙</small></button><button type="button" data-source="kairan"><b>Kairan</b><small data-source-status aria-live="polite">미확인</small></button><button type="button" data-source="csora"><b>Csora</b><small data-source-status aria-live="polite">미확인</small></button><button type="button" data-source="anissia"><b>Anissia</b><small data-source-status aria-live="polite">미확인</small></button><button type="button" data-source="jimaku"><b>Jimaku</b><small>일본어 → 번역</small></button><button type="button" data-source="ai"><b>AI 번역</b><small>한국어로 번역</small></button></div>
@@ -249,6 +259,7 @@
   <script src="../node_modules/hls.js/dist/hls.min.js"></script>
   <script src="anime-metadata.js"></script>
   <script src="catalog-browser.js"></script>
+  <script src="manual-subtitle-translation.js"></script>
   <script src="app.js"></script>
   <script src="catalog-updates.js"></script>
   <script src="player.js"></script>

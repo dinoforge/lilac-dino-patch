@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, session, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, session, net, clipboard } = require('electron');
 const path = require('path');
 const zlib = require('zlib');
 const cheerio = require('cheerio');
@@ -2092,6 +2092,19 @@ app.whenReady().then(async () => {
   ipcMain.handle('subtitle-store:list',(_,key)=>subtitleStore.list(String(key||'')));
   ipcMain.handle('subtitle-store:save',(_,key,entry)=>subtitleStore.save(String(key||''),entry));
   ipcMain.handle('subtitle-store:remove',(_,key,id)=>subtitleStore.remove(String(key||''),String(id||'')));
+  ipcMain.handle('clipboard:copy-text',(_,value)=>{const text=String(value??'');if(!text.trim()||text.length>2_000_000)throw new Error('복사할 내용이 비어 있거나 너무 큽니다.');clipboard.writeText(text);return true});
+  ipcMain.handle('subtitle:manual-save',(_,input={})=>{
+    const key=String(input.key||'').trim(),text=String(input.text||'');
+    if(key.length>1200)throw new Error('회차 식별 정보가 너무 깁니다.');
+    if(text.length>12_000_000||!/^WEBVTT(?:[ \t].*)?(?:\r?\n|$)/i.test(text))throw new Error('번역 결과가 유효한 WebVTT 자막이 아닙니다.');
+    const dir=path.join(app.getPath('userData'),'subtitles','translated');fs.mkdirSync(dir,{recursive:true});
+    const file=path.join(dir,`chatgpt_${Date.now()}_${Math.random().toString(36).slice(2,8)}.vtt`);
+    fs.writeFileSync(file,text,'utf8');
+    try{
+      const saved=key?subtitleStore.save(key,{source:'chatgpt',label:'ChatGPT 수동 번역',path:file,from:String(input.from||''),fromName:String(input.fromName||'원본 자막')}):null;
+      return saved||{source:'chatgpt',label:'ChatGPT 수동 번역',path:file,url:pathToFileURL(file).href};
+    }catch(error){try{fs.unlinkSync(file)}catch{}throw error}
+  });
   // 설정 > 자막 캐시: the subtitle files no saved subtitle uses (translations, downloads, partial results), removed by
   // hand, and by themselves a minute after start once a month old.
   ipcMain.handle('subtitle-cache:usage',()=>subtitleStore.usage());
