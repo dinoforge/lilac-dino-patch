@@ -2371,5 +2371,5 @@ app.whenReady().then(async () => {
   app.on('activate', () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow(); });
 });
 
-app.on('before-quit', () => { closeFlixProxy(); subtitleTranslator?.local?.stop(); updater?.installOnQuit(); });
+app.on('before-quit', () => { closeFlixProxy(); subtitleTranslator?.local?.stop(); });
 app.on('window-all-closed', () => { if (process.env.LILAC_SMOKE_REANIME==='1')return;if (process.platform !== 'darwin') app.quit(); });

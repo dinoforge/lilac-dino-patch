@@ -1304,11 +1304,12 @@ applyCueStyle();
 function latestHistoryByAnime(items){const seen=new Set();return items.filter(item=>{const key=item.anime?.mal_id||item.anime?.id||item.subtitleTitle||item.name.split(' · ')[0];if(seen.has(key))return false;seen.add(key);return true;});}
 function renderContinue(){const section=$('#continueSection'),rail=$('#continueRail'),latest=latestHistoryByAnime(state.history),hasContinue=latest.length>0;section.classList.toggle('hidden',!hasContinue);$('#homeView').classList.toggle('has-continue',hasContinue);rail.replaceChildren(...latest.slice(0,6).map(h=>{const el=document.createElement('article'),image=historyImage(h),episode=h.episode?.number||h.name.match(/(?:·|EP\.?)\D*(\d+)/i)?.[1]||1;el.className='continue-card';el.dataset.historyKey=h.key||h.src;el.innerHTML=`<div class="continue-thumb"${image?` style="background-image:url('${image}')"`:''}><span class="continue-play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 6 9 6-9 6Z"/></svg></span><div class="history-progress"><i style="width:${Math.max(0,Math.min(100,h.progress||0))}%"></i></div></div><b ${h.anime?titleAttr(h.anime):''}>${escapeHtml(storedTitle(h))}</b><span>EP.${escapeHtml(String(episode))} · ${Math.max(0,Math.min(100,h.progress||0))}%</span>`;el.onclick=()=>playHistoryItem(h);return el;}));}
 init();
-// GitHub release auto update: banner + settings controls.
+// Project release updates: banner + settings controls.
 let updateBannerDismissed=false;
 function renderUpdate(state={}){
   const status=$('#updateStatus'),apply=$('#applyUpdate'),banner=$('#updateBanner'),text=$('#updateBannerText'),action=$('#updateBannerAction');
-  const messages={idle:`현재 버전 ${state.current||''}`,checking:'업데이트를 확인하는 중...',latest:`최신 버전입니다. (v${state.current})`,available:`새 버전 v${state.latest}을 사용할 수 있습니다.`,downloading:`v${state.latest} 다운로드 중${state.percent!=null?` ${state.percent}%`:''}`,ready:`v${state.latest} 설치 준비 완료 · 설치하면 앱이 다시 시작됩니다.`,error:`업데이트 실패: ${state.error||'알 수 없는 오류'}`};
+  const messages={disabled:'이 프로젝트의 업데이트 릴리스는 아직 설정되지 않았습니다.',idle:`현재 버전 ${state.current||''}`,checking:'업데이트를 확인하는 중...',latest:`최신 버전입니다. (v${state.current})`,available:`새 버전 v${state.latest}을 사용할 수 있습니다.`,downloading:`v${state.latest} 다운로드 중${state.percent!=null?` ${state.percent}%`:''}`,ready:`v${state.latest} 설치 준비 완료 · 설치하면 앱이 다시 시작됩니다.`,error:`업데이트 실패: ${state.error||'알 수 없는 오류'}`};
+  $('#checkUpdate').disabled=state.status==='disabled';
   status.textContent=messages[state.status]||'';
   apply.classList.toggle('hidden',!['available','ready','downloading'].includes(state.status));apply.disabled=state.status==='downloading';apply.textContent=state.status==='ready'?'지금 설치':'업데이트 다운로드';
   const show=['available','downloading','ready'].includes(state.status)&&!updateBannerDismissed;banner.classList.toggle('hidden',!show);
@@ -1417,14 +1418,16 @@ function releaseNotesHtml(text){
   }
   close();return html;
 }
-// Shown once on the first start of each version, a fresh install included.
+// Show once when this version has release notes or an official release link.
 async function showChangelogIfUpdated(version){
-  let seen=null;try{seen=localStorage.getItem('lastSeenVersion');localStorage.setItem('lastSeenVersion',version)}catch{return}
+  let seen=null;try{seen=localStorage.getItem('lastSeenVersion')}catch{return}
   if(seen===version)return;
   const data=await window.lilac.updateNotes().catch(()=>null),dialog=$('#changelogDialog');
-  $('#changelogTitle').textContent=`v${version} 변경 사항`;
   // Release texts start with their own "## v0.3.19" heading, which the dialog title already says.
   const notes=String(data?.notes||'').replace(/^\s*#{1,6}\s*v?\d+(?:\.\d+)+\s*(?:\n|$)/,'').trim();
+  if(!notes&&!data?.url){try{localStorage.setItem('lastSeenVersion',version)}catch{};return}
+  try{localStorage.setItem('lastSeenVersion',version)}catch{return}
+  $('#changelogTitle').textContent=`v${version} 변경 사항`;
   $('#changelogBody').innerHTML=notes?releaseNotesHtml(notes):'<p>변경 사항을 불러오지 못했어요. GitHub 릴리스에서 확인할 수 있어요.</p>';
   $('#changelogLink').classList.toggle('hidden',!data?.url);$('#changelogLink').onclick=()=>window.lilac.openExternal(data.url);
   if(!dialog.open)dialog.showModal();
