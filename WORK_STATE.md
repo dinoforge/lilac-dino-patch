@@ -389,6 +389,12 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 회귀 확인: `npm run test:phase1-electron` 통과(통합 검색·자막·이어보기, 27% 저장 및 3.27초 복구, renderer 오류 0회·외부 요청 0회); `npm test` 221/221 통과. 이는 합성 공급원/영상의 패키지 renderer 검증이며 실제 Re:Anime 콘텐츠, 실제 자막 일치, 설치 NSIS 앱과 사용자 프로필은 검증하지 않는다.
 - 후속 복구 확인: 합성 RE:Anime episode에 같은 종류의 `HD-2`·`HD-1` 서버를 제공하고 패키지 Hls.js 인스턴스에 fatal 오류를 넣었다. 실제 main IPC가 `HD-1`로 재해석하고, 320×180 영상 디코드·선택한 한국어 자막 트랙·활성 cue·약 2.02초 위치를 복구했다. FlixCloud loopback redirect 4회, renderer 프록시 요청 6회, 미등록 fetch·차단된 브라우저 요청·외부 네트워크 호출은 각 0회다. `npm run test:phase1-main`, `npm run test:phase1-electron`, `npm test` 221/221 모두 통과했다. 공급원·영상·자막은 전부 합성 데이터다.
 
+## 2026-10-10 패키지 홈 탐색 IPC 검증
+
+- `tests/phase1-main.electron.cjs`에서 패키지 main/preload의 실제 IPC를 사용해 홈 탐색 핵심 경로를 추가 검증했다. RE:Anime 2026년 4분기는 main handler가 `season=FALL&year=2026`으로 요청하고 올바른 작품·분기 라벨을 반환했다. AniList 최신 방영은 가용 회차 초과·미래 회차를 거르고 2화를 선택했으며 두 번째 요청은 15분 캐시를 사용했다. 미지원 Linkkf 최신 방영 요청은 외부 호출을 하지 않았다.
+- Linkkf 주간 방영표는 월요일~일요일 요청 7개를 실행했고, 합성 월요일 카드 1개와 나머지 빈 요일, 오류 없는 상태를 반환했다. Wikidata 제목 보강은 빈 합성 결과로 처리해 외부 네트워크를 열지 않았다. 합성 fixture 50회, 미등록 fetch·차단된 브라우저 요청·외부 네트워크 호출은 0회다.
+- `npm run test:phase1-main`, `npm run test:phase1-electron`, 전체 `npm test` 221/221, 테스트 파일 `node --check`가 통과했다. 이 결과는 main handler 연결·필터·캐시·요일 배열을 합성 데이터로 확인한 것으로 실제 AniList/Re:Anime/Linkkf 응답과 방영 정보 정확도는 검증하지 않는다.
+
 ## 주요 결정
 
 - 새 앱은 Windows 우선, Android는 후속이다. Chrome·macOS는 제품 범위에서 제외한다.

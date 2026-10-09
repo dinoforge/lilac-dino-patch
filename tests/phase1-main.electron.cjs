@@ -61,6 +61,7 @@ BrowserWindow.prototype.show = function hideSmokeWindow() {};
 
 const fetchAttempts = [];
 const fixtureRequests = [];
+const anilistRequests = [];
 const deniedBrowserRequests = [];
 const redirectedFlixRequests = [];
 const localBrowserRequests = [];
@@ -125,11 +126,35 @@ function response(body, status = 200, contentType = 'application/json') {
   return new Response(text, { status, headers: { 'content-type': contentType } });
 }
 
-function fixtureResponse(rawUrl) {
+function fixtureResponse(rawUrl, requestInit = {}) {
   const url = new URL(String(rawUrl));
+  if (url.hostname === 'graphql.anilist.co') {
+    const request = JSON.parse(String(requestInit.body || '{}'));
+    anilistRequests.push({ query: String(request.query || ''), variables: request.variables || {} });
+    const now = Number(request.variables?.now) || Math.floor(Date.now() / 1000);
+    fixtureRequests.push(url.href);
+    return response({ data: { Page: { airingSchedules: [
+      { episode: 2, airingAt: now - 120, media: { id: 62001 } },
+      { episode: 3, airingAt: now - 30, media: { id: 62001 } },
+      { episode: 2, airingAt: now + 30, media: { id: 62001 } },
+      { episode: 1, airingAt: now - 13 * 24 * 60 * 60, media: { id: 62001 } },
+      { episode: 1, airingAt: now - 60, media: { id: 62002 } }
+    ] } } });
+  }
+  if (url.hostname === 'linkkf1.5imgdarr.top' && url.pathname === '/api/singlefilter.php') {
+    fixtureRequests.push(url.href);
+    const tag = Number(url.searchParams.get('categorytagid'));
+    return response({ data: tag === 21189 ? [{ postid: '81001', postname: '합성 월요일 방영작' }] : [] });
+  }
+  if (url.hostname === 'query.wikidata.org' && url.pathname === '/sparql') {
+    fixtureRequests.push(url.href);
+    return response({ head: { vars: ['ko', 'seriesKo'] }, results: { bindings: [] } });
+  }
   if (url.hostname === 'reanime.to' && url.pathname === '/api/v1/search') {
     fixtureRequests.push(url.href);
-    const matches = url.searchParams.get('q') === SEARCH_TITLE;
+    const matchesSearch = url.searchParams.get('q') === SEARCH_TITLE;
+    const matchesQuarter = url.searchParams.get('season') === 'FALL' && url.searchParams.get('year') === '2026';
+    const matches = matchesSearch || matchesQuarter;
     return response({ data: matches ? [animeFixture] : [], total: matches ? 1 : 0 });
   }
   if (url.hostname === 'reanime.to' && url.pathname === `/anime/${SLUG}`) {
@@ -184,15 +209,15 @@ function fixtureResponse(rawUrl) {
   return response('blocked by phase1-main fixture', 503, 'text/plain');
 }
 
-globalThis.fetch = async (input) => {
+globalThis.fetch = async (input, requestInit = {}) => {
   const url = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
   fetchAttempts.push(url);
-  return fixtureResponse(url);
+  return fixtureResponse(url, requestInit);
 };
-net.fetch = async (input) => {
+net.fetch = async (input, requestInit = {}) => {
   const url = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
   fetchAttempts.push(url);
-  return fixtureResponse(url);
+  return fixtureResponse(url, requestInit);
 };
 
 function blockSessionRequests(ses) {
@@ -261,6 +286,51 @@ app.whenReady().then(async () => {
     });
     const win = await waitFor('packaged app window', () => BrowserWindow.getAllWindows().find(item => !item.isDestroyed()));
     await waitFor('packaged preload API', () => win.webContents.executeJavaScript('Boolean(window.lilac && window.lilac.providerCatalog)'));
+
+    const quarterResult = await win.webContents.executeJavaScript(
+      "window.lilac.providerQuarter('reanime', 2026, 4)"
+    );
+    assert.equal(quarterResult.label, '2026년 4분기');
+    assert.equal(quarterResult.data.length, 1);
+    assert.equal(quarterResult.data[0].id, SLUG);
+    assert.equal(quarterResult.data[0].provider, 'reanime');
+    const quarterRequest = fixtureRequests.map(url => new URL(url)).find(url => url.hostname === 'reanime.to'
+      && url.pathname === '/api/v1/search' && url.searchParams.get('season') === 'FALL'
+      && url.searchParams.get('year') === '2026');
+    assert.ok(quarterRequest, 'the real main handler requested the selected RE:Anime season and year');
+
+    const latestCandidates = [
+      { provider: 'reanime', anilistId: 62001, subbed: 2, dubbed: 0, title: '합성 최신 방영작' },
+      { provider: 'reanime', anilistId: 62002, subbed: 0, dubbed: 0, title: '미방영 합성 작품' },
+      { provider: 'miruro', anilistId: 62003, availableEpisodeCount: 5, title: '다른 출처 작품' }
+    ];
+    const latestResult = await win.webContents.executeJavaScript(
+      `window.lilac.providerLatestEpisodes('reanime', ${JSON.stringify(latestCandidates)})`
+    );
+    assert.equal(latestResult.supported, true);
+    assert.equal(latestResult.fromCache, false);
+    assert.equal(latestResult.data.length, 1);
+    assert.equal(latestResult.data[0].anime.title, '합성 최신 방영작');
+    assert.equal(latestResult.data[0].episode, 2, 'latest airing excludes future and unavailable episodes');
+    const latestCached = await win.webContents.executeJavaScript(
+      `window.lilac.providerLatestEpisodes('reanime', ${JSON.stringify(latestCandidates)})`
+    );
+    assert.equal(latestCached.fromCache, true, 'latest airing reuses the cached schedule');
+    const unsupportedLatest = await win.webContents.executeJavaScript(
+      `window.lilac.providerLatestEpisodes('linkkf', ${JSON.stringify(latestCandidates)})`
+    );
+    assert.equal(unsupportedLatest.supported, false);
+    assert.equal(anilistRequests.length, 1, 'only the supported valid Re:Anime AniList candidates were queried once');
+    assert.deepEqual(anilistRequests[0].variables.ids, [62001]);
+    assert.ok(anilistRequests[0].query.includes('airingSchedules'));
+
+    const schedule = await win.webContents.executeJavaScript('window.lilac.linkkfSchedule()');
+    assert.equal(schedule.days.length, 7, 'Linkkf main IPC returns Monday through Sunday');
+    assert.deepEqual(schedule.unavailableDays, []);
+    assert.equal(schedule.days[0].length, 1);
+    assert.equal(schedule.days[0][0].provider, 'linkkf');
+    assert.equal(schedule.days[0][0].title, '합성 월요일 방영작');
+    assert.equal(schedule.days.slice(1).reduce((total, day) => total + day.length, 0), 0);
 
     const search = await win.webContents.executeJavaScript(
       `window.lilac.providerCatalog('reanime', ${JSON.stringify(SEARCH_TITLE)}, 0, '')`
@@ -453,6 +523,9 @@ app.whenReady().then(async () => {
     assert.match(fallbackState.activeCueText, /합성 한국어 자막/);
 
     assert.ok(fixtureRequests.some(url => new URL(url).searchParams.get('q') === SEARCH_TITLE), 'search reached the synthetic Re:Anime API');
+    assert.ok(fixtureRequests.some(url => new URL(url).hostname === 'linkkf1.5imgdarr.top'
+      && new URL(url).pathname === '/api/singlefilter.php'), 'the weekly schedule reached all seven Linkkf API partitions');
+    assert.ok(fixtureRequests.some(url => new URL(url).hostname === 'graphql.anilist.co'), 'the latest episode IPC reached the AniList GraphQL client');
     assert.ok(fixtureRequests.some(url => new URL(url).hostname === 'api.aniskip.com'), 'the player received an empty synthetic AniSkip response');
     assert.ok(fixtureRequests.some(url => url.includes(`/api/v1/anime/${SLUG}/episodes`)), 'detail reached the synthetic episode API');
     assert.ok(fixtureRequests.some(url => url.includes(`/api/watch/${SLUG}/1`)), 'subtitle lookup reached the synthetic episode-server API');
@@ -470,7 +543,7 @@ app.whenReady().then(async () => {
     assert.equal(deniedUnknownFetches.length, 0, `no unregistered main-process URL was requested: ${deniedUnknownFetches.join(', ')}`);
     assert.equal(deniedBrowserRequests.length, 0, `no external browser request was allowed or attempted: ${deniedBrowserRequests.join(', ')}`);
 
-    console.log('Packaged Phase 1 main-process smoke passed: actual main IPC search/detail/episodes, Korean subtitle parsing and save, loopback HLS decode, Korean WebVTT cue, persisted resume, and automatic same-kind server fallback.');
+    console.log('Packaged Phase 1 main-process smoke passed: actual main IPC quarter catalog, latest airing/cache, weekday schedule, search/detail/episodes, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
     console.log(`Playback: ${playbackState.width}x${playbackState.height} at ${playbackState.currentTime.toFixed(2)}s; resume: ${resumeState.currentTime.toFixed(2)}s from saved 50%; fallback: ${fallbackState.server} at ${fallbackState.currentTime.toFixed(2)}s with selected subtitle; synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; renderer proxy requests: ${rendererProxyRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: 0; blocked browser requests: 0; external network calls: 0.`);
     await new Promise(resolve => localPlayerServer.close(resolve));
     app.quit();

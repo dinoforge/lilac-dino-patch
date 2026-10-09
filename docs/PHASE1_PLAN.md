@@ -216,3 +216,10 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 - 성공 재생 해석은 합성 Re:Anime 서버 목록과 FlixCloud 플레이어 페이지를 사용하며, FlixCloud 요청은 로컬 HTTP 서버로만 리다이렉트한다. `npm run test:phase1-main`에서 Hls.js가 4초 합성 HLS/MPEG-TS를 320×180으로 디코딩하고 한국어 cue를 표시했으며 50% 저장 뒤 새로고침 이어보기로 약 2초 위치를 복구했다. main은 한국어 VTT를 격리 `userData`에 저장하고 앱 로컬 `__flix` 프록시가 HLS를 제공했다.
 - 같은 테스트에서 선택한 `HD-2` 서버에 fatal HLS 오류를 넣었다. 실제 main IPC가 같은 종류의 `HD-1`로 재해석했으며, 패키지 renderer가 다시 영상 디코드·선택한 자막·cue·약 2.02초 위치를 복구했다. FlixCloud loopback 리다이렉트는 4회, renderer 프록시 요청은 6회였다. 등록되지 않은 fetch·차단된 브라우저 요청·외부 네트워크 호출은 각각 0회다. 서버 없는 경로의 예상 resolve 오류 로그도 안내 경로 확인을 위해 발생한다.
 - `npm run test:phase1-electron` 및 `npm test` 221/221도 통과했다. **PASS — 패키지 main/preload/renderer의 합성 HLS 재생·자막·이어보기·동일 종류 대체 서버 복구 통합**. 실제 사이트 응답·ID 정확도·공급원 영상판과 자막 매칭, 권리 확인, 설치 NSIS 앱과 사용자 프로필은 미검증이다.
+
+## 2026-10-10 패키지 홈 탐색 IPC 스모크
+
+- `tests/phase1-main.electron.cjs`에서 패키지 main/preload가 실제 등록한 IPC를 호출하고 API 응답은 합성 fixture로 처리했다. RE:Anime `provider:quarter`에 2026년 4분기를 전달해 `season=FALL&year=2026` 요청과 `2026년 4분기` 결과를 확인했다.
+- `provider:latest-episodes`는 합성 AniList GraphQL 요청 한 번으로 제한된 RE:Anime ID를 보냈고, 현재 가용 화수를 넘는 회차·미래 회차를 제외해 가장 최근 가용 회차 2화를 선택했다. 반복 요청은 캐시에서 반환했고 지원하지 않는 Linkkf 요청은 네트워크 호출을 추가하지 않았다.
+- Linkkf `linkkf:schedule` 실제 main IPC는 월~일 일곱 API 분할을 호출해 월요일 합성 작품 1개와 다른 여섯 빈 요일을 반환했다. Wikidata 제목 보강 조회는 빈 fixture로 응답했다. 총 fixture 요청은 50회, 미등록 fetch·차단된 브라우저 요청·외부 호출은 0회다.
+- **PASS — 패키지 main/preload 홈 탐색 경로(합성 데이터)**. `npm run test:phase1-main`, `npm run test:phase1-electron`, `npm test` 221/221이 통과했다. 라이브 AniList/Re:Anime/Linkkf 정보, 최신 회차 정확성 및 설치 NSIS UI는 검증하지 않았다.
