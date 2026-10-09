@@ -10,8 +10,9 @@ const appSource = fs.readFileSync(path.join(__dirname, '../src/app.js'), 'utf8')
 const indexSource = fs.readFileSync(path.join(__dirname, '../src/index.html'), 'utf8');
 
 function appFunction(name,nextName){
-  const start=appSource.indexOf(`function ${name}(`),end=appSource.indexOf(`\nfunction ${nextName}(`,start);
+  let start=appSource.indexOf(`function ${name}(`);const end=appSource.indexOf(`\nfunction ${nextName}(`,start);
   assert.ok(start>=0&&end>start,`Missing app function ${name}`);
+  if(appSource.slice(start-6,start)==='async ')start-=6;
   return appSource.slice(start,end);
 }
 
@@ -103,4 +104,72 @@ test('pending fallback restoration seeks to exact seconds before falling back to
   assert.equal(video.currentTime,123.5);
   assert.equal(context.pendingResumeSeconds,null);
   assert.equal(context.pendingResumeProgress,0);
+});
+
+test('renderer resolve, exhausted HLS recovery, exact alternate resolve, and subtitle restoration compose end to end', async () => {
+  const providerCalls=[],resolvePromises=[],subtitleApplications=[],storageWrites=[];
+  const video={currentTime:0,duration:600,paused:true};
+  const streamServers=[{label:'HD-1',kind:'soft'},{label:'HD-2',kind:'soft'}];
+  const koreanTrack={url:'https://fixture.invalid/ko.vtt',label:'한국어',language:'ko'};
+  const streams={
+    first:{url:'https://fixture.invalid/first.m3u8',servers:streamServers,server:'HD-1',subtitleTracks:[koreanTrack]},
+    second:{url:'https://fixture.invalid/second.m3u8',servers:streamServers,server:'HD-2',subtitleTracks:[koreanTrack]}
+  };
+  class FakeHls {
+    static Events={MANIFEST_PARSED:'manifest',LEVEL_SWITCHED:'level',FRAG_BUFFERED:'buffered',FRAG_CHANGED:'changed',ERROR:'error'};
+    static ErrorDetails={FRAG_PARSING_ERROR:'parse'};
+    static ErrorTypes={NETWORK_ERROR:'network',MEDIA_ERROR:'media'};
+    constructor(){this.handlers=new Map();this.levels=[];this.startLoadCount=0;this.destroyed=false}
+    on(event,handler){this.handlers.set(event,handler)}
+    emit(event,data){this.handlers.get(event)?.(event,data)}
+    startLoad(){this.startLoadCount++}
+    recoverMediaError(){}
+    swapAudioCodec(){}
+    destroy(){this.destroyed=true}
+  }
+  const ui={textContent:'',value:'통합 테스트 작품'};
+  const context=vm.createContext({
+    window:{LilacPlayerFailover:failover,lilac:{providerResolve:async episode=>{providerCalls.push({...episode});return episode.server==='HD-2'?streams.second:streams.first}}},
+    Hls:FakeHls,playbackRequestId:0,currentPlaybackContext:{},hlsPlayer:null,currentSubtitle:null,pendingResumeProgress:0,pendingResumeSeconds:null,
+    subtitleSelectionRequestId:0,playerFailureHistory:[],video,playbackDuration:()=>600,
+    $:selector=>selector==='#video'?video:ui,onlineSubtitleFor:()=>Promise.resolve(null),episodeRef:episode=>episode.url,jobByRef:()=>null,downloadedSeries:()=>[],
+    renderVideoServers:()=>{},renderSubtitleTracks:()=>{},loadMissingSubtitleTracks:()=>{},ensureSubtitle:async()=>false,
+    attachSubtitle:(src,label,options)=>{subtitleApplications.push({src,label,options});context.currentSubtitle={src,label,...options}},
+    showPlayerFailure:()=>{throw new Error('unexpected player failure')},toast:()=>{throw new Error('unexpected failure toast')},
+    cancelPendingPlaybackLookups(){context.playbackRequestId++},
+    showPendingPlayer(name,playback){context.cancelPendingPlaybackLookups();if(context.hlsPlayer){context.hlsPlayer.destroy();context.hlsPlayer=null}video.currentTime=0;context.currentSubtitle=null;context.currentPlaybackContext={...playback,resolving:true};return ++context.playbackRequestId},
+    play(url,name,playback){context.playbackRequestId++;context.currentPlaybackContext={...playback,currentUrl:url};context.pendingResumeSeconds=Number(playback.resumeSeconds)>0?Number(playback.resumeSeconds):null;context.pendingResumeProgress=Number(playback.resumeProgress)||0;context.applyPendingResume();const instance=new FakeHls();context.hlsPlayer=instance;context.bindHlsPlayerEvents(instance,video)},
+    localStorage:{getItem:()=>null,setItem:(key,value)=>storageWrites.push([key,value])},
+    applyDefaultQuality(){},renderQualityChoices(){},scheduleOpEdAnalysis(){},playerSettingsOpen:()=>false
+  });
+  vm.runInContext([
+    appFunction('resolveIntoPlayer','startAutomaticVideoServerFallback'),
+    appFunction('startAutomaticVideoServerFallback','bindHlsPlayerEvents'),
+    appFunction('bindHlsPlayerEvents','play'),
+    appFunction('applyPendingResume','showPlayerControls')
+  ].join('\n'),context);
+  const resolve= context.resolveIntoPlayer,pending=[];
+  context.resolveIntoPlayer=(...args)=>{const promise=resolve(...args);pending.push(promise);return promise};
+  const episode={provider:'reanime',name:'1',number:1,url:'https://fixture.invalid/episode'};
+  await context.resolveIntoPlayer(()=>context.window.lilac.providerResolve(episode),'통합 테스트 작품 · 1화',
+    {episode,subtitleTitle:'통합 테스트 작품',selectedSubtitleTrack:koreanTrack.url},'통합 테스트 작품',1);
+  const firstPlayer=context.hlsPlayer;
+  context.currentSubtitle={src:'file:///fixture/chosen-ko.vtt',label:'선택한 한국어 자막',path:'C:/fixture/chosen-ko.vtt',source:'user'};
+  video.currentTime=120.25;
+  for(let attempt=0;attempt<4;attempt++)firstPlayer.emit(FakeHls.Events.ERROR,{fatal:true,type:FakeHls.ErrorTypes.NETWORK_ERROR,details:`network-${attempt}`});
+  assert.equal(firstPlayer.startLoadCount,3);
+  assert.equal(pending.length,2);
+  await pending[1];
+  assert.equal(providerCalls.length,2);
+  assert.equal(providerCalls[1].server,'HD-2');
+  assert.equal(providerCalls[1].serverOnly,true);
+  assert.deepEqual(providerCalls[1].excludeVideoServers,['HD-1']);
+  assert.equal(context.currentPlaybackContext.videoServer,'HD-2');
+  assert.equal(context.currentPlaybackContext.resumeSeconds,120.25);
+  assert.equal(video.currentTime,120.25);
+  assert.equal(context.pendingResumeSeconds,null);
+  assert.equal(context.currentSubtitle.src,'file:///fixture/chosen-ko.vtt');
+  assert.equal(context.currentPlaybackContext.selectedSubtitleTrack,koreanTrack.url);
+  assert.deepEqual(subtitleApplications.map(item=>item.src),['file:///fixture/chosen-ko.vtt']);
+  assert.deepEqual(storageWrites,[]);
 });
