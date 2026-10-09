@@ -87,6 +87,8 @@ function downloadIcon(type='download'){const paths={download:'<path d="M12 3v11m
 function updateLibraryButton(button,isSaved,withLabel=true){if(!button)return;button.classList.toggle('saved',isSaved);button.innerHTML=`${heartIcon()}${withLabel?'<span>내 목록</span>':''}`;button.setAttribute('aria-label',isSaved?'내 목록에서 삭제':'내 목록에 추가')}
 // Cards shown outside the home lists (related works, schedule, filters) must still open.
 const knownAnime=new Map();
+const searchGroupsByKey=new Map();
+let currentSearchGroups=[],currentSearchStatuses=[],currentSearchFilter='all',currentSearchQuery='';
 function rememberAnime(a){if(a?.mal_id!=null&&!knownAnime.has(String(a.mal_id)))knownAnime.set(String(a.mal_id),a);return a}
 function animeById(id) { return [...(state.quarterShows||[]),...(state.current||[]),...(state.airing||[]),...state.season,...state.top,...state.library].find(x=>String(x.mal_id)===String(id))||knownAnime.get(String(id)); }
 function toast(message) { const el=$('#toast'); el.textContent=message; el.classList.add('show'); clearTimeout(toast.t); toast.t=setTimeout(()=>el.classList.remove('show'),2200); }
@@ -113,16 +115,17 @@ function switchView(name) {
 function card(a) {
   rememberAnime(a);const el=document.createElement('article'); el.className='anime-card'; el.dataset.id=a.mal_id;
   const latestEpisode=Number(a.latestEpisodeNumber)||0,latestDate=Number(a.latestAiringAt)?new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric'}).format(new Date(Number(a.latestAiringAt)*1000)):'';
-  const libraryNew=Boolean(a.libraryUpdateNew);
+  const savedSource=a.sourceItems?.find(item=>state.library.some(savedItem=>String(savedItem.mal_id)===String(item.mal_id))),libraryNew=Boolean(a.libraryUpdateNew),libraryItem=savedSource||a.sourceItems?.find(item=>String(item.mal_id)===String(a.mal_id))||a,isCardSaved=Boolean(savedSource)||saved(a.mal_id);
   if(latestEpisode)el.classList.add('latest-episode-card');
   const episodeMeta=LilacAnimeMeta.episodeLabel(a),regularMeta=[a.year,a.type,episodeMeta].filter(Boolean).map(value=>escapeHtml(String(value))).join(' · '),latestMeta=[latestDate?`방영 ${latestDate}`:'',episodeMeta].filter(Boolean).map(value=>escapeHtml(String(value))).join(' · ');
-  el.innerHTML=`<div class="poster"><button class="heart ${saved(a.mal_id)?'saved':''}" title="내 목록">${heartIcon()}</button>${a.score?`<span class="score">★ ${escapeHtml(String(a.score))}</span>`:''}${libraryNew?'<span class="library-new-badge">NEW</span>':''}${latestEpisode?`<span class="latest-episode-badge">EP.${escapeHtml(String(latestEpisode))}</span>`:''}</div><h3 ${titleAttr(a)}>${escapeHtml(titleOf(a))}</h3>${originalTitleMarkup(a,'anime-card-native')}<p>${latestEpisode?latestMeta:regularMeta}</p>`;
+  el.innerHTML=`<div class="poster"><button class="heart ${isCardSaved?'saved':''}" title="내 목록">${heartIcon()}</button>${a.score?`<span class="score">★ ${escapeHtml(String(a.score))}</span>`:''}${libraryNew?'<span class="library-new-badge">NEW</span>':''}${latestEpisode?`<span class="latest-episode-badge">EP.${escapeHtml(String(latestEpisode))}</span>`:''}${a.sourceCount>1?`<span class="source-count-badge">${a.sourceCount}개 소스</span>`:''}</div><h3 ${titleAttr(a)}>${escapeHtml(titleOf(a))}</h3>${originalTitleMarkup(a,'anime-card-native')}<p>${latestEpisode?latestMeta:regularMeta}</p>`;
   setBackgroundImage(el.querySelector('.poster'),imageOf(a));
   // The whole card opens the anime (its title and facts too, the row in 인기 순위), with Enter or Space as well.
   el.tabIndex=0;el.setAttribute('role','button');el.setAttribute('aria-label',[titleOf(a),originalTitleOf(a),latestEpisode?`${latestEpisode}화 ${a.latestEpisodeKind==='updated'?'최신 업데이트':'최신 방영'} 회차 재생`:'',libraryNew?'새 회차 있음':''].filter(Boolean).join(' '));
-  el.addEventListener('click', e => { if(e.target.closest('.heart'))return;if(latestEpisode)playLatestEpisode(a);else openDetail(a.mal_id); });
-  el.addEventListener('keydown', e => { if((e.key==='Enter'||e.key===' ')&&e.target===el){e.preventDefault();if(latestEpisode)playLatestEpisode(a);else openDetail(a.mal_id)} });
-  el.querySelector('.heart').addEventListener('click', e => { e.stopPropagation(); toggleLibrary(a, e.currentTarget); });
+  const open=()=>a.groupKey?openDetail(a.mal_id,{groupKey:a.groupKey}):openDetail(a.mal_id);
+  el.addEventListener('click', e => { if(e.target.closest('.heart'))return;if(latestEpisode)playLatestEpisode(a);else open(); });
+  el.addEventListener('keydown', e => { if((e.key==='Enter'||e.key===' ')&&e.target===el){e.preventDefault();if(latestEpisode)playLatestEpisode(a);else open()} });
+  el.querySelector('.heart').addEventListener('click', e => { e.stopPropagation(); toggleLibrary(libraryItem, e.currentTarget); });
   return el;
 }
 
@@ -393,17 +396,27 @@ function showHero(index){
 // language it comes in until a Korean overview turns up.
 function heroDetail(a){const id=String(a.mal_id);if(id.startsWith('linkkf:'))return window.lilac.linkkfDetail(id.slice(7)).then(r=>r?.data);if(/^(animenosub|reanime|miruro|ohli24):/.test(id))return window.lilac.providerDetail(a).then(r=>r?.data);return window.lilac.detail(id).then(r=>r?.data)}
 function cleanSynopsis(text){return String(text||'').replace(/<[^>]*>/g,' ').replace(/\s*[(\[](?:Source|출처)[^)\]]*[)\]]\s*$/i,'').replace(/\s+/g,' ').trim()}
-async function openDetail(id) {
-  cancelPendingPlaybackLookups();const dialog=$('#detailDialog'),token=Symbol(id);openDetail.token=token;$('#detailContent').innerHTML='<div class="empty-state"><p>작품 정보를 불러오는 중...</p></div>';if(!dialog.open)dialog.showModal();$('#detailContent').scrollTop=0;
+function detailSourcePickerMarkup(group,activeSource){
+  const items=group?.sourceItems||[];if(items.length<2)return '';
+  const providerCounts=new Map();items.forEach(item=>providerCounts.set(item.provider,(providerCounts.get(item.provider)||0)+1));
+  return `<section class="detail-source-picker" aria-label="작품 공급원 선택"><b>공급원 · 회차 목록</b><div role="group" aria-label="공급원 선택">${items.map((item,index)=>{const id=String(item.mal_id),count=Number(item.availableEpisodeCount||item.availableEpisodes||item.episodes)||0,extra=providerCounts.get(item.provider)>1?` · ${item.year||`목록 ${index+1}`}`:'',episode=count?` · 최대 ${count}화`:'';return `<button type="button" data-detail-source="${escapeHtml(id)}" aria-pressed="${id===String(activeSource.mal_id)}">${escapeHtml(SOURCE_LABELS[item.provider]||item.provider)}${escapeHtml(extra)}${escapeHtml(episode)}</button>`}).join('')}</div></section>`;
+}
+async function openDetail(id,{groupKey='',sourceId=''}={}) {
+  cancelPendingPlaybackLookups();
+  const group=groupKey?searchGroupsByKey.get(groupKey):null,groupSource=group?LilacIntegratedSearch.chooseSource(group,{provider:currentSearchFilter,preferredProvider:state.source,sourceId}):null;
+  if(group&&!groupSource){toast('이 검색 결과에서 선택할 수 있는 공급원을 찾지 못했습니다.');return;}
+  if(groupSource){id=groupSource.mal_id;rememberAnime(groupSource)}
+  const dialog=$('#detailDialog'),token=Symbol(id);openDetail.token=token;$('#detailContent').innerHTML='<div class="empty-state"><p>작품 정보를 불러오는 중...</p></div>';if(!dialog.open)dialog.showModal();$('#detailContent').scrollTop=0;
   try {
     if(String(id).startsWith('linkani:'))throw new Error('이전에 저장된 작품의 콘텐츠 소스는 더 이상 지원하지 않습니다. 다른 콘텐츠 소스에서 다시 찾아 주세요.');
     const isLinkkf=String(id).startsWith('linkkf:'); const isExternal=/^(animenosub|reanime|miruro|ohli24):/.test(String(id));
     const known=animeById(id);if(isExternal&&!known)throw new Error('작품 정보를 찾지 못했습니다. 목록에서 다시 선택해 주세요.');
     const providerResult=isExternal?await window.lilac.providerDetail(known):null;
-    const {data:a}=isLinkkf?await window.lilac.linkkfDetail(String(id).slice(7)):isExternal?providerResult:await window.lilac.detail(id);if(openDetail.token!==token)return;const isSaved=saved(a.mal_id),isReAnime=a.provider==='reanime';
+    const {data:a}=isLinkkf?await window.lilac.linkkfDetail(String(id).slice(7)):isExternal?providerResult:await window.lilac.detail(id);if(openDetail.token!==token)return;const savedSource=group?.sourceItems.find(item=>state.library.some(savedItem=>String(savedItem.mal_id)===String(item.mal_id))),isSaved=Boolean(savedSource)||saved(a.mal_id),libraryItem=savedSource||a,isReAnime=a.provider==='reanime';
     const meta=[a.type,a.year,a.status,a.aired,LilacAnimeMeta.episodeLabel(a),(a.studios||[]).slice(0,2).map(x=>x.name).join(', ')].filter(Boolean).map(x=>escapeHtml(String(x))).join(' · ');
-    $('#detailContent').innerHTML=`<div class="detail-hero"></div><div class="detail-body"><img alt=""><div class="detail-info"><span class="eyebrow">${escapeHtml(a.type||'ANIME')} · ${a.score?`★ ${a.score}`:isLinkkf?'LINKKF':'평점 없음'}</span><h1 ${titleAttr(a)}>${escapeHtml(titleOf(a))}</h1>${originalTitleMarkup(a,'detail-native','p')}${meta?`<p class="detail-meta">${meta}</p>`:''}<p class="detail-stats hidden"></p><div class="tags">${(a.genres||[]).slice(0,5).map(g=>`<span>${escapeHtml(g.name)}</span>`).join('')}</div><p class="detail-synopsis">${escapeHtml(a.synopsis||'등록된 줄거리가 없습니다.')}</p><div class="detail-actions"><button class="primary detail-play" ${providerResult?.unavailable?'disabled':''}>${providerResult?.unavailable?'현재 재생 불가':isLinkkf?'회차 불러오기':playLabel('플레이어 열기')}</button><button class="ghost detail-save library-toggle ${isSaved?'saved':''}">${heartIcon()}<span>내 목록</span></button>${a.url?'<button class="ghost detail-web"><svg class="external-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><span>작품 정보</span></button>':''}</div><div class="detail-tabs hidden" role="tablist"><button type="button" role="tab" data-detail-tab="episodes" class="selected" aria-selected="true">회차</button><button type="button" role="tab" data-detail-tab="related" aria-selected="false">관련 작품</button></div><div id="episodeBlock" class="episode-block">${providerResult?.unavailable?'<p class="episode-loading">현재 제공처에 영상이 없는 작품입니다. 설정에서 다른 콘텐츠 소스를 선택해 주세요.</p>':''}</div><div id="relatedBlock" class="related-block hidden"></div></div></div>`;
+    $('#detailContent').innerHTML=`<div class="detail-hero"></div><div class="detail-body"><img alt=""><div class="detail-info"><span class="eyebrow">${escapeHtml(a.type||'ANIME')} · ${a.score?`★ ${a.score}`:isLinkkf?'LINKKF':'평점 없음'}</span><h1 ${titleAttr(a)}>${escapeHtml(titleOf(a))}</h1>${originalTitleMarkup(a,'detail-native','p')}${group?detailSourcePickerMarkup(group,groupSource||a):''}${meta?`<p class="detail-meta">${meta}</p>`:''}<p class="detail-stats hidden"></p><div class="tags">${(a.genres||[]).slice(0,5).map(g=>`<span>${escapeHtml(g.name)}</span>`).join('')}</div><p class="detail-synopsis">${escapeHtml(a.synopsis||'등록된 줄거리가 없습니다.')}</p><div class="detail-actions"><button class="primary detail-play" ${providerResult?.unavailable?'disabled':''}>${providerResult?.unavailable?'현재 재생 불가':isLinkkf?'회차 불러오기':playLabel('플레이어 열기')}</button><button class="ghost detail-save library-toggle ${isSaved?'saved':''}">${heartIcon()}<span>내 목록</span></button>${a.url?'<button class="ghost detail-web"><svg class="external-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><span>작품 정보</span></button>':''}</div><div class="detail-tabs hidden" role="tablist"><button type="button" role="tab" data-detail-tab="episodes" class="selected" aria-selected="true">회차</button><button type="button" role="tab" data-detail-tab="related" aria-selected="false">관련 작품</button></div><div id="episodeBlock" class="episode-block">${providerResult?.unavailable?'<p class="episode-loading">현재 제공처에 영상이 없는 작품입니다. 설정에서 다른 콘텐츠 소스를 선택해 주세요.</p>':''}</div><div id="relatedBlock" class="related-block hidden"></div></div></div>`;
     setBackgroundImage($('#detailContent .detail-hero'),imageOf(a));koreanOverview(a).then(text=>{const p=$('#detailContent .detail-synopsis');if(text&&p&&openDetail.token===token){p.textContent=text;p.title='줄거리: TMDB'}});setImageSource($('#detailContent .detail-body img'),imageOf(a));
+    $$('#detailContent [data-detail-source]').forEach(button=>button.onclick=()=>openDetail(button.dataset.detailSource,{groupKey:group?.groupKey||'',sourceId:button.dataset.detailSource}));
     $$('#detailContent [data-detail-tab]').forEach(button=>button.onclick=()=>selectDetailTab(button.dataset.detailTab));
     const resumeChoiceButton=document.createElement('button');resumeChoiceButton.type='button';resumeChoiceButton.className='ghost detail-resume-choice hidden';resumeChoiceButton.textContent='처음부터';resumeChoiceButton.setAttribute('aria-label','이어보기 선택');$('.detail-actions').insertBefore(resumeChoiceButton,$('.detail-save'));
     const updateResumeActions=(target,playTarget)=>bindResumeActions($('.detail-play'),resumeChoiceButton,target,playTarget);
@@ -434,7 +447,7 @@ async function openDetail(id) {
       if(!isLinkkf){dialog.close();$('#playerTitle').textContent=titleOf(a);switchView('player');return;}
       const target=linkkfServers?linkkfResumeTarget(a,linkkfServers):null;if(target?.episode)await playLinkkf(target.episode,target.episodes,resumeAction(target).options);
     };
-    $('.detail-save').onclick=e=>toggleLibrary(a,e.currentTarget);
+    $('.detail-save').onclick=e=>toggleLibrary(libraryItem,e.currentTarget);
     $('.detail-web')?.addEventListener('click',()=>window.lilac.openExternal(a.url));
   } catch(e){if(openDetail.token===token)$('#detailContent').innerHTML=`<div class="empty-state"><h3>정보를 불러오지 못했어요</h3><p>${escapeHtml(e.message)}</p></div>`;}
 }
@@ -450,6 +463,37 @@ async function playLatestEpisode(anime){
     const title=titleOf(data),context={episode,subtitleTitle:title,image:imageOf(data),anime:data,seriesEpisodes:episodes,comparisonEpisodes:nearbyEpisodes(episodes,episode),resolveKind:'provider'};
     resolveIntoPlayer(()=>window.lilac.providerResolve(episode),`${title} · ${episode.name||number}화`,context,title,number);
   }catch(error){if(requestId===latestEpisodeRequestId&&playerRequest===playbackRequestId)toast(`최신 회차를 불러오지 못했습니다: ${String(error?.message||error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`)}
+}
+
+function renderIntegratedSearchCards(){
+  const groups=LilacIntegratedSearch.filterGroups(currentSearchGroups,currentSearchFilter);
+  renderCards('#searchGrid',groups);
+}
+function hideIntegratedSearchFilters(){const container=$('#searchProviderFilters');container?.classList.add('hidden');container?.replaceChildren()}
+function applyIntegratedSearchResult(result){
+  for(const item of result.items)rememberAnime(item);
+  currentSearchStatuses=result.statuses;currentSearchGroups=LilacIntegratedSearch.groupResults(result.items,state.source);searchGroupsByKey.clear();
+  for(const group of currentSearchGroups)searchGroupsByKey.set(group.groupKey,group);
+  renderIntegratedSearchFilters();renderIntegratedSearchCards();updateIntegratedSearchStatus();
+}
+function updateIntegratedSearchStatus(){
+  const groups=LilacIntegratedSearch.filterGroups(currentSearchGroups,currentSearchFilter),failed=currentSearchStatuses.filter(status=>status.state==='failed'),partial=currentSearchStatuses.filter(status=>status.state==='partial'),skipped=currentSearchStatuses.filter(status=>status.state==='skipped');
+  const checked=currentSearchStatuses.filter(status=>status.state==='ready'||status.state==='partial').length;
+  const resultText=currentSearchFilter==='all'?`${groups.length}개 작품 · ${checked}/${currentSearchStatuses.length}개 공급원 확인 완료`:`${SOURCE_LABELS[currentSearchFilter]||currentSearchFilter} 결과 ${groups.length}개`;
+  const issues=[failed.length?`${failed.map(status=>SOURCE_LABELS[status.provider]||status.provider)} 확인 실패`:'' ,partial.length?`${partial.map(status=>SOURCE_LABELS[status.provider]||status.provider)} 일부 검색 실패`:'' ,skipped.length?`${skipped.map(status=>SOURCE_LABELS[status.provider]||status.provider)} 검색 생략`:'' ].filter(Boolean);
+  $('#searchStatus').textContent=`“${currentSearchQuery}” 검색 결과 ${resultText}${issues.length?` · ${issues.join(' · ')}`:''}`;
+}
+function renderIntegratedSearchFilters(){
+  const container=$('#searchProviderFilters'),groups=currentSearchGroups;
+  container.replaceChildren();container.classList.remove('hidden');
+  const add=(provider,label,count,status='ready')=>{
+    const button=document.createElement('button');button.type='button';button.className='search-provider-chip';button.dataset.provider=provider;button.dataset.state=status;button.setAttribute('aria-pressed',String(currentSearchFilter===provider));
+    const suffix=status==='failed'?' · 확인 실패':status==='partial'?' · 일부 실패':status==='skipped'?' · 검색 생략':` · ${count}`;
+    button.textContent=`${label}${suffix}`;button.addEventListener('click',()=>{currentSearchFilter=provider;container.querySelectorAll('button').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));renderIntegratedSearchCards();updateIntegratedSearchStatus()});container.append(button);
+  };
+  add('all','전체',groups.length);
+  for(const status of currentSearchStatuses){const count=LilacIntegratedSearch.filterGroups(groups,status.provider).length;add(status.provider,SOURCE_LABELS[status.provider]||status.provider,count,status.state)}
+  container.setAttribute('aria-label','검색 결과 공급원 필터');
 }
 
 function normalizeSearchText(value){return String(value||'').normalize('NFKC').toLocaleLowerCase().replace(/\s+/g,' ').trim()}
@@ -486,28 +530,21 @@ function bindSearchAutocomplete(inputId,listId){const input=$(`#${inputId}`),pop
 }
 document.addEventListener('pointerdown',event=>{for(const control of searchAutocompleteControls)if(!control.popup.parentElement.contains(event.target)){control.popup.classList.add('hidden');control.input.setAttribute('aria-expanded','false');control.input.removeAttribute('aria-activedescendant')}});
 async function doSearch(query) {
-  query=query.trim(); if(!query)return;cancelPendingPlaybackLookups();saveRecentSearch(query); switchView('search'); $('#pageSearch').value=query; $('#globalSearch').value=query; $('#searchStatus').textContent='검색 중...'; $('#searchGrid').replaceChildren();
-  $('#filterMore').classList.add('hidden');if(state.source==='linkkf')$('#searchStatus').textContent='Linkkf 전체 목록에서 검색 중... (처음 검색은 목록을 받느라 조금 걸립니다)';
-  const searchToken=(doSearch.token||0)+1;
-  const search=text=>PROVIDER_SOURCES.includes(state.source)?window.lilac.providerCatalog(state.source,text):state.source==='linkkf'?window.lilac.linkkfSearch(text):window.lilac.search(text);
+  query=query.trim();if(!query)return;cancelPendingPlaybackLookups();saveRecentSearch(query);switchView('search');$('#pageSearch').value=query;$('#globalSearch').value=query;$('#searchStatus').textContent='모든 공급원에서 검색 중...';$('#searchGrid').replaceChildren();$('#filterMore').classList.add('hidden');$('#filterBar').classList.add('hidden');$('#filterPanel').classList.add('hidden');
+  const token=doSearch.token=(doSearch.token||0)+1;currentSearchQuery=query;currentSearchFilter='all';currentSearchGroups=[];currentSearchStatuses=[];searchGroupsByKey.clear();$('#searchProviderFilters').replaceChildren();$('#searchProviderFilters').classList.add('hidden');
   try{
-    // The other-language lookup runs alongside the first search.
-    // Re:Anime / Animenosub: a Korean query also matches the Korean names of the whole catalog (main process index); those come first.
-    const localPromise=['reanime','animenosub'].includes(state.source)&&/[가-힣]/.test(query)?window.lilac.catalogKoreanSearch(state.source,query).catch(()=>[]):Promise.resolve([]);
-    // Animenosub's and Miruro's own searches are English only (Animenosub returns its newest posts for a Korean query).
-    const serverSearch=text=>['animenosub','miruro'].includes(state.source)&&/[가-힣]/.test(text)?Promise.resolve({data:[]}):search(text);
-    const token=doSearch.token=searchToken,variantsPromise=window.lilac.titleVariants(query).catch(()=>[]),[result,local]=await Promise.all([serverSearch(query),localPromise]);if(token!==doSearch.token)return;const localIds=new Set(local.map(a=>String(a.mal_id)));let data=[...local,...(result.data||[]).filter(a=>!localIds.has(String(a.mal_id)))];renderCards('#searchGrid',data);const firstStatus=`“${query}” 검색 결과 ${data.length}${result.total?` / ${result.total}`:''}개`;
-    // Nothing yet (a Korean query on an English-only site): the other-language names are still being looked up.
-    $('#searchStatus').textContent=data.length?firstStatus:'다른 언어 제목으로 찾는 중...';
-    // Korean and English names both work: the query is also searched under its other-language titles.
-    const variants=await variantsPromise;if(token!==doSearch.token)return;if(!variants.length){$('#searchStatus').textContent=firstStatus;return}
-    // Six searches at a time: a short query can match many known titles.
-    const lists=[];let next=0;await Promise.all(Array.from({length:6},async()=>{while(next<variants.length){const text=variants[next++];lists.push(await search(text).then(r=>r.data||[]).catch(()=>[]))}}));
-    const extra=lists.flat(),seen=new Set(data.map(a=>String(a.mal_id)));
-    const added=extra.filter(a=>!seen.has(String(a.mal_id))&&seen.add(String(a.mal_id)));if(token!==doSearch.token)return;if(!added.length){$('#searchStatus').textContent=firstStatus;return}
-    data=[...data,...added];$('#searchGrid').append(...added.map(card));$('#searchStatus').textContent=`“${query}” 검색 결과 ${data.length}개 (${variants.length>3?`${variants.slice(0,3).join(', ')} 외 ${variants.length-3}개`:variants.join(', ')} 포함)`;
-  }
-  catch(e){if(doSearch.token===searchToken)$('#searchStatus').textContent=`검색 실패: ${String(e.message||e).replace(/^Error invoking remote method '[^']+': (?:Error: )?/,'')}`;}
+    const searchOptions={
+      providers:LilacIntegratedSearch.PROVIDERS,
+      concurrency:6,
+      search:(provider,text)=>provider==='linkkf'?window.lilac.linkkfSearch(text):window.lilac.providerCatalog(provider,text),
+      localSearch:(provider,text)=>/[가-힣]/.test(text)&&['reanime','animenosub'].includes(provider)?window.lilac.catalogKoreanSearch(provider,text):null
+    },variantsPromise=window.lilac.titleVariants(query).then(values=>Array.isArray(values)?values.slice(0,3):[]).catch(()=>[]);
+    const first=await LilacIntegratedSearch.searchProviders({...searchOptions,query});if(token!==doSearch.token)return;applyIntegratedSearchResult(first);
+    const variants=await variantsPromise;if(token!==doSearch.token||!variants.length)return;
+    $('#searchStatus').textContent+=' · 다른 제목 표기도 찾는 중';
+    const extra=await LilacIntegratedSearch.searchProviders({...searchOptions,query:'',terms:variants,localSearch:async()=>null});if(token!==doSearch.token)return;
+    applyIntegratedSearchResult(LilacIntegratedSearch.mergeSearchResults(first,extra));
+  }catch(error){if(token===doSearch.token)$('#searchStatus').textContent=`검색 준비 실패: ${String(error?.message||error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/,'')}`;}
 }
 
 function showPendingPlayer(name,context={}){
@@ -1301,7 +1338,7 @@ async function toggleFilterPanel(){
 function filterCount(){return ['format','genre','year'].filter(key=>filterState[key]!=null).length}
 async function runLinkkfFilter(append=false){
   if(!filterCount()){toast('필터를 하나 이상 선택하세요.');return}
-  filterState.page=append?filterState.page+1:1;switchView('search');$('#searchStatus').textContent='필터 결과를 불러오는 중...';$('#filterMore').classList.add('hidden');
+  filterState.page=append?filterState.page+1:1;switchView('search');hideIntegratedSearchFilters();$('#searchStatus').textContent='필터 결과를 불러오는 중...';$('#filterMore').classList.add('hidden');
   if(!append)$('#searchGrid').replaceChildren();
   try{
     const result=await window.lilac.linkkfFilter({page:filterState.page,limit:40,seasonTypeIds:filterState.format?[filterState.format]:[],genreIds:filterState.genre?[filterState.genre]:[],yearIds:filterState.year?[filterState.year]:[]});
@@ -1378,7 +1415,7 @@ $('#sourceNotice [data-notice="source"]').onclick=()=>{switchView('settings');wi
 
 $$('.nav').forEach(b=>b.onclick=()=>switchView(b.dataset.view));$$('[data-goto]').forEach(b=>b.onclick=()=>switchView(b.dataset.goto));
 // 홈 > "2026 가을 신작" / "방영 중" > 전체 보기: the whole list in the search view.
-function showHomeList(list,label){switchView('search');if(!list?.length)return;$('#pageSearch').value='';$('#filterMore')?.classList.add('hidden');renderCards('#searchGrid',list);$('#searchStatus').textContent=`${label} ${list.length}개 · 인기순`}
+function showHomeList(list,label){switchView('search');hideIntegratedSearchFilters();if(!list?.length)return;$('#pageSearch').value='';$('#filterMore')?.classList.add('hidden');renderCards('#searchGrid',list);$('#searchStatus').textContent=`${label} ${list.length}개 · 인기순`}
 $('#seeAllSeason').onclick=()=>QUARTER_PROVIDERS.includes(state.source)?showHomeList(state.quarterShows,state.quarterSelection?.label||'분기별 작품'):showHomeList(state.current||state.season,'이번 시즌 신작');
 $('#seeAllAiring').onclick=()=>showHomeList(state.airing,'방영 중');
 $('#seeAllLatestEpisodes').onclick=()=>showHomeList(state.latestEpisodes,latestEpisodeSectionTitle(state.source));

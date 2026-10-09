@@ -22,6 +22,7 @@
   <link rel="stylesheet" href="motion.css" />
   <link rel="stylesheet" href="ott.css" />
   <link rel="stylesheet" href="mac.css" />
+  <link rel="stylesheet" href="integrated-search.css" />
 </head>
 <body>
   <div class="window-drag" aria-hidden="true"></div>
@@ -66,7 +67,8 @@
         <div class="big-search"><svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input id="pageSearch" placeholder="애니메이션 제목 입력" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="pageSearchSuggestions" autocomplete="off" /><button id="searchButton">검색</button><div class="search-suggestions hidden"><div id="pageSearchSuggestions" class="search-suggestion-list" role="listbox" aria-label="최근 검색 및 작품 제안"></div><div class="search-suggestion-footer"><button type="button" data-clear-search-history>최근 검색 기록 지우기</button></div></div></div>
         <div id="filterBar" class="filter-bar hidden"><button id="filterToggle" class="ghost filter-toggle" aria-expanded="false" aria-controls="filterPanel">태그 필터</button></div>
         <div id="filterPanel" class="filter-panel hidden"><div class="filter-group"><b>시즌 타입</b><div class="chip-row" data-filter-group="format"></div></div><div class="filter-group"><b>장르</b><div class="chip-row" data-filter-group="genre"></div></div><div class="filter-group"><b>연도</b><div class="chip-row" data-filter-group="year"></div></div><div class="filter-actions"><button id="filterReset" class="ghost">초기화</button><button id="filterApply" class="primary">적용</button></div></div>
-        <div id="searchStatus" class="result-status">인기 작품을 둘러보거나 검색을 시작하세요.</div>
+        <div id="searchStatus" class="result-status" role="status" aria-live="polite">인기 작품을 둘러보거나 검색을 시작하세요.</div>
+        <div id="searchProviderFilters" class="search-provider-filters hidden" role="group" aria-label="검색 결과 공급원 필터"></div>
         <div id="searchGrid" class="poster-grid"></div>
         <button id="filterMore" class="ghost load-more hidden">더 불러오기</button>
       </section>
@@ -265,6 +267,7 @@
   <script src="manual-subtitle-translation.js"></script>
   <script src="player-diagnostics.js"></script>
   <script src="player-failover.js"></script>
+  <script src="integrated-search.js"></script>
   <script src="app.js"></script>
   <script src="catalog-updates.js"></script>
   <script src="player.js"></script>

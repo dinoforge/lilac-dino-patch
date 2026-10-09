@@ -94,8 +94,8 @@ test('leaving playback navigation cancels an outstanding history detail lookup',
 
   assert.equal(h.calls.some(call => call.type === 'player' || call.type === 'resolve'), false);
   assert.match(appSource, /if\(name!==current\)cancelPendingPlaybackLookups\(\)/);
-  assert.match(appSource, /async function openDetail\(id\)\s*\{\s*cancelPendingPlaybackLookups\(\)/);
-  assert.match(appSource, /async function doSearch\(query\)\s*\{\s*query=query\.trim\(\); if\(!query\)return;cancelPendingPlaybackLookups\(\)/);
+  assert.match(appSource, /async function openDetail\(id,\{groupKey='',sourceId=''\}=\{\}\)\s*\{\s*cancelPendingPlaybackLookups\(\)/);
+  assert.match(appSource, /async function doSearch\(query\)\s*\{\s*query=query\.trim\(\);if\(!query\)return;cancelPendingPlaybackLookups\(\)/);
 });
 
 test('a newer Continue selection cancels a pending home latest-episode lookup', async () => {
