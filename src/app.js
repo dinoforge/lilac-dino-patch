@@ -333,9 +333,11 @@ function bindResumeActions(primaryButton,alternateButton,target,playTarget){
 function resumeEpisode(anime,episodes){
   const playable=episodes.filter(ep=>ep.playable!==false),fallback=playable[0]||null;
   const sameProvider=(episode,item)=>{const current=episode?.provider||anime?.provider||'',saved=item?.episode?.provider||item?.anime?.provider||'';return !current||!saved||current===saved};
-  const sameAnime=item=>item?.anime?.mal_id!=null&&anime?.mal_id!=null&&String(item.anime.mal_id)===String(anime.mal_id)&&sameProvider(null,item);
+  const sameAnime=(episode,item)=>{const saved=item?.anime||{};if(saved.mal_id!=null&&anime?.mal_id!=null)return String(saved.mal_id)===String(anime.mal_id);const currentId=anime?.id,savedId=saved.id,currentProvider=anime?.provider||episode?.provider||'',savedProvider=saved.provider||item?.episode?.provider||'';return currentId!=null&&savedId!=null&&currentProvider!==''&&currentProvider===savedProvider&&String(currentId)===String(savedId)};
+  const differentAnime=item=>{const saved=item?.anime||{};if(saved.mal_id!=null&&anime?.mal_id!=null)return String(saved.mal_id)!==String(anime.mal_id);return saved.id!=null&&anime?.id!=null&&String(saved.id)!==String(anime.id)};
+  const sameAddress=(episode,saved)=>{const address=item=>String(item?.url||item?.token||'');return Boolean(address(episode))&&address(episode)===address(saved)};
   const numberOf=ep=>Number(ep.number??String(ep.name).match(/\d+/)?.[0]);
-  const matches=(episode,item)=>sameProvider(episode,item)&&(episodeRef(episode)===episodeRef(item.episode)||(sameAnime(item)&&Number.isFinite(numberOf(item.episode))&&numberOf(episode)===numberOf(item.episode)&&!episode.dub===!item.episode.dub));
+  const matches=(episode,item)=>{if(!sameProvider(episode,item)||differentAnime(item))return false;if(sameAnime(episode,item))return episodeRef(episode)===episodeRef(item.episode)||(Number.isFinite(numberOf(item.episode))&&numberOf(episode)===numberOf(item.episode)&&!episode.dub===!item.episode.dub);return sameAddress(episode,item.episode)};
   const last=state.history.find(item=>item.episode&&playable.some(episode=>matches(episode,item)));
   if(!last)return {episode:fallback,resume:false,progress:0,matched:false};
   const episode=playable.find(candidate=>matches(candidate,last))||fallback,progress=Math.max(0,Math.min(100,Number(last.progress)||0));

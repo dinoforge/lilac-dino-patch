@@ -48,6 +48,53 @@ test('resumeEpisode falls back to the first playable episode when saved episode 
   assert.equal(target.matched, false);
 });
 
+test('resumeEpisode does not match number-only history from a different anime on the same provider', () => {
+  const anime = { mal_id: 7, provider: 'reanime' };
+  const first = { provider: 'reanime', number: 1, name: '1', playable: true };
+  const otherAnimeEpisode = { provider: 'reanime', number: 1, name: '1' };
+  const context = setup([{ episode: otherAnimeEpisode, progress: 82, anime: { mal_id: 9, provider: 'reanime' } }]);
+
+  const target = context.resumeEpisode(anime, [first]);
+  assert.equal(target.episode, first);
+  assert.equal(target.progress, 0);
+  assert.equal(target.matched, false);
+});
+
+test('resumeEpisode keeps number-only legacy history when the same anime is identified', () => {
+  const anime = { mal_id: 42, provider: 'reanime' };
+  const current = { provider: 'reanime', number: 2, name: '2', playable: true };
+  const saved = { provider: 'reanime', number: 2, name: '2' };
+  const context = setup([{ episode: saved, progress: 31, anime }]);
+
+  const target = context.resumeEpisode(anime, [current]);
+  assert.equal(target.episode, current);
+  assert.equal(target.progress, 31);
+  assert.equal(target.matched, true);
+});
+
+test('resumeEpisode uses matching provider-scoped anime IDs for older history without a MAL ID', () => {
+  const anime = { id: 'series-a', provider: 'reanime' };
+  const current = { provider: 'reanime', number: 2, name: '2', playable: true };
+  const saved = { provider: 'reanime', number: 2, name: '2' };
+  const context = setup([{ episode: saved, progress: 46, anime }]);
+
+  const target = context.resumeEpisode(anime, [current]);
+  assert.equal(target.progress, 46);
+  assert.equal(target.matched, true);
+});
+
+test('resumeEpisode preserves a legacy record with an exact URL and no anime metadata', () => {
+  const anime = { provider: 'reanime' };
+  const url = 'https://re-anime.invalid/watch/legacy-episode';
+  const current = { provider: 'reanime', number: 1, url, playable: true };
+  const saved = { provider: 'reanime', number: 1, url };
+  const context = setup([{ episode: saved, progress: 55, anime: null }]);
+
+  const target = context.resumeEpisode(anime, [current]);
+  assert.equal(target.progress, 55);
+  assert.equal(target.matched, true);
+});
+
 test('resumeAction offers start-over alongside ordinary resume below 95 percent', () => {
   const context = setup();
   const target = { episode: episode('reanime', 3), progress: 28 };
