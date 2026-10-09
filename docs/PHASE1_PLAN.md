@@ -163,6 +163,13 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 - 회차의 합성 VTT에서 `language=ko`, `mode=showing`, 활성 cue `한국어 합성 자막`을 확인했다. 이 결과는 Chromium 트랙 상태 증거이며 픽셀 캡처나 실제 영상·자막 검증은 아니다.
 - 검증 한계: 공급원 IPC·MP4·VTT는 모두 합성이다. 실제 Re:Anime 응답, 외부 스트림, 회차·영상판 자막 일치, NSIS 설치 앱, 기존 프로필은 확인하지 않았다. 외부 네트워크 요청은 시도되지 않았다.
 
+## 2026-10-09 패키지 `app.asar` 한국어 ASS 픽셀 스모크
+
+- Electron 38.8.6 런타임의 격리 harness가 `dist/win-unpacked/resources/app.asar/electron/main.cjs`를 실제로 불러왔다. 패키지 preload·renderer·JASSUB 자산을 사용하고 main의 실제 `font:default` handler에서 Windows `malgun.ttf`를 받았다. `provider:catalog`·`provider:detail`·`provider:resolve`는 합성 응답으로 대체했다. `userData`·`sessionData`는 task 전용 폴더, Chromium은 headless, DNS는 외부 주소 차단으로 실행했다.
+- `테스트 애니` 검색, 작품 선택, 2개 회차 표시, 1화의 로컬 12초 MP4 재생, 이어보기 기록 저장 및 VTT 트랙 적용을 확인했다. ASS 파일은 실제 renderer의 `currentSubtitle.assUrl`에 연결됐고 `LilacAss.active=true`, 1440×810 캔버스가 보였다. 캡처에서 한글 ASS 문구 `한국어 ASS 통합 검증`이 영상 위에 렌더됐다. 500ms 싱크 입력·저장·레이블도 확인했다.
+- 결과: 14개 확인 조건 통과, renderer 예외 0건, 외부 HTTP(S) 요청 0건. JSON은 `%TEMP%\lilac-ass-integration-20261009\packaged-main-ass-result.json`, 화면 캡처는 `%TEMP%\lilac-ass-integration-20261009\packaged-main-ass-player.png`에 있다.
+- 검증 한계: 실제 `LilacAnime.exe`·NSIS 설치 프로그램은 이 스모크에서 실행하지 않았다. 공급원 IPC·영상·자막은 합성이며 실제 Re:Anime 콘텐츠·회차/영상판 매칭은 미검증이다.
+
 ## 2026-10-09 홈 발견·내 목록 패키지 UI 스모크
 
 - `dist/win-unpacked`의 사본을 격리 폴더에서 실행했다. `LilacAnime.exe` 바이너리는 원본과 SHA-256이 같고, 테스트 ASAR는 main 진입점을 harness로 바꿔 실제 `electron/main.cjs`를 불렀다. 별도 `userData`·`sessionData`를 사용했다.

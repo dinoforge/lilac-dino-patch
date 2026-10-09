@@ -135,6 +135,25 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 이 Chromium 시험은 Electron main의 `font:default` IPC/font-family 추출, 설치 앱, 실제 공급원 영상, 자막의 작품·판본 매칭을 입증하지 않는다. Re:Anime 실제 재생과 외부 자막의 영상 일치는 아직 확인하지 않았다.
 - 임시 페이지는 loopback 주소만 사용했고 공급원 사이트나 외부 API를 호출하지 않았다. JASSUB 및 기본 `default.woff2`의 배포 권리 추적은 별도 미완료 항목이다.
 
+## 2026-10-09 검색·재생·한국어 ASS 글꼴 IPC 통합 스모크
+
+- Windows Electron 소스 앱에서 실제 `electron/main.cjs`, preload, renderer를 실행했다. 검색·상세·resolve IPC는 합성 작품으로 대체하고 12초 로컬 합성 MP4, VTT, ASS 파일을 사용했다. 격리 `userData`·`sessionData`와 외부 DNS 차단을 적용했다.
+- 검색 → 작품 선택 → 회차 재생 → 이어보기 기록 저장 → 제공 한국어 트랙 적용을 확인했다. stream의 ASS URL이 renderer에 전달되고 `LilacAss.active=true`, 1440×810 캔버스 생성·표시를 확인했다. 캡처에서 `한국어 ASS 통합 검증` 문구가 영상 위에 렌더됐다.
+- `font:default`의 실제 main-process handler는 Windows `malgun.ttf` 13,459,196바이트, family `Malgun Gothic`을 반환했다. 500ms 수동 싱크 입력도 저장·레이블 갱신됐다. 14개 확인 조건 통과, renderer 오류 0건, 외부 HTTP(S) 요청 0건이다. 캡처와 JSON 결과는 `%TEMP%\lilac-ass-integration-20261009`에 있다.
+- 한계: Electron 소스 앱 합성 스모크이며 NSIS 실행 파일이나 실제 Re:Anime 공급원·영상·자막 매칭을 입증하지 않는다. 기존 프로필과 외부 미디어는 사용하지 않았다.
+
+## 2026-10-09 패키지 `app.asar` 한국어 ASS 픽셀 스모크
+
+- Electron 38.8.6 런타임에서 `dist/win-unpacked/resources/app.asar`의 실제 main, preload, renderer를 열었다. `font:default`는 패키지 main handler를 사용했고 Windows `malgun.ttf`를 반환했다. 카탈로그·상세·resolve 응답만 합성 IPC로 대체했으며 12초 로컬 MP4와 한국어 VTT·ASS를 사용했다.
+- 검색 → 상세 → 1화 재생 → 이어보기 기록·한국어 자막 적용과 실제 JASSUB 캔버스 렌더링을 확인했다. `LilacAss.active=true`, 1440×810 표시 캔버스와 화면에 보이는 `한국어 ASS 통합 검증`을 캡처했다. 싱크 500ms 저장도 통과했다. 14개 조건 통과, renderer 오류 0건, 외부 HTTP(S) 요청 0건이다. 결과와 캡처는 `%TEMP%\lilac-ass-integration-20261009`에 있다.
+- 한계: `app.asar`를 Electron 런타임에 직접 연결한 격리 확인이며 `dist/win-unpacked/LilacAnime.exe`나 NSIS 설치 창을 이 스모크에서 실행하지 않았다. 공급원 IPC는 합성이며 실제 사이트·스트림·자막 매칭은 검증하지 않았다.
+
+## 2026-10-09 JASSUB npm source 및 기본 폰트 출처 추적
+
+- npm `jassub@2.5.16`은 `2026-09-05T18:49:36.487Z` 게시로 기록됐고 레지스트리 metadata에 `gitHead`가 없다. upstream tags에는 1.8.8만 있었다. 10월 3일의 `c369b0f` commit은 `package.json`에 2.5.16이라고 쓰지만 npm 게시 시점 이후이며, tarball의 주요 TypeScript/worker/WebGL 파일과 일치하지 않아 source commit으로 확정할 수 없다. 그 commit에 기록된 submodule SHA도 tarball의 대응 revision으로 취급하지 않는다.
+- 패키지 `dist/default.woff2`의 SHA-256은 `886929903707C5BB28B07CD2EED69921B3D5EF5C49C73A0DD1E187EBF6546A4C`이며 upstream `src/default.woff2` 파일 blob과 일치한다. JASSUB 코드의 기본 family는 `liberation sans`다. 글꼴의 원 저작권자와 별도 라이선스 출처는 아직 못 찾았다.
+- 출처 확인이 끝나지 않아 JASSUB·libass의 전체 고지를 생성하거나 재배포 허가를 결론 내리지 않았다. 상세 비교와 한계는 `docs/DEPENDENCY_LICENSE_INVENTORY.md`에 반영했다.
+
 ## 주요 결정
 
 - 새 앱은 Windows 우선, Android는 후속이다. Chrome·macOS는 제품 범위에서 제외한다.
