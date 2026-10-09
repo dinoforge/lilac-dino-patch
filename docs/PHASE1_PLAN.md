@@ -147,3 +147,10 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 - 별도 임시 `userData`·`sessionData`, DNS 차단, 합성 공급원 IPC, 12초 로컬 MP4로 Electron 소스 앱을 실행했다. 96% 시청 기록에서 `1화 처음부터`와 `1화 이어보기`가 표시됐고 보조 이어보기를 누르자 영상이 11.5초에서 멈췄다. 상세 창 닫힘·회차 resolve를 확인했으며 렌더러 오류 0건, 외부 HTTP(S) 요청 0건이다. 결과 파일은 `%TEMP%\lilac-resume-choice-MUEPqw\resume-choice-result.json`에 있다.
 - 같은 격리 소스 앱에서 28% 시청 기록을 넣고 `처음부터`를 선택했다. 영상은 0.005885초에서 멈췄고 기록은 0%로 저장됐다. 상세 창 닫힘·회차 resolve를 확인했으며 외부 HTTP(S) 요청과 렌더러 오류는 0건이다. 결과 파일은 `%TEMP%\lilac-resume-choice-cLxnZw\resume-choice-result.json`에 있다.
 - 검증 한계: Windows NSIS 설치 앱의 창, 실제 공급원·영상, 기존 사용자 프로필은 사용하지 않았다. 두 위치 선택은 격리 Electron 소스 앱의 합성 IPC·영상으로 확인했다.
+
+## 2026-10-09 패키지 `app.asar` 이어보기 UI
+
+- 빌드된 `dist/win-unpacked/resources/app.asar`의 화면과 실제 preload를 별도 임시 Electron harness에서 열었다. 합성 IPC 88개와 12초 로컬 MP4만 연결했으며, 앱의 기존 사용자 프로필과 공급원 응답은 사용하지 않았다.
+- 작품 상세에서 `1화 이어보기`와 보조 `1화 처음부터`가 표시됐다. 처음부터를 고르면 회차 resolve가 실행되고 상세가 닫혔으며, 영상 위치 0.01363초·이어보기 기록 0%를 확인했다. renderer 오류와 외부 HTTP(S) 요청은 0건이다. 결과 JSON: `%TEMP%\lilac-packaged-ui-yFofCR\packaged-ui-result.json`.
+- 별도 headless 실행으로 `dist/win-unpacked/LilacAnime.exe` 창 생성은 확인했지만, 상세 UI를 기다리던 CDP 호출은 시간 초과됐다. 임시 실행에 IPC mock 호출 또는 요청 차단 기록이 없어 이 exe 실행을 통합 통과로 보지 않는다. 초기 `provider:catalog` 경로가 실제 RE:Anime fetch에 연결될 수 있어, 네트워크 격리가 입증되지 않은 상태에서 추가 재시도하지 않았다.
+- 다음 검증은 패키지 main handler mock의 설치 여부와 네트워크 차단을 실행 전에 확인하고, 확인 기록이 남은 경우에만 exe UI를 연다. 현재까지 패키지 renderer/preload는 확인됐지만, 패키지 exe의 main-process 통합과 실제 공급원·영상·자막은 미검증이다.
