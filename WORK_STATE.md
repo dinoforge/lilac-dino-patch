@@ -295,6 +295,13 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 전용 합성 회귀 테스트는 후보 유형·최대 횟수·주소 확인 실패 순서·기존 HLS 최종 오류를 확인한다. 추가 VM 통합 테스트에서는 앱의 `resolveIntoPlayer`·`startAutomaticVideoServerFallback`·HLS 이벤트 바인딩·`applyPendingResume` 함수를 합쳐, 초기 서버의 재시도 3회 후 정확한 대체 서버 resolve, 120.25초 위치 복구, 선택 자막 복구 및 저장된 서버 선호도 변경 없음까지 확인한다. 전체 `node --test` 197/197, 수정 JavaScript와 테스트 구문 검사, `git diff --check`가 통과했다. `npm run dist` Windows NSIS 빌드도 성공했고, 124,555,049바이트의 설치 파일은 로컬 산출물로만 남겼다. 패키지 `app.asar`에서 새 모듈과 main·renderer 연결을 확인했다.
 - 검증은 합성 데이터와 패키지 구조에 한정한다. 실제 Re:Anime·Animenosub·Miruro 서버 목록·스트림, 설치 앱 재생은 확인하지 않았으며, 사이트 권리 검토 전 외부 요청과 공개 배포를 계속 보류한다.
 
+## 2026-10-10 자막 파일 문자 인코딩 회귀 검증
+
+- ASS/SSA의 WebVTT 대체본 생성만 UTF-8 고정 읽기를 사용해 CP949·UTF-16 파일에서 한글이 깨질 수 있어, 기존 SRT·SMI와 같은 인코딩 감지 함수로 읽도록 맞췄다. 원본 ASS/SSA 경로를 보존하는 동작은 유지했다.
+- 실제 변환 함수와 `subtitleResult`를 호출하는 임시 파일 테스트에서 UTF-8 BOM SRT, CP949 SMI, UTF-16LE ASS, CP949 SSA 및 VTT 직접 사용을 확인했다. ASS의 `\N` 줄바꿈·쉼표 포함 대사와 SMI 다음 SYNC 기준 종료 시각도 확인했고 4/4 통과했다.
+- 전체 `node --test` 201/201, `electron/main.cjs`·신규 테스트 구문 검사, `git diff --check`가 통과했다. `npm run dist` Windows NSIS 빌드가 성공해 124,555,799바이트 설치 파일을 만들었고, 패키지 `app.asar`에서 ASS/SSA가 공유 인코딩 디코더를 쓰는 코드를 확인했다. 설치 파일은 로컬 산출물로만 두었다.
+- 합성 로컬 파일만 사용했다. 실제 사용자가 가진 자막 파일, SMI SAMI 변형, JASSUB의 스타일·폰트 렌더링 화면, 외부 공급원 자막은 확인하지 않았다.
+
 ## 주요 결정
 
 - 새 앱은 Windows 우선, Android는 후속이다. Chrome·macOS는 제품 범위에서 제외한다.
