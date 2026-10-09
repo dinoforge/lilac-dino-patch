@@ -635,8 +635,19 @@ function labelTranslateButtons(){
 }
 function renderSubtitleSheet(){
   $$('#psSubtitleSources button').forEach(button=>button.classList.toggle('selected',button.dataset.source===activeSubtitleSource()));
+  renderSubtitleSourceAvailability();
   $('#subtitleTranslateRow').classList.toggle('hidden',!translatableSubtitle()&&!retranslatable()&&!['#translateNow','#translateNowLocal'].some(id=>$(id).dataset.run));labelTranslateButtons();
   renderSubtitleTracks();renderJimaku();if(typeof renderAnissiaMakers==='function')renderAnissiaMakers();
+}
+const ONLINE_SUBTITLE_SOURCES=['kairan','csora','anissia'],subtitleAvailabilityByEpisode=new Map();
+function subtitleAvailabilityLabel(status){return ({checking:'확인 중',available:'있음',unavailable:'없음',error:'확인 실패'})[status]||'미확인'}
+function subtitleAvailabilityStatusFromError(error){const message=String(error?.message||error||'');return /찾지 못|찾을 수 없|없습니다|추출하지 못/.test(message)?'unavailable':'error'}
+function currentSubtitleAvailability(){const key=subtitleStoreKey();return key?subtitleAvailabilityByEpisode.get(key)||{}:{}}
+function renderSubtitleSourceAvailability(){const availability=currentSubtitleAvailability();$$('#psSubtitleSources button[data-source="kairan"],#psSubtitleSources button[data-source="csora"],#psSubtitleSources button[data-source="anissia"]').forEach(button=>{const status=availability[button.dataset.source]||'unknown',label=button.querySelector('[data-source-status]');if(!label)return;label.textContent=subtitleAvailabilityLabel(status);label.dataset.availability=status})}
+function setSubtitleAvailability(source,status,requestId=playbackRequestId){
+  if(!ONLINE_SUBTITLE_SOURCES.includes(source)||requestId!==playbackRequestId)return;const key=subtitleStoreKey();if(!key)return;
+  let availability=subtitleAvailabilityByEpisode.get(key);if(!availability){availability={};subtitleAvailabilityByEpisode.set(key,availability);if(subtitleAvailabilityByEpisode.size>500)subtitleAvailabilityByEpisode.delete(subtitleAvailabilityByEpisode.keys().next().value)}
+  availability[source]=status;renderSubtitleSourceAvailability();
 }
 // Kairan → Csora → Anissia (the preferred one first), started while the stream is still being resolved so the
 // result is usually ready when playback starts. One search per title and episode. The three are asked at once and
@@ -644,8 +655,9 @@ function renderSubtitleSheet(){
 let onlineSubtitleSearch=null;
 function onlineSubtitleFor(title,episode,anime){
   const key=`${title}|${episode}`;if(onlineSubtitleSearch?.key===key)return onlineSubtitleSearch.promise;
-  const preferred=localStorage.getItem('subtitleSource')||'reanime',online=['kairan','csora','anissia'],sources=online.includes(preferred)?[preferred,...online.filter(x=>x!==preferred)]:online;
-  const searches=sources.map(source=>window.lilac.findSubtitle(source,title,episode,anime).then(result=>({source,result}),()=>null));
+  const preferred=localStorage.getItem('subtitleSource')||'reanime',sources=ONLINE_SUBTITLE_SOURCES.includes(preferred)?[preferred,...ONLINE_SUBTITLE_SOURCES.filter(x=>x!==preferred)]:ONLINE_SUBTITLE_SOURCES,requestId=playbackRequestId;
+  sources.forEach(source=>setSubtitleAvailability(source,'checking',requestId));
+  const searches=sources.map(source=>window.lilac.findSubtitle(source,title,episode,anime).then(result=>{setSubtitleAvailability(source,result?'available':'unavailable',requestId);return result?{source,result}:null},error=>{setSubtitleAvailability(source,subtitleAvailabilityStatusFromError(error),requestId);return null}));
   const promise=(async()=>{for(const search of searches){const found=await search;if(found)return found}return null})();
   onlineSubtitleSearch={key,promise};
   promise.then(found=>{if(!found&&onlineSubtitleSearch?.promise===promise)onlineSubtitleSearch=null});
@@ -666,7 +678,7 @@ async function offerKoreanSubtitle(title,episode,requestId,current){
 async function ensureSubtitle(stream,title,episode,{skipSaved=false}={}){
   const requestId=playbackRequestId,preferred=localStorage.getItem('subtitleSource')||'reanime',key=subtitleStoreKey();
   $('#subtitleOffer').classList.add('hidden');
-  const saved=key&&!skipSaved?await window.lilac.savedSubtitles(key).catch(()=>[]):[];if(requestId!==playbackRequestId)return false;
+  const saved=key&&!skipSaved?await window.lilac.savedSubtitles(key).catch(()=>[]):[];if(requestId!==playbackRequestId)return false;for(const source of ONLINE_SUBTITLE_SOURCES)if(saved.some(entry=>entry.source===source))setSubtitleAvailability(source,'available',requestId);
   // 애니24: the Korean subtitle is in the picture, so nothing is put over it, searched or translated (a subtitle picked by
   // hand still goes on; the next episode is not translated ahead).
   if(!skipSaved&&(stream?.burnedKorean||currentPlaybackContext.episode?.provider==='ohli24')){currentPlaybackContext.siteKorean=true;$('#subtitleState').textContent='영상에 한국어 자막이 들어 있어요.';return true}
