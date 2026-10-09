@@ -44,7 +44,7 @@ function makeTrack(video) {
   };
 }
 
-test('user subtitle picker copies ASS and its font, then the player hands the original to JASSUB', async () => {
+test('user subtitle picker copies ASS, hands it to JASSUB, and ignores stale dialog results', async () => {
   await withTempDirectory(async directory => {
     const sourceDirectory = path.join(directory, 'source');
     const userData = path.join(directory, 'app-data');
@@ -103,12 +103,15 @@ test('user subtitle picker copies ASS and its font, then the player hands the or
       $: selector => elements.get(selector) || { textContent: '', checked: false },
       fetch: () => Promise.reject(new Error('offline fixture; no network fetch allowed')),
       currentPlaybackContext: { koreanFound: false }, currentSubtitlePath: null,
+      playbackRequestId: 1, subtitleSelectionRequestId: 0,
       KOREAN_SOURCES: ['kairan', 'csora', 'anissia', 'linkkf'], translating: null,
-      beginSubtitleSelection() {}, applyVttLayout() {}, toast: message => toasts.push(message),
+      applyVttLayout() {}, toast: message => toasts.push(message),
       rememberSubtitle: subtitle => remembered.push(subtitle), renderSubtitleSheet() {},
       renderDiscoveredFonts() {}, translatingNow: () => false, showTranslatedLines() {}
     });
-    vm.runInContext(`${subtitleAttachment}\n${openSubtitleClick}\nglobalThis.getCurrentSubtitle = () => currentSubtitle;`, uiContext);
+    uiContext.beginSubtitleSelection = () => ++uiContext.subtitleSelectionRequestId;
+    vm.runInContext(`${subtitleAttachment}\n${openSubtitleClick}\n`+
+      'globalThis.getCurrentSubtitle = () => currentSubtitle; globalThis.advanceSubtitleSelection = () => ++subtitleSelectionRequestId;', uiContext);
     await openButton.onclick();
     await new Promise(resolve => setImmediate(resolve));
 
@@ -133,5 +136,28 @@ test('user subtitle picker copies ASS and its font, then the player hands the or
     video.children[0].fire('load');
     assert.match(elements.get('#subtitleState').textContent, /사용자 자막 적용됨 · ASS 효과/);
     assert.equal(toasts.length, 1);
+
+    const appliedBeforeStaleResults = uiContext.getCurrentSubtitle();
+    let releasePicker;
+    uiContext.window.lilac.chooseSubtitleDetails = () => new Promise(resolve => { releasePicker = resolve; });
+    const staleAfterSourceChange = openButton.onclick();
+    uiContext.advanceSubtitleSelection();
+    releasePicker({ ...selected, path: path.join(directory, 'older.ass') });
+    await staleAfterSourceChange;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.strictEqual(uiContext.getCurrentSubtitle(), appliedBeforeStaleResults, 'a newer subtitle choice wins');
+    assert.equal(uiContext.currentSubtitlePath, selected.path);
+    assert.equal(video.children.length, 1);
+    assert.equal(jassubCalls.length, 1);
+
+    const staleAfterEpisodeChange = openButton.onclick();
+    uiContext.playbackRequestId++;
+    releasePicker({ ...selected, path: path.join(directory, 'previous-episode.ass') });
+    await staleAfterEpisodeChange;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.strictEqual(uiContext.getCurrentSubtitle(), appliedBeforeStaleResults, 'a result from the previous episode is discarded');
+    assert.equal(uiContext.currentSubtitlePath, selected.path);
+    assert.equal(video.children.length, 1);
+    assert.equal(jassubCalls.length, 1);
   });
 });

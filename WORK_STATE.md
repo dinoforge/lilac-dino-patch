@@ -301,7 +301,8 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 실제 변환 함수와 `subtitleResult`를 호출하는 임시 파일 테스트에서 UTF-8 BOM SRT, CP949 SMI, UTF-16LE ASS, CP949 SSA 및 VTT 직접 사용을 확인했다. ASS의 `\N` 줄바꿈·쉼표 포함 대사와 SMI 다음 SYNC 기준 종료 시각도 확인했고 4/4 통과했다.
 - 격리 Electron 창에서 실제 `src/ass-renderer.js`·JASSUB WASM에 640×360 합성 영상을 연결하고, Windows `Malgun Gothic` 파일과 한글 ASS cue를 전달했다. 캡처에서 아래쪽 한글 대사가 밝은 픽셀 738개로 렌더됐고 외부 HTTP(S) 요청은 0건이었다. 렌더 완료 전 캡처하면 픽셀 검사가 실패해 대기 후 캡처하도록 했다.
 - 별도 흐름 테스트에서 실제 `file:subtitle` 처리기와 사용자 자막 버튼·`attachSubtitle` 코드를 연결했다. 합성 UTF-16LE ASS와 글꼴이 격리 userData 아래로 복사되고, 변환 WebVTT가 `<track>`에, 원본 ASS와 글꼴·125ms 싱크가 JASSUB 호출에 전달되며 단순 WebVTT 트랙은 숨겨지는 것을 확인했다. 원본 ASS는 바뀌지 않았다.
-- 전체 `node --test` 202/202, `electron/main.cjs`·신규 테스트 구문 검사, `git diff --check`가 통과했다. `npm run dist` Windows NSIS 빌드가 성공해 124,555,799바이트 설치 파일을 만들었고, 패키지 `app.asar`에서 ASS/SSA가 공유 인코딩 디코더를 쓰는 코드를 확인했다. 설치 파일은 로컬 산출물로만 두었다.
+- 파일 선택 창을 기다리는 동안 출처나 회차가 바뀌면 늦게 돌아온 파일이 현재 선택을 덮는 경합을 재현하고 수정했다. 반환 시 `playbackRequestId`와 `subtitleSelectionRequestId`를 모두 확인하며, 회귀 테스트에서 더 새 출처 선택과 회차가 오래된 파일보다 우선하는 것을 확인했다.
+- 전체 `node --test` 202/202, `src/app.js`·신규 테스트 구문 검사, `git diff --check`가 통과했다. `npm run dist` Windows NSIS 빌드가 성공해 124,555,809바이트 설치 파일을 만들었고, 패키지 `app.asar`에서 ASS/SSA 공유 인코딩 판독기와 늦은 파일 선택 차단 코드를 확인했다. 설치 파일은 로컬 산출물로만 두었다.
 - 합성 로컬 파일만 사용했다. 실제 사용자가 가진 자막 파일, SMI SAMI 변형, 설치 NSIS 앱의 설정·화면 동작, 외부 공급원 자막은 확인하지 않았다.
 
 ## 주요 결정
