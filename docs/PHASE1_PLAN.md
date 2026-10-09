@@ -152,5 +152,5 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 
 - 빌드된 `dist/win-unpacked/resources/app.asar`의 화면과 실제 preload를 별도 임시 Electron harness에서 열었다. 합성 IPC 88개와 12초 로컬 MP4만 연결했으며, 앱의 기존 사용자 프로필과 공급원 응답은 사용하지 않았다.
 - 작품 상세에서 `1화 이어보기`와 보조 `1화 처음부터`가 표시됐다. 처음부터를 고르면 회차 resolve가 실행되고 상세가 닫혔으며, 영상 위치 0.01363초·이어보기 기록 0%를 확인했다. renderer 오류와 외부 HTTP(S) 요청은 0건이다. 결과 JSON: `%TEMP%\lilac-packaged-ui-yFofCR\packaged-ui-result.json`.
-- 별도 headless 실행으로 `dist/win-unpacked/LilacAnime.exe` 창 생성은 확인했지만, 상세 UI를 기다리던 CDP 호출은 시간 초과됐다. 임시 실행에 IPC mock 호출 또는 요청 차단 기록이 없어 이 exe 실행을 통합 통과로 보지 않는다. 초기 `provider:catalog` 경로가 실제 RE:Anime fetch에 연결될 수 있어, 네트워크 격리가 입증되지 않은 상태에서 추가 재시도하지 않았다.
+- 별도 headless 실행으로 `dist/win-unpacked/LilacAnime.exe` 창 생성은 확인했지만, 상세 UI를 기다리던 CDP 호출은 시간 초과됐다. 임시 실행에 IPC mock 호출 또는 요청 차단 기록이 없어 이 exe 실행을 통합 통과로 보지 않는다. 초기 화면은 카탈로그 IPC를 시작하며 `provider:catalog`가 실제 RE:Anime fetch에 연결되므로, 이 실행에서 외부 요청이 없었다고 판단할 수도 없다. 네트워크 격리가 입증되지 않은 상태에서 추가 재시도하지 않았다.
 - 다음 검증은 패키지 main handler mock의 설치 여부와 네트워크 차단을 실행 전에 확인하고, 확인 기록이 남은 경우에만 exe UI를 연다. 현재까지 패키지 renderer/preload는 확인됐지만, 패키지 exe의 main-process 통합과 실제 공급원·영상·자막은 미검증이다.
