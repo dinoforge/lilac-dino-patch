@@ -27,6 +27,7 @@ let subtitleSelectionRequestId = 0;
 let latestEpisodeRequestId = 0;
 let historyPlaybackRequestId = 0;
 let pendingResumeProgress = 0;
+let pendingResumeSeconds = null;
 const playerFailureHistory=[];
 function cancelPendingPlaybackLookups(){latestEpisodeRequestId++;historyPlaybackRequestId++;playbackRequestId++}
 
@@ -530,15 +531,15 @@ function showPendingPlayer(name,context={}){
 const videoServerKey=provider=>`${provider||'animenosub'}Server`;
 const KOREAN_SHOWS_KEY='koreanSubtitleShows';
 function koreanShows(){try{return JSON.parse(localStorage.getItem(KOREAN_SHOWS_KEY)||'[]')}catch{return []}}
-async function resolveWithVideoServer(episode,koreanSearch,anime){
-  const picked=localStorage.getItem(videoServerKey(episode.provider))||'';let prefer='sub';
+async function resolveWithVideoServer(episode,koreanSearch,anime,options={}){
+  const picked=options.serverOverride||localStorage.getItem(videoServerKey(episode.provider))||'';let prefer=options.onlyServerKind||'sub';
   const show=anime?.id?`${anime.provider||episode.provider}:${anime.id}`:'';
-  koreanSearch.then(found=>{if(!found||!show)return;const list=koreanShows().filter(key=>key!==show);list.unshift(show);try{localStorage.setItem(KOREAN_SHOWS_KEY,JSON.stringify(list.slice(0,300)))}catch{}});
-  if(!picked){
+  if(!options.serverOverride)koreanSearch.then(found=>{if(!found||!show)return;const list=koreanShows().filter(key=>key!==show);list.unshift(show);try{localStorage.setItem(KOREAN_SHOWS_KEY,JSON.stringify(list.slice(0,300)))}catch{}});
+  if(!picked&&!options.serverOverride){
     const saved=await window.lilac.savedSubtitles(episodeRef(episode)).catch(()=>[]);
     if(saved.some(entry=>entry.source!=='provider')||(show&&koreanShows().includes(show))||await Promise.race([koreanSearch,new Promise(resolve=>setTimeout(()=>resolve(null),8000))]))prefer='raw';
   }
-  return window.lilac.providerResolve({...episode,server:picked,prefer});
+  return window.lilac.providerResolve({...episode,server:picked,prefer,onlyServerKind:options.onlyServerKind||'',excludeVideoServers:options.excludeVideoServers||[],serverOnly:Boolean(options.serverOnly)});
 }
 function recordPlayerFailure(failure={}){playerFailureHistory.push(window.LilacPlayerDiagnostics.createEntry({context:currentPlaybackContext,failure}));if(playerFailureHistory.length>5)playerFailureHistory.shift()}
 function showPlayerFailure(message,failure={}){recordPlayerFailure(failure);$('#playerEmpty').classList.remove('hidden');$('.player-spinner').classList.add('hidden');$('#playerEmpty p').textContent=message;$('#playerDiagnosticActions').classList.remove('hidden');$('#playerDiagnosticStatus').textContent='';showPlayerControls()}
@@ -555,12 +556,14 @@ async function resolveIntoPlayer(resolver,name,context={},subtitleTitle='',episo
   const requestId=showPendingPlayer(name,context);
   const searchTitle=subtitleTitle||context.subtitleTitle||name.split(' · ')[0];
   // Old LinkAni history can still point at a completed local video with Korean subtitles already present.
-  const koreanSearch=['ohli24','linkani'].includes(context.episode?.provider)?Promise.resolve(null):onlineSubtitleFor(searchTitle,episode,context.anime?{provider:context.anime.provider,id:context.anime.id,title:context.anime.title||context.anime.title_english||'',anilistId:context.anime.anilistId||null,malId:context.anime.malId||null}:null).catch(()=>null);
+  const koreanSearch=context.serverOverride?Promise.resolve(null):['ohli24','linkani'].includes(context.episode?.provider)?Promise.resolve(null):onlineSubtitleFor(searchTitle,episode,context.anime?{provider:context.anime.provider,id:context.anime.id,title:context.anime.title||context.anime.title_english||'',anilistId:context.anime.anilistId||null,malId:context.anime.malId||null}:null).catch(()=>null);
   try{
     // A download whose video is not there (moved, the drive unplugged) plays online instead.
     const job=context.episode?jobByRef(episodeRef(context.episode)):null,downloaded=job&&!job.missing?job:null;
-    const stream=downloaded?.status==='completed'?{...await window.lilac.playDownload(downloaded.id),downloaded:true}:['animenosub','miruro'].includes(context.episode?.provider)?await resolveWithVideoServer(context.episode,koreanSearch,context.anime):await resolver();
+    const automaticServer=context.serverOverride&&['reanime','animenosub','miruro'].includes(context.episode?.provider);
+    const stream=downloaded?.status==='completed'?{...await window.lilac.playDownload(downloaded.id),downloaded:true}:['animenosub','miruro'].includes(context.episode?.provider)?await resolveWithVideoServer(context.episode,koreanSearch,context.anime,context):automaticServer?await window.lilac.providerResolve({...context.episode,server:context.serverOverride,prefer:context.onlyServerKind,onlyServerKind:context.onlyServerKind,excludeVideoServers:context.excludeVideoServers||[],serverOnly:Boolean(context.serverOnly)}):await resolver();
     if(requestId!==playbackRequestId)return;
+    if(context.serverOverride&&stream.server&&stream.server!==context.serverOverride)throw new Error('요청한 자동 대체 서버를 선택하지 못했습니다.');
     const offlineEpisodes=downloaded?.status==='completed'?downloadedSeries(downloaded):[];
     play(stream.url,name,{...context,seriesEpisodes:offlineEpisodes.length?offlineEpisodes:context.seriesEpisodes,streamHeaders:stream.headers||{},offline:Boolean(downloaded?.status==='completed'),hls:Boolean(stream.hls)});
     if(downloaded?.status==='completed')$('#downloadStatus').textContent='다운로드한 영상 재생 중';
@@ -568,15 +571,47 @@ async function resolveIntoPlayer(resolver,name,context={},subtitleTitle='',episo
     currentPlaybackContext.subtitleTrackStatus=currentPlaybackContext.episode?.provider==='reanime'&&!currentPlaybackContext.subtitleTracks.length?'idle':'loaded';
     if(currentPlaybackContext.subtitleTrackStatus==='idle')loadMissingSubtitleTracks();else renderSubtitleTracks();
     currentPlaybackContext.videoServers=stream.servers||[];currentPlaybackContext.videoServer=stream.server||'';if(typeof renderVideoServers==='function')renderVideoServers();
-    ensureSubtitle(stream,searchTitle,episode);
+    const preserved=context.preservedSubtitle;
+    if(preserved?.src){
+      attachSubtitle(preserved.src,preserved.label||'자막',{path:preserved.path||null,assUrl:preserved.assUrl||null,assPath:preserved.assPath||null,fonts:preserved.fonts||[],source:preserved.source||null,saved:Boolean(preserved.saved),from:preserved.from||null,fromName:preserved.fromName||''});
+    }else if(context.preservedSubtitleTrack){
+      const wanted=context.preservedSubtitleTrack,tracks=currentPlaybackContext.subtitleTracks;
+      const track=tracks.find(item=>item.url===wanted.url)||tracks.find(item=>item.label===wanted.label&&item.language===wanted.language);
+      if(track){currentPlaybackContext.selectedSubtitleTrack=track.url;selectSubtitleTrack(track,{auto:true,notice:'서버 전환 후 선택한 자막을 다시 적용했습니다.'});}
+      else ensureSubtitle(stream,searchTitle,episode);
+    }else ensureSubtitle(stream,searchTitle,episode);
   }catch(error){
     if(requestId!==playbackRequestId)return;
+    const next=window.LilacPlayerFailover?.advance(context);
+    if(next){$('#downloadStatus').textContent='다른 영상 서버로 전환하는 중...';return resolveIntoPlayer(resolver,name,next,subtitleTitle,episode)}
     // IPC errors arrive as "Error invoking remote method '…': Error: <message>".
     const message=String(error?.message||'영상 서버에 연결하지 못했습니다.').replace(/^Error invoking remote method '[^']+': (?:Error: )?/,'');
     showPlayerFailure('영상을 불러오지 못했어요',{stage:'stream-resolution',mediaType:'unknown'});
     $('#playerMeta').textContent='뒤로 가서 다른 회차를 선택해 주세요';$('#downloadStatus').textContent=message;
     toast(`재생 실패: ${message}`);
   }
+}
+
+function startAutomaticVideoServerFallback(instance,video){
+  if(hlsPlayer!==instance)return false;
+  const context=currentPlaybackContext,episode=context.episode;
+  const plan=window.LilacPlayerFailover?.createPlan({provider:episode?.provider,servers:context.videoServers,currentServer:context.videoServer,
+    failedVideoServers:context.failedVideoServers||context.excludeVideoServers||[],attemptCount:context.autoFallbackCount||0,offline:Boolean(context.offline)});
+  if(!plan)return false;
+  const resumeSeconds=Number(video.currentTime),duration=playbackDuration(),resumeProgress=duration&&resumeSeconds>0?Math.min(99.9,resumeSeconds/duration*100):Number(context.resumeProgress)||0;
+  const {currentUrl,videoServer,resolving,...base}=context;
+  const next=window.LilacPlayerFailover.begin(base,plan,{resumeSeconds,resumeProgress});
+  if(!next)return false;
+  if(currentSubtitle)next.preservedSubtitle={src:currentSubtitle.src,label:currentSubtitle.label,path:currentSubtitle.path||null,assUrl:currentSubtitle.assUrl||null,
+    assPath:currentSubtitle.assPath||null,fonts:currentSubtitle.fonts||[],source:currentSubtitle.source||null,saved:Boolean(currentSubtitle.saved),from:currentSubtitle.from||null,fromName:currentSubtitle.fromName||''};
+  else if(context.preservedSubtitle)next.preservedSubtitle=context.preservedSubtitle;
+  const selectedTrack=(context.subtitleTracks||[]).find(track=>track.url===context.selectedSubtitleTrack);
+  if(selectedTrack)next.preservedSubtitleTrack=selectedTrack;
+  else if(context.preservedSubtitleTrack)next.preservedSubtitleTrack=context.preservedSubtitleTrack;
+  const title=context.subtitleTitle||$('#skipTitle').value.trim()||'애니';
+  resolveIntoPlayer(()=>window.lilac.providerResolve(episode),`${title} · ${episode.name||episode.number||1}화`,next,title,Number(episode.number)||1);
+  $('#downloadStatus').textContent='재생이 어려워 다른 영상 서버로 전환하고 있어요...';
+  return true;
 }
 
 function bindHlsPlayerEvents(instance,video){
@@ -602,11 +637,13 @@ function bindHlsPlayerEvents(instance,video){
     if(!data.fatal)return;
     if(data.type===Hls.ErrorTypes.NETWORK_ERROR&&recovery.network<3){recovery.network++;$('#downloadStatus').textContent='영상 서버에 다시 연결하는 중...';instance.startLoad();return}
     if(data.type===Hls.ErrorTypes.MEDIA_ERROR&&recovery.media<3){recovery.media++;if(recovery.media===2)instance.swapAudioCodec();$('#downloadStatus').textContent='재생 오류를 복구하는 중...';instance.recoverMediaError();return}
+    if(startAutomaticVideoServerFallback(instance,video))return;
     {const detail=data.details||data.type||'unknown',status=data.response?.code||data.response?.status||'',reason=data.reason||data.error?.message||'';const message=[detail,status&&`HTTP ${status}`,reason].filter(Boolean).join(' · ');showPlayerFailure('HLS 영상을 재생하지 못했습니다.',{stage:'hls-playback',mediaType:'hls',errorCategory:data.type});$('#downloadStatus').textContent=`HLS 오류: ${message}`;toast(`HLS 재생 오류: ${message}`)}
   });
 }
 
 function play(src,name='직접 재생',context={}) {
+  pendingResumeSeconds=Number.isFinite(Number(context.resumeSeconds))&&Number(context.resumeSeconds)>0?Number(context.resumeSeconds):null;
   cancelPendingPlaybackLookups();++playbackRequestId;const video=$('#video');currentPlaybackContext={...context,currentUrl:src};cancelOtherEpisodeTranslations();clearSubtitle();renderSubtitleSheet();skipSegments=[];activeSkip=null;activeSkipKey=null;opEdAnalysisKey=null;if(hlsPlayer){hlsPlayer.destroy();hlsPlayer=null;} video.removeAttribute('src');
   enterPlayer();setPlayerLocked(false);showPlayerControls();updateEpisodeButtons();$('#playerEmpty').classList.remove('hidden');$('#playerDiagnosticActions').classList.add('hidden');$('#playerDiagnosticStatus').textContent='';$('.player-spinner').classList.remove('hidden');$('#subtitleState').textContent='온라인 자막을 확인하는 중...';
   const isHls=/\.m3u8(?:$|\?)/i.test(src)||/\/__flix\//i.test(src)||Boolean(context.hls);
@@ -1114,7 +1151,7 @@ async function selectSubtitleTrack(track,{auto=false,notice=''}={}){
 function formatTime(value){if(!Number.isFinite(value))return '00:00';const seconds=Math.max(0,Math.floor(value)),h=Math.floor(seconds/3600),m=Math.floor(seconds%3600/60),s=seconds%60;return h?`${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`}
 function syncVolumeUI(){const video=$('#video'),control=$('.volume-control'),slider=$('#playerVolume'),muted=video.muted||video.volume===0;control.classList.toggle('muted',muted);slider.value=String(Math.round(video.volume*100));$('#mutePlayer').setAttribute('aria-label',muted?'음소거 해제':'음소거')}
 function playbackDuration(){const video=$('#video');if(Number.isFinite(video.duration)&&video.duration>0)return video.duration;const details=hlsPlayer?.latestLevelDetails||hlsPlayer?.levels?.[hlsPlayer.currentLevel]?.details||hlsPlayer?.levels?.find(level=>level.details)?.details,duration=Number(details?.totalduration);return Number.isFinite(duration)&&duration>0?duration:0}
-function applyPendingResume(){if(!pendingResumeProgress)return false;const video=$('#video'),duration=playbackDuration();if(!duration)return false;const target=duration*pendingResumeProgress/100;if(Number.isFinite(target)&&target>0){video.currentTime=Math.min(target,Math.max(0,duration-.5));pendingResumeProgress=0;return true}return false}
+function applyPendingResume(){const video=$('#video'),duration=playbackDuration();if(!duration)return false;if(Number.isFinite(pendingResumeSeconds)&&pendingResumeSeconds>0){video.currentTime=Math.min(pendingResumeSeconds,Math.max(0,duration-.5));pendingResumeSeconds=null;pendingResumeProgress=0;return true}if(!pendingResumeProgress)return false;const target=duration*pendingResumeProgress/100;if(Number.isFinite(target)&&target>0){video.currentTime=Math.min(target,Math.max(0,duration-.5));pendingResumeProgress=0;return true}return false}
 function showPlayerControls(){const player=$('#immersivePlayer'),settingsOpen=()=>typeof playerSettingsOpen==='function'&&playerSettingsOpen();if(typeof playerLocked!=='undefined'&&playerLocked)return;player.classList.add('controls-visible');clearTimeout(controlsTimer);if(!$('#video').paused&&!settingsOpen())controlsTimer=setTimeout(()=>{if(!settingsOpen())player.classList.remove('controls-visible')},2000)}
 function scheduleOpEdAnalysis(attempt=0){const duration=playbackDuration();if(!duration&&attempt<20){setTimeout(()=>scheduleOpEdAnalysis(attempt+1),500);return}loadOpEdSegments()}
 async function loadOpEdSegments(){const title=$('#skipTitle').value.trim(),episode=Number($('#skipEpisode').value)||1,duration=playbackDuration(),analysisKey=`${currentPlaybackContext.currentUrl}:${episode}`;if(!title||!duration||opEdAnalysisKey===analysisKey)return;opEdAnalysisKey=analysisKey;$('#downloadStatus').textContent='OP/ED 구간을 확인하는 중...';try{const currentJob=currentPlaybackContext.episode?jobByRef(episodeRef(currentPlaybackContext.episode)):null,comparison=currentPlaybackContext.offline&&currentJob?downloadedSeries(currentJob).filter(item=>episodeRef(item)!==episodeRef(currentPlaybackContext.episode)):(currentPlaybackContext.comparisonEpisodes||[]);const candidates=await Promise.all(comparison.map(async candidate=>{const job=jobByRef(episodeRef(candidate));if(job?.status!=='completed')return candidate;try{const local=await window.lilac.playDownload(job.id);return {...candidate,localUrl:local.url}}catch{return candidate}}));skipSegments=await window.lilac.opEdSkip({title,episode,duration,currentUrl:currentPlaybackContext.currentUrl,currentHeaders:currentPlaybackContext.streamHeaders||{},candidates,anilistId:currentPlaybackContext.episode?.anilistId||currentPlaybackContext.anime?.anilistId||null,malId:currentPlaybackContext.episode?.malId||currentPlaybackContext.anime?.malId||null,nativeTitle:['ohli24','linkani'].includes(currentPlaybackContext.anime?.provider)?currentPlaybackContext.anime.title_japanese||'':'',year:currentPlaybackContext.anime?.year||'',audioAnalysis:localStorage.getItem('opedAudioAnalysis')!=='false',offline:Boolean(currentPlaybackContext.offline),jobId:currentPlaybackContext.episode?jobByRef(episodeRef(currentPlaybackContext.episode))?.id||null:null});$('#downloadStatus').textContent=skipSegments.length?`OP/ED 구간 ${skipSegments.length}개 준비됨`:'OP/ED 구간을 찾지 못했습니다.'}catch(e){skipSegments=[];opEdAnalysisKey=null;$('#downloadStatus').textContent=`OP/ED 분석 실패: ${e.message}`}}

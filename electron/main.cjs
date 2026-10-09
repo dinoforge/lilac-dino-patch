@@ -21,6 +21,7 @@ const { QUARTER_PROVIDERS, quarterForDate, quarterPeriod, quarterQuery } = requi
 const { fetchLatestEpisodes } = require('./latest-episodes.cjs');
 const { createCatalogBrowser } = require('./catalog-browser.cjs');
 const { createCatalogUpdates } = require('./catalog-updates.cjs');
+const { filterProviderServers } = require('../src/player-failover.js');
 let catalogUpdates;
 let subtitleTranslator = null;
 const translator = () => subtitleTranslator ||= createTranslator(app.getPath('userData'));
@@ -403,16 +404,26 @@ async function resolveProviderEpisode(episode) {
   if(episode.provider==='miruro')return resolveMiruroEpisode(episode);
   if(episode.provider==='ohli24')return resolveOhliEpisode(episode);
   if(episode.provider==='reanime') {
-    const ordered=await reanimeServers(episode);
+    const allServers=(await reanimeServers(episode)).map((server,index)=>({...server,label:String(server.name||'').trim()||`영상 서버 ${index+1}`,kind:'soft'}));
+    let ordered=filterProviderServers(allServers,episode);
+    if(episode.serverOnly)ordered=ordered.filter(server=>server.label===episode.server);
+    else if(episode.server)ordered=ordered.slice().sort((a,b)=>Number(b.label===episode.server)-Number(a.label===episode.server));
     if(!ordered.length)throw new Error('이 작품은 현재 RE:Anime에서 재생할 수 없습니다. 다른 콘텐츠 소스를 선택해주세요.');
     let lastError;
     for(const server of ordered){
-      try{return await resolveStreamPage(server.url,`${REANIME_WEB}/`)}catch(error){lastError=error}
+      try{return {...await resolveStreamPage(server.url,`${REANIME_WEB}/`),servers:allServers.map(({label,kind})=>({label,kind})),server:server.label}}catch(error){lastError=error}
     }
     throw lastError||new Error('모든 영상 서버 연결에 실패했습니다.');
   }
   if(episode.provider==='animenosub'){
-    const servers=animenosubServers(await providerFetch(episode.url,{referer:`${ANIMENOSUB_WEB}/`}),episode.url);
+    const allServers=animenosubServers(await providerFetch(episode.url,{referer:`${ANIMENOSUB_WEB}/`}),episode.url);
+    const servers=filterProviderServers(allServers,episode);
+    if(allServers.length&&!servers.length)throw new Error('요청한 영상 서버 유형의 대체 서버가 없습니다.');
+    if(episode.serverOnly){
+      const exact=servers.filter(server=>server.label===episode.server);
+      if(!exact.length)throw new Error('요청한 영상 서버를 찾을 수 없습니다.');
+      servers.splice(0,servers.length,...exact);
+    }
     // The server picked in the player first, then the preferred kind (RAW under a Korean subtitle), then SUB. Server
     // names point at different hosts from episode to episode and some hosts never answer, so the servers of one kind
     // are tried at once (each in a session of its own) and the first that answers is used; the others are stopped.
@@ -423,7 +434,7 @@ async function resolveProviderEpisode(episode) {
       const controller=new AbortController();
       try{
         const {stream,server}=await Promise.any(tier.map(server=>resolveStreamPage(server.url,episode.url,15000,{partition:`lilac-resolve-${resolverSlot=(resolverSlot+1)%8}`,waitSubtitle:false,signal:controller.signal}).then(stream=>({stream,server}))));
-        return {...stream,servers:servers.map(({label,kind})=>({label,kind})),server:server.label};
+        return {...stream,servers:allServers.map(({label,kind})=>({label,kind})),server:server.label};
       }catch(error){lastError=error.errors?.[0]||error}
       finally{controller.abort()}
     }
@@ -527,7 +538,7 @@ function remoteTrackOptions(url,referer=''){
 }
 const isEnglishTrack=track=>/^en/i.test(track.language||'')&&!/forced|sign/i.test(track.label||'');
 async function resolveMiruroEpisode(episode){
-  const root=await miruroApi(`anime/${episode.animeId}/episodes/${episode.number}/play`),servers=[];
+  const root=await miruroApi(`anime/${episode.animeId}/episodes/${episode.number}/play`),allServers=[];
   for(const track of root.tracks||[]){
     if(!MIRURO_KINDS[track.track])continue;
     for(const provider of track.providers||[])for(const server of provider.servers||[]){
@@ -538,10 +549,16 @@ async function resolveMiruroEpisode(episode){
       // Some segment hosts also want the Origin of the Referer (kickassanime's), which the list leaves out.
       const headers={...server.headers};if(headers.Referer&&!headers.Origin)try{headers.Origin=new URL(headers.Referer).origin}catch{/* no origin */}
       tracks.forEach(item=>miruroTrackHeaders.set(item.url,headers));
-      if(stream&&!servers.some(item=>item.label===label))servers.push({label,kind,provider:provider.provider,url:stream.url,headers,tracks});
+      if(stream&&!allServers.some(item=>item.label===label))allServers.push({label,kind,provider:provider.provider,url:stream.url,headers,tracks});
     }
   }
-  if(!servers.length)throw new Error('이 회차는 Miruro에서 재생할 수 있는 영상이 없습니다.');
+  if(!allServers.length)throw new Error('이 회차는 Miruro에서 재생할 수 있는 영상이 없습니다.');
+  let servers=filterProviderServers(allServers,episode);
+  if(episode.serverOnly){
+    servers=servers.filter(server=>server.label===episode.server);
+    if(!servers.length)throw new Error('요청한 영상 서버를 찾을 수 없습니다.');
+  }
+  if(!servers.length)throw new Error('요청한 영상 서버 유형의 대체 서버가 없습니다.');
   const known=provider=>{const index=MIRURO_PROVIDERS.indexOf(provider);return index<0?MIRURO_PROVIDERS.length:index};
   const clean=server=>['raw','soft'].includes(server.kind),english=server=>server.kind==='soft'&&server.tracks.some(isEnglishTrack);
   // A SOFT server with a Korean file of its own comes first, like a Korean Re:Anime track.
@@ -549,7 +566,7 @@ async function resolveMiruroEpisode(episode){
   const kindRank=server=>korean(server)?0.5:episode.prefer==='raw'?(clean(server)?1:server.kind==='sub'?2:3):(english(server)?1:server.kind==='sub'?2:clean(server)?3:4);
   const rank=server=>(server.label===episode.server?0:kindRank(server)*100)+(server.provider===miruroWorkingProvider?0:10)+known(server.provider);
   const result=async(server,extra={})=>{
-    const stream={url:server.url,headers:server.headers,referer:server.headers.Referer||'',servers:servers.map(({label,kind})=>({label,kind})),server:server.label,subtitleTracks:server.tracks,...extra};
+    const stream={url:server.url,headers:server.headers,referer:server.headers.Referer||'',servers:allServers.map(({label,kind})=>({label,kind})),server:server.label,subtitleTracks:server.tracks,...extra};
     // Only a Korean file is applied by itself, as with Re:Anime; other languages wait in the track list.
     const track=server.kind!=='soft'?null:server.tracks.find(isKoreanTrack);
     if(track)try{const file=subtitleResult(await saveRemoteSubtitle(track.url,remoteTrackOptions(track.url)));Object.assign(stream,{subtitleUrl:file.url,subtitlePath:file.path,subtitleAss:file.assUrl?{url:file.assUrl,path:file.assPath}:null,subtitleLabel:`Miruro ${track.label} 자막`,subtitleTrack:track.url})}catch{/* the track list still offers it */}

@@ -328,8 +328,9 @@ function selectVideoServer(label) {
   if (label) localStorage.setItem(key, label); else localStorage.removeItem(key);
   if (!episode || (label && label === context.videoServer)) { renderVideoServers(); return; }
   const duration = playbackDuration(), resumeProgress = duration ? Math.min(94, video.currentTime / duration * 100) : 0, title = context.subtitleTitle || $('#skipTitle').value.trim();
-  const { videoServers, videoServer, resolving, currentUrl, ...keep } = context;
-  resolveIntoPlayer(() => window.lilac.providerResolve(episode), `${title} · ${episode.name || episode.number}화`, { ...keep, resumeProgress }, title, Number($('#skipEpisode').value) || episode.number || 1);
+  const { videoServers, videoServer, resolving, currentUrl, serverOverride, serverOnly, onlyServerKind, excludeVideoServers, failedVideoServers, autoFallbackLabels, autoFallbackCount, preservedSubtitle, preservedSubtitleTrack, ...keep } = context;
+  const requestedEpisode=label?{...episode,server:label}:episode;
+  resolveIntoPlayer(() => window.lilac.providerResolve(requestedEpisode), `${title} · ${episode.name || episode.number}화`, { ...keep, resumeProgress }, title, Number($('#skipEpisode').value) || episode.number || 1);
 }
 
 function renderQualityChoices() {

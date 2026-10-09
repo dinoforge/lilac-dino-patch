@@ -34,6 +34,8 @@ function setup() {
     scheduleOpEdAnalysis: () => calls.push('analysis'),
     playerSettingsOpen: () => false,
     toast: message => messages.push(message),
+    startAutomaticVideoServerFallback: () => false,
+    showPlayerFailure: (...args) => calls.push(['failure', ...args]),
     hlsPlayer: null
   });
   vm.runInContext(bindingSource, context);
@@ -72,4 +74,31 @@ test('events from a replaced HLS instance cannot start recovery or change the ac
 test('play wires the event handlers to the newly assigned HLS instance', () => {
   assert.match(appSource, /const instance=hlsPlayer=new Hls\(/);
   assert.match(appSource, /bindHlsPlayerEvents\(instance,video\)/);
+});
+
+test('server failover starts only after the existing network recovery attempts are exhausted', () => {
+  const h = setup(), active = new FakeHls(), fallbackCalls = [];
+  h.context.startAutomaticVideoServerFallback = (...args) => { fallbackCalls.push(args); return true; };
+  h.context.hlsPlayer = active;
+  h.context.bindHlsPlayerEvents(active, h.video);
+  for (let attempt = 0; attempt < 3; attempt++) active.emit('error', { fatal: true, type: 'network', details: `network-${attempt}` });
+  assert.equal(active.startLoadCount, 3);
+  assert.equal(fallbackCalls.length, 0);
+  active.emit('error', { fatal: true, type: 'network', details: 'network-final' });
+  assert.equal(fallbackCalls.length, 1);
+  assert.equal(h.context.hlsPlayer, active);
+  assert.deepEqual(h.calls.filter(call => Array.isArray(call)&&call[0]==='failure'), []);
+  assert.deepEqual(h.messages, []);
+});
+
+test('the HLS failure screen remains the end state when no alternate server is available', () => {
+  const h = setup(), active = new FakeHls(), failures = [];
+  h.context.startAutomaticVideoServerFallback = () => false;
+  h.context.showPlayerFailure = (...args) => failures.push(args);
+  h.context.hlsPlayer = active;
+  h.context.bindHlsPlayerEvents(active, h.video);
+  for (let attempt = 0; attempt < 4; attempt++) active.emit('error', { fatal: true, type: 'network', details: `network-${attempt}` });
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0][0], 'HLS 영상을 재생하지 못했습니다.');
+  assert.equal(h.messages.length, 1);
 });
