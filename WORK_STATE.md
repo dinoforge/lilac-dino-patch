@@ -377,8 +377,9 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 - 반복 가능한 `npm run test:phase1-main`과 `tests/phase1-main.electron.cjs`를 추가했다. 빌드된 `dist/win-unpacked/resources/app.asar`의 main/preload 바이트가 현재 소스와 일치하는지 확인한 뒤 실제 패키지 main·preload와 앱 renderer를 격리 Electron 프로세스에서 연결한다.
 - 테스트 전용 `userData`·`sessionData`를 사용한다. Node `fetch`·Electron `net.fetch`는 등록된 Re:Anime·VTT·loopback HLS fixture만 반환하고, 나머지 요청은 503으로 거부한다. Chromium 세션은 fixture용 loopback 외부 요청을 차단한다.
-- 실제 `provider:catalog` 검색, `provider:detail` 메타데이터·회차 정규화, `provider:subtitle-tracks`의 한국어 VTT 트랙 파싱, 서버가 없는 회차의 `provider:resolve` 안내를 확인했다. 성공 경로에서는 FlixCloud 페이지를 HTTP loopback fixture로 리다이렉트하고 합성 HLS 요청을 관찰했다. main은 로컬 `127.0.0.1/__flix/...` 프록시 주소를 반환하고 한국어 VTT를 격리 `userData` 아래에 저장했다. 앱 프록시가 합성 HLS manifest를 가져와 segment 링크를 자체 loopback 경로로 다시 쓰는 것도 확인했다. 합성 네트워크 fixture 14회, loopback 페이지 리다이렉트 1회·브라우저 loopback 요청 2회, 알 수 없는 fetch 0회, 차단된 외부 브라우저 요청 0회다.
-- 외부 네트워크는 호출하지 않았다. loopback manifest를 실제 영상 요소로 재생하거나 segment를 요청하지는 않았다. 서버 없음 경로는 main IPC가 예상 오류를 reject하며 Electron이 오류 로그를 출력하지만 검증은 통과한다.
+- 실제 `provider:catalog` 검색, `provider:detail` 메타데이터·회차 정규화, `provider:subtitle-tracks`의 한국어 VTT 트랙 파싱, 서버가 없는 회차의 `provider:resolve` 안내를 확인했다. 성공 경로에서는 FlixCloud 페이지를 HTTP loopback fixture로 리다이렉트하고 합성 HLS 요청을 관찰했다. main은 로컬 `127.0.0.1/__flix/...` 프록시 주소를 반환하고 한국어 VTT를 격리 `userData` 아래에 저장했다. 앱 프록시가 합성 HLS manifest를 가져와 segment 링크를 자체 loopback 경로로 다시 쓰고, 188바이트 합성 MPEG-TS 조각을 반환하는 것도 확인했다. 합성 네트워크 fixture 15회, loopback 페이지 리다이렉트 1회·브라우저 loopback 요청 2회·앱 프록시 요청 2회, 알 수 없는 fetch 0회, 차단된 외부 브라우저 요청 0회다.
+- 외부 네트워크는 호출하지 않았다. 합성 segment를 실제 영상 요소에서 디코딩·재생하거나 실제 외부 segment를 가져오지는 않았다. 서버 없음 경로는 main IPC가 예상 오류를 reject하며 Electron이 오류 로그를 출력하지만 검증은 통과한다.
+- 병렬 검증에서 기존 패키지 UI 스모크가 첫 자막 cue를 읽기 전에 playback이 다음 cue로 진행하는 타이밍을 한 번 드러냈다. 테스트가 재생을 멈추고 1.2초로 되돌려 첫 문장을 확인하도록 보강했다. 이후 전체 `npm test`와 UI 스모크를 병렬 재실행해 각각 통과했다.
 - 전체 `npm test` 221/221과 기존 `npm run test:phase1-electron` 검색→합성 영상·한국어 자막→이어보기 스모크가 통과했다. 변경 JS 구문 검사와 `git diff --check`도 통과했다. 실제 공급원 응답·외부 스트림 재생과 자막 일치·설치 NSIS UI·사용자 프로필은 미검증이다. NSIS 설치 파일은 재빌드·설치·배포하지 않았으며, 기존 `app.asar` main/preload는 테스트 프로세스에서 실행했다.
 
 ## 주요 결정

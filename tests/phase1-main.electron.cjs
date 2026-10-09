@@ -43,6 +43,7 @@ const fixtureRequests = [];
 const deniedBrowserRequests = [];
 const redirectedFlixRequests = [];
 const localBrowserRequests = [];
+const localProxyRequests = [];
 const deniedUnknownFetches = [];
 const guardedSessions = new WeakSet();
 const SEARCH_TITLE = '메인 처리기 검증 작품';
@@ -90,7 +91,7 @@ const animeFixture = {
 };
 
 function response(body, status = 200, contentType = 'application/json') {
-  const text = typeof body === 'string' ? body : JSON.stringify(body);
+  const text = typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body);
   return new Response(text, { status, headers: { 'content-type': contentType } });
 }
 
@@ -140,6 +141,10 @@ function fixtureResponse(rawUrl) {
   if (localBase && url.origin === localBase && url.pathname === '/master.m3u8') {
     fixtureRequests.push(url.href);
     return response('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nsegment.ts\n#EXT-X-ENDLIST\n', 200, 'application/vnd.apple.mpegurl');
+  }
+  if (localBase && url.origin === localBase && url.pathname === '/segment.ts') {
+    fixtureRequests.push(url.href);
+    return response(Buffer.alloc(188, 0x47), 200, 'video/mp2t');
   }
   deniedUnknownFetches.push(url.href);
   return response('blocked by phase1-main fixture', 503, 'text/plain');
@@ -196,6 +201,7 @@ function waitFor(label, predicate, timeoutMs = 8000) {
 function requestLoopback(urlText) {
   const url = new URL(urlText);
   if (url.hostname !== '127.0.0.1') throw new Error(`Refusing non-loopback test request: ${url.origin}`);
+  localProxyRequests.push(url.pathname);
   return new Promise((resolve, reject) => {
     http.get(url, response => {
       const chunks = [];
@@ -269,6 +275,11 @@ app.whenReady().then(async () => {
     assert.match(proxiedManifest.body, /^#EXTM3U/);
     assert.match(proxiedManifest.body, /#EXTINF:4,[\r\n]+http:\/\/127\.0\.0\.1:\d+\/__flix\//,
       'the app proxy rewrites the fixture manifest segment to its own loopback route');
+    const segmentUrl = proxiedManifest.body.split(/\r?\n/).find(line => line.startsWith('http://127.0.0.1:') && line.includes('/__flix/'));
+    assert.ok(segmentUrl, 'the synthetic manifest has a rewritten segment URL');
+    const proxiedSegment = await requestLoopback(segmentUrl);
+    assert.equal(proxiedSegment.status, 200);
+    assert.equal(proxiedSegment.body, 'G'.repeat(188), 'the app proxy returned the synthetic MPEG-TS segment bytes');
 
     assert.ok(fixtureRequests.some(url => new URL(url).searchParams.get('q') === SEARCH_TITLE), 'search reached the synthetic Re:Anime API');
     assert.ok(fixtureRequests.some(url => url.includes(`/api/v1/anime/${SLUG}/episodes`)), 'detail reached the synthetic episode API');
@@ -276,13 +287,14 @@ app.whenReady().then(async () => {
     assert.ok(fixtureRequests.some(url => url.includes(`/api/watch/${SLUG}/99`)), 'unavailable resolve reached the synthetic episode-server API');
     assert.ok(fixtureRequests.some(url => url === 'https://subtitles.invalid/phase1-ko.vtt'), 'resolved stream downloaded the synthetic Korean VTT');
     assert.ok(fixtureRequests.some(url => localBase && url === `${localBase}/master.m3u8`), 'the app proxy fetched only the synthetic loopback manifest');
+    assert.ok(fixtureRequests.some(url => localBase && url === `${localBase}/segment.ts`), 'the app proxy fetched only the synthetic loopback segment');
     assert.equal(redirectedFlixRequests.length, 1, 'the FlixCloud page was redirected before external network access');
     assert.ok(localBrowserRequests.includes(`/e/${SLUG}`), 'the resolver loaded the local player fixture');
     assert.ok(localBrowserRequests.includes('/master.m3u8'), 'the resolver observed the synthetic HLS manifest request');
     assert.ok(fetchAttempts.length > 0, 'the test exercised the packaged main process network boundary');
 
     console.log('Packaged Phase 1 main-process smoke passed: actual main IPC search/detail/episodes, Korean subtitle parsing and save, unavailable-server feedback, and successful loopback-only HLS proxy resolution.');
-    console.log(`Synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; denied unknown fetches: ${deniedUnknownFetches.length}; blocked browser requests: ${deniedBrowserRequests.length}; external network calls: 0.`);
+    console.log(`Synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: ${deniedUnknownFetches.length}; blocked browser requests: ${deniedBrowserRequests.length}; external network calls: 0.`);
     await new Promise(resolve => localPlayerServer.close(resolve));
     app.quit();
   } catch (error) { fail(error); }

@@ -334,10 +334,13 @@ app.whenReady().then(async () => {
     video.currentTime = 1.2;
     await Promise.race([seeked, new Promise(resolve => setTimeout(resolve, 1000))]);
   })()`);
-  const firstCue = await waitFor('active Korean subtitle cue', () => win.webContents.executeJavaScript(`(() => {
-    const track = document.querySelector('#video')?.textTracks?.[0];
-    const cue = track?.activeCues?.[0]?.text || '';
-    return cue.includes('한국어 합성 자막') ? cue : null;
+  const firstCue = await waitFor('first active Korean subtitle cue', () => win.webContents.executeJavaScript(`(() => {
+    const video = document.querySelector('#video');
+    if (!video) return null;
+    video.pause();
+    if (video.currentTime < 0.5 || video.currentTime > 3.9) { video.currentTime = 1.2; return null; }
+    const cue = video.textTracks?.[0]?.activeCues?.[0]?.text || '';
+    return cue.includes('첫 문장') ? cue : null;
   })()`));
   assert.ok(firstCue.includes('첫 문장'));
 
