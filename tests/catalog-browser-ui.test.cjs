@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
-function setup() {
+function setup(exposeAppDomHelpers = true) {
   const elements = new Map(), requests = [];
   function element(id, tagName = 'div') {
     const classes = new Set();
@@ -24,9 +24,9 @@ function setup() {
   }
   const card = item => ({ dataset: { id: String(item.mal_id) }, title: item.title });
   const context = vm.createContext({ state: { source: 'reanime' }, allSort: () => 'popular', card,
-    $: selector => elements.get(selector.slice(1)), $$: () => [...elements.values()],
+    ...(exposeAppDomHelpers ? { $: selector => elements.get(selector.slice(1)), $$: () => [...elements.values()] } : {}),
     Option: function (name, value) { this.name = name; this.value = value; },
-    document: { createElement: tag => element('', tag), querySelector: () => elements.get('main') },
+    document: { createElement: tag => element('', tag), querySelector: selector => elements.get(exposeAppDomHelpers ? 'main' : selector.slice(1)), querySelectorAll: () => [] },
     renderCards: (selector, items) => elements.get(selector.slice(1)).replaceChildren(...items.map(card)),
     renderAllSort: () => {},
     window: { lilac: {
@@ -45,6 +45,13 @@ function setup() {
   };
   return { context, elements, requests, browser, submit };
 }
+
+test('catalog browser initializes before app DOM helpers are available', async () => {
+  const h = setup(false);
+  await h.browser.initialize();
+  assert.equal(h.browser.active(), false);
+  assert.match(h.elements.get('catalogFilterNote').textContent, /지원하는 장르/);
+});
 
 test('an older filter response cannot overwrite the newly selected category', async () => {
   const h = setup(); await h.browser.initialize(); h.submit('Action'); await tick();

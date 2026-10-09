@@ -214,6 +214,15 @@ test('ending an episode saves completion, exposes controls, and never starts the
   assert.match(source, /\$\('#nextEpisode'\)\.onclick\s*=\s*\(\)\s*=>\s*playSiblingEpisode\(siblingEpisode\(1\)\)/);
 });
 
+test('continue card progress markup closes its width attribute before the episode label', () => {
+  const start = appSource.indexOf('function renderContinue(){'), end = appSource.indexOf('init();', start);
+  assert.ok(start >= 0 && end > start, 'Missing continue card renderer');
+  const render = appSource.slice(start, end);
+  const progress = render.match(/history-progress"><i style="width:\$\{Math\.max\(0,Math\.min\(100,h\.progress\|\|0\)\)\}%([^<]*)<\/i>/);
+  assert.ok(progress, 'continue progress element is present');
+  assert.equal(progress[1], '">');
+});
+
 function scheduleHarness(linkkfSchedule) {
   const buttons = Array.from({ length: 8 }, () => ({ classList: classList(), attrs: {}, setAttribute(name, value) { this.attrs[name] = value; } }));
   const rail = { classList: classList(), innerHTML: '', replaceChildren() { this.innerHTML = ''; } };
