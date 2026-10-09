@@ -153,6 +153,13 @@ body.light .rail-arrow{color:var(--text)}
 #homeView .continue-card:hover .continue-thumb{transform:scale(1.04);box-shadow:0 14px 34px #000000b3;filter:none}
 #homeView .continue-card .continue-play{opacity:0;width:54px;height:54px;border:2px solid #fff;transition:opacity .2s ease-out}
 #homeView .continue-card:hover .continue-play{opacity:1}
+#homeView.has-continue{padding-top:calc(var(--ott-head) + 12px)}
+#homeView #continueSection{margin:0 var(--ott-gutter) 24px}
+#homeView #continueSection .section-title{margin-bottom:8px}
+#homeView #continueSection .section-title h2{font-size:16px}
+#homeView #continueSection .continue-card{flex:0 0 clamp(150px,13vw,190px)}
+#homeView #continueSection .continue-card b{font-size:12px}
+#homeView #continueSection .continue-card>span{font-size:10px}
 
 .poster-grid{grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:30px 12px}
 /* 전체: the sort beside the title, one height and radius with the other chips. */
