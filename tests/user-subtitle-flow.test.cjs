@@ -161,3 +161,32 @@ test('user subtitle picker copies ASS, hands it to JASSUB, and ignores stale dia
     assert.equal(jassubCalls.length, 1);
   });
 });
+
+test('user subtitle picker prevents overlapping dialogs and recovers after an IPC error', async () => {
+  const button = { disabled: false };
+  const messages = [], attached = [];
+  let calls = 0, rejectDialog;
+  const context = vm.createContext({
+    window: { lilac: { chooseSubtitleDetails: () => {
+      calls++;
+      return new Promise((_, reject) => { rejectDialog = reject; });
+    } } },
+    $: selector => selector === '#openSubtitle' ? button : null,
+    playbackRequestId: 1, subtitleSelectionRequestId: 0, currentSubtitlePath: null,
+    beginSubtitleSelection: () => ++context.subtitleSelectionRequestId,
+    attachSubtitle: (...args) => attached.push(args), toast: message => messages.push(message)
+  });
+  vm.runInContext(openSubtitleClick, context);
+
+  const pending = button.onclick();
+  assert.equal(button.disabled, true, 'the picker is disabled while the native dialog is open');
+  await button.onclick();
+  assert.equal(calls, 1, 'a second click cannot open a second native dialog');
+
+  rejectDialog(new Error('synthetic IPC failure'));
+  await pending;
+  assert.equal(button.disabled, false, 'the picker is re-enabled after failure');
+  assert.deepEqual(messages, ['사용자 자막을 열지 못했습니다. 파일을 다시 선택해 주세요.']);
+  assert.deepEqual(attached, []);
+  assert.equal(context.currentSubtitlePath, null);
+});
