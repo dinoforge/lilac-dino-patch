@@ -109,7 +109,7 @@ function card(a) {
   setBackgroundImage(el.querySelector('.poster'),imageOf(a));
   // The whole card opens the anime (its title and facts too, the row in 인기 순위), with Enter or Space as well.
   el.tabIndex=0;el.setAttribute('role','button');el.setAttribute('aria-label',titleOf(a));
-  if(latestEpisode)el.setAttribute('aria-label',`${titleOf(a)} ${latestEpisode}화 최신 방영 회차 재생`);
+  if(latestEpisode)el.setAttribute('aria-label',`${titleOf(a)} ${latestEpisode}화 ${a.latestEpisodeKind==='updated'?'최신 업데이트':'최신 방영'} 회차 재생`);
   el.addEventListener('click', e => { if(e.target.closest('.heart'))return;if(latestEpisode)playLatestEpisode(a);else openDetail(a.mal_id); });
   el.addEventListener('keydown', e => { if((e.key==='Enter'||e.key===' ')&&e.target===el){e.preventDefault();if(latestEpisode)playLatestEpisode(a);else openDetail(a.mal_id)} });
   el.querySelector('.heart').addEventListener('click', e => { e.stopPropagation(); toggleLibrary(a, e.currentTarget); });
@@ -1082,6 +1082,8 @@ async function loadLinkkfHome(){
 }
 let latestEpisodeRequest=0;
 const latestEpisodeCacheKey=provider=>`latestEpisodeCache:v1:${provider}`;
+const latestUpdatedEpisodeCacheKey=provider=>`latestUpdatedEpisodeCache:v1:${provider}`;
+const latestEpisodeSectionTitle=provider=>['animenosub','ohli24'].includes(provider)?'최신 업데이트 회차':'최신 방영 회차';
 function latestSourceEpisodeCount(provider,anime){return provider==='reanime'?Math.max(Number(anime?.subbed)||0,Number(anime?.dubbed)||0):Number(anime?.availableEpisodeCount)||0}
 function cachedLatestEpisodeItems(provider,candidates){
   const value=store.get(latestEpisodeCacheKey(provider),null),age=Date.now()-Number(value?.savedAt||0);
@@ -1091,10 +1093,34 @@ function cachedLatestEpisodeItems(provider,candidates){
   return {items,age};
 }
 function rememberLatestEpisodeItems(provider,items){try{store.set(latestEpisodeCacheKey(provider),{savedAt:Date.now(),items:items.slice(0,30)})}catch{}}
+function cachedLatestUpdatedEpisodeItems(provider){
+  const value=store.get(latestUpdatedEpisodeCacheKey(provider),null),age=Date.now()-Number(value?.savedAt||0);
+  if(!Array.isArray(value?.items)||age<0||age>12*60*60*1000)return null;
+  return {items:LilacHomeDiscovery.latestUpdatedEpisodes(provider,value.items),age};
+}
+function rememberLatestUpdatedEpisodeItems(provider,items){try{store.set(latestUpdatedEpisodeCacheKey(provider),{savedAt:Date.now(),items:items.slice(0,30)})}catch{}}
 function showLatestEpisodeItems(items){state.latestEpisodes=items;renderCards('#latestEpisodeRail',items);$('#seeAllLatestEpisodes').classList.toggle('hidden',!items.length)}
 async function loadLatestEpisodeRail(provider,candidates){
   const request=++latestEpisodeRequest,section=$('#latestEpisodeSection'),rail=$('#latestEpisodeRail'),status=$('#latestEpisodeStatus');
-  state.latestEpisodes=[];rail.replaceChildren();$('#seeAllLatestEpisodes').classList.add('hidden');$('#latestEpisodeRetry').classList.add('hidden');section.classList.remove('hidden');
+  state.latestEpisodes=[];rail.replaceChildren();$('#latestEpisodeTitle').textContent=latestEpisodeSectionTitle(provider);$('#seeAllLatestEpisodes').classList.add('hidden');$('#latestEpisodeRetry').classList.add('hidden');section.classList.remove('hidden');
+  if(['animenosub','ohli24'].includes(provider)){
+    const cached=cachedLatestUpdatedEpisodeItems(provider),cacheIsFresh=cached&&cached.age<30*60*1000;
+    if(cached)showLatestEpisodeItems(cached.items);
+    if(cacheIsFresh){status.textContent=`저장된 최신 업데이트 회차 ${cached.items.length}개`;return;}
+    status.textContent=cached?`저장된 최신 업데이트 회차 ${cached.items.length}개 · 목록 갱신 중...`:'최신 업데이트 회차를 확인하는 중...';
+    try{
+      const result=await window.lilac.catalogUpdates(provider,0);
+      if(request!==latestEpisodeRequest||provider!==state.source)return;
+      const items=LilacHomeDiscovery.latestUpdatedEpisodes(provider,result?.data);
+      showLatestEpisodeItems(items);rememberLatestUpdatedEpisodeItems(provider,items);
+      status.textContent=items.length?`${items.length}개 · ${result?.note||'공급원의 최근 회차 업데이트 목록입니다.'}`:'회차 수가 확인된 최신 업데이트 작품이 없습니다.';
+    }catch(error){
+      if(request!==latestEpisodeRequest||provider!==state.source)return;
+      status.textContent=cached?`최신 목록 갱신 실패 · 저장된 회차 ${cached.items.length}개를 표시 중입니다.`:`최신 업데이트 회차를 불러오지 못했습니다: ${String(error?.message||error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`;
+      $('#latestEpisodeRetry').classList.remove('hidden');
+    }
+    return;
+  }
   if(!['reanime','miruro'].includes(provider)){
     status.textContent=provider==='linkkf'?'회차별 최신 정보 연결은 준비 중입니다. 요일별 방영표를 아래에서 확인할 수 있어요.':'현재 공급원의 회차별 최신 방영 정보 연결은 준비 중입니다.';
     return;
@@ -1205,7 +1231,7 @@ async function init(){
         else $('#quarterStatus').textContent='';
         $('#quarterRetry').classList.toggle('hidden',!selectedResult?.error&&!selectedResult?.stale);
       }
-      if(onAir?.error){state.airing=[];$('#latestEpisodeSection').classList.remove('hidden');$('#latestEpisodeStatus').textContent=`방영 중인 작품을 불러오지 못했습니다: ${String(onAir.error?.message||onAir.error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`;$('#latestEpisodeRetry').classList.remove('hidden');}
+      if(onAir?.error){state.airing=[];$('#airingSection').classList.add('hidden');if(['animenosub','ohli24'].includes(state.source))loadLatestEpisodeRail(state.source,[]);else{$('#latestEpisodeSection').classList.remove('hidden');$('#latestEpisodeTitle').textContent=latestEpisodeSectionTitle(state.source);$('#latestEpisodeStatus').textContent=`방영 중인 작품을 불러오지 못했습니다: ${String(onAir.error?.message||onAir.error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`;$('#latestEpisodeRetry').classList.remove('hidden');}}
       else{state.airing=onAir?.value?.data||[];loadLatestEpisodeRail(state.source,state.airing);}
     }else{state.airing=[];loadLatestEpisodeRail(state.source,[]);[season,top]=await Promise.all([window.lilac.season(),window.lilac.top()]);}
     state.season=season.data;state.top=top.data;if(state.source==='reanime'){state.catalogOffset=season.data.length;state.catalogTotal=season.total||null}else if(['animenosub','ohli24'].includes(state.source)){state.catalogOffset=season.nextOffset||2}else if(state.source==='miruro'){state.catalogOffset=season.nextOffset;state.catalogDone=Boolean(season.done)}const quarterSource=QUARTER_PROVIDERS.includes(state.source),homeSeason=quarterSource?state.quarterShows:(state.current||state.season);$('#seasonRail').closest('.content-section').classList.toggle('hidden',!quarterSource&&Boolean(state.current&&!homeSeason?.length));renderCards('#seasonRail',(homeSeason||[]).slice(0,30));$('#airingSection').classList.toggle('hidden',!state.airing?.length);if(state.airing?.length)renderCards('#airingRail',state.airing.slice(0,30));renderCards('#topRail',state.top.slice(0,20));if(!quarterSource)$('#seasonTitle').textContent='이번 시즌 신작';if(state.source==='linkkf'&&state.season[0]?.provider==='linkkf')loadLinkkfHome();
@@ -1230,7 +1256,7 @@ $$('.nav').forEach(b=>b.onclick=()=>switchView(b.dataset.view));$$('[data-goto]'
 function showHomeList(list,label){switchView('search');if(!list?.length)return;$('#pageSearch').value='';$('#filterMore')?.classList.add('hidden');renderCards('#searchGrid',list);$('#searchStatus').textContent=`${label} ${list.length}개 · 인기순`}
 $('#seeAllSeason').onclick=()=>QUARTER_PROVIDERS.includes(state.source)?showHomeList(state.quarterShows,state.quarterSelection?.label||'분기별 작품'):showHomeList(state.current||state.season,'이번 시즌 신작');
 $('#seeAllAiring').onclick=()=>showHomeList(state.airing,'방영 중');
-$('#seeAllLatestEpisodes').onclick=()=>showHomeList(state.latestEpisodes,'최근 방영 회차');
+$('#seeAllLatestEpisodes').onclick=()=>showHomeList(state.latestEpisodes,latestEpisodeSectionTitle(state.source));
 $('#latestEpisodeRetry').onclick=retryLatestEpisodeRail;
 $('#seeAllTop').onclick=()=>showHomeList(state.top,'인기 애니메이션');
 $$('[data-library-tab]').forEach(button=>button.onclick=()=>{$$('[data-library-tab]').forEach(x=>x.classList.toggle('selected',x===button));$('#savedLibraryPanel').classList.toggle('hidden',button.dataset.libraryTab!=='saved');$('#downloadsPanel').classList.toggle('hidden',button.dataset.libraryTab!=='downloads')});
