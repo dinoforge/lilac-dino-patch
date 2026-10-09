@@ -152,6 +152,15 @@ function fixtureResponse(rawUrl, requestInit = {}) {
     fixtureRequests.push(url.href);
     return response({ head: { vars: ['ko', 'seriesKo'] }, results: { bindings: [] } });
   }
+  if (url.hostname === 'animenosub.to' && url.pathname === '/anime/'
+    && url.searchParams.get('order') === 'update' && url.searchParams.get('page') === '1') {
+    fixtureRequests.push(url.href);
+    return response('<article class="bs"><a href="/anime/phase1-update-series"><img alt="합성 Animenosub 최신작" src="/poster.jpg"><span class="epx">12화</span></a></article>', 200, 'text/html; charset=utf-8');
+  }
+  if (url.hostname === 'www.ohli24.net' && url.pathname === '/ing') {
+    fixtureRequests.push(url.href);
+    return response('<div class="show-item"><a class="show-item-img-link" href="/81002/phase1-update.html"><img src="/poster.jpg" title="합성 애니24 최신작"></a><div class="show-item-title">합성 애니24 최신작</div><span class="show-item-eps">13화</span></div>', 200, 'text/html; charset=utf-8');
+  }
   if (url.hostname === 'reanime.to' && url.pathname === '/api/v1/search') {
     fixtureRequests.push(url.href);
     const matchesSearch = url.searchParams.get('q') === SEARCH_TITLE;
@@ -343,6 +352,28 @@ app.whenReady().then(async () => {
     assert.equal(schedule.days[0][0].provider, 'linkkf');
     assert.equal(schedule.days[0][0].title, '합성 월요일 방영작');
     assert.equal(schedule.days.slice(1).reduce((total, day) => total + day.length, 0), 0);
+
+    const animenosubUpdates = await win.webContents.executeJavaScript("window.lilac.catalogUpdates('animenosub', 0)");
+    assert.equal(animenosubUpdates.data.length, 1);
+    assert.equal(animenosubUpdates.data[0].provider, 'animenosub');
+    assert.equal(animenosubUpdates.data[0].title, '합성 Animenosub 최신작');
+    assert.equal(animenosubUpdates.data[0].availableEpisodes, 12);
+    assert.equal(animenosubUpdates.nextOffset, 2);
+    assert.equal(animenosubUpdates.done, false);
+    const animenosubCached = await win.webContents.executeJavaScript("window.lilac.catalogUpdates('animenosub', 0)");
+    assert.equal(animenosubCached.data[0].id, animenosubUpdates.data[0].id);
+    assert.equal(fixtureRequests.filter(rawUrl => {
+      const url = new URL(rawUrl);
+      return url.hostname === 'animenosub.to' && url.pathname === '/anime/' && url.searchParams.get('order') === 'update';
+    }).length, 1, 'Animenosub page results are reused by the main-process cache');
+
+    const ohliUpdates = await win.webContents.executeJavaScript("window.lilac.catalogUpdates('ohli24', 0)");
+    assert.equal(ohliUpdates.data.length, 1);
+    assert.equal(ohliUpdates.data[0].provider, 'ohli24');
+    assert.equal(ohliUpdates.data[0].title, '합성 애니24 최신작');
+    assert.equal(ohliUpdates.data[0].availableEpisodes, 13);
+    assert.equal(ohliUpdates.data[0].url, 'https://www.ohli24.net/81002/phase1-update.html');
+    assert.equal(ohliUpdates.done, true);
 
     const search = await win.webContents.executeJavaScript(
       `window.lilac.providerCatalog('reanime', ${JSON.stringify(SEARCH_TITLE)}, 0, '')`
@@ -538,6 +569,10 @@ app.whenReady().then(async () => {
     assert.ok(fixtureRequests.some(url => new URL(url).hostname === 'linkkf1.5imgdarr.top'
       && new URL(url).pathname === '/api/singlefilter.php'), 'the weekly schedule reached all seven Linkkf API partitions');
     assert.ok(fixtureRequests.some(url => new URL(url).hostname === 'graphql.anilist.co'), 'the latest episode IPC reached the AniList GraphQL client');
+    assert.ok(fixtureRequests.some(url => new URL(url).hostname === 'animenosub.to'
+      && new URL(url).pathname === '/anime/' && new URL(url).searchParams.get('order') === 'update'), 'Animenosub latest updates reached its update-sorted feed');
+    assert.ok(fixtureRequests.some(url => new URL(url).hostname === 'www.ohli24.net'
+      && new URL(url).pathname === '/ing'), 'Ani24 latest updates reached its airing feed');
     assert.ok(fixtureRequests.some(url => new URL(url).hostname === 'api.aniskip.com'), 'the player received an empty synthetic AniSkip response');
     assert.ok(fixtureRequests.some(url => url.includes(`/api/v1/anime/${SLUG}/episodes`)), 'detail reached the synthetic episode API');
     assert.ok(fixtureRequests.some(url => url.includes(`/api/watch/${SLUG}/1`)), 'subtitle lookup reached the synthetic episode-server API');
@@ -555,7 +590,7 @@ app.whenReady().then(async () => {
     assert.equal(deniedUnknownFetches.length, 0, `no unregistered main-process URL was requested: ${deniedUnknownFetches.join(', ')}`);
     assert.equal(deniedBrowserRequests.length, 0, `no external browser request was allowed or attempted: ${deniedBrowserRequests.join(', ')}`);
 
-    console.log('Packaged Phase 1 main-process smoke passed: actual main IPC quarter catalog, Re:Anime/Miruro latest airing/cache, weekday schedule, search/detail/episodes, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
+    console.log('Packaged Phase 1 main-process smoke passed: actual main IPC quarter catalog, Re:Anime/Miruro latest airing, weekday schedule, Animenosub/Ani24 update feeds, search/detail/episodes, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
     console.log(`Playback: ${playbackState.width}x${playbackState.height} at ${playbackState.currentTime.toFixed(2)}s; resume: ${resumeState.currentTime.toFixed(2)}s from saved 50%; fallback: ${fallbackState.server} at ${fallbackState.currentTime.toFixed(2)}s with selected subtitle; synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; renderer proxy requests: ${rendererProxyRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: 0; blocked browser requests: 0; external network calls: 0.`);
     await new Promise(resolve => localPlayerServer.close(resolve));
     app.quit();
