@@ -233,4 +233,10 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 
 - `tests/phase1-main.electron.cjs`에서 설정 화면의 Animenosub 버튼을 클릭했다. 버튼이 설정 저장 경로를 거쳐 renderer를 재로드했고, 재로드 뒤 선택 공급원 저장값·설정 버튼 상태·`state.source`가 `animenosub`으로 복원됐다.
 - 이어 새 공급원의 메인 목록과 sitemap, 분기 홈 목록을 합성 응답으로 처리해 Animenosub 분기 작품 카드가 표시되는 것을 확인했다. 테스트는 격리 사용자 프로필을 사용했고 main fixture 요청 82회, 미등록 fetch·차단된 브라우저 요청·외부 네트워크 호출은 0회다.
-- `npm run test:phase1-main`, `npm run test:phase1-electron`, `npm test` 221/221, 테스트 파일 구문 검사와 `git diff --check` 통과. 실제 사이트, 실제 프로세스 종료 후 사용자 프로필, 설치 NSIS UI는 검증하지 않았다.
+- `npm run test:phase1-main`, `npm run test:phase1-electron`, `npm test` 221/221, 테스트 파일 구문 검사와 `git diff --check` 통과. 실제 사이트, 기존 사용자 프로필, 설치 NSIS UI는 검증하지 않았다. 앱 프로세스 종료 후 복원은 다음 스모크에서 동일한 격리 프로필로 별도 확인했다.
+
+## 2026-10-10 사용자 프로필을 유지한 Electron 재시작
+
+- `npm run test:phase1-source-restart`는 패키지 Electron을 같은 격리 `userData`·`sessionData`로 실제 두 번 실행한다. 첫 프로세스에서 설정 버튼을 눌러 Animenosub을 저장·재로드한 뒤 완전히 종료했고, 다음 프로세스에서 저장된 공급원, 선택 UI, 분기 홈 카드를 복원했다.
+- 첫 실행은 합성 HTTP fixture 17회, 두 번째 실행 7회였다. 미등록 fetch와 외부 브라우저 요청은 각각 0회이며, 임시 프로필은 검사 뒤 제거했다.
+- 기존 `npm run test:phase1-main`(82 fixture 요청), `npm run test:phase1-electron`, `npm test` 221/221과 구문·공백 검사가 통과했다. 이는 동일 테스트 프로필의 실제 앱 프로세스 재시작 검증이며 기존 사용자 프로필, 라이브 공급원·재생, 설치 NSIS UI는 미검증이다.

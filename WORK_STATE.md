@@ -424,4 +424,10 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 패키지 설정의 `Animenosub` 버튼을 실제로 클릭해 공급원을 저장하고 600ms 뒤 renderer가 다시 로드되는 흐름을 확인했다. 재로드 후 `localStorage`, 설정 선택 상태, 앱 `state.source`가 모두 `animenosub`이며, 분기 홈에 합성 Animenosub 작품 카드가 나타났다.
 - 새 공급원의 정규 목록 페이지와 sitemap 인덱스·sitemap, 진행 중 목록, 상세 페이지 및 현재 분기 응답을 main/preload IPC fixture로 제공했다. 격리 프로필만 사용했다.
 - `npm run test:phase1-main` 통과: 합성 HTTP 요청 82회, 미등록 main fetch 0회, 차단된 브라우저 요청 0회, 외부 네트워크 0회. 기존 `npm run test:phase1-electron` 및 `npm test` 221/221도 통과했고 `node --check tests/phase1-main.electron.cjs`, `git diff --check`도 통과했다.
-- 이는 실제 공급원 버튼→저장→renderer 재로드→새 공급원 홈 연결을 합성 응답으로 확인한 결과다. 실제 프로세스 종료 후 사용자 프로필 복구, 라이브 사이트 응답, 실제 재생 적합성, 설치 NSIS 화면은 검증하지 않았다.
+- 이 단계는 실제 공급원 버튼→저장→renderer 재로드→새 공급원 홈 연결을 합성 응답으로 확인했다. 이 renderer 재로드만으로는 앱 프로세스 재시작을 검증하지 못했다. 라이브 사이트 응답, 실제 재생 적합성, 설치 NSIS 화면도 검증하지 않았다.
+
+## 2026-10-10 공급원 설정의 앱 재시작 복원
+
+- `npm run test:phase1-source-restart`가 패키지 Electron 앱을 같은 임시 프로필로 두 번 실행한다. 첫 프로세스에서 설정 버튼으로 Animenosub을 고르고 renderer 재로드를 확인한 다음 프로세스를 종료했다. 두 번째 프로세스는 localStorage 설정값·공급원 선택 UI·Animenosub 분기 홈 카드를 다시 읽었다.
+- 첫 실행은 합성 fixture 17회, 재시작 뒤 실행은 7회였고, 두 실행 모두 미등록 main fetch와 외부 브라우저 요청이 없었다. 프로필은 OS 임시 폴더에서 만들고 두 프로세스 종료 뒤 제거했다.
+- 검증: `npm run test:phase1-source-restart`, `npm run test:phase1-main`(fixture 82회), `npm run test:phase1-electron`, `npm test`(221/221), 두 테스트 파일 `node --check`, `git diff --check` 통과. 기존 사용자 프로필과 설치 NSIS UI는 사용하지 않았다.

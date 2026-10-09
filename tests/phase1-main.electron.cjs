@@ -14,6 +14,13 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 
 const repo = path.resolve(__dirname, '..');
+const restartMode = process.env.LILAC_PHASE1_RESTART_MODE || '';
+const sharedTempRoot = process.env.LILAC_PHASE1_SHARED_ROOT ? path.resolve(process.env.LILAC_PHASE1_SHARED_ROOT) : '';
+if (restartMode && !['seed', 'verify'].includes(restartMode)) throw new Error(`Unknown source restart mode: ${restartMode}`);
+if (Boolean(restartMode) !== Boolean(sharedTempRoot)) throw new Error('Source restart mode requires a shared temporary profile root.');
+if (sharedTempRoot && !path.basename(sharedTempRoot).startsWith('lilac-source-restart-')) {
+  throw new Error(`Refusing an unexpected shared profile path: ${sharedTempRoot}`);
+}
 const appAsar = path.join(repo, 'dist', 'win-unpacked', 'resources', 'app.asar');
 assert.ok(fs.existsSync(appAsar), `packaged app.asar exists: ${appAsar}`);
 assert.ok(fs.existsSync(path.join(appAsar, 'electron', 'main.cjs')), 'packaged main entry exists');
@@ -35,11 +42,11 @@ for (const file of ['src/app.js', 'src/player.js']) {
   );
 }
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lilac-phase1-main-'));
+const tempRoot = sharedTempRoot || fs.mkdtempSync(path.join(os.tmpdir(), 'lilac-phase1-main-'));
 const userData = path.join(tempRoot, 'profile');
 const sessionData = path.join(tempRoot, 'session');
-fs.mkdirSync(userData);
-fs.mkdirSync(sessionData);
+fs.mkdirSync(userData, { recursive: true });
+fs.mkdirSync(sessionData, { recursive: true });
 const hlsManifestPath = path.join(tempRoot, 'synthetic.m3u8');
 const hlsSegmentPath = path.join(tempRoot, 'segment000.ts');
 execFileSync(require('ffmpeg-static'), [
@@ -186,7 +193,7 @@ function fixtureResponse(rawUrl, requestInit = {}) {
     return response('<article class="bs"><a href="/anime/phase1-update-series"><img alt="합성 Animenosub 최신작" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="><span class="epx">12화</span></a></article>', 200, 'text/html; charset=utf-8');
   }
   if (url.hostname === 'animenosub.to' && url.pathname === '/anime/'
-    && url.searchParams.get('season[0]') === 'fall-2026' && url.searchParams.get('order') === 'popular') {
+    && url.searchParams.has('season[0]') && url.searchParams.get('order') === 'popular') {
     fixtureRequests.push(url.href);
     return response('<article class="bs"><a href="/anime/phase1-quarter-series"><img alt="합성 Animenosub 분기작" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="><span class="epx">4화</span></a></article><article class="bs"><a href="/anime/phase1-upcoming-series"><img alt="합성 예정작" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="><span class="epx">1화</span><span class="ans-status-ribbon">Upcoming</span></a></article>', 200, 'text/html; charset=utf-8');
   }
@@ -353,6 +360,44 @@ function requestLoopback(urlText) {
   });
 }
 
+async function runSourceRestartProbe(win) {
+  if (restartMode === 'seed') {
+    await waitFor('default source before selecting Animenosub', () => win.webContents.executeJavaScript(`(() =>
+      state.source === 'reanime' && document.querySelector('#contentSource')?.value === 'reanime'
+    )()`), 15000);
+    const reloadFinished = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Timed out waiting for the seed source-choice reload')), 15000);
+      win.webContents.once('did-finish-load', () => { clearTimeout(timeout); resolve(); });
+    });
+    const selectedSource = await win.webContents.executeJavaScript(`(() => {
+      switchView('settings');
+      window.showSettingsPane?.('playback');
+      const button = document.querySelector('#sourceChoices button[data-value="animenosub"]');
+      if (!button) return null;
+      button.click();
+      return localStorage.getItem('contentSource');
+    })()`);
+    assert.equal(selectedSource, 'animenosub', 'the first process saved the provider through the settings button');
+    await reloadFinished;
+  }
+  const restored = await waitFor(`${restartMode} process loads the Animenosub home`, () => win.webContents.executeJavaScript(`(() => {
+    const card = document.querySelector('#seasonRail .anime-card');
+    const title = card?.querySelector('h3')?.textContent || '';
+    if (state.source !== 'animenosub' || localStorage.getItem('contentSource') !== 'animenosub'
+      || document.querySelector('#contentSource')?.value !== 'animenosub'
+      || title !== '합성 Animenosub 분기작') return null;
+    return {
+      source: state.source,
+      title,
+      selected: document.querySelector('#sourceChoices button[data-value="animenosub"]')?.classList.contains('selected')
+    };
+  })()`), 25000);
+  assert.equal(restored.selected, true, 'the selected provider is reflected in settings after the renderer starts');
+  assert.equal(deniedUnknownFetches.length, 0, `the source restart used only registered fixture URLs: ${deniedUnknownFetches.join(', ')}`);
+  assert.equal(deniedBrowserRequests.length, 0, `the source restart made no browser requests outside local fixtures: ${deniedBrowserRequests.join(', ')}`);
+  console.log(`Source restart ${restartMode} passed: ${restored.source}, ${restored.title}; fixture calls: ${fixtureRequests.length}; unknown fetches: 0; blocked browser requests: 0.`);
+}
+
 app.on('session-created', blockSessionRequests);
 app.once('ready', () => blockSessionRequests(session.defaultSession));
 require(path.join(appAsar, 'electron', 'main.cjs'));
@@ -366,6 +411,13 @@ app.whenReady().then(async () => {
     });
     const win = await waitFor('packaged app window', () => BrowserWindow.getAllWindows().find(item => !item.isDestroyed()));
     await waitFor('packaged preload API', () => win.webContents.executeJavaScript('Boolean(window.lilac && window.lilac.providerCatalog)'));
+
+    if (restartMode) {
+      await runSourceRestartProbe(win);
+      await new Promise(resolve => localPlayerServer.close(resolve));
+      app.quit();
+      return;
+    }
 
     const quarterResult = await win.webContents.executeJavaScript(
       "window.lilac.providerQuarter('reanime', 2026, 4)"
@@ -915,5 +967,5 @@ app.whenReady().then(async () => {
 
 process.on('exit', () => {
   try { if (localPlayerServer.listening) localPlayerServer.close(); } catch {}
-  try { fs.rmSync(tempRoot, { recursive: true, force: true }); } catch {}
+  if (!sharedTempRoot) try { fs.rmSync(tempRoot, { recursive: true, force: true }); } catch {}
 });
