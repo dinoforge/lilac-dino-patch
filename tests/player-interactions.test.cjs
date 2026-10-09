@@ -214,6 +214,34 @@ test('manual subtitle timing edits persist from both settings surfaces on change
   }
 });
 
+test('renderer and Electron subtitle resolvers recognize the same Korean track metadata', () => {
+  const helper = source => {
+    const start = source.indexOf('function isKoreanTrack('), end = source.indexOf('\n', start);
+    assert.ok(start >= 0 && end > start, 'Missing Korean track detector');
+    return source.slice(start, end);
+  };
+  const renderer = vm.createContext({}), main = vm.createContext({});
+  vm.runInContext(helper(appSource), renderer);
+  vm.runInContext(helper(mainSource), main);
+  const korean = [
+    { language: 'ko', label: 'Track 1' },
+    { language: 'ko-KR', label: 'Track 2' },
+    { language: 'kor', label: 'Track 3' },
+    { label: '한국어' },
+    { label: 'Korean' },
+    { url: 'https://cdn.example/subtitle_kor_track.vtt' }
+  ];
+  const other = [
+    { language: 'en-US', label: 'English' },
+    { language: 'ja-JP', label: '日本語' },
+    { language: 'koala', label: 'Track 4' }
+  ];
+  for (const detector of [renderer.isKoreanTrack, main.isKoreanTrack]) {
+    for (const track of korean) assert.equal(detector(track), true);
+    for (const track of other) assert.equal(detector(track), false);
+  }
+});
+
 test('ending an episode saves completion, exposes controls, and never starts the next episode automatically', () => {
   const status = { textContent: '' }, calls = [];
   const context = vm.createContext({
