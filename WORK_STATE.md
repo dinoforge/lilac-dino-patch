@@ -130,9 +130,9 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 ## 2026-10-09 JASSUB 한국어 ASS 합성 렌더 확인
 
-- localhost 전용 임시 페이지에서 저장소에 포함된 JASSUB JS·worker·WASM으로 합성 ASS 한 줄을 렌더했다. Windows Malgun Gothic 폰트 파일을 로컬 경로로 제공했고 별도 복사·배포하지 않았다.
-- 브라우저에서 JASSUB가 ASS 이벤트 1개를 읽었고 캔버스에 `한국어 ASS 자막 테스트`가 보이는 것을 화면으로 확인했다. 한국어 글리프의 로컬 렌더 경로는 확인했다.
-- 이 검증은 앱의 Electron `ass-renderer` 연결, 실제 영상 위 오버레이, 자막 출처·작품·판본 매칭을 입증하지 않는다. Re:Anime 실제 재생과 외부 자막의 영상 일치는 아직 확인하지 않았다.
+- localhost 전용 임시 페이지에서 저장소의 JASSUB JS·worker·WASM과 `src/ass-renderer.js`를 그대로 불러왔다. Canvas `captureStream`으로 합성 1280×720 영상을 만들고, Windows Malgun Gothic 폰트 바이트를 `{ family, data }`로 래퍼에 전달했다. 폰트 파일은 로컬 경로로만 읽고 복사·배포하지 않았다.
+- 직접 JASSUB 캔버스 시험은 ASS 이벤트 1개를 읽었다. 래퍼 시험에서 `LilacAss.attach`는 `true`, `active`도 `true`였고 비디오 시각 약 2.8초에 `한국어 ASS 자막 테스트`가 영상 위에 보이는 것을 브라우저 화면으로 확인했다.
+- 이 Chromium 시험은 Electron main의 `font:default` IPC/font-family 추출, 설치 앱, 실제 공급원 영상, 자막의 작품·판본 매칭을 입증하지 않는다. Re:Anime 실제 재생과 외부 자막의 영상 일치는 아직 확인하지 않았다.
 - 임시 페이지는 loopback 주소만 사용했고 공급원 사이트나 외부 API를 호출하지 않았다. JASSUB 및 기본 `default.woff2`의 배포 권리 추적은 별도 미완료 항목이다.
 
 ## 주요 결정
