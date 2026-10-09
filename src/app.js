@@ -27,6 +27,7 @@ let subtitleSelectionRequestId = 0;
 let latestEpisodeRequestId = 0;
 let historyPlaybackRequestId = 0;
 let pendingResumeProgress = 0;
+const playerFailureHistory=[];
 function cancelPendingPlaybackLookups(){latestEpisodeRequestId++;historyPlaybackRequestId++;playbackRequestId++}
 
 // 한국어 제목을 우선 표시하고, 확인된 원제를 보조로 보여 준다. 제목을 아직 모르면 TMDB → AniList → Wikidata에서 찾는다.
@@ -515,6 +516,7 @@ function showPendingPlayer(name,context={}){
   currentPlaybackContext={...context,resolving:true};clearSubtitle();renderSubtitleSheet();skipSegments=[];activeSkip=null;currentHistoryKey=null;
   enterPlayer();showPlayerControls();
   $('#immersivePlayer').classList.remove('is-playing');$('#playerEmpty').classList.remove('hidden');
+  $('#playerDiagnosticActions').classList.add('hidden');$('#playerDiagnosticStatus').textContent='';
   $('.player-spinner').classList.remove('hidden');
   $('#playerEmpty p').textContent='영상 서버에 연결하고 있어요';$('#playerTitle').textContent=name;updatePlayerTitle();$('#playerMeta').textContent='재생 준비 중';
   $('#downloadStatus').textContent='영상 주소를 확인하는 중...';$('#subtitleState').textContent='영상 연결 후 자막을 확인합니다.';renderSubtitleTracks();
@@ -538,7 +540,17 @@ async function resolveWithVideoServer(episode,koreanSearch,anime){
   }
   return window.lilac.providerResolve({...episode,server:picked,prefer});
 }
-function showPlayerFailure(message){$('#playerEmpty').classList.remove('hidden');$('.player-spinner').classList.add('hidden');$('#playerEmpty p').textContent=message;showPlayerControls()}
+function recordPlayerFailure(failure={}){playerFailureHistory.push(window.LilacPlayerDiagnostics.createEntry({context:currentPlaybackContext,failure}));if(playerFailureHistory.length>5)playerFailureHistory.shift()}
+function showPlayerFailure(message,failure={}){recordPlayerFailure(failure);$('#playerEmpty').classList.remove('hidden');$('.player-spinner').classList.add('hidden');$('#playerEmpty p').textContent=message;$('#playerDiagnosticActions').classList.remove('hidden');$('#playerDiagnosticStatus').textContent='';showPlayerControls()}
+async function copyPlayerDiagnostics(){
+  const status=$('#playerDiagnosticStatus');
+  try{
+    const app=await window.lilac.appDiagnosticInfo().catch(()=>({}));
+    await window.lilac.copyText(window.LilacPlayerDiagnostics.formatReport({app,entries:playerFailureHistory}));
+    status.textContent='오류 정보가 복사됐어요. 직접 확인한 뒤 필요한 곳에 붙여넣으세요.';
+  }catch{status.textContent='오류 정보를 복사하지 못했습니다.'}
+}
+$('#copyPlayerDiagnostics').addEventListener('click',copyPlayerDiagnostics);
 async function resolveIntoPlayer(resolver,name,context={},subtitleTitle='',episode=1){
   const requestId=showPendingPlayer(name,context);
   const searchTitle=subtitleTitle||context.subtitleTitle||name.split(' · ')[0];
@@ -561,7 +573,7 @@ async function resolveIntoPlayer(resolver,name,context={},subtitleTitle='',episo
     if(requestId!==playbackRequestId)return;
     // IPC errors arrive as "Error invoking remote method '…': Error: <message>".
     const message=String(error?.message||'영상 서버에 연결하지 못했습니다.').replace(/^Error invoking remote method '[^']+': (?:Error: )?/,'');
-    showPlayerFailure('영상을 불러오지 못했어요');
+    showPlayerFailure('영상을 불러오지 못했어요',{stage:'stream-resolution',mediaType:'unknown'});
     $('#playerMeta').textContent='뒤로 가서 다른 회차를 선택해 주세요';$('#downloadStatus').textContent=message;
     toast(`재생 실패: ${message}`);
   }
@@ -590,13 +602,13 @@ function bindHlsPlayerEvents(instance,video){
     if(!data.fatal)return;
     if(data.type===Hls.ErrorTypes.NETWORK_ERROR&&recovery.network<3){recovery.network++;$('#downloadStatus').textContent='영상 서버에 다시 연결하는 중...';instance.startLoad();return}
     if(data.type===Hls.ErrorTypes.MEDIA_ERROR&&recovery.media<3){recovery.media++;if(recovery.media===2)instance.swapAudioCodec();$('#downloadStatus').textContent='재생 오류를 복구하는 중...';instance.recoverMediaError();return}
-    {const detail=data.details||data.type||'unknown',status=data.response?.code||data.response?.status||'',reason=data.reason||data.error?.message||'';const message=[detail,status&&`HTTP ${status}`,reason].filter(Boolean).join(' · ');$('#downloadStatus').textContent=`HLS 오류: ${message}`;toast(`HLS 재생 오류: ${message}`)}
+    {const detail=data.details||data.type||'unknown',status=data.response?.code||data.response?.status||'',reason=data.reason||data.error?.message||'';const message=[detail,status&&`HTTP ${status}`,reason].filter(Boolean).join(' · ');showPlayerFailure('HLS 영상을 재생하지 못했습니다.',{stage:'hls-playback',mediaType:'hls',errorCategory:data.type});$('#downloadStatus').textContent=`HLS 오류: ${message}`;toast(`HLS 재생 오류: ${message}`)}
   });
 }
 
 function play(src,name='직접 재생',context={}) {
   cancelPendingPlaybackLookups();++playbackRequestId;const video=$('#video');currentPlaybackContext={...context,currentUrl:src};cancelOtherEpisodeTranslations();clearSubtitle();renderSubtitleSheet();skipSegments=[];activeSkip=null;activeSkipKey=null;opEdAnalysisKey=null;if(hlsPlayer){hlsPlayer.destroy();hlsPlayer=null;} video.removeAttribute('src');
-  enterPlayer();setPlayerLocked(false);showPlayerControls();updateEpisodeButtons();$('#playerEmpty').classList.remove('hidden');$('.player-spinner').classList.remove('hidden');$('#subtitleState').textContent='온라인 자막을 확인하는 중...';
+  enterPlayer();setPlayerLocked(false);showPlayerControls();updateEpisodeButtons();$('#playerEmpty').classList.remove('hidden');$('#playerDiagnosticActions').classList.add('hidden');$('#playerDiagnosticStatus').textContent='';$('.player-spinner').classList.remove('hidden');$('#subtitleState').textContent='온라인 자막을 확인하는 중...';
   const isHls=/\.m3u8(?:$|\?)/i.test(src)||/\/__flix\//i.test(src)||Boolean(context.hls);
   if(isHls&&window.Hls?.isSupported()){
     const instance=hlsPlayer=new Hls({
@@ -1378,7 +1390,7 @@ function handleDirectVideoError(){
   const video=$('#video'),error=video.error;
   if(hlsPlayer||!currentPlaybackContext.currentUrl||!error||error.code===1)return;
   const message=({2:'영상 서버와 연결이 끊겼습니다.',3:'영상 데이터를 재생할 수 없습니다.',4:'지원하지 않는 영상 형식입니다.'})[error.code]||'영상을 재생하지 못했습니다.';
-  showPlayerFailure(message);$('#downloadStatus').textContent=message;
+  showPlayerFailure(message,{stage:'direct-playback',mediaType:'native',videoErrorCode:error.code});$('#downloadStatus').textContent=message;
 }
 $('#video').addEventListener('error',handleDirectVideoError);
 $('#video').addEventListener('playing',()=>{$('#immersivePlayer').classList.add('is-playing');$('#playerEmpty').classList.add('hidden');showPlayerControls()});

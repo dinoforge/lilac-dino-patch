@@ -2169,6 +2169,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('subtitle-store:save',(_,key,entry)=>subtitleStore.save(String(key||''),entry));
   ipcMain.handle('subtitle-store:remove',(_,key,id)=>subtitleStore.remove(String(key||''),String(id||'')));
   ipcMain.handle('clipboard:copy-text',(_,value)=>{const text=String(value??'');if(!text.trim()||text.length>2_000_000)throw new Error('복사할 내용이 비어 있거나 너무 큽니다.');clipboard.writeText(text);return true});
+  ipcMain.handle('app:diagnostic-info',()=>({version:app.getVersion(),platform:process.platform,arch:process.arch}));
   ipcMain.handle('subtitle:manual-save',(_,input={})=>{
     const key=String(input.key||'').trim(),text=String(input.text||'');
     if(key.length>1200)throw new Error('회차 식별 정보가 너무 깁니다.');

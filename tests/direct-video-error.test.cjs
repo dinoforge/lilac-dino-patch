@@ -28,16 +28,17 @@ function element(...initialClasses) {
 }
 
 function setup({ error, currentUrl = 'https://media.test/episode.mp4', hlsPlayer = null } = {}) {
-  const video = { error }, playerEmpty = element('hidden'), playerMessage = { textContent: '' }, spinner = element(), status = { textContent: '' }, calls = [];
-  const elements = { '#video': video, '#playerEmpty': playerEmpty, '#playerEmpty p': playerMessage, '.player-spinner': spinner, '#downloadStatus': status };
+  const video = { error }, playerEmpty = element('hidden'), playerMessage = { textContent: '' }, spinner = element(), status = { textContent: '' }, diagnostics = element('hidden'), diagnosticStatus = { textContent: '' }, calls = [], failures = [];
+  const elements = { '#video': video, '#playerEmpty': playerEmpty, '#playerEmpty p': playerMessage, '.player-spinner': spinner, '#downloadStatus': status, '#playerDiagnosticActions': diagnostics, '#playerDiagnosticStatus': diagnosticStatus, '#copyPlayerDiagnostics': { addEventListener() {} } };
   const context = vm.createContext({
     $: selector => elements[selector],
     currentPlaybackContext: { currentUrl },
     hlsPlayer,
-    showPlayerControls: () => calls.push('controls')
+    showPlayerControls: () => calls.push('controls'),
+    recordPlayerFailure: failure => failures.push(failure)
   });
   vm.runInContext(`${failureUiSource}\n${handlerSource}`, context);
-  return { context, video, playerEmpty, playerMessage, spinner, status, calls };
+  return { context, video, playerEmpty, playerMessage, spinner, status, diagnostics, diagnosticStatus, calls, failures };
 }
 
 test('native video errors stop the loading spinner and explain common playback failures', () => {
@@ -53,8 +54,11 @@ test('native video errors stop the loading spinner and explain common playback f
     assert.equal(h.playerEmpty.classList.contains('hidden'), false, `error ${code}`);
     assert.equal(h.spinner.classList.contains('hidden'), true, `error ${code}`);
     assert.equal(h.playerMessage.textContent, expected, `error ${code}`);
+    assert.equal(h.diagnostics.classList.contains('hidden'), false);
     assert.equal(h.status.textContent, expected, `error ${code}`);
     assert.deepEqual(h.calls, ['controls'], `error ${code}`);
+    assert.equal(h.failures[0].stage, 'direct-playback');
+    assert.equal(h.failures[0].videoErrorCode, code);
   }
 });
 
@@ -79,11 +83,12 @@ test('the video element forwards its native error event to the handler', () => {
 });
 
 test('stream resolution failures share the stopped-spinner failure surface', () => {
-  assert.match(resolverSource, /showPlayerFailure\('영상을 불러오지 못했어요'\)/);
+  assert.match(resolverSource, /showPlayerFailure\('영상을 불러오지 못했어요',\{stage:'stream-resolution'/);
   const h = setup();
   h.context.showPlayerFailure('영상을 불러오지 못했어요');
   assert.equal(h.playerEmpty.classList.contains('hidden'), false);
   assert.equal(h.spinner.classList.contains('hidden'), true);
   assert.equal(h.playerMessage.textContent, '영상을 불러오지 못했어요');
+  assert.equal(h.diagnostics.classList.contains('hidden'), false);
   assert.deepEqual(h.calls, ['controls']);
 });

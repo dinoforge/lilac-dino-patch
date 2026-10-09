@@ -282,6 +282,12 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 공식 OFL 고지를 `licenses/Liberation-Fonts-2.00.5-OFL-1.1.txt`로 추가하고, `package.json`의 `extraResources`로 사용자 열람이 쉬운 `resources/licenses`에 복사하도록 했다. 이 보완은 JASSUB/libass, Expat, 번들 JS 의존성의 전체 고지 미해결을 해결하지 않는다.
 - `node --check scripts/build-jassub.cjs`, package JSON 파싱, `npm run vendor`, 전체 `node --test` 183/183, `npm run dist` Windows NSIS 빌드가 통과했다. `app.asar`에 Liberation Sans font와 JASSUB `LICENSE`가 있고, unpacked Windows 앱의 `resources/licenses/Liberation-Fonts-2.00.5-OFL-1.1.txt` SHA-256이 저장소 파일과 일치한다. NSIS 설치 파일은 124,551,257바이트의 로컬 산출물이다. 설치 실행·실제 공급원·사용자 프로필은 검사하지 않았다.
 
+## 2026-10-10 재생 오류 진단 정보 복사
+
+- 스트림 주소 확인·직접 영상·HLS 재생의 최종 실패 화면에 `오류 정보 복사`를 추가했다. 사용자가 버튼을 눌렀을 때만 앱 버전, OS·CPU, 허용 목록의 공급원, 오류 단계·미디어 형식, 서버 호스트명, 제한된 오류 코드가 클립보드에 복사된다. 앱 실행 중 최근 5건만 메모리에 보관하며, 작품명·회차·전체 URL·요청 헤더·쿠키·자막 내용·상세 오류 문구는 보고서에 넣지 않는다.
+- 개인정보 제거와 필드 허용 목록 테스트, 직접 영상 오류 연결을 포함한 전체 `node --test` 187/187 통과. 수정 파일 구문 검사와 `git diff --check`가 통과했고, `npm run dist` Windows NSIS 빌드가 성공해 124,553,317바이트의 설치 파일을 생성했다. `app.asar`에 UI·진단 모듈·preload·IPC 연결이 포함된 것도 확인했다.
+- 설치된 앱에서 버튼을 누르는 화면 동작과 실제 공급원 오류는 아직 확인하지 않았다. 설치 파일은 로컬 검증 산출물로만 둔다.
+
 ## 주요 결정
 
 - 새 앱은 Windows 우선, Android는 후속이다. Chrome·macOS는 제품 범위에서 제외한다.
@@ -296,4 +302,4 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 1. FFmpeg는 아직 선택하지 않는다. BtbN의 8.1.3·9.0.2 LGPL shared 후보는 합성 remux/디코딩을 통과했지만 기존 FFmpeg 6.1.1보다 큰 배포 폴더와 미확인 소스·외부 고지가 남았다. 최소 호환 빌드에는 shell 기반 빌드 환경이 필요하지만 현재 Docker·WSL 배포판·Bash·Make가 없어 설치하지 않고 보류했다. 해결 전까지 현행 의존성 유지, 설치 파일 공개 보류를 계속한다.
 2. JASSUB source commit 후보·다섯 submodule SHA를 확인했고, GPL-3.0 `rvfc-polyfill` fallback은 앱 빌드에서 제외했다. 기본 font는 공식 Liberation Sans 2.00.5와 glyph·metrics를 대조했고 OFL notice를 unpacked Windows 앱의 `resources/licenses`에 넣어 원본 파일과 해시가 같은 것을 확인했다. NSIS 빌드도 성공했다. 남은 항목은 pinned C/WASM source의 완전한 고지, upstream generator의 Expat 입력 불일치/실제 포함 여부, 세 번들 JS 보조 패키지의 원본 고지다. 이 환경에는 Docker/WSL 배포판, Bash, Make, `licensecheck`가 없어 upstream shell generator를 실행하지 않았다. 전체 재배포 조건은 미해결이다.
 3. Aya Expanse GGUF는 설정의 Cohere 조건 링크와 다운로드 전 사용자 확인을 제공한다. 앱이 약관 열람·법적 동의나 자격을 검증하지는 않는다. `ja-ko-vn` GGUF와 기반 모델 두 저장소는 Apache-2.0을 선언하지만 학습 대화 자료 출처·권리는 확인하지 못했다. 임의 GGUF의 약관은 앱이 검사하지 않는다. 8개 preset 다운로드 pin은 적용됐으며 기존 모델 파일은 새로 검사하거나 교체하지 않는다. HY-MT1.5 1.8B·7B는 앱에서 차단했고 기존 사용자 파일을 보존한다.
-4. 프로젝트 코드·로고·아이콘 재배포 허가와 AniList 보완성, TMDB·AI 기능 결합 조건을 해결하기 전까지 공개 저장소·설치 파일 배포와 실사이트 콘텐츠 요청은 보류한다. 권리 해결 후 검색→상세→회차 재생→자막→이어보기 실제 인수 검증을 계획한다.
+4. 프로젝트 코드·로고·아이콘 재배포 허가와 AniList 보완성, TMDB·AI 기능 결합 조건을 해결하기 전까지 공개 저장소·설치 파일 배포와 실사이트 콘텐츠 요청은 보류한다. 권리 해결 후 검색→상세→회차 재생→자막→이어보기 실제 인수 검증을 계획한다. 그 전에는 합성·로컬 검증이 가능한 Phase 1 안정화 작업을 이어간다.

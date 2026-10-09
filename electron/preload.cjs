@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('lilac', {
   saveSubtitle: (key, entry) => ipcRenderer.invoke('subtitle-store:save', key, entry),
   saveManualSubtitle: input => ipcRenderer.invoke('subtitle:manual-save', input),
   copyText: text => ipcRenderer.invoke('clipboard:copy-text', text),
+  appDiagnosticInfo: () => ipcRenderer.invoke('app:diagnostic-info'),
   removeSavedSubtitle: (key, id) => ipcRenderer.invoke('subtitle-store:remove', key, id),
   subtitleCacheUsage: () => ipcRenderer.invoke('subtitle-cache:usage'),
   cleanSubtitleCache: () => ipcRenderer.invoke('subtitle-cache:clean'),
