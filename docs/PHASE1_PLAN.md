@@ -220,6 +220,6 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 ## 2026-10-10 패키지 홈 탐색 IPC 스모크
 
 - `tests/phase1-main.electron.cjs`에서 패키지 main/preload가 실제 등록한 IPC를 호출하고 API 응답은 합성 fixture로 처리했다. RE:Anime `provider:quarter`에 2026년 4분기를 전달해 `season=FALL&year=2026` 요청과 `2026년 4분기` 결과를 확인했다.
-- `provider:latest-episodes`는 합성 AniList GraphQL 요청 한 번으로 제한된 RE:Anime ID를 보냈고, 현재 가용 화수를 넘는 회차·미래 회차를 제외해 가장 최근 가용 회차 2화를 선택했다. 반복 요청은 캐시에서 반환했고 지원하지 않는 Linkkf 요청은 네트워크 호출을 추가하지 않았다.
-- Linkkf `linkkf:schedule` 실제 main IPC는 월~일 일곱 API 분할을 호출해 월요일 합성 작품 1개와 다른 여섯 빈 요일을 반환했다. Wikidata 제목 보강 조회는 빈 fixture로 응답했다. 총 fixture 요청은 50회, 미등록 fetch·차단된 브라우저 요청·외부 호출은 0회다.
+- `provider:latest-episodes`는 합성 AniList GraphQL 요청을 RE:Anime와 Miruro에 따로 보내 각 공급원의 후보 ID만 전달했다. 가용 화수를 넘는 회차·미래 회차를 제외해 RE:Anime 2화와 Miruro 3화를 골랐다. Re:Anime 반복 요청은 캐시에서 반환했고 지원하지 않는 Linkkf 요청은 네트워크 호출을 추가하지 않았다.
+- Linkkf `linkkf:schedule` 실제 main IPC는 월~일 일곱 API 분할을 호출해 월요일 합성 작품 1개와 다른 여섯 빈 요일을 반환했다. Wikidata 제목 보강 조회는 빈 fixture로 응답했다. 총 fixture 요청은 51회, 미등록 fetch·차단된 브라우저 요청·외부 호출은 0회다.
 - **PASS — 패키지 main/preload 홈 탐색 경로(합성 데이터)**. `npm run test:phase1-main`, `npm run test:phase1-electron`, `npm test` 221/221이 통과했다. 라이브 AniList/Re:Anime/Linkkf 정보, 최신 회차 정확성 및 설치 NSIS UI는 검증하지 않았다.

@@ -138,6 +138,8 @@ function fixtureResponse(rawUrl, requestInit = {}) {
       { episode: 3, airingAt: now - 30, media: { id: 62001 } },
       { episode: 2, airingAt: now + 30, media: { id: 62001 } },
       { episode: 1, airingAt: now - 13 * 24 * 60 * 60, media: { id: 62001 } },
+      { episode: 3, airingAt: now - 100, media: { id: 62004 } },
+      { episode: 5, airingAt: now - 20, media: { id: 62004 } },
       { episode: 1, airingAt: now - 60, media: { id: 62002 } }
     ] } } });
   }
@@ -323,6 +325,16 @@ app.whenReady().then(async () => {
     assert.equal(anilistRequests.length, 1, 'only the supported valid Re:Anime AniList candidates were queried once');
     assert.deepEqual(anilistRequests[0].variables.ids, [62001]);
     assert.ok(anilistRequests[0].query.includes('airingSchedules'));
+    const miruroLatest = await win.webContents.executeJavaScript(
+      "window.lilac.providerLatestEpisodes('miruro', [{ provider: 'miruro', anilistId: 62004, availableEpisodeCount: 4, title: '합성 Miruro 최신작' }])"
+    );
+    assert.equal(miruroLatest.supported, true);
+    assert.equal(miruroLatest.data.length, 1);
+    assert.equal(miruroLatest.data[0].anime.title, '합성 Miruro 최신작');
+    assert.equal(miruroLatest.data[0].episode, 3, 'Miruro latest airing excludes episodes past its available count');
+    assert.equal(anilistRequests.length, 2, 'Re:Anime and Miruro each issue one provider-scoped AniList request');
+    assert.deepEqual(anilistRequests[1].variables.ids, [62004]);
+    assert.ok(anilistRequests[1].query.includes('airingSchedules'));
 
     const schedule = await win.webContents.executeJavaScript('window.lilac.linkkfSchedule()');
     assert.equal(schedule.days.length, 7, 'Linkkf main IPC returns Monday through Sunday');
@@ -543,7 +555,7 @@ app.whenReady().then(async () => {
     assert.equal(deniedUnknownFetches.length, 0, `no unregistered main-process URL was requested: ${deniedUnknownFetches.join(', ')}`);
     assert.equal(deniedBrowserRequests.length, 0, `no external browser request was allowed or attempted: ${deniedBrowserRequests.join(', ')}`);
 
-    console.log('Packaged Phase 1 main-process smoke passed: actual main IPC quarter catalog, latest airing/cache, weekday schedule, search/detail/episodes, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
+    console.log('Packaged Phase 1 main-process smoke passed: actual main IPC quarter catalog, Re:Anime/Miruro latest airing/cache, weekday schedule, search/detail/episodes, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
     console.log(`Playback: ${playbackState.width}x${playbackState.height} at ${playbackState.currentTime.toFixed(2)}s; resume: ${resumeState.currentTime.toFixed(2)}s from saved 50%; fallback: ${fallbackState.server} at ${fallbackState.currentTime.toFixed(2)}s with selected subtitle; synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; renderer proxy requests: ${rendererProxyRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: 0; blocked browser requests: 0; external network calls: 0.`);
     await new Promise(resolve => localPlayerServer.close(resolve));
     app.quit();
