@@ -179,6 +179,14 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 - 내 목록: 격리 프로필에 7화 기준 작품을 넣고 12화 합성 업데이트를 반환하자 `NEW` 배지가 표시됐다. 모든 결과는 packaged renderer의 DOM 상태에서 확인했다.
 - 검증 한계: 실제 공급원 응답·작품/회차 일치·사이트 영상, 설치 NSIS 앱과 픽셀 레이아웃은 검증하지 않았다. 데이터는 합성이고 기존 프로필은 사용하지 않았다.
 
+## 2026-10-10 통합 검색 패키지 렌더러 스모크
+
+- 첫 검색 결과를 제목 변형 조회와 동시에 표시한다. 기본 결과가 보인 뒤 변형을 준비하는 동안 `다른 제목 표기 준비 중`, 변형 검색 시작 뒤 `다른 제목 표기도 찾는 중`을 상태 문구로 표시하도록 보완했다. 변형이 없으면 대기 문구를 정리한다.
+- 빌드된 `app.asar`의 `src/index.html`, 실제 renderer, `electron/preload.cjs`를 격리 Electron `BrowserWindow`에서 열었다. 테스트 전용 Electron main이 preload IPC 채널에 합성 응답을 제공했다. 페이지 로드 전에 Chromium 외부 네트워크 차단기를 설치했다. 앱 `electron/main.cjs`, 공급원 사이트, 사용자 프로필은 사용하지 않았다.
+- `통합 검색 테스트`의 제목 변형 응답을 1초 늦춰 3개 첫 결과와 대기 상태가 먼저 나타나는 것을 확인했다. 변형 결과 병합 뒤 5개 공급원에서 3개 작품으로 표시되고, AniList/MAL 연결 작품의 배지는 `3개 소스`였다. Miruro 필터 1개 결과, 상세의 공급원 3개, 필터에 따른 Miruro 초기 선택과 Re:Anime 선택 뒤 `provider:detail` 호출을 확인했다.
+- 전체 `node --test` 219/219, `node --check src/app.js`, `node --check tests/integrated-search.electron.cjs`, `git diff --check`가 통과했다. `npm run dist` Windows NSIS 빌드 성공, 설치 파일 124,555,556바이트. 패키지 `app.asar`에 두 상태 문구가 들어갔다.
+- **PASS — 패키지 renderer/preload UI와 검색 IPC 연결(합성 데이터)**. 합성 검색 IPC 11회, 외부 요청 시도 0회, 임시 `userData` 프로필을 사용했다. 실제 공급원 응답·ID 정확성·회차·영상·자막 및 설치 NSIS 앱은 미검증이며 설치 파일은 실행·배포하지 않았다.
+
 ## 2026-10-10 5개 공급원 통합 검색
 
 - 검색 실행 때 RE:Anime·Animenosub·Miruro·애니24·Linkkf를 함께 조회한다. 제목 변형은 최대 3개, 공급원 검색 동시성은 6으로 제한한다. 한국어 검색은 RE:Anime·Animenosub의 한국어 카탈로그 검색도 병행하고, 한국어 검색을 최신 게시물로 처리하는 Animenosub·Miruro에는 원문 한국어 검색을 보내지 않는다.

@@ -540,8 +540,10 @@ async function doSearch(query) {
       localSearch:(provider,text)=>/[가-힣]/.test(text)&&['reanime','animenosub'].includes(provider)?window.lilac.catalogKoreanSearch(provider,text):null
     },variantsPromise=window.lilac.titleVariants(query).then(values=>Array.isArray(values)?values.slice(0,3):[]).catch(()=>[]);
     const first=await LilacIntegratedSearch.searchProviders({...searchOptions,query});if(token!==doSearch.token)return;applyIntegratedSearchResult(first);
-    const variants=await variantsPromise;if(token!==doSearch.token||!variants.length)return;
-    $('#searchStatus').textContent+=' · 다른 제목 표기도 찾는 중';
+    $('#searchStatus').textContent+=' · 다른 제목 표기 준비 중';
+    const variants=await variantsPromise;if(token!==doSearch.token)return;
+    if(!variants.length){$('#searchStatus').textContent=$('#searchStatus').textContent.replace(' · 다른 제목 표기 준비 중','');return}
+    $('#searchStatus').textContent=$('#searchStatus').textContent.replace('다른 제목 표기 준비 중','다른 제목 표기도 찾는 중');
     const extra=await LilacIntegratedSearch.searchProviders({...searchOptions,query:'',terms:variants,localSearch:async()=>null});if(token!==doSearch.token)return;
     applyIntegratedSearchResult(LilacIntegratedSearch.mergeSearchResults(first,extra));
   }catch(error){if(token===doSearch.token)$('#searchStatus').textContent=`검색 준비 실패: ${String(error?.message||error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/,'')}`;}
