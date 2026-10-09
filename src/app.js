@@ -169,8 +169,8 @@ const PROVIDER_SOURCES=['reanime','animenosub','miruro','ohli24'],SOURCE_LABELS=
 // 전체's sort: the orders each source can give (the first is its own; 인기순 is the site's for RE:Anime and Miruro, and
 // Animenosub's 인기순 is its popular list), kept per source. Another than the source's own comes page by page from main
 // (sortedCatalog). 애니24 lists have no year or score to sort by.
-const ALL_SORTS={reanime:['popular','year','score'],miruro:['popular','year','score'],animenosub:['popular','year','score'],linkkf:['default','year']},SORT_LABELS={popular:'인기순',default:'기본 순서',year:'최신순',score:'평점순'};
-const OWN_ORDER={reanime:'popular',miruro:'popular',linkkf:'default'};
+const ALL_SORTS={reanime:['popular','year','updated','score'],miruro:['popular','year','updated','score'],animenosub:['popular','year','updated','score'],linkkf:['default','year'],ohli24:['default','updated']},SORT_LABELS={popular:'인기순',default:'기본 순서',year:'최신순',updated:'최근 업데이트순',score:'평점순'};
+const OWN_ORDER={reanime:'popular',miruro:'popular',linkkf:'default',ohli24:'default'};
 const QUARTER_PROVIDERS=['reanime','miruro','animenosub'],QUARTER_CACHE_TTL=12*60*60*1000,QUARTER_CACHE_LIMIT=16;
 function currentQuarterSelection(date=new Date()){
   const year=date.getFullYear(),quarter=Math.floor(date.getMonth()/3)+1;

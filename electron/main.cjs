@@ -16,6 +16,8 @@ const { SubtitleStore } = require('./subtitle-store.cjs');
 const { createTranslator } = require('./subtitle-translator.cjs');
 const { QUARTER_PROVIDERS, quarterForDate, quarterPeriod, quarterQuery } = require('./quarter-catalog.cjs');
 const { fetchLatestEpisodes } = require('./latest-episodes.cjs');
+const { createCatalogUpdates } = require('./catalog-updates.cjs');
+let catalogUpdates;
 let subtitleTranslator = null;
 const translator = () => subtitleTranslator ||= createTranslator(app.getPath('userData'));
 
@@ -199,7 +201,7 @@ function reanimeItems(root) {
     const genresRaw = a.genres || raw.genres || [];
     const genres = (Array.isArray(genresRaw) ? genresRaw : Object.values(genresRaw)).map(x => ({name: typeof x === 'string' ? x : x.name || x.title || ''})).filter(x=>x.name);
     const episodeCount=Number(a.episodes||0)||Math.max(Number(a.subbed||0),Number(a.dubbed||0))||0;
-    return {provider:'reanime',id:slug,mal_id:`reanime:${slug}`,title,title_english:'',images:{webp:{large_image_url:imageUrl}},score:Number(a.average_score||a.score||0)/10||null,year:a.season_year||a.year||'',type:a.format||'Anime',episodes:episodeCount||null,status:a.status||'',synopsis:a.description||a.synopsis||'',genres,studios:[],url:`${REANIME_WEB}/anime/${slug}`,anilistId:Number(a.anilist_id||a.anilistId||a.anilist||0)||null,malId:Number(a.mal_id||0)||null,canWatch:a.can_watch!==false,subbed:Number(a.subbed||0),dubbed:Number(a.dubbed||0)};
+    return {provider:'reanime',id:slug,mal_id:`reanime:${slug}`,title,title_english:'',images:{webp:{large_image_url:imageUrl}},score:Number(a.average_score||a.score||0)/10||null,year:a.season_year||a.year||'',type:a.format||'Anime',episodes:episodeCount||null,status:a.status||'',synopsis:a.description||a.synopsis||'',genres,studios:[],url:`${REANIME_WEB}/anime/${slug}`,anilistId:Number(a.anilist_id||a.anilistId||a.anilist||0)||null,malId:Number(a.mal_id||0)||null,canWatch:a.can_watch!==false,subbed:Number(a.subbed||0),dubbed:Number(a.dubbed||0),updatedAt:a.episode?.aired||''};
   }).filter(x => x.title && x.id);
 }
 
@@ -1090,6 +1092,7 @@ function sortedFromIndex(provider,sort){
   sortedLists.set(key,{items:index.items,list});return list;
 }
 async function sortedCatalog(provider,sort,offset){
+  if(sort==='updated')return catalogUpdates.page(provider,offset);
   if(provider==='reanime'||provider==='linkkf'){
     const list=sortedFromIndex(provider,sort);if(!list)return {data:[],offset:0,nextOffset:0,done:true,pending:true};
     const at=Math.max(0,Number(offset)||0);return {data:list.slice(at,at+SORTED_PAGE),offset:at,nextOffset:at+SORTED_PAGE,total:list.length,done:at+SORTED_PAGE>=list.length};
@@ -1999,6 +2002,19 @@ app.whenReady().then(async () => {
   ipcMain.handle('provider:quarter', (_, provider, year, quarter) => homeShows(provider,'quarter',year,quarter));
   ipcMain.handle('provider:airing', (_, provider) => homeShows(provider,'airing'));
   ipcMain.handle('provider:latest-episodes', (_, provider, candidates) => fetchLatestEpisodes(provider, candidates));
+  catalogUpdates = createCatalogUpdates({
+    reanimeBase: REANIME_WEB,
+    reanimeFetch: url => providerFetch(url, { json: true, referer: `${REANIME_WEB}/` }),
+    reanimeItems,
+    miruroApi,
+    miruroItem,
+    animenosubBase: ANIMENOSUB_WEB,
+    animenosubFetch: url => providerFetch(url, { referer: `${ANIMENOSUB_WEB}/` }),
+    animenosubItems: animenosubList,
+    ohliBase: OHLI24_WEB,
+    ohliFetch,
+    ohliItems
+  });
   ipcMain.handle('provider:catalog', async (_, provider, query = '', offset = 0, sort = '') => {
     if (sort && !query) return sortedCatalog(provider, String(sort), offset);
     if (provider === 'reanime') {
