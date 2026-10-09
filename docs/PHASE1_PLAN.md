@@ -228,3 +228,9 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 - 같은 renderer에서 연도 선택을 2025년으로 바꾸고 4분기 목록을 확인한 뒤 3분기 탭을 눌러 제목·선택 표시·카드 전환을 확인했다. 두 선택 모두 패키지 `provider:quarter` main IPC를 호출해 분기에 맞는 요청을 보냈다.
 - Re:Anime의 최신 방영 줄은 별도 AniList 합성 작품 ID를 `provider:latest-episodes` IPC에 보내고 반환한 4화 결과를 카드·상태 문구로 표시했다. Linkkf 홈에서는 현재 요일 탭 선택을 확인하고 월요일 탭을 눌러 월요일 합성 작품 카드로 전환했다. `loadLinkkfHome`이 `linkkf:schedule` 일곱 요청과 계절 레일 요청을 실제 main handler로 보냈다.
 - **PASS — 패키지 main/preload 홈 탐색 경로(합성 데이터)**. `npm run test:phase1-main`, `npm run test:phase1-electron`, `npm test` 221/221이 통과했다. 라이브 AniList·Re:Anime·Miruro·Linkkf·Animenosub·애니24 정보, 최신 회차 정확성 및 설치 NSIS UI는 검증하지 않았다.
+
+## 2026-10-10 설정 공급원 전환과 재로딩
+
+- `tests/phase1-main.electron.cjs`에서 설정 화면의 Animenosub 버튼을 클릭했다. 버튼이 설정 저장 경로를 거쳐 renderer를 재로드했고, 재로드 뒤 선택 공급원 저장값·설정 버튼 상태·`state.source`가 `animenosub`으로 복원됐다.
+- 이어 새 공급원의 메인 목록과 sitemap, 분기 홈 목록을 합성 응답으로 처리해 Animenosub 분기 작품 카드가 표시되는 것을 확인했다. 테스트는 격리 사용자 프로필을 사용했고 main fixture 요청 82회, 미등록 fetch·차단된 브라우저 요청·외부 네트워크 호출은 0회다.
+- `npm run test:phase1-main`, `npm run test:phase1-electron`, `npm test` 221/221, 테스트 파일 구문 검사와 `git diff --check` 통과. 실제 사이트, 실제 프로세스 종료 후 사용자 프로필, 설치 NSIS UI는 검증하지 않았다.

@@ -168,6 +168,18 @@ function fixtureResponse(rawUrl, requestInit = {}) {
     fixtureRequests.push(url.href);
     return response({ head: { vars: ['ko', 'seriesKo'] }, results: { bindings: [] } });
   }
+  if (url.hostname === 'animenosub.to' && url.pathname === '/sitemap_index.xml') {
+    fixtureRequests.push(url.href);
+    return response('<sitemapindex><sitemap><loc>https://animenosub.to/anime-sitemap1.xml</loc></sitemap></sitemapindex>', 200, 'application/xml');
+  }
+  if (url.hostname === 'animenosub.to' && url.pathname === '/anime-sitemap1.xml') {
+    fixtureRequests.push(url.href);
+    return response('<urlset><url><loc>https://animenosub.to/anime/phase1-settings-series/</loc><image:image><image:loc>data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==</image:loc></image:image></url></urlset>', 200, 'application/xml');
+  }
+  if (url.hostname === 'animenosub.to' && url.pathname === '/' && !url.search) {
+    fixtureRequests.push(url.href);
+    return response('<article class="bs"><a href="/anime/phase1-settings-series/"><img alt="설정 전환 합성 작품" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="><span class="epx">3화</span></a></article>', 200, 'text/html; charset=utf-8');
+  }
   if (url.hostname === 'animenosub.to' && url.pathname === '/anime/'
     && url.searchParams.get('order') === 'update' && url.searchParams.get('page') === '1') {
     fixtureRequests.push(url.href);
@@ -176,7 +188,16 @@ function fixtureResponse(rawUrl, requestInit = {}) {
   if (url.hostname === 'animenosub.to' && url.pathname === '/anime/'
     && url.searchParams.get('season[0]') === 'fall-2026' && url.searchParams.get('order') === 'popular') {
     fixtureRequests.push(url.href);
-    return response('<article class="bs"><a href="/anime/phase1-quarter-series"><img alt="합성 Animenosub 분기작" src="/poster.jpg"><span class="epx">4화</span></a></article><article class="bs"><a href="/anime/phase1-upcoming-series"><img alt="합성 예정작" src="/upcoming.jpg"><span class="epx">1화</span><span class="ans-status-ribbon">Upcoming</span></a></article>', 200, 'text/html; charset=utf-8');
+    return response('<article class="bs"><a href="/anime/phase1-quarter-series"><img alt="합성 Animenosub 분기작" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="><span class="epx">4화</span></a></article><article class="bs"><a href="/anime/phase1-upcoming-series"><img alt="합성 예정작" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="><span class="epx">1화</span><span class="ans-status-ribbon">Upcoming</span></a></article>', 200, 'text/html; charset=utf-8');
+  }
+  if (url.hostname === 'animenosub.to' && url.pathname === '/anime/'
+    && url.searchParams.get('status') === 'ongoing' && url.searchParams.get('order') === 'popular') {
+    fixtureRequests.push(url.href);
+    return response('<article class="bs"><a href="/anime/phase1-quarter-series/"><img alt="합성 Animenosub 방영작" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="><span class="epx">4화</span></a></article>', 200, 'text/html; charset=utf-8');
+  }
+  if (url.hostname === 'animenosub.to' && url.pathname === '/anime/phase1-quarter-series/') {
+    fixtureRequests.push(url.href);
+    return response('<!doctype html><html><head><meta name="description" content="합성 상세 줄거리"></head><body><h1>합성 Animenosub 분기작</h1></body></html>', 200, 'text/html; charset=utf-8');
   }
   if (url.hostname === 'www.ohli24.net' && url.pathname === '/ing') {
     fixtureRequests.push(url.href);
@@ -798,6 +819,55 @@ app.whenReady().then(async () => {
     assert.equal(fallbackState.subtitleMode, 'showing');
     assert.match(fallbackState.activeCueText, /합성 한국어 자막/);
 
+    const sourcePicker = await win.webContents.executeJavaScript(`(() => {
+      switchView('settings');
+      window.showSettingsPane?.('playback');
+      const button = document.querySelector('#sourceChoices button[data-value="animenosub"]');
+      return { found: Boolean(button), label: button?.textContent.trim() || '' };
+    })()`);
+    assert.equal(sourcePicker.found, true, 'the packaged settings expose the Animenosub source choice');
+    const sourceReloadFinished = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Timed out waiting for the source-choice renderer reload')), 15000);
+      win.webContents.once('did-finish-load', () => { clearTimeout(timeout); resolve(); });
+    });
+    const selectedSource = await win.webContents.executeJavaScript(`(() => {
+      document.querySelector('#sourceChoices button[data-value="animenosub"]').click();
+      return localStorage.getItem('contentSource');
+    })()`);
+    assert.equal(selectedSource, 'animenosub', 'the actual source choice stores the selected provider');
+    await sourceReloadFinished;
+    await waitFor('selected provider after settings reload', () => win.webContents.executeJavaScript(`(() => {
+      const select = document.querySelector('#contentSource');
+      return state.source === 'animenosub' && localStorage.getItem('contentSource') === 'animenosub'
+        && select?.value === 'animenosub';
+    })()`), 15000);
+    const animenosubSitemap = await waitFor('Animenosub catalog sitemap after source selection', () => {
+      const index = fixtureRequests.some(rawUrl => {
+        const url = new URL(rawUrl);
+        return url.hostname === 'animenosub.to' && url.pathname === '/sitemap_index.xml';
+      });
+      const sitemap = fixtureRequests.some(rawUrl => {
+        const url = new URL(rawUrl);
+        return url.hostname === 'animenosub.to' && url.pathname === '/anime-sitemap1.xml';
+      });
+      return index && sitemap;
+    }, 15000);
+    assert.equal(animenosubSitemap, true, 'the selected source activated its catalog index');
+    const switchedHome = await waitFor('Animenosub quarter home card after settings reload', () => win.webContents.executeJavaScript(`(() => {
+      const card = document.querySelector('#seasonRail .anime-card');
+      const title = card?.querySelector('h3')?.textContent || '';
+      if (state.source !== 'animenosub' || localStorage.getItem('contentSource') !== 'animenosub'
+        || title !== '합성 Animenosub 분기작') return null;
+      return {
+        source: state.source,
+        title,
+        quarter: document.querySelector('#seasonTitle')?.textContent || '',
+        selectedButton: document.querySelector('#sourceChoices button[data-value="animenosub"]')?.classList.contains('selected')
+      };
+    })()`), 20000);
+    assert.match(switchedHome.quarter, /4분기/);
+    assert.equal(switchedHome.selectedButton, true, 'settings reflect the persisted provider on the reloaded renderer');
+
     assert.ok(fixtureRequests.some(url => new URL(url).searchParams.get('q') === SEARCH_TITLE), 'search reached the synthetic Re:Anime API');
     assert.ok(fixtureRequests.some(url => new URL(url).hostname === 'linkkf1.5imgdarr.top'
       && new URL(url).pathname === '/api/singlefilter.php'), 'the weekly schedule reached all seven Linkkf API partitions');
@@ -811,6 +881,10 @@ app.whenReady().then(async () => {
       return url.hostname === 'animenosub.to' && url.pathname === '/anime/'
         && url.searchParams.get('season[0]') === 'fall-2026' && url.searchParams.get('order') === 'popular';
     }), 'Animenosub quarter listing reached its selected-season page');
+    assert.ok(fixtureRequests.some(rawUrl => {
+      const url = new URL(rawUrl);
+      return url.hostname === 'animenosub.to' && url.pathname === '/' && !url.search;
+    }), 'the source switch loaded Animenosub through its regular catalog page');
     assert.ok(fixtureRequests.some(rawUrl => {
       const url = new URL(rawUrl);
       return url.hostname === 'www.miruro.to' && url.pathname === '/api/v1/anime/phase1-miruro-quarter/episodes';
@@ -832,7 +906,7 @@ app.whenReady().then(async () => {
     assert.equal(deniedUnknownFetches.length, 0, `no unregistered main-process URL was requested: ${deniedUnknownFetches.join(', ')}`);
     assert.equal(deniedBrowserRequests.length, 0, `no external browser request was allowed or attempted: ${deniedBrowserRequests.join(', ')}`);
 
-    console.log('Packaged Phase 1 smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs and Re:Anime quarter selection UI, Re:Anime latest-airing UI, Linkkf current-day/weekday schedule UI, Animenosub/Ani24 update feeds and Animenosub recent-updates home card, search/detail/episodes, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
+    console.log('Packaged Phase 1 smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs and Re:Anime quarter selection UI, Re:Anime latest-airing UI, Linkkf current-day/weekday schedule UI, Animenosub/Ani24 update feeds and Animenosub recent-updates home card, settings source selection and reload into the Animenosub home, search/detail/episodes, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
     console.log(`Playback: ${playbackState.width}x${playbackState.height} at ${playbackState.currentTime.toFixed(2)}s; resume: ${resumeState.currentTime.toFixed(2)}s from saved 50%; fallback: ${fallbackState.server} at ${fallbackState.currentTime.toFixed(2)}s with selected subtitle; synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; renderer proxy requests: ${rendererProxyRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: 0; blocked browser requests: 0; external network calls: 0.`);
     await new Promise(resolve => localPlayerServer.close(resolve));
     app.quit();

@@ -418,3 +418,10 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - Re:Anime 최신 방영 줄은 실제 패키지 `provider:latest-episodes` IPC의 별도 합성 ID 응답을 받아 `EP.4` 카드와 상태 문구를 표시했다. Linkkf `loadLinkkfHome`은 현재 요일을 선택하고 `요일별 방영표`의 월요일 탭을 누르면 월요일 합성 카드로 전환됐다. 홈 탭 요청 7개가 패키지 `linkkf:schedule` handler를 통과했다.
 - `npm run test:phase1-main` 통과: 합성 fixture 요청 72회, 미등록 fetch·차단된 브라우저 요청·외부 네트워크 0회. 전체 `npm test` 221/221과 `npm run test:phase1-electron`도 통과했고, 테스트 파일 구문 검사와 `git diff --check` 통과.
 - 공급원 상태는 격리 renderer 테스트에서 Animenosub·RE:Anime·Linkkf로 설정했다. 실제 사이트 응답, 사용자 설정 전환/재시작, 설치 NSIS 화면은 확인하지 않았다.
+
+## 2026-10-10 설정 공급원 전환과 재로딩 검증
+
+- 패키지 설정의 `Animenosub` 버튼을 실제로 클릭해 공급원을 저장하고 600ms 뒤 renderer가 다시 로드되는 흐름을 확인했다. 재로드 후 `localStorage`, 설정 선택 상태, 앱 `state.source`가 모두 `animenosub`이며, 분기 홈에 합성 Animenosub 작품 카드가 나타났다.
+- 새 공급원의 정규 목록 페이지와 sitemap 인덱스·sitemap, 진행 중 목록, 상세 페이지 및 현재 분기 응답을 main/preload IPC fixture로 제공했다. 격리 프로필만 사용했다.
+- `npm run test:phase1-main` 통과: 합성 HTTP 요청 82회, 미등록 main fetch 0회, 차단된 브라우저 요청 0회, 외부 네트워크 0회. 기존 `npm run test:phase1-electron` 및 `npm test` 221/221도 통과했고 `node --check tests/phase1-main.electron.cjs`, `git diff --check`도 통과했다.
+- 이는 실제 공급원 버튼→저장→renderer 재로드→새 공급원 홈 연결을 합성 응답으로 확인한 결과다. 실제 프로세스 종료 후 사용자 프로필 복구, 라이브 사이트 응답, 실제 재생 적합성, 설치 NSIS 화면은 검증하지 않았다.
