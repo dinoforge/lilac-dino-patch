@@ -330,3 +330,131 @@ test('LinkAni is absent from source choices and online provider adapters', () =>
   assert.doesNotMatch(indexHtml, /(?:data-value|option value)="linkani"/i);
   assert.doesNotMatch(mainSource, /LINKANI_WEB|linkaniFetch|linkaniItems|linkaniDetail|resolveLinkaniEpisode|provider\s*===\s*['"]linkani['"]/i);
 });
+
+function subtitleSourceHarness() {
+  const h = setup(), savedRequests = [], findRequests = [], searched = [], attached = [];
+  const controls = new Map([
+    ['#subtitleSource', { value: '' }],
+    ['#subtitleState', { textContent: '' }],
+    ['#skipTitle', { value: '테스트 애니' }],
+    ['#skipEpisode', { value: '1' }]
+  ]);
+  const originalSelect = h.context.$;
+  h.context.$ = selector => controls.get(selector) || originalSelect(selector);
+  Object.assign(h.context, {
+    currentPlaybackContext: { episodeKey: 'reanime:one', anime: { provider: 'reanime', id: 'one' } },
+    currentSubtitle: { path: 'currently-playing.vtt' },
+    currentSubtitlePath: 'currently-playing.vtt',
+    playbackRequestId: 1,
+    subtitleSelectionRequestId: 0,
+    KOREAN_SOURCES: ['kairan', 'csora', 'anissia'],
+    SUBTITLE_SOURCE_LABELS: { kairan: 'Kairan', csora: 'Csora', anissia: 'Anissia' },
+    renderSubtitleSheet() {},
+    beginSubtitleSelection: () => ++h.context.subtitleSelectionRequestId,
+    pressSubtitleSource: source => { h.context.currentPlaybackContext.pressedSource = source; h.context.currentPlaybackContext.pressedFor = h.context.currentSubtitle; },
+    preferAiSubtitle() {},
+    syncSettingChoices() {},
+    syncPlayerSettingsUI() {},
+    subtitleStoreKey: () => h.context.currentPlaybackContext.episodeKey,
+    subtitleSearchAnime: () => h.context.currentPlaybackContext.anime,
+    setSubtitleAvailability() {},
+    communityLabel(source) { return `${source} 자막`; },
+    subtitleAvailabilityStatusFromError() { return 'error'; },
+    attachSubtitle(url, label, options) { this.currentSubtitle = { url, label, ...options }; attached.push(options.source); },
+    window: {
+      lilac: {
+        savedSubtitles(key) { return new Promise(resolve => savedRequests.push({ key, resolve })); },
+        findSubtitle(source) { searched.push(source); return new Promise(resolve => findRequests.push({ source, resolve })); }
+      }
+    }
+  });
+  vm.runInContext(section('async function selectSubtitleSource(source)', '// Quality: the HLS variants'), h.context);
+  return { ...h, controls, savedRequests, findRequests, searched, attached };
+}
+
+test('a late saved-subtitle lookup cannot replace the most recently selected source', async () => {
+  const h = subtitleSourceHarness();
+  const first = h.context.selectSubtitleSource('kairan');
+  const second = h.context.selectSubtitleSource('csora');
+  assert.deepEqual(h.savedRequests.map(request => request.key), ['reanime:one', 'reanime:one']);
+
+  h.savedRequests[0].resolve([{ source: 'kairan', path: 'old.vtt', url: 'subtitle://old' }]);
+  await first;
+  assert.deepEqual(h.searched, []);
+  assert.deepEqual(h.attached, []);
+
+  h.savedRequests[1].resolve([]);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(h.findRequests.map(request => request.source), ['csora']);
+  h.findRequests[0].resolve({ path: 'csora.vtt', url: 'subtitle://csora' });
+  await second;
+  assert.deepEqual(h.searched, ['csora']);
+  assert.deepEqual(h.attached, ['csora']);
+});
+
+test('a saved-subtitle lookup started on the previous episode cannot apply to the new episode', async () => {
+  const h = subtitleSourceHarness();
+  const pending = h.context.selectSubtitleSource('kairan');
+  h.context.playbackRequestId++;
+  h.context.currentPlaybackContext = { episodeKey: 'reanime:two', anime: { provider: 'reanime', id: 'one' } };
+  h.savedRequests[0].resolve([{ source: 'kairan', path: 'episode-one.vtt', url: 'subtitle://episode-one' }]);
+
+  await pending;
+  assert.deepEqual(h.searched, []);
+  assert.deepEqual(h.attached, []);
+});
+
+test('automatic subtitle lookup yields when the user changes the subtitle source', async () => {
+  let resolveSaved;
+  const context = vm.createContext({
+    playbackRequestId: 1,
+    subtitleSelectionRequestId: 0,
+    currentPlaybackContext: {},
+    ONLINE_SUBTITLE_SOURCES: [],
+    localStorage: { getItem: () => null },
+    subtitleStoreKey: () => 'reanime:one',
+    window: { lilac: { savedSubtitles: () => new Promise(resolve => { resolveSaved = resolve; }) } },
+    $: () => ({ classList: { add() {} } })
+  });
+  vm.runInContext(appSection('async function ensureSubtitle(', '// 설정 > 자막 자동 번역 translates from the best source'), context);
+  const pending = context.ensureSubtitle(null, '테스트 애니', 1);
+  context.subtitleSelectionRequestId++;
+  resolveSaved([]);
+  assert.equal(await pending, false);
+});
+
+test('an explicit subtitle choice invalidates and cancels pending translations', () => {
+  const offer = { classList: classList() }, cloud = { dataset: { run: '2' } }, local = { dataset: { run: '3' } }, cancelled = [];
+  const context = vm.createContext({
+    subtitleSelectionRequestId: 4,
+    translationRun: 9,
+    $: selector => ({ '#subtitleOffer': offer, '#translateNow': cloud, '#translateNowLocal': local }[selector]),
+    cancelButtonRun: button => cancelled.push(button),
+    renderManualChatgptPanel() {}
+  });
+  vm.runInContext(appSection('function beginSubtitleSelection()', '\nfunction cancelOtherEpisodeTranslations'), context);
+
+  assert.equal(context.beginSubtitleSelection(), 5);
+  assert.equal(context.translationRun, 10);
+  assert.equal(offer.classList.contains('hidden'), true);
+  assert.deepEqual(cancelled, [cloud, local]);
+});
+
+test('a late subtitle search result cannot override a newer source choice', async () => {
+  const h = subtitleSourceHarness();
+  const first = h.context.selectSubtitleSource('kairan');
+  h.savedRequests[0].resolve([]);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.searched.join(','), 'kairan');
+
+  const second = h.context.selectSubtitleSource('csora');
+  h.savedRequests[1].resolve([]);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.searched.join(','), 'kairan,csora');
+  h.findRequests[1].resolve({ path: 'csora.vtt', url: 'subtitle://csora' });
+  await second;
+  h.findRequests[0].resolve({ path: 'kairan.vtt', url: 'subtitle://kairan' });
+  await first;
+
+  assert.deepEqual(h.attached, ['csora']);
+});

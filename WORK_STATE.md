@@ -225,6 +225,12 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - ChatGPT 번역 결과의 마지막 저장이 실패해도 검증된 문장을 유지하고 저장만 재시도할 수 있게 했다. 다시 번역을 붙여넣을 필요가 없고, 같은 자막 원본·회차인지 확인하는 기존 안전 검사는 유지한다.
 - `node --test tests/manual-subtitle-translation.test.cjs tests/manual-subtitle-translation-ui.test.cjs` 9/9 통과. 첫 저장 실패 뒤 재시도 성공, 재붙여넣기 없이 한 번만 파싱하는 동작을 시험했다. `npm run dist` 성공(124,548,604바이트); `app.asar`에서 저장 재시도 UI와 흐름을 확인했다. 실제 ChatGPT 왕복과 번역 품질은 미검증이다.
 
+## 2026-10-09 자막 출처 선택 경합 방지
+
+- 저장 자막 조회나 온라인 출처 검색이 지연된 사이 회차 또는 사용자의 출처 선택이 바뀌어도 이전 요청이 새 선택을 덮지 않도록 재생 회차 ID와 자막 선택 순번을 함께 확인한다. 자동 자막 검색을 중단하고 진행 중인 자막 번역을 취소한다. Re:Anime 트랙·Anissia 제작자·Jimaku 선택의 지연 결과에도 같은 경계를 적용했다.
+- 회귀 검증 5건에서 이전 회차의 저장 결과, 오래된 출처 조회, 늦은 검색 응답, 자동 검색 중 명시적 출처 변경, 출처 선택 때 진행 중이던 번역의 취소를 확인했다. `node --test` 156/156, `node --check src/app.js`, `node --check src/player.js`, 테스트 구문 검사, `git diff --check`가 통과했다.
+- `npm run dist` Windows NSIS 빌드 성공(124,548,713바이트). 패키지 `app.asar`의 `src/app.js`와 `src/player.js`에서 요청 선택 검사 포함을 확인했다. 설치 파일은 로컬 산출물이며 배포하지 않았다. 실제 공급원 검색과 실제 작품·회차·영상판 자막 일치는 여전히 미검증이다.
+
 ## 주요 결정
 
 - 새 앱은 Windows 우선, Android는 후속이다. Chrome·macOS는 제품 범위에서 제외한다.

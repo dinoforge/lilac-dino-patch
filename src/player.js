@@ -129,14 +129,15 @@ function renderAnissiaMakers() {
   }));
 }
 async function selectAnissiaMaker(name) {
-  const title = $('#skipTitle').value.trim(), episode = Number($('#skipEpisode').value) || 1, requestId = playbackRequestId;
+  const title = $('#skipTitle').value.trim(), episode = Number($('#skipEpisode').value) || 1, requestId = playbackRequestId, selectionRequestId = beginSubtitleSelection();
+  const isCurrentSelection = () => requestId === playbackRequestId && selectionRequestId === subtitleSelectionRequestId;
   $('#subtitleState').textContent = `Anissia · ${name} 자막을 찾는 중...`;
   try {
     const result = await window.lilac.findSubtitle('anissia', title, episode, subtitleSearchAnime(), { maker: name });
-    if (requestId !== playbackRequestId) return;
+    if (!isCurrentSelection()) return;
     currentSubtitlePath = result.path; attachSubtitle(result.url, communityLabel('anissia', result), { path: result.path, assUrl: result.assUrl, assPath: result.assPath, fonts: result.fonts, source: 'anissia' });
     renderAnissiaMakers();
-  } catch { if (requestId === playbackRequestId) $('#subtitleState').textContent = `${name}의 ${episode}화 자막을 찾지 못했습니다.`; }
+  } catch { if (isCurrentSelection()) $('#subtitleState').textContent = `${name}의 ${episode}화 자막을 찾지 못했습니다.`; }
 }
 
 // Writes one subtitle setting and keeps the settings page controls in step.
@@ -220,24 +221,30 @@ function applyVttLayout() {
 // goes dark again (the one on screen is lit); a chip with a list to pick from (Jimaku, Re:Anime tracks, Anissia makers)
 // stays lit while its list is open.
 async function selectSubtitleSource(source) {
-  await switchSubtitleSource(source);
+  const requestId = playbackRequestId, selectionRequestId = beginSubtitleSelection();
+  const isCurrentSelection = () => requestId === playbackRequestId && selectionRequestId === subtitleSelectionRequestId;
+  await switchSubtitleSource(source, selectionRequestId, requestId);
+  if (!isCurrentSelection()) return;
   const context = currentPlaybackContext;
   if (context.pressedSource === source && context.pressedFor === currentSubtitle && !['jimaku', 'reanime', 'anissia'].includes(source)) { context.pressedSource = null; renderSubtitleSheet(); }
 }
-async function switchSubtitleSource(source) {
+async function switchSubtitleSource(source, selectionRequestId, requestId) {
+  const isCurrentSelection = () => requestId === playbackRequestId && selectionRequestId === subtitleSelectionRequestId;
   // Jimaku is picked by hand per episode (a list of files), so it is not kept as the default source.
   if (source === 'jimaku') { openJimaku(); return; }
   // AI 번역: the episode's machine translation, else one made now from the best source (Jimaku, then the site's Japanese
   // and English tracks), with the side 자막 자동 번역 picks or whichever is set up; the series goes on in it. Not kept as
   // the default source (each episode's translation is looked for first anyway).
   if (source === 'ai') {
-    const key = subtitleStoreKey(), requestId = playbackRequestId; currentPlaybackContext.sheetSource = null; pressSubtitleSource('ai'); preferAiSubtitle(true); renderSubtitleSheet();
+    const key = subtitleStoreKey(); currentPlaybackContext.sheetSource = null; pressSubtitleSource('ai'); preferAiSubtitle(true); renderSubtitleSheet();
     const translated = (key ? await window.lilac.savedSubtitles(key).catch(() => []) : []).find(item => item.source === 'gemini');
+    if (!isCurrentSelection()) return;
     if (translated) { applySavedSubtitle(translated); return; }
     translationSettings = await window.lilac.geminiSettings().catch(() => translationSettings);
+    if (!isCurrentSelection()) return;
     const provider = autoTranslateProvider() || autoProvider();
     if (!provider) { toast('설정 > 자막 자동 번역에서 번역 API 키나 로컬 AI 모델을 먼저 준비해 주세요.'); return; }
-    if (!await autoTranslate(() => requestId !== playbackRequestId, true, provider) && requestId === playbackRequestId) $('#subtitleState').textContent = '번역할 자막(Jimaku, 일본어·영어 트랙)이 없습니다.';
+    if (!await autoTranslate(() => !isCurrentSelection(), true, provider) && isCurrentSelection()) $('#subtitleState').textContent = '번역할 자막(Jimaku, 일본어·영어 트랙)이 없습니다.';
     return;
   }
   // The list of a source with several to pick from opens under the chips.
@@ -246,7 +253,8 @@ async function switchSubtitleSource(source) {
   localStorage.setItem('subtitleSource', source);
   if ($('#subtitleSource')) { $('#subtitleSource').value = source; syncSettingChoices(); }
   syncPlayerSettingsUI();
-  const key = subtitleStoreKey(), saved = key ? await window.lilac.savedSubtitles(key).catch(() => []) : [], requestId = playbackRequestId;
+  const key = subtitleStoreKey(), saved = key ? await window.lilac.savedSubtitles(key).catch(() => []) : [];
+  if (!isCurrentSelection()) return;
   // Re:Anime / Miruro: the site's Korean track; without one the episode's machine translation, the one already made
   // (from whichever source) or one made now from the best source as the automatic translation picks it (Jimaku, then
   // the site's Japanese and English tracks); with 자막 자동 번역 off or not set up, the track that would be translated.
@@ -255,7 +263,7 @@ async function switchSubtitleSource(source) {
     if (korean) { selectSubtitleTrack(korean); return; }
     const translated = saved.find(item => item.source === 'gemini');
     if (translated) { applySavedSubtitle(translated); return; }
-    if (await autoTranslate(() => requestId !== playbackRequestId, true) || requestId !== playbackRequestId) return;
+    if (await autoTranslate(() => !isCurrentSelection(), true) || !isCurrentSelection()) return;
     const track = translationSourceTrack() || tracks[0];
     if (track) selectSubtitleTrack(track); else $('#subtitleState').textContent = `${trackSourceLabel()} 자막 트랙이 없습니다.`;
     return;
@@ -265,8 +273,8 @@ async function switchSubtitleSource(source) {
   if (source === 'kairan' || source === 'csora' || source === 'anissia') {
     const title = $('#skipTitle').value.trim(), episode = Number($('#skipEpisode').value) || 1, requestId = playbackRequestId;
     setSubtitleAvailability(source, 'checking', requestId); $('#subtitleState').textContent = `${SUBTITLE_SOURCE_LABELS[source]} 자막을 찾는 중...`;
-    try { const result = await window.lilac.findSubtitle(source, title, episode, subtitleSearchAnime()); if (requestId !== playbackRequestId) return; setSubtitleAvailability(source, 'available', requestId); currentSubtitlePath = result.path; attachSubtitle(result.url, communityLabel(source, result), { path: result.path, assUrl: result.assUrl, assPath: result.assPath, fonts: result.fonts, source }); }
-    catch (error) { if (requestId === playbackRequestId) { setSubtitleAvailability(source, subtitleAvailabilityStatusFromError(error), requestId); $('#subtitleState').textContent = `${SUBTITLE_SOURCE_LABELS[source]} 자막을 찾지 못했습니다.`; } }
+    try { const result = await window.lilac.findSubtitle(source, title, episode, subtitleSearchAnime()); if (!isCurrentSelection()) return; setSubtitleAvailability(source, 'available', requestId); currentSubtitlePath = result.path; attachSubtitle(result.url, communityLabel(source, result), { path: result.path, assUrl: result.assUrl, assPath: result.assPath, fonts: result.fonts, source }); }
+    catch (error) { if (isCurrentSelection()) { setSubtitleAvailability(source, subtitleAvailabilityStatusFromError(error), requestId); $('#subtitleState').textContent = `${SUBTITLE_SOURCE_LABELS[source]} 자막을 찾지 못했습니다.`; } }
     return;
   }
   const own = currentPlaybackContext.streamSubtitle;
