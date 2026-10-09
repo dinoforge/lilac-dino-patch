@@ -1,33 +1,20 @@
-<p align="center">
-  <img src="build/icon.png" width="96" alt="">
-</p>
-
-<h1 align="center">LilacAnime Desktop</h1>
+<h1 align="center">LilacAnime Player</h1>
 
 <p align="center">
-  <a href="https://github.com/whispelyn-byte/LilacAnime-desktop/releases/latest"><img src="https://img.shields.io/github/v/release/whispelyn-byte/LilacAnime-desktop?label=%EC%B5%9C%EC%8B%A0%20%EB%B2%84%EC%A0%84&color=b98fd6" alt="최신 버전"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%2F%2011-0078d4" alt="Windows 10 / 11">
-  <img src="https://img.shields.io/badge/macOS-Apple%20Silicon%20%2F%20Intel-555555" alt="macOS">
+  <img src="https://img.shields.io/badge/status-private%20development-74549a" alt="비공개 개발 중">
 </p>
 
-<p align="center">
-  <a href="https://github.com/whispelyn-byte/LilacAnime-desktop/releases/latest/download/LilacAnime-Setup.exe"><img src="https://img.shields.io/badge/%EB%B0%9B%EA%B8%B0-Windows-c8a2c8" alt="Windows용 받기"></a>
-  <a href="https://github.com/whispelyn-byte/LilacAnime-desktop/releases/latest/download/LilacAnime-mac-arm64.dmg"><img src="https://img.shields.io/badge/%EB%B0%9B%EA%B8%B0-Mac%20%28Apple%20Silicon%29-c8a2c8" alt="Mac(Apple Silicon)용 받기"></a>
-  <a href="https://github.com/whispelyn-byte/LilacAnime-desktop/releases/latest/download/LilacAnime-mac-x64.dmg"><img src="https://img.shields.io/badge/%EB%B0%9B%EA%B8%B0-Mac%20%28Intel%29-c8a2c8" alt="Mac(Intel)용 받기"></a>
-</p>
+Windows 우선의 LilacAnime 기반 데스크톱 앱입니다. RE:Anime · Miruro · Animenosub · 애니24 · Linkkf에서 작품을 찾고, 회차별 자막을 선택해 재생하는 흐름을 개발하고 있습니다. **LinkAni는 포함하지 않습니다.**
 
-<p align="center">
-  <a href="https://github.com/dream150/LilacAnime">LilacAnime</a> Android 앱을 Windows와 macOS에서 쓸 수 있게 옮긴 데스크톱 앱입니다.<br>
-  여러 사이트의 애니를 한 화면에서 찾아 보고, 한국어 자막을 자동으로 찾아 입히고,<br>
-  없으면 일본어·영어 자막을 한국어로 번역해 줍니다. 회차를 내려받아 오프라인에서도 볼 수 있습니다.
-</p>
+> 이 저장소는 비공개 개발용입니다. 원본 코드와 콘텐츠 출처의 이용 권한을 확인 중이며, 권한이 확인된 자료만 사용하세요. 설치 파일을 공개 배포하지 않고 자체 릴리스 전까지 앱 업데이트도 비활성입니다.
 
 ## 목차
 
 - **시작하기**: [주요 기능](#주요-기능) · [설치](#설치) · [처음 쓸 때](#처음-쓸-때)
 - **사용법**
   - [애니 보기](#애니-보기)
-  - [TMDB 키 넣기 (꼭 해 주세요)](#tmdb-키-넣기-꼭-해-주세요)
+  - [TMDB 한국어 제목 찾기](#tmdb-한국어-제목-찾기)
   - [자막 고르기 · 다시 번역](#자막-고르기--다시-번역)
   - [자막 크기 · 싱크 · 글꼴](#자막-크기--싱크--글꼴)
   - [번역 시작하기](#번역-시작하기)
@@ -47,7 +34,7 @@
 - **없으면 AI 번역**: Jimaku 일본어 자막이나 사이트의 일본어·영어 트랙을 번역 API(Gemini · OpenAI · DeepL · Qwen)나 내 PC의 로컬 AI(Gemma 4 · Aya · Hy-MT2)로 번역합니다. **보고 있는 장면부터 번역해 번역된 줄은 바로 한국어로** 바뀌고, 다음 화는 보는 동안 미리 번역해 둡니다.
 - **한국어 제목 · 줄거리**: 영어 사이트의 작품도 한국어 제목으로 보여 주고, TMDB 키가 있으면 줄거리도 한국어로 보여 줍니다.
 - **OP/ED 건너뛰기 · 이어보기 · 다음 화 수동 선택 · 키보드 단축키**
-- **다운로드**: 자막·OP/ED 구간까지 함께 저장해 오프라인에서도 그대로 봅니다. 외장하드로 옮겨도 저장 폴더만 바꾸면 다시 이어집니다.
+- **다운로드**: 사용 권한이 확인된 회차는 자막·OP/ED 구간과 함께 저장해 오프라인에서 볼 수 있습니다.
 
 | | |
 |---|---|
@@ -62,30 +49,15 @@
 
 ### Windows
 
-1. **[LilacAnime-Setup.exe 받기](https://github.com/whispelyn-byte/LilacAnime-desktop/releases/latest/download/LilacAnime-Setup.exe)**: 항상 최신 버전이 받아집니다. ([모든 릴리즈](https://github.com/whispelyn-byte/LilacAnime-desktop/releases))
-2. 실행해서 설치 위치를 고르고 설치합니다. 바탕 화면에 바로가기가 생깁니다.
-
-설치한 뒤에는 새 버전이 나오면 앱이 알려 주고, **설정 > 업데이트 · 정보**에서 바로 받아 설치할 수 있습니다. 업데이트하면 바뀐 점이 처음 한 번 표시됩니다.
-
-### macOS
-
-1. 내 Mac에 맞는 파일을 받습니다 (**Apple 메뉴 > 이 Mac에 관하여**에서 칩이 Apple M…이면 Apple Silicon, Intel이면 Intel):
-   - **[Apple Silicon (M1 이상)](https://github.com/whispelyn-byte/LilacAnime-desktop/releases/latest/download/LilacAnime-mac-arm64.dmg)**
-   - **[Intel](https://github.com/whispelyn-byte/LilacAnime-desktop/releases/latest/download/LilacAnime-mac-x64.dmg)**
-2. 받은 `.dmg`를 열고 LilacAnime을 **응용 프로그램** 폴더로 끌어 놓습니다.
-3. 처음 열 때 "Apple은 악성 코드가 없음을 확인할 수 없습니다"라고 나옵니다 (Apple 개발자 인증서로 서명하지 않은 앱이라서). **완료**를 누른 뒤 **시스템 설정 > 개인정보 보호 및 보안** 아래의 **그래도 열기**를 누르고, 한 번 더 **열기**를 누릅니다. 다음부터는 그냥 열립니다.
-   - 그래도 열리지 않으면 터미널에서 `xattr -cr /Applications/LilacAnime.app`을 실행한 뒤 다시 엽니다.
-
-Mac에서는 업데이트를 받아 **지금 설치**를 누르면 새 버전의 `.dmg`가 열리고 앱이 닫힙니다. 2번처럼 응용 프로그램 폴더로 끌어 놓아(**대치**) 바꿉니다.
+현재 공개 설치 파일은 없습니다. 이 프로젝트를 직접 개발·검증할 때만 아래 개발 안내를 사용하세요. `npm run dist`로 만든 설치 파일도 배포하지 않습니다.
 
 ## 처음 쓸 때
 
 설정은 오른쪽 위 톱니바퀴 버튼에 있고, 왼쪽에서 분류를 고르면 그 설정이 나옵니다.
 
 1. **설정 > 재생 > 콘텐츠 / 영상 소스**에서 볼 사이트를 고릅니다. 바꾸면 바로 목록을 다시 불러옵니다.
-2. **설정 > 일반 > 작품 제목 표시**에서 한국어 / 영어를 고릅니다.
-3. **(강력 추천) 설정 > 한국어 제목 검색**에 TMDB API 키를 넣습니다. 한국어 자막을 훨씬 많이 찾고, 제목 · 줄거리도 한국어로 나옵니다. → [TMDB 키 넣기](#tmdb-키-넣기-꼭-해-주세요)
-4. (선택) 자막 번역을 쓰려면 **설정 > 자막 자동 번역**에서 번역 API(Gemini · OpenAI · DeepL · Qwen) 키를 넣거나 로컬 AI 모델을 받습니다. → [번역 시작하기](#번역-시작하기)
+2. 작품 제목은 한국어 우선으로 표시됩니다. 일부 제목을 찾지 못하면 **설정 > 한국어 제목 검색**에서 TMDB 키를 선택적으로 등록할 수 있습니다. TMDB 키는 자막 재생에 필수는 아닙니다. → [TMDB 한국어 제목 찾기](#tmdb-한국어-제목-찾기)
+3. 사이트의 한국어 자막 또는 등록된 자막 후보를 회차별로 고를 수 있습니다. 자막이 없을 때 번역은 선택 사항이며, 플레이어의 ChatGPT 복사·붙여넣기 흐름에는 API 키가 필요하지 않습니다. → [자막 번역](#자막-번역)
 
 ## 사용법
 
@@ -105,9 +77,9 @@ Mac에서는 업데이트를 받아 **지금 설치**를 누르면 새 버전의
 
 자막은 앱이 알아서 찾아 입힙니다. 따로 할 일은 없습니다. 보다가 나가도 괜찮습니다. 홈의 **이어서 보기**나 위쪽 **시청기록**에서 누르면 멈춘 곳부터 이어집니다.
 
-### TMDB 키 넣기 (꼭 해 주세요)
+### TMDB 한국어 제목 찾기
 
-**한국어 자막을 찾는 데 가장 중요한 설정입니다.** RE:Anime · Miruro · Animenosub는 작품 제목이 영어라서, 한국어 자막(Kairan · Csora · Anissia)을 찾으려면 그 작품의 한국어 제목을 알아야 합니다. TMDB 키가 있으면 훨씬 많은 작품의 한국어 제목을 찾아서 한국어 자막이 더 많이 붙고, 제목과 줄거리도 한국어로 나옵니다. 키 없이도 쓸 수는 있지만 한국어 제목을 못 찾는 작품이 많습니다.
+TMDB API 키는 작품 제목과 일부 줄거리를 한국어로 찾는 데 사용할 수 있는 선택 설정입니다. 키가 없어도 작품 검색·회차 재생·사이트 자막 트랙·수동으로 선택한 자막 기능을 쓸 수 있습니다. 자막 후보의 실제 작품·회차 일치 여부와 서비스 이용 권한은 별도로 검증해야 합니다.
 
 키는 무료이고, PC 브라우저로 5분쯤 걸립니다 (TMDB 신청 화면이 휴대폰에서는 잘 안 됩니다).
 
@@ -342,7 +314,7 @@ Horimiya 1화(Jimaku SubsPlease 일본어 자막, 같은 대사를 빼면 425줄
 - Miruro · Animenosub는 플레이어 설정 > 재생 > 영상 서버에서 다른 서버(SUB · RAW · SOFT)를 골라 봅니다.
 
 **한국어 자막을 못 찾아요**
-- **설정 > 한국어 제목 검색**에 TMDB 키를 넣으면 훨씬 많이 찾습니다 → [TMDB API 키](#tmdb-키-넣기-꼭-해-주세요)
+- **설정 > 한국어 제목 검색**에 TMDB 키를 넣으면 한국어 제목을 더 많이 찾을 수 있습니다 → [TMDB 한국어 제목 찾기](#tmdb-한국어-제목-찾기)
 - 플레이어 설정 > 자막 > **한국어 자막 다시 찾기**를 눌러 봅니다. 그래도 없으면 번역 자막이 대신 나옵니다 ([번역 시작하기](#번역-시작하기)).
 
 **번역이 안 돼요**
@@ -364,14 +336,14 @@ Horimiya 1화(Jimaku SubsPlease 일본어 자막, 같은 대사를 빼면 425줄
 - 받은 회차는 **내 목록 > 다운로드**에서 지우거나, 저장 폴더를 다른 드라이브로 바꿉니다.
 
 **새 버전으로 바꾸고 싶어요**
-- **설정 > 업데이트 · 정보**에서 받아 설치합니다. 새 버전이 나오면 앱이 먼저 알려 줍니다.
+- 현재 프로젝트의 자체 업데이트 피드는 설정되지 않아 업데이트 확인·다운로드가 비활성입니다. 공개 릴리스를 제공하지 않습니다.
 
 ## 저장 위치
 
 | 내용 | 위치 |
 |---|---|
-| 다운로드한 회차 | `동영상\LilacAnime\작품 이름\` (Mac: `~/Movies/LilacAnime/작품 이름/`) (내 목록 > 다운로드 > 저장 폴더 바꾸기로 바꿀 수 있음) |
-| 설정, API 키, 자막·번역, 로컬 AI 모델 | `%APPDATA%\lilacanime-desktop\` (Mac: `~/Library/Application Support/lilacanime-desktop/`) |
+| 다운로드한 회차 | `동영상\LilacAnime\작품 이름\` (내 목록 > 다운로드 > 저장 폴더 바꾸기로 바꿀 수 있음) |
+| 설정, API 키, 자막·번역, 로컬 AI 모델 | `%APPDATA%\lilacanime-desktop\` |
 
 API 키는 이 PC에만 저장되고 다른 곳으로 보내지 않습니다 (각 키는 그 서비스 요청에만 씁니다).
 
@@ -392,11 +364,9 @@ npm start
 npm run dist
 ```
 
-`dist\LilacAnime-Setup.exe`가 만들어집니다. 앱 버전은 `package.json`의 `version`을 따릅니다.
+`dist\LilacAnime-Setup.exe`가 로컬에 만들어집니다. 앱 버전은 `package.json`의 `version`을 따릅니다. 이 설치 파일은 개발·검증용이며 공개하거나 다른 사람에게 배포하지 마세요.
 
-Mac에서는 `npm run dist:mac`으로 그 Mac의 칩에 맞는 `dist/LilacAnime-mac-arm64.dmg`(또는 `-x64.dmg`)가 만들어집니다.
-
-GitHub Actions(`.github/workflows/build.yml`)로도 만들어집니다. `v0.5.2`처럼 `v`로 시작하는 태그를 올리면 Windows 설치 파일과 Mac용 `.dmg` 두 개(Apple Silicon · Intel)를 만들어 그 태그의 릴리즈에 올립니다. 릴리즈가 아직 없으면 초안(draft)으로 만들어지니, 바뀐 점을 적고 게시하면 됩니다. 이미 있는 릴리즈에 직접 올린 `.exe`는 그대로 둡니다. **Actions > Build > Run workflow**로 돌리면 릴리즈 없이 실행 결과(Artifacts)로만 받을 수 있습니다.
+GitHub Actions 워크플로는 릴리스 태그 또는 수동 실행에만 반응합니다. 권리와 배포 범위를 확인하기 전에는 태그를 만들거나 워크플로를 실행하지 않습니다.
 
 | 폴더 | 내용 |
 |---|---|
@@ -406,7 +376,7 @@ GitHub Actions(`.github/workflows/build.yml`)로도 만들어집니다. `v0.5.2`
 
 ## 크레딧
 
-- 원작: [dream150/LilacAnime](https://github.com/dream150/LilacAnime) (Android). 원작자의 허락을 받아 Windows · macOS 데스크톱(Electron)용으로 포팅한 프로젝트입니다.
+- 기반: [LilacAnime Android](https://github.com/dream150/LilacAnime)와 [LilacAnime Desktop 업스트림](https://github.com/whispelyn-byte/LilacAnime-desktop). 업스트림 README는 포팅 허가를 받았다고 설명하지만, 이 파생 프로젝트에 적용되는 허가 범위는 별도로 확인되지 않았습니다. 그래서 저장소는 비공개로 두고 공개 배포하지 않습니다.
 - 자막: Kairan, Csora, [Anissia](https://anissia.net)에 등록된 자막 제작자분들, [Jimaku](https://jimaku.cc)
 - 로컬 번역: [llama.cpp](https://github.com/ggml-org/llama.cpp), [Tencent Hy-MT2](https://github.com/Tencent-Hunyuan/Hy-MT2), [Gemma 4](https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf), [Aya Expanse](https://huggingface.co/CohereLabs/aya-expanse-8b)
 - OP/ED 타임스탬프: [AniSkip](https://aniskip.com)
