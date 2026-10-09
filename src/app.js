@@ -310,20 +310,41 @@ function selectDetailTab(name){$$('#detailContent [data-detail-tab]').forEach(bu
 
 // Detail "재생" (Android DetailScreen): the most recently played episode of this anime,
 // otherwise the first playable one.
+function resumePosition(progress,mode='default'){
+  const value=Number(progress);
+  return Number.isFinite(value)&&value>0&&value<100&&(value<95||mode==='continue')?value:0;
+}
+
+function resumeAction(target,intent='primary'){
+  const progress=Math.max(0,Math.min(100,Number(target?.progress)||0)),hasProgress=Boolean(target?.episode)&&progress>0&&progress<100;
+  const primaryMode=hasProgress&&progress<95?'continue':'start-over',mode=intent==='alternate'?(primaryMode==='continue'?'start-over':'continue'):primaryMode;
+  const episode=target?.episode,episodeName=episode?`${episode.name||episode.number||1}화`:'';
+  const action=mode==='continue'?'이어보기':hasProgress?'처음부터':'재생';
+  return {label:[episodeName,action].filter(Boolean).join(' '),showAlternate:hasProgress,options:mode==='continue'?{resumeMode:'continue',resumeProgress:progress}:{resumeProgress:0}};
+}
+
+function bindResumeActions(primaryButton,alternateButton,target,playTarget){
+  const primary=resumeAction(target),alternate=resumeAction(target,'alternate');
+  if(target?.episode)primaryButton.innerHTML=playLabel(primary.label);
+  alternateButton.classList.toggle('hidden',!alternate.showAlternate);alternateButton.textContent=alternate.label;alternateButton.setAttribute('aria-label',alternate.label);
+  alternateButton.onclick=()=>playTarget(target.episode,alternate.options);
+}
+
 function resumeEpisode(anime,episodes){
-  const playable=episodes.filter(ep=>ep.playable!==false),refs=new Set(episodes.map(episodeRef));
-  const last=state.history.find(item=>item.episode&&(refs.has(episodeRef(item.episode))||(item.anime&&String(item.anime.mal_id)===String(anime.mal_id))));
-  if(!last)return {episode:playable[0]||null,resume:false};
+  const playable=episodes.filter(ep=>ep.playable!==false),fallback=playable[0]||null;
+  const sameProvider=(episode,item)=>{const current=episode?.provider||anime?.provider||'',saved=item?.episode?.provider||item?.anime?.provider||'';return !current||!saved||current===saved};
+  const sameAnime=item=>item?.anime?.mal_id!=null&&anime?.mal_id!=null&&String(item.anime.mal_id)===String(anime.mal_id)&&sameProvider(null,item);
   const numberOf=ep=>Number(ep.number??String(ep.name).match(/\d+/)?.[0]);
-  const index=episodes.findIndex(ep=>episodeRef(ep)===episodeRef(last.episode)||(Number.isFinite(numberOf(last.episode))&&numberOf(ep)===numberOf(last.episode)&&!ep.dub===!last.episode.dub));
-  if(index<0)return {episode:playable[0]||null,resume:false};
-  // Android: the last played episode; it resumes below 95% and starts over from there on.
-  return {episode:episodes[index],resume:Number(last.progress)>0&&Number(last.progress)<95};
+  const matches=(episode,item)=>sameProvider(episode,item)&&(episodeRef(episode)===episodeRef(item.episode)||(sameAnime(item)&&Number.isFinite(numberOf(item.episode))&&numberOf(episode)===numberOf(item.episode)&&!episode.dub===!item.episode.dub));
+  const last=state.history.find(item=>item.episode&&playable.some(episode=>matches(episode,item)));
+  if(!last)return {episode:fallback,resume:false,progress:0,matched:false};
+  const episode=playable.find(candidate=>matches(candidate,last))||fallback,progress=Math.max(0,Math.min(100,Number(last.progress)||0));
+  // Resuming below 95% stays automatic; near-complete episodes expose an explicit resume choice.
+  return {episode,resume:resumePosition(progress)>0,progress,matched:true};
 }
 
 function linkkfResumeTarget(anime,servers){
-  const refs=new Set(state.history.filter(item=>item.episode).map(item=>episodeRef(item.episode)));
-  const server=servers.find(item=>item.episodes.some(ep=>refs.has(episodeRef(ep))))||servers[0];
+  const server=servers.find(item=>resumeEpisode(anime,item.episodes).matched)||servers[0];
   return {...resumeEpisode(anime,server?.episodes||[]),episodes:server?.episodes||[]};
 }
 
@@ -352,8 +373,10 @@ async function openDetail(id) {
     $('#detailContent').innerHTML=`<div class="detail-hero"></div><div class="detail-body"><img alt=""><div class="detail-info"><span class="eyebrow">${escapeHtml(a.type||'ANIME')} · ${a.score?`★ ${a.score}`:isLinkkf?'LINKKF':'평점 없음'}</span><h1 ${titleAttr(a)}>${escapeHtml(titleOf(a))}</h1>${native?`<p class="detail-native">${escapeHtml(native)}</p>`:''}${meta?`<p class="detail-meta">${meta}</p>`:''}<p class="detail-stats hidden"></p><div class="tags">${(a.genres||[]).slice(0,5).map(g=>`<span>${escapeHtml(g.name)}</span>`).join('')}</div><p class="detail-synopsis">${escapeHtml(a.synopsis||'등록된 줄거리가 없습니다.')}</p><div class="detail-actions"><button class="primary detail-play" ${providerResult?.unavailable?'disabled':''}>${providerResult?.unavailable?'현재 재생 불가':isLinkkf?'회차 불러오기':playLabel('플레이어 열기')}</button><button class="ghost detail-save library-toggle ${isSaved?'saved':''}">${heartIcon()}<span>내 목록</span></button>${a.url?'<button class="ghost detail-web"><svg class="external-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><span>작품 정보</span></button>':''}</div><div class="detail-tabs hidden" role="tablist"><button type="button" role="tab" data-detail-tab="episodes" class="selected" aria-selected="true">회차</button><button type="button" role="tab" data-detail-tab="related" aria-selected="false">관련 작품</button></div><div id="episodeBlock" class="episode-block">${providerResult?.unavailable?'<p class="episode-loading">현재 제공처에 영상이 없는 작품입니다. 설정에서 다른 콘텐츠 소스를 선택해 주세요.</p>':''}</div><div id="relatedBlock" class="related-block hidden"></div></div></div>`;
     setBackgroundImage($('#detailContent .detail-hero'),imageOf(a));koreanOverview(a).then(text=>{const p=$('#detailContent .detail-synopsis');if(text&&p&&openDetail.token===token){p.textContent=text;p.title='줄거리: TMDB'}});setImageSource($('#detailContent .detail-body img'),imageOf(a));
     $$('#detailContent [data-detail-tab]').forEach(button=>button.onclick=()=>selectDetailTab(button.dataset.detailTab));
-    const playProvider=ep=>{dialog.close();return resolveIntoPlayer(()=>window.lilac.providerResolve(ep),`${titleOf(a)} · ${ep.name}화`,{episode:ep,subtitleTitle:titleOf(a),image:imageOf(a),comparisonEpisodes:nearbyEpisodes(providerResult.episodes,ep),seriesEpisodes:providerResult.episodes,anime:normalize(a)},titleOf(a),ep.number||1)};
-    if(isExternal&&providerResult.episodes?.length&&!providerResult.unavailable){const target=resumeEpisode(a,providerResult.episodes);if(target.episode)$('.detail-play').innerHTML=playLabel(`${target.episode.name}화 ${target.resume?'이어보기':'재생'}`)}
+    const resumeChoiceButton=document.createElement('button');resumeChoiceButton.type='button';resumeChoiceButton.className='ghost detail-resume-choice hidden';resumeChoiceButton.textContent='처음부터';resumeChoiceButton.setAttribute('aria-label','이어보기 선택');$('.detail-actions').insertBefore(resumeChoiceButton,$('.detail-save'));
+    const updateResumeActions=(target,playTarget)=>bindResumeActions($('.detail-play'),resumeChoiceButton,target,playTarget);
+    const playProvider=(ep,playbackOptions={})=>{dialog.close();return resolveIntoPlayer(()=>window.lilac.providerResolve(ep),`${titleOf(a)} · ${ep.name}화`,{episode:ep,subtitleTitle:titleOf(a),image:imageOf(a),comparisonEpisodes:nearbyEpisodes(providerResult.episodes,ep),seriesEpisodes:providerResult.episodes,anime:normalize(a),...playbackOptions},titleOf(a),ep.number||1)};
+    if(isExternal&&providerResult.episodes?.length&&!providerResult.unavailable){const target=resumeEpisode(a,providerResult.episodes);if(target.episode)updateResumeActions(target,playProvider)}
     if(isExternal&&providerResult.episodes?.length)mountEpisodeList($('#episodeBlock'),{heading:'회차',episodes:providerResult.episodes,anime:a,onPlay:playProvider});
     if((isReAnime||a.provider==='miruro')&&a.related?.length){const groups=new Map();a.related.forEach(item=>{const name=relationLabel(item.relationType)||'관련 작품';if(!groups.has(name))groups.set(name,[]);groups.get(name).push(item)});renderRelated([...groups].map(([name,items])=>({name,items})))}
     const showStats=stats=>{if(!stats||openDetail.token!==token)return;const el=$('#detailContent .detail-stats');el.textContent=`조회수 오늘 ${stats.day.toLocaleString()} · 주간 ${stats.week.toLocaleString()} · 월간 ${stats.month.toLocaleString()} · 전체 ${stats.total.toLocaleString()}`;el.classList.remove('hidden')};
@@ -362,7 +385,7 @@ async function openDetail(id) {
       // Android records a view once the detail page has stayed open for 9 seconds, then refreshes the counters.
       setTimeout(()=>{if(openDetail.token===token&&dialog.open)window.lilac.linkkfRecordView(a.id).then(showStats).catch(()=>{})},9000);
     }
-    const playLinkkf=(ep,episodes)=>{const episodeNumber=Number(String(ep.name).match(/\d+/)?.[0]||1);dialog.close();return resolveIntoPlayer(()=>window.lilac.linkkfResolve(ep),`${titleOf(a)} · ${ep.name}화`,{episode:ep,subtitleTitle:titleOf(a),image:imageOf(a),seriesEpisodes:episodes,resolveKind:'linkkf',anime:normalize(a)},titleOf(a),episodeNumber)};
+    const playLinkkf=(ep,episodes,playbackOptions={})=>{const episodeNumber=Number(String(ep.name).match(/\d+/)?.[0]||1);dialog.close();return resolveIntoPlayer(()=>window.lilac.linkkfResolve(ep),`${titleOf(a)} · ${ep.name}화`,{episode:ep,subtitleTitle:titleOf(a),image:imageOf(a),seriesEpisodes:episodes,resolveKind:'linkkf',anime:normalize(a),...playbackOptions},titleOf(a),episodeNumber)};
     // Linkkf episodes load with the page, like Android, so "재생" can resume the last played one.
     let linkkfServers=null;
     if(isLinkkf){
@@ -371,13 +394,13 @@ async function openDetail(id) {
         if(openDetail.token!==token)return;linkkfServers=servers;block.replaceChildren();
         if(!servers.length){block.innerHTML='<p class="episode-loading">등록된 회차가 없습니다.</p>';return}
         servers.forEach(server=>mountEpisodeList(block,{heading:server.name,episodes:server.episodes,anime:a,resolveKind:'linkkf',onPlay:ep=>playLinkkf(ep,server.episodes)}));
-        const target=linkkfResumeTarget(a,servers);if(target.episode){playButton.disabled=false;playButton.innerHTML=playLabel(`${target.episode.name}화 ${target.resume?'이어보기':'재생'}`)}
+        const target=linkkfResumeTarget(a,servers);if(target.episode){playButton.disabled=false;updateResumeActions(target,(ep,options)=>playLinkkf(ep,target.episodes,options))}
       }).catch(e=>{if(openDetail.token===token)block.innerHTML=`<p class="episode-loading">${escapeHtml(e.message)}</p>`});
     }
     $('.detail-play').onclick=async()=>{
-      if(isExternal){const ep=resumeEpisode(a,providerResult.episodes||[]).episode;if(ep)await playProvider(ep);else toast(providerResult.unavailable?'현재 제공처에 영상이 없는 작품입니다.':'회차 목록을 불러오지 못했습니다. 작품 정보 버튼으로 제공처 상태를 확인해 주세요.');return;}
+      if(isExternal){const target=resumeEpisode(a,providerResult.episodes||[]);if(target.episode)await playProvider(target.episode,resumeAction(target).options);else toast(providerResult.unavailable?'현재 제공처에 영상이 없는 작품입니다.':'회차 목록을 불러오지 못했습니다. 작품 정보 버튼으로 제공처 상태를 확인해 주세요.');return;}
       if(!isLinkkf){dialog.close();$('#playerTitle').textContent=titleOf(a);switchView('player');return;}
-      const target=linkkfServers?linkkfResumeTarget(a,linkkfServers):null;if(target?.episode)await playLinkkf(target.episode,target.episodes);
+      const target=linkkfServers?linkkfResumeTarget(a,linkkfServers):null;if(target?.episode)await playLinkkf(target.episode,target.episodes,resumeAction(target).options);
     };
     $('.detail-save').onclick=e=>toggleLibrary(a,e.currentTarget);
     $('.detail-web')?.addEventListener('click',()=>window.lilac.openExternal(a.url));
@@ -558,7 +581,7 @@ function play(src,name='직접 재생',context={}) {
       {const detail=data.details||data.type||'unknown',status=data.response?.code||data.response?.status||'',reason=data.reason||data.error?.message||'';const message=[detail,status&&`HTTP ${status}`,reason].filter(Boolean).join(' · ');$('#downloadStatus').textContent=`HLS 오류: ${message}`;toast(`HLS 재생 오류: ${message}`)}});
   }else video.src=src;
   $('#streamUrl').value=/^https?:/i.test(src)?src:'';$('#playerTitle').textContent=name;updatePlayerTitle();$('#playerMeta').textContent=context.episode?`${episodeNumberOf(context.episode)||1}화`:'LilacAnime';$('#playerEmpty p').textContent='영상을 준비하고 있어요';$('#skipTitle').value=context.subtitleTitle||((name==='직접 재생')?'':name.split(' · ')[0]);if(context.episode)$('#skipEpisode').value=episodeNumberOf(context.episode)||1;video.volume=Math.max(0,Math.min(1,Number(localStorage.getItem('playerVolume')??1)));video.muted=localStorage.getItem('playerMuted')==='true';syncVolumeUI();video.playbackRate=Number($('#speed').value);if(!isHls)video.play().catch(()=>{});loadJimakuList();
-  const historyKey=context.episode?`${context.episode.provider||context.resolveKind||'linkkf'}:${context.episode.url||context.episode.token||context.episode.id||context.episode.number}`:src;if(context.episode||!/^http:\/\/127\.0\.0\.1:\d+\/__flix\//i.test(src)){const previous=state.history.find(x=>(x.key||x.src)===historyKey),savedProgress=Number(context.resumeProgress??previous?.progress??0);pendingResumeProgress=savedProgress>0&&savedProgress<95?savedProgress:0;state.history=state.history.filter(x=>(x.key||x.src)!==historyKey);state.history.unshift({key:historyKey,src:context.episode?'':src,name,episode:context.episode||null,subtitleTitle:context.subtitleTitle||name.split(' · ')[0],image:context.image||previous?.image||'',comparisonEpisodes:context.comparisonEpisodes||previous?.comparisonEpisodes||[],anime:context.anime||previous?.anime||null,resolveKind:context.resolveKind||previous?.resolveKind||null,progress:savedProgress,updated:Date.now()});state.history=state.history.slice(0,300);currentHistoryKey=historyKey;store.set('history',state.history);if(context.episode)catalogUpdateUI.markEpisodeSeen(context.anime,context.episode);renderContinue();applyPendingResume()}else{currentHistoryKey=null;pendingResumeProgress=0}
+  const historyKey=context.episode?`${context.episode.provider||context.resolveKind||'linkkf'}:${context.episode.url||context.episode.token||context.episode.id||context.episode.number}`:src;if(context.episode||!/^http:\/\/127\.0\.0\.1:\d+\/__flix\//i.test(src)){const previous=state.history.find(x=>(x.key||x.src)===historyKey),savedProgress=Number(context.resumeProgress??previous?.progress??0);pendingResumeProgress=resumePosition(savedProgress,context.resumeMode);state.history=state.history.filter(x=>(x.key||x.src)!==historyKey);state.history.unshift({key:historyKey,src:context.episode?'':src,name,episode:context.episode||null,subtitleTitle:context.subtitleTitle||name.split(' · ')[0],image:context.image||previous?.image||'',comparisonEpisodes:context.comparisonEpisodes||previous?.comparisonEpisodes||[],anime:context.anime||previous?.anime||null,resolveKind:context.resolveKind||previous?.resolveKind||null,progress:savedProgress,updated:Date.now()});state.history=state.history.slice(0,300);currentHistoryKey=historyKey;store.set('history',state.history);if(context.episode)catalogUpdateUI.markEpisodeSeen(context.anime,context.episode);renderContinue();applyPendingResume()}else{currentHistoryKey=null;pendingResumeProgress=0}
 }
 function escapeHtml(v=''){const d=document.createElement('div');d.textContent=v;return d.innerHTML;}
 // Subtitle currently applied. ASS subtitles render through libass (ass-renderer.js) while
