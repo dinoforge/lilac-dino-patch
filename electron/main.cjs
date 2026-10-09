@@ -9,6 +9,7 @@ const AdmZip = require('adm-zip');
 const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 const { createFlixProxyUrl, createFlixAvProxyUrl, closeFlixProxy } = require('./flix-proxy.cjs');
+const { createPlayerStreamHeaders } = require('./player-stream-headers.cjs');
 const { detectOpEd } = require('./oped-fingerprint.cjs');
 const { requestAniListGraphQL } = require('./anilist-client.cjs');
 const { DownloadManager } = require('./download-manager.cjs');
@@ -50,10 +51,7 @@ const REANIME_WEB = 'https://reanime.to';
 const ANIMENOSUB_WEB = 'https://animenosub.to';
 const MIRURO_WEB = 'https://www.miruro.to';
 const ANDROID_WEBVIEW_UA = 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
-const resolvedStreamHeaders = new Map();
-// Headers of the Miruro stream playing in the main window. Its playlists and segments come from several hosts, so they
-// go on every video request of the player (see the session hooks) until another episode is resolved.
-let playerStreamHeaders = null;
+const playerStreamHeaders = createPlayerStreamHeaders();
 const malIdCache = new Map();
 let downloadManager;
 let updater;
@@ -802,7 +800,7 @@ async function resolveStreamPage(targetUrl, referer = '', timeoutMs = 30000, { p
     // The key appears with the player; a page that never sets it is given up instead of waiting forever.
     if(isFlixCloud){const keyDeadline=Date.now()+15000;while(!flixPk&&!resolver.isDestroyed()&&Date.now()<keyDeadline){flixPk=await resolver.webContents.executeJavaScript(`window.__pk||''`,true).catch(()=>'');if(!flixPk)await new Promise(resolve=>setTimeout(resolve,250))}if(!flixPk)throw new Error(resolver.isDestroyed()?'플레이어 창이 닫혀 복호화 키 탐색을 중단했습니다.':'FlixCloud 복호화 키를 찾지 못했습니다.');const headers={...lastHeaders,Referer:targetUrl,'User-Agent':ANDROID_WEBVIEW_UA};stream=flixVideo&&flixAudio?await createFlixAvProxyUrl(flixVideo,flixAudio,flixPk,headers):await createFlixProxyUrl(stream,flixPk,headers);}
     let subtitleUrl=subtitle,subtitlePath=null,subtitleAss=null;if(subtitle){try{const saved=subtitleResult(await saveRemoteSubtitle(subtitle,{referer:targetUrl,userAgent:browserUa,headers:lastHeaders}));subtitleUrl=saved.url;subtitlePath=saved.path;subtitleAss=saved.assUrl?{url:saved.assUrl,path:saved.assPath}:null}catch{/* Community subtitle fallback remains available. */}}
-    resolvedStreamHeaders.set(new URL(stream).host,{...lastHeaders,Referer:targetUrl});return {url:stream,subtitleUrl,subtitlePath,subtitleAss,subtitleTracks,headers:lastHeaders,referer:targetUrl};
+    return {url:stream,subtitleUrl,subtitlePath,subtitleAss,subtitleTracks,headers:lastHeaders,referer:targetUrl};
   } finally {signal?.removeEventListener('abort',stop);ses.webRequest.onBeforeSendHeaders(null);if(!resolver.isDestroyed())resolver.destroy();}
 }
 
@@ -1950,8 +1948,8 @@ app.whenReady().then(async () => {
   },broadcast});
   // A Miruro stream's playlists and segments (main window video requests) carry its Referer/Origin, and those hosts
   // only allow their own site's origin, so the answer is opened to the player.
-  const playerMediaRequest=details=>Boolean(playerStreamHeaders)&&['xhr','media'].includes(details.resourceType)&&/^https?:/i.test(details.url)&&!details.url.startsWith(MIRURO_WEB)&&details.webContentsId!==undefined&&details.webContentsId===mainWindow?.webContents?.id;
-  session.defaultSession.webRequest.onBeforeSendHeaders({urls:['*://*/*']},(details,callback)=>{let headers=details.requestHeaders||{};const host=new URL(details.url).host,remembered=resolvedStreamHeaders.get(host)||(playerMediaRequest(details)?playerStreamHeaders:null);if(remembered){for(const [key,value] of Object.entries(remembered)){if(['referer','origin','user-agent','cookie','authorization'].includes(key.toLowerCase())&&value)headers[key]=value;}}callback({requestHeaders:headers});});
+  const playerMediaRequest=details=>playerStreamHeaders.hasFallback()&&['xhr','media'].includes(details.resourceType)&&/^https?:/i.test(details.url)&&!details.url.startsWith(MIRURO_WEB)&&details.webContentsId!==undefined&&details.webContentsId===mainWindow?.webContents?.id;
+  session.defaultSession.webRequest.onBeforeSendHeaders({urls:['*://*/*']},(details,callback)=>{let headers=details.requestHeaders||{};const host=new URL(details.url).host,remembered=playerStreamHeaders.forRequest(host,playerMediaRequest(details));if(remembered){for(const [key,value] of Object.entries(remembered))headers[key]=value;}callback({requestHeaders:headers});});
   session.defaultSession.webRequest.onHeadersReceived({urls:['*://*/*']},(details,callback)=>{
     if(!playerMediaRequest(details))return callback({});
     const headers={...details.responseHeaders};for(const key of Object.keys(headers))if(/^access-control-allow-(?:origin|credentials)$/i.test(key))delete headers[key];
@@ -2041,9 +2039,9 @@ app.whenReady().then(async () => {
     return true;
   });
   ipcMain.handle('linkkf:resolve', async (_, episode) => {
-    playerStreamHeaders=null;let playerUrl='';try{const root=await linkkfFetch(`https://emdlinkkf.5imgdarr.top/apilink2.php?data=${encodeURIComponent(episode.token)}`);const links=Array.isArray(root.data)?root.data:[];playerUrl=(links.find(x=>String(x.server).toUpperCase()==='NR-HD')||links[0]||{}).link||'';}catch{}
+    const requestId=playerStreamHeaders.begin();let playerUrl='';try{const root=await linkkfFetch(`https://emdlinkkf.5imgdarr.top/apilink2.php?data=${encodeURIComponent(episode.token)}`);const links=Array.isArray(root.data)?root.data:[];playerUrl=(links.find(x=>String(x.server).toUpperCase()==='NR-HD')||links[0]||{}).link||'';}catch{}
     if(!playerUrl)playerUrl=`${LINKKF_WEB}/up/${encodeURIComponent(episode.postId)}/watch/?slug=${encodeURIComponent(episode.slug)}`;
-    return resolveStreamPage(playerUrl,`${LINKKF_WEB}/`,15000);
+    const stream=await resolveStreamPage(playerUrl,`${LINKKF_WEB}/`,15000);playerStreamHeaders.complete(requestId,'linkkf',stream);return stream;
   });
   // Home rails, most popular first and only shows that already have episodes (early in a season most are still to
   // air): "2026 가을 신작" (this season; Re:Anime and Miruro filter their catalog by season and year, Animenosub its
@@ -2159,9 +2157,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('provider:play', (_, episode, title) => openProviderPlayer(episode,title).then(()=>true));
   // The player's own resolves (downloads resolve in the background through resolveProviderEpisode directly).
   ipcMain.handle('provider:resolve', async (_, episode) => {
-    playerStreamHeaders = null;
+    const requestId=playerStreamHeaders.begin();
     const stream = await resolveProviderEpisode(episode);
-    if (['miruro', 'ohli24'].includes(episode?.provider)) playerStreamHeaders = stream.headers || null;
+    playerStreamHeaders.complete(requestId,episode?.provider,stream);
     return stream;
   });
   ipcMain.handle('provider:subtitle-tracks', (_, episode) => reanimeSubtitleTracks(episode));
