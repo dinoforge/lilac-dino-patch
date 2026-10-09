@@ -16,6 +16,7 @@ const { SubtitleStore } = require('./subtitle-store.cjs');
 const { createTranslator } = require('./subtitle-translator.cjs');
 const { QUARTER_PROVIDERS, quarterForDate, quarterPeriod, quarterQuery } = require('./quarter-catalog.cjs');
 const { fetchLatestEpisodes } = require('./latest-episodes.cjs');
+const { createCatalogBrowser } = require('./catalog-browser.cjs');
 const { createCatalogUpdates } = require('./catalog-updates.cjs');
 let catalogUpdates;
 let subtitleTranslator = null;
@@ -148,6 +149,13 @@ async function linkkfFilter({ page = 1, limit = 20, seasonTypeIds = [], genreIds
   const pagination = root.pagination || {};
   return { data: (root.data || []).map(linkkfAnime).filter(a => a.id), page: Number(pagination.current_page) || Number(page) || 1, totalPages: Number(pagination.total_pages) || 1, total: Number(pagination.total_results) || 0 };
 }
+async function linkkfFilterTags() {
+  const load = taxonomy => linkkfFetch(`${LINKKF_API}/link/api.php?taxonomy=${encodeURIComponent(taxonomy)}&limit=200&orderby=name&order=ASC`)
+    .then(root => (root.terms || []).map(term => ({ id: Number(term.tag_ID) || 0, name: String(term.name || '').trim(), count: Number(term.count) || 0 })).filter(tag => tag.id > 0 && tag.name))
+    .catch(() => []);
+  const [formats, genres, years] = await Promise.all([load('anime-seasontype'), load('anigenres'), load('anime-seasonys')]);
+  return { formats, genres, years: years.reverse() };
+}
 // Android searches the whole Linkkf catalog locally (title/genre). The full list is the Linkkf catalog index
 // (see CATALOGS), loaded in the background like the other sources; it is downloaded here when not loaded yet.
 let activeCatalogSource = null;
@@ -201,7 +209,8 @@ function reanimeItems(root) {
     const genresRaw = a.genres || raw.genres || [];
     const genres = (Array.isArray(genresRaw) ? genresRaw : Object.values(genresRaw)).map(x => ({name: typeof x === 'string' ? x : x.name || x.title || ''})).filter(x=>x.name);
     const episodeCount=Number(a.episodes||0)||Math.max(Number(a.subbed||0),Number(a.dubbed||0))||0;
-    return {provider:'reanime',id:slug,mal_id:`reanime:${slug}`,title,title_english:'',images:{webp:{large_image_url:imageUrl}},score:Number(a.average_score||a.score||0)/10||null,year:a.season_year||a.year||'',type:a.format||'Anime',episodes:episodeCount||null,status:a.status||'',synopsis:a.description||a.synopsis||'',genres,studios:[],url:`${REANIME_WEB}/anime/${slug}`,anilistId:Number(a.anilist_id||a.anilistId||a.anilist||0)||null,malId:Number(a.mal_id||0)||null,canWatch:a.can_watch!==false,subbed:Number(a.subbed||0),dubbed:Number(a.dubbed||0),updatedAt:a.episode?.aired||''};
+    const metadata={season:a.season||'',aired:a.start_date||a.started_on||'',totalEpisodes:Number(a.episodes)||null,availableEpisodes:Math.max(Number(a.subbed)||0,Number(a.dubbed)||0),updatedAt:a.episode?.aired||''};
+    return {...metadata,provider:'reanime',id:slug,mal_id:`reanime:${slug}`,title,title_english:'',images:{webp:{large_image_url:imageUrl}},score:Number(a.average_score||a.score||0)/10||null,year:a.season_year||a.year||'',type:a.format||'Anime',episodes:episodeCount||null,status:a.status||'',synopsis:a.description||a.synopsis||'',genres,studios:[],url:`${REANIME_WEB}/anime/${slug}`,anilistId:Number(a.anilist_id||a.anilistId||a.anilist||0)||null,malId:Number(a.mal_id||0)||null,canWatch:a.can_watch!==false,subbed:Number(a.subbed||0),dubbed:Number(a.dubbed||0)};
   }).filter(x => x.title && x.id);
 }
 
@@ -228,9 +237,12 @@ function animenosubList(html, base = `${ANIMENOSUB_WEB}/`, { onlyResults = false
     let title=(img.attr('alt')||container.find('h1,h2,h3,h4,.title,.film-name,.post-title').first().text()||el.text()).trim();
     title=title.replace(/\s+episode\s+\d+.*$/i,'').trim()||seriesSlug.replace(/[-_]+/g,' ');
     const id=`animenosub:${seriesSlug}`, current=found.get(id);
+    const episodeNumbers=container.find('.ans-num, .epx').map((_,node)=>Number($(node).text().match(/\d+/)?.[0])||0).get();
+    const uploaded=Math.max(0,...episodeNumbers,Number(episodeSlug.match(/-episode-(\d+)/i)?.[1])||0);
     const better=!current||(poster&&(!current.images.webp.large_image_url||(backdrops.has(id)&&src)));
     if(better){if(src||!poster)backdrops.delete(id);else backdrops.add(id)}
-    if(better)found.set(id,{provider:'animenosub',id:seriesSlug,mal_id:id,title,title_english:'',images:{webp:{large_image_url:poster}},score:null,year:'',type:'Anime',episodes:null,synopsis:'',genres:[],studios:[],url:`${ANIMENOSUB_WEB}/anime/${seriesSlug}/`});
+    if(better)found.set(id,{provider:'animenosub',id:seriesSlug,mal_id:id,title,title_english:'',images:{webp:{large_image_url:poster}},score:null,year:'',type:container.find('.typez').first().text().trim()||'Anime',availableEpisodes:uploaded||null,totalEpisodes:null,episodes:null,synopsis:'',genres:[],studios:[],url:`${ANIMENOSUB_WEB}/anime/${seriesSlug}/`});
+    else if(current&&uploaded>Number(current.availableEpisodes||0))found.set(id,{...current,availableEpisodes:uploaded});
   });
   return [...found.values()];
 }
@@ -285,7 +297,8 @@ function reanimeMediaFromJson(root,original){
     status:root.status||original.status,season:root.season||'',source:root.source||'',aired:start&&end?`${start} ~ ${end}`:start,
     score:Number(root.average_score)?Number(root.average_score)/10:original.score,
     anilistId:Number(root.anilist_id)||original.anilistId||null,malId:Number(root.mal_id)||original.malId||null,
-    episodes:Number(root.episodes_total)||original.episodes,subbed:Number(root.subbed)||original.subbed,dubbed:Number(root.dubbed)||original.dubbed,
+    episodes:Number(root.episodes_total)||original.episodes,totalEpisodes:Number(root.episodes_total)||original.totalEpisodes||null,
+    availableEpisodes:Math.max(Number(root.subbed??original.subbed)||0,Number(root.dubbed??original.dubbed)||0),subbed:root.subbed==null?original.subbed:Number(root.subbed),dubbed:root.dubbed==null?original.dubbed:Number(root.dubbed),
     related:reanimeRelated(root.relations,original.id)};
 }
 function reanimeMediaFromHtml(html,original){
@@ -452,6 +465,7 @@ function miruroItem(raw={}){
   if(Number(raw.episode_count)>0)availableEpisodeCount=Math.min(availableEpisodeCount,Number(raw.episode_count));
   return {provider:'miruro',id:raw.id,mal_id:`miruro:${raw.id}`,title:title.english||title.romaji||native,title_english:'',title_japanese:native,romaji:title.romaji||'',
     images:{webp:{large_image_url:raw.cover_url||''}},score:Number(raw.average_score)?Number(raw.average_score)/10:null,year:raw.season_year||'',type:raw.format||'Anime',
+    season:raw.season||'',aired:raw.started_on||'',totalEpisodes:Number(raw.episode_count)||null,availableEpisodes:Object.values(counts).some(value=>value!=null)?availableEpisodeCount:null,
     episodes:Number(raw.episode_count)||null,availableEpisodeCount,status:String(raw.status||'').toLowerCase().replace(/_/g,' ').replace(/^./,c=>c.toUpperCase()),synopsis:miruroText(raw.description),genres:(raw.genres||[]).map(name=>({name:String(name)})),studios:[],
     url:`${MIRURO_WEB}/watch/${raw.id}`,anilistId:externalId('anilist'),malId:externalId('mal')};
 }
@@ -590,8 +604,9 @@ function ohliItems(html){
     const el=$(node),link=el.find('a.show-item-img-link').attr('href')||el.find('a[href*=".html"]').attr('href')||'',id=String(link).match(/\/(\d+)\/[^/]+\.html/)?.[1];
     const img=el.find('img').first(),title=(el.find('.show-item-title').first().text()||img.attr('title')||'').trim();
     if(!id||!title||found.has(id))return;
+    const available=Number(el.find('.show-item-eps').first().text().match(/\d+/)?.[0])||null;
     found.set(id,{provider:'ohli24',id,mal_id:`ohli24:${id}`,title,title_english:'',images:{webp:{large_image_url:absoluteUrl(img.attr('src')||'',OHLI24_WEB)}},score:null,year:'',type:/극장판/.test(title)?'Movie':'TV',
-      episodes:Number(el.find('.show-item-eps').first().text().match(/\d+/)?.[0])||null,status:el.find('.cat-tag').first().text().trim(),synopsis:'',
+      episodes:available,availableEpisodes:available,totalEpisodes:null,status:el.find('.cat-tag').first().text().trim(),synopsis:'',
       genres:el.find('.top-list-body-genre a').map((_,a)=>({name:$(a).text().trim()})).get().filter(genre=>genre.name),studios:[],url:absoluteUrl(link,OHLI24_WEB)});
   });
   return [...found.values()];
@@ -633,7 +648,8 @@ async function ohliDetail(anime){
   if(ids)for(const episode of episodes)Object.assign(episode,ids);
   const data={...anime,...(ids||{}),title,title_japanese:native,images:{webp:{large_image_url:absoluteUrl(poster,OHLI24_WEB)}},
     synopsis:$('.movie-coment').first().text().replace(/\s+/g,' ').trim()||anime.synopsis||'',genres:(meta['장르']||'').split(/[,/·]/).map(name=>name.trim()).filter(Boolean).map(name=>({name})),
-    year:(meta['방영일']||'').match(/\d{4}/)?.[0]||anime.year||'',aired:meta['방영일']||'',episodes:Number((meta['총화수']||'').match(/\d+/)?.[0])||episodes.length};
+    year:(meta['방영일']||'').match(/\d{4}/)?.[0]||anime.year||'',aired:meta['방영일']||'',availableEpisodes:Math.max(0,...episodes.map(episode=>Number(episode.number)||0)),
+    totalEpisodes:Number((meta['총화수']||'').match(/\d+/)?.[0])||null,episodes:Number((meta['총화수']||'').match(/\d+/)?.[0])||episodes.length};
   return {data,episodes,unavailable:false};
 }
 // The cdndania player hands its master playlist (master.txt) only to its own page: the request needs the cookie the
@@ -1890,11 +1906,7 @@ app.whenReady().then(async () => {
     const entries = await Promise.all(Object.entries(LINKKF_SEASON_TYPES).map(([key, tag]) => linkkfFilter({ page: 1, limit: 10, seasonTypeIds: [tag] }).then(result => [key, result.data]).catch(() => [key, []])));
     return Object.fromEntries(entries);
   });
-  ipcMain.handle('linkkf:filter-tags', async () => {
-    const load = taxonomy => linkkfFetch(`${LINKKF_API}/link/api.php?taxonomy=${encodeURIComponent(taxonomy)}&limit=200&orderby=name&order=ASC`).then(root => (root.terms || []).map(term => ({ id: Number(term.tag_ID) || 0, name: String(term.name || '').trim(), count: Number(term.count) || 0 })).filter(tag => tag.id > 0 && tag.name)).catch(() => []);
-    const [formats, genres, years] = await Promise.all([load('anime-seasontype'), load('anigenres'), load('anime-seasonys')]);
-    return { formats, genres, years: years.reverse() };
-  });
+  ipcMain.handle('linkkf:filter-tags', () => linkkfFilterTags());
   ipcMain.handle('linkkf:filter', (_, request) => linkkfFilter(request));
   ipcMain.handle('linkkf:search', async (_, query = '') => {
     const key = linkkfSearchKey(query); if (!key) return { data: [] };
@@ -2015,6 +2027,26 @@ app.whenReady().then(async () => {
     ohliFetch,
     ohliItems
   });
+  ipcMain.handle('catalog:updates', (_, provider, offset) => catalogUpdates.page(String(provider || ''), offset));
+  const catalogBrowser = createCatalogBrowser({
+    reanimeBase: REANIME_WEB,
+    reanimeFetch: url => providerFetch(url, { json: true, referer: `${REANIME_WEB}/search` }),
+    reanimeItems,
+    reanimeReleaseItems: () => sortedFromIndex('reanime', 'year'),
+    animenosubBase: ANIMENOSUB_WEB,
+    animenosubFetch: url => providerFetch(url, { referer: `${ANIMENOSUB_WEB}/` }),
+    animenosubItems: animenosubList,
+    linkkfTags: linkkfFilterTags,
+    linkkfFilter,
+    miruroApi,
+    miruroItem,
+    updates: catalogUpdates,
+    ohliBase: OHLI24_WEB,
+    ohliFetch,
+    ohliItems
+  });
+  ipcMain.handle('catalog:facets', (_, provider) => catalogBrowser.facets(String(provider || '')));
+  ipcMain.handle('catalog:browse', (_, provider, request) => catalogBrowser.browse(String(provider || ''), request || {}));
   ipcMain.handle('provider:catalog', async (_, provider, query = '', offset = 0, sort = '') => {
     if (sort && !query) return sortedCatalog(provider, String(sort), offset);
     if (provider === 'reanime') {
@@ -2043,7 +2075,8 @@ app.whenReady().then(async () => {
     const html=await providerFetch(anime.url,{referer:new URL(anime.url).origin+'/'});
     const detail=anime.provider==='animenosub'?animenosubDetail(html,anime):anime.provider==='reanime'?await reanimeDetail(anime,html):{...anime,synopsis:cheerio.load(html)('meta[name=description]').attr('content')||anime.synopsis};
     const episodes=anime.provider==='reanime'?await reanimeEpisodes(detail,html):providerEpisodes(html,anime.provider,detail);
-    return {data:detail,episodes,unavailable:false};
+    const data=anime.provider==='animenosub'?{...detail,availableEpisodes:Math.max(0,...episodes.map(episode=>Number(episode.number)||0))||detail.availableEpisodes||null}:detail;
+    return {data,episodes,unavailable:false};
   });
   ipcMain.handle('provider:play', (_, episode, title) => openProviderPlayer(episode,title).then(()=>true));
   // The player's own resolves (downloads resolve in the background through resolveProviderEpisode directly).

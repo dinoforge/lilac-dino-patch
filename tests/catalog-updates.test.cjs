@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 const { createCatalogUpdates, decodeData } = require('../electron/catalog-updates.cjs');
 
 test('Svelte data references resolve without evaluating site scripts', () => {
@@ -102,4 +103,31 @@ test('recent update sort is wired only through the existing source catalog loade
   assert.ok(main.includes("updatedAt:a.episode?.aired||''"));
   assert.ok(main.includes("if (sort && !query) return sortedCatalog(provider, String(sort), offset);"));
   assert.ok(preload.includes("providerCatalog: (provider, query = '', offset = 0, sort = '')"));
+});
+
+test('the renderer update feed is connected through preload and IPC without adding LinkAni', () => {
+  const root = path.join(__dirname, '..');
+  const main = fs.readFileSync(path.join(root, 'electron/main.cjs'), 'utf8');
+  const preload = fs.readFileSync(path.join(root, 'electron/preload.cjs'), 'utf8');
+  const ui = fs.readFileSync(path.join(root, 'src/catalog-updates.js'), 'utf8');
+  assert.ok(main.includes("ipcMain.handle('catalog:updates', (_, provider, offset) => catalogUpdates.page(String(provider || ''), offset))"));
+  assert.ok(preload.includes("catalogUpdates: (provider, offset = 0) => ipcRenderer.invoke('catalog:updates', provider, offset)"));
+  assert.match(ui, /const supported = \['reanime', 'miruro', 'animenosub', 'ohli24'\]/);
+  assert.doesNotMatch(ui, /linkani/i);
+});
+
+test('Animenosub counts the newest uploaded episode across duplicate listing cards', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
+  const start = source.indexOf('function animenosubList('), end = source.indexOf('\nfunction animenosubDetail', start);
+  assert.ok(start >= 0 && end > start);
+  const context = vm.createContext({
+    cheerio: require('cheerio'),
+    URL,
+    ANIMENOSUB_WEB: 'https://animenosub.test',
+    absoluteUrl: (value, base) => { try { return new URL(value, base).href; } catch { return ''; } }
+  });
+  vm.runInContext(source.slice(start, end) + '\nglobalThis.parse = animenosubList;', context);
+  const html = '<article><a href="/anime/series"><img alt="작품" src="/poster.jpg"><span class="epx">6화</span></a></article>'
+    + '<article><a href="/anime/series"><img alt="작품" src="/poster.jpg"><span class="epx">12화</span></a></article>';
+  assert.equal(context.parse(html)[0].availableEpisodes, 12);
 });
