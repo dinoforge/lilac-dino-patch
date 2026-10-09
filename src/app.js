@@ -387,7 +387,7 @@ async function playLatestEpisode(anime){
   const number=Number(anime?.latestEpisodeNumber);if(!anime||!Number.isInteger(number)||number<=0)return;
   try{
     const result=await window.lilac.providerDetail(anime),data=result?.data||anime,episodes=result?.episodes||[];
-    const episode=episodes.find(item=>Number(item.number)===number&&item.playable!==false);
+    const episode=episodes.find(item=>item?.provider===anime.provider&&Number(item.number)===number&&item.playable!==false);
     if(!episode){toast(`${number}화는 현재 공급원에서 재생 가능한 회차로 확인되지 않았습니다.`);openDetail(anime.mal_id);return}
     const title=titleOf(data),context={episode,subtitleTitle:title,image:imageOf(data),anime:data,seriesEpisodes:episodes,comparisonEpisodes:nearbyEpisodes(episodes,episode),resolveKind:'provider'};
     resolveIntoPlayer(()=>window.lilac.providerResolve(episode),`${title} · ${episode.name||number}화`,context,title,number);

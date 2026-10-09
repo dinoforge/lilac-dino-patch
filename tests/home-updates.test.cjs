@@ -43,7 +43,7 @@ test('home update feed is loaded through the existing provider IPC, cached per s
   assert.match(app, /latestUpdatedEpisodeCache:v1:/);
   assert.match(app, /cached\.age<30\*60\*1000/);
   assert.match(app, /providerDetail\(anime\)/);
-  assert.match(app, /episodes\.find\(item=>Number\(item\.number\)===number&&item\.playable!==false\)/);
+  assert.match(app, /episodes\.find\(item=>item\?\.provider===anime\.provider&&Number\(item\.number\)===number&&item\.playable!==false\)/);
 });
 
 function setupLatestRail({ source = 'animenosub', feed = async () => ({ data: [] }), saved = [] } = {}) {
@@ -110,4 +110,62 @@ test('home update rail keeps saved cards and exposes retry when the refresh fail
   assert.equal(h.elements.get('latestEpisodeRail').children[0].title, '저장 작품');
   assert.match(h.elements.get('latestEpisodeStatus').textContent, /저장된 회차 1개를 표시 중/);
   assert.equal(h.elements.get('latestEpisodeRetry').classList.contains('hidden'), false);
+});
+
+function setupLatestPlayback({ anime, episodes }) {
+  const calls = [], messages = [];
+  const context = vm.createContext({
+    window: { lilac: {
+      providerDetail: async item => { calls.push({ type: 'detail', item }); return { data: item, episodes }; },
+      providerResolve: async episode => { calls.push({ type: 'resolve', episode }); return { url: 'file:///synthetic.mp4' }; }
+    } },
+    titleOf: item => item.title,
+    imageOf: item => item.image || '',
+    nearbyEpisodes: () => [],
+    resolveIntoPlayer: (resolver, name, playback, title, episodeNumber) => {
+      calls.push({ type: 'player', name, playback, title, episodeNumber, resolver });
+    },
+    toast: message => messages.push(message),
+    openDetail: id => calls.push({ type: 'openDetail', id })
+  });
+  const app = fs.readFileSync(path.join(root, 'src/app.js'), 'utf8');
+  const start = app.indexOf('async function playLatestEpisode(anime){');
+  const end = app.indexOf('\nfunction normalizeSearchText', start);
+  assert.ok(start >= 0 && end > start);
+  vm.runInContext(app.slice(start, end) + '\nglobalThis.playLatestEpisode = playLatestEpisode;', context);
+  return { context, calls, messages, anime };
+}
+
+test('latest episode playback never crosses any selected provider boundary', async () => {
+  const providers = ['animenosub', 'ohli24', 'reanime', 'miruro'];
+  for (const provider of providers) {
+    const otherProvider = providers.find(candidate => candidate !== provider);
+    const anime = { provider, mal_id: `${provider}:show`, title: '작품', latestEpisodeNumber: 7 };
+    const h = setupLatestPlayback({ anime, episodes: [
+      { provider: otherProvider, number: 7, url: `https://${otherProvider}.test/wrong-source` },
+      { provider, number: 7, playable: false, url: `https://${provider}.test/unplayable` },
+      { provider, number: 6, url: `https://${provider}.test/wrong-number` },
+      { provider, number: 7, url: `https://${provider}.test/selected` }
+    ] });
+
+    await h.context.playLatestEpisode(anime);
+    const player = h.calls.find(call => call.type === 'player');
+    assert.ok(player, `${provider} should select its available episode`);
+    assert.equal(player.playback.episode.url, `https://${provider}.test/selected`);
+    assert.equal(player.playback.episode.provider, provider);
+    assert.equal(player.episodeNumber, 7);
+    await player.resolver();
+    assert.equal(h.calls.find(call => call.type === 'resolve').episode.url, `https://${provider}.test/selected`);
+    assert.deepEqual(h.messages, []);
+  }
+});
+
+test('latest episode playback opens detail instead of resolving a same-number foreign episode', async () => {
+  const anime = { provider: 'ohli24', mal_id: 'ohli24:show', title: '작품', latestEpisodeNumber: 3 };
+  const h = setupLatestPlayback({ anime, episodes: [{ provider: 'miruro', number: 3, url: 'https://miruro.test/wrong-source' }] });
+
+  await h.context.playLatestEpisode(anime);
+  assert.equal(h.calls.some(call => call.type === 'player' || call.type === 'resolve'), false);
+  assert.deepEqual(h.calls.filter(call => call.type === 'openDetail').map(call => call.id), ['ohli24:show']);
+  assert.match(h.messages[0], /현재 공급원에서 재생 가능한 회차로 확인되지 않았습니다/);
 });
