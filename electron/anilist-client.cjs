@@ -1,7 +1,10 @@
 const ANILIST_API = 'https://graphql.anilist.co';
 const RATE_LIMIT_FALLBACK_MS = 60 * 1000;
+const MIN_REQUEST_INTERVAL_MS = 2100;
 
 let cooldownUntil = 0;
+let nextRequestAt = 0;
+let requestQueue = Promise.resolve();
 
 class AniListRateLimitError extends Error {
   constructor(retryAfterAt) {
@@ -29,25 +32,68 @@ function getAniListCooldownUntil(now = Date.now()) {
   return cooldownUntil;
 }
 
-function clearAniListCooldown() { cooldownUntil = 0; }
+function resetAniListClientState() {
+  cooldownUntil = 0;
+  nextRequestAt = 0;
+  requestQueue = Promise.resolve();
+}
+
+function currentTime(now) {
+  if (typeof now === 'function') return now();
+  return Number.isFinite(now) ? now : Date.now();
+}
+
+function wait(milliseconds) { return new Promise(resolve => setTimeout(resolve, milliseconds)); }
+
+async function requestInSlot(startRequest, { now, waitImpl, minIntervalMs }) {
+  const previous = requestQueue;
+  let release;
+  requestQueue = new Promise(resolve => { release = resolve; });
+  await previous;
+
+  try {
+    let current = currentTime(now);
+    let blockedUntil = getAniListCooldownUntil(current);
+    if (blockedUntil > current) throw new AniListRateLimitError(blockedUntil);
+
+    const delayMs = Math.max(0, nextRequestAt - current);
+    if (delayMs > 0) await waitImpl(delayMs);
+
+    current = currentTime(now);
+    blockedUntil = getAniListCooldownUntil(current);
+    if (blockedUntil > current) throw new AniListRateLimitError(blockedUntil);
+    nextRequestAt = Math.max(nextRequestAt, current) + minIntervalMs;
+    return startRequest();
+  } finally {
+    release();
+  }
+}
 
 async function requestAniListGraphQL(query, variables = {}, {
   fetchImpl = globalThis.fetch,
-  now = Date.now(),
+  now = Date.now,
   timeoutMs = 25000,
-  userAgent = 'LilacAnime Desktop'
+  userAgent = 'LilacAnime Desktop',
+  minIntervalMs = MIN_REQUEST_INTERVAL_MS,
+  waitImpl = wait
 } = {}) {
-  const blockedUntil = getAniListCooldownUntil(now);
-  if (blockedUntil > now) throw new AniListRateLimitError(blockedUntil);
+  const initialTime = currentTime(now);
+  const blockedUntil = getAniListCooldownUntil(initialTime);
+  if (blockedUntil > initialTime) throw new AniListRateLimitError(blockedUntil);
 
-  const response = await fetchImpl(ANILIST_API, {
+  const interval = Number.isFinite(minIntervalMs) && minIntervalMs >= 0 ? minIntervalMs : MIN_REQUEST_INTERVAL_MS;
+  const response = await requestInSlot(() => fetchImpl(ANILIST_API, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': userAgent },
     body: JSON.stringify({ query, variables }),
     signal: AbortSignal.timeout(timeoutMs)
+  }), {
+    now,
+    waitImpl,
+    minIntervalMs: interval
   });
   if (response.status === 429) {
-    cooldownUntil = Math.max(cooldownUntil, retryAfterAt(response, now));
+    cooldownUntil = Math.max(cooldownUntil, retryAfterAt(response, currentTime(now)));
     try { await response.body?.cancel(); } catch {}
     throw new AniListRateLimitError(cooldownUntil);
   }
@@ -58,5 +104,6 @@ module.exports = {
   AniListRateLimitError,
   requestAniListGraphQL,
   getAniListCooldownUntil,
-  clearAniListCooldown
+  resetAniListClientState,
+  MIN_REQUEST_INTERVAL_MS
 };

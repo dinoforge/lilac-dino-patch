@@ -59,19 +59,31 @@ function cacheKey(provider, byId) {
   return `${provider}:${[...byId].map(([id, entry]) => `${id}-${entry.available}`).sort().join(',')}`;
 }
 
-async function fetchLatestEpisodes(provider, candidates, { fetchImpl = globalThis.fetch, now = Date.now() } = {}) {
+async function fetchLatestEpisodes(provider, candidates, { fetchImpl = globalThis.fetch, now = Date.now, minIntervalMs } = {}) {
   if (!SUPPORTED_PROVIDERS.has(provider)) return { supported: false, data: [] };
+  const currentTime = typeof now === 'function' ? now() : now;
   const byId = validCandidates(provider, candidates);
   if (!byId.size) return { supported: true, data: [] };
 
   const key = cacheKey(provider, byId), current = cache.get(key);
-  if (current && current.expiresAt > now) return { supported: true, data: current.data, fromCache: true };
-  const retryAfterAt = Math.max(current?.retryAfterAt || 0, getAniListCooldownUntil(now));
-  if (retryAfterAt > now) return rateLimitedResult(key, current, retryAfterAt);
+  if (current && current.expiresAt > currentTime) return { supported: true, data: current.data, fromCache: true };
+  const retryAfterAt = Math.max(current?.retryAfterAt || 0, getAniListCooldownUntil(currentTime));
+  if (retryAfterAt > currentTime) return rateLimitedResult(key, current, retryAfterAt);
 
-  const nowSeconds = Math.floor(now / 1000), after = nowSeconds - AIRING_WINDOW_SECONDS;
+  const nowSeconds = Math.floor(currentTime / 1000), after = nowSeconds - AIRING_WINDOW_SECONDS;
   let response;
-  try { response = await requestAniListGraphQL(QUERY, { ids: [...byId.keys()], after, now: nowSeconds }, { fetchImpl, now, timeoutMs: 15000 }); }
+  try {
+    response = await requestAniListGraphQL(
+      QUERY,
+      { ids: [...byId.keys()], after, now: nowSeconds },
+      {
+        fetchImpl,
+        now: typeof now === 'function' ? now : () => now,
+        timeoutMs: 15000,
+        ...(minIntervalMs === undefined ? {} : { minIntervalMs })
+      }
+    );
+  }
   catch (error) {
     if (error?.code === 'ANILIST_RATE_LIMITED') return rateLimitedResult(key, current, error.retryAfterAt);
     throw error;
@@ -81,7 +93,7 @@ async function fetchLatestEpisodes(provider, candidates, { fetchImpl = globalThi
   if (payload.errors?.length) throw new Error(String(payload.errors[0]?.message || 'AniList 조회 실패'));
 
   const data = mapLatestEpisodes(provider, byId, payload.data?.Page?.airingSchedules, nowSeconds);
-  cache.set(key, { data, expiresAt: now + CACHE_TTL });
+  cache.set(key, { data, expiresAt: currentTime + CACHE_TTL });
   while (cache.size > 8) cache.delete(cache.keys().next().value);
   return { supported: true, data, fromCache: false };
 }

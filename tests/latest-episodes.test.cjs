@@ -3,14 +3,20 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { requestAniListGraphQL, clearAniListCooldown } = require('../electron/anilist-client.cjs');
+const { requestAniListGraphQL, resetAniListClientState } = require('../electron/anilist-client.cjs');
 const { fetchLatestEpisodes, mapLatestEpisodes, validCandidates, clearLatestEpisodeCache } = require('../electron/latest-episodes.cjs');
 const appSource = fs.readFileSync(path.join(__dirname, '../src/app.js'), 'utf8');
+const platformFetch = globalThis.fetch;
+globalThis.fetch = (input, ...args) => {
+  const url = typeof input === 'string' ? input : input?.url;
+  if (url === 'https://graphql.anilist.co') throw new Error('Unexpected live AniList request in a unit test');
+  return platformFetch(input, ...args);
+};
 
 const now = 1_800_000_000_000;
 const nowSeconds = Math.floor(now / 1000);
 const anime = (id, availableEpisodeCount, provider = 'miruro') => ({ provider, id: String(id), anilistId: id, availableEpisodeCount, title: `Show ${id}` });
-const clearAniListTestState = () => { clearLatestEpisodeCache(); clearAniListCooldown(); };
+const clearAniListTestState = () => { clearLatestEpisodeCache(); resetAniListClientState(); };
 
 test('latest airing cards match only the selected source and currently available episodes', () => {
   const candidates = [anime(10, 8), anime(11, 2), anime(12, 10, 'reanime')];
@@ -37,14 +43,16 @@ test('future, stale, and invalid airing schedules are not shown', () => {
 test('AniList request is cached briefly and only trusted provider IDs are sent', async () => {
   clearAniListTestState();
   let requests = 0, body;
+  let currentNow = now;
   const fetchImpl = async (_url, options) => {
     requests++;
     body = JSON.parse(options.body);
     return { ok: true, json: async () => ({ data: { Page: { airingSchedules: [{ media: { id: 31 }, episode: 5, airingAt: nowSeconds - 30 }] } } }) };
   };
   const candidates = [anime(31, 6), { ...anime(32, 9), provider: 'animenosub' }, { provider: 'miruro', anilistId: 'bad', availableEpisodeCount: 4 }];
-  const first = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now });
-  const second = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: now + 1000 });
+  const first = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: () => currentNow, minIntervalMs: 0 });
+  currentNow += 1000;
+  const second = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: () => currentNow, minIntervalMs: 0 });
   assert.equal(requests, 1);
   assert.deepEqual(body.variables.ids, [31]);
   assert.equal(first.data[0].episode, 5);
@@ -62,16 +70,16 @@ test('AniList 429 honors Retry-After and reuses stale results without sending mo
     const retriedNow = firstNow + 16 * 60 * 1000;
     return { status: 200, ok: true, json: async () => ({ data: { Page: { airingSchedules: [{ media: { id: 131 }, episode: 6, airingAt: Math.floor(retriedNow / 1000) - 30 }] } } }) };
   };
-  const first = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: firstNow });
+  const first = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: firstNow, minIntervalMs: 0 });
   const limitedAt = firstNow + 16 * 60 * 1000;
-  const limited = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: limitedAt });
+  const limited = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: limitedAt, minIntervalMs: 0 });
   assert.equal(limited.rateLimited, true);
   assert.equal(limited.retryAfterAt, limitedAt + 20_000);
   assert.equal(limited.data[0].episode, first.data[0].episode);
-  const deferred = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: limitedAt + 10_000 });
+  const deferred = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: limitedAt + 10_000, minIntervalMs: 0 });
   assert.equal(deferred.rateLimited, true);
   assert.equal(requests, 2);
-  const retried = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: limited.retryAfterAt });
+  const retried = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: limited.retryAfterAt, minIntervalMs: 0 });
   assert.equal(retried.rateLimited, undefined);
   assert.equal(retried.data[0].episode, 6);
   assert.equal(requests, 3);
@@ -81,9 +89,9 @@ test('AniList 429 without a usable Retry-After waits for its documented one-minu
   clearAniListTestState();
   let requests = 0;
   const fetchImpl = async () => { requests++; return { status: 429, headers: { get: () => null } }; };
-  const limited = await fetchLatestEpisodes('reanime', [{ provider: 'reanime', anilistId: 132, subbed: 3 }], { fetchImpl, now });
+  const limited = await fetchLatestEpisodes('reanime', [{ provider: 'reanime', anilistId: 132, subbed: 3 }], { fetchImpl, now, minIntervalMs: 0 });
   assert.equal(limited.retryAfterAt, now + 60_000);
-  const deferred = await fetchLatestEpisodes('reanime', [{ provider: 'reanime', anilistId: 132, subbed: 3 }], { fetchImpl, now: now + 30_000 });
+  const deferred = await fetchLatestEpisodes('reanime', [{ provider: 'reanime', anilistId: 132, subbed: 3 }], { fetchImpl, now: now + 30_000, minIntervalMs: 0 });
   assert.equal(deferred.rateLimited, true);
   assert.equal(requests, 1);
 });
@@ -96,29 +104,31 @@ test('a 429 from an AniList title lookup also defers the latest episode query', 
     if (requests === 1) return { status: 429, ok: false, headers: { get: name => name === 'Retry-After' ? '20' : null } };
     return { status: 200, ok: true, json: async () => ({ data: { Page: { airingSchedules: [{ media: { id: 133 }, episode: 4, airingAt: nowSeconds - 30 }] } } }) };
   };
-  await assert.rejects(requestAniListGraphQL('query { Media { id } }', {}, { fetchImpl, now }), error => error.code === 'ANILIST_RATE_LIMITED');
+  await assert.rejects(requestAniListGraphQL('query { Media { id } }', {}, { fetchImpl, now, minIntervalMs: 0 }), error => error.code === 'ANILIST_RATE_LIMITED');
   const candidates = [anime(133, 5)];
-  const deferred = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: now + 1000 });
+  const deferred = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: now + 1000, minIntervalMs: 0 });
   assert.equal(deferred.rateLimited, true);
   assert.equal(deferred.retryAfterAt, now + 20_000);
   assert.equal(requests, 1);
-  const retried = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: deferred.retryAfterAt });
+  const retried = await fetchLatestEpisodes('miruro', candidates, { fetchImpl, now: deferred.retryAfterAt, minIntervalMs: 0 });
   assert.equal(retried.data[0].episode, 4);
   assert.equal(requests, 2);
 });
 
 test('clearing the latest episode cache does not bypass the shared AniList cooldown', async t => {
   clearAniListTestState();
-  t.after(clearAniListCooldown);
+  t.after(resetAniListClientState);
   let requests = 0;
   await assert.rejects(requestAniListGraphQL('query { Media { id } }', {}, {
     now,
+    minIntervalMs: 0,
     fetchImpl: async () => { requests++; return { status: 429, headers: { get: () => '20' } }; }
   }), error => error.code === 'ANILIST_RATE_LIMITED');
 
   clearLatestEpisodeCache();
   await assert.rejects(requestAniListGraphQL('query { Media { id } }', {}, {
     now: now + 1000,
+    minIntervalMs: 0,
     fetchImpl: async () => { requests++; return { status: 200 }; }
   }), error => error.code === 'ANILIST_RATE_LIMITED');
   assert.equal(requests, 1);

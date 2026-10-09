@@ -2,7 +2,24 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
-const { requestAniListGraphQL, getAniListCooldownUntil, clearAniListCooldown } = require('../electron/anilist-client.cjs');
+const { requestAniListGraphQL, getAniListCooldownUntil, resetAniListClientState, MIN_REQUEST_INTERVAL_MS } = require('../electron/anilist-client.cjs');
+
+test('concurrent AniList callers share a conservative global request interval', async t => {
+  const start = 1_800_000_000_000;
+  let now = start;
+  const starts = [];
+  t.after(resetAniListClientState);
+  const request = () => requestAniListGraphQL('query { Viewer { id } }', {}, {
+    now: () => now,
+    minIntervalMs: MIN_REQUEST_INTERVAL_MS,
+    waitImpl: async milliseconds => { now += milliseconds; },
+    fetchImpl: async () => { starts.push(now); return { status: 200, ok: true }; }
+  });
+
+  await Promise.all([request(), request(), request()]);
+  assert.deepEqual(starts, [start, start + MIN_REQUEST_INTERVAL_MS, start + MIN_REQUEST_INTERVAL_MS * 2]);
+  assert.ok(Math.floor(60_000 / MIN_REQUEST_INTERVAL_MS) < 30, 'The configured interval must stay below the documented degraded limit');
+});
 
 test('AniList sends GraphQL requests and shares Retry-After cooldown across callers', async t => {
   const now = 1_800_000_000_000;
@@ -14,21 +31,21 @@ test('AniList sends GraphQL requests and shares Retry-After cooldown across call
     assert.deepEqual(JSON.parse(options.body), { query: 'query Test { Viewer { id } }', variables: { page: 1 } });
     return { status: 429, ok: false, headers: { get: name => name === 'Retry-After' ? '20' : null } };
   };
-  t.after(clearAniListCooldown);
+  t.after(resetAniListClientState);
 
   await assert.rejects(
-    requestAniListGraphQL('query Test { Viewer { id } }', { page: 1 }, { fetchImpl: limitedFetch, now }),
+    requestAniListGraphQL('query Test { Viewer { id } }', { page: 1 }, { fetchImpl: limitedFetch, now, minIntervalMs: 0 }),
     error => error.code === 'ANILIST_RATE_LIMITED' && error.retryAfterAt === now + 20_000
   );
   assert.equal(getAniListCooldownUntil(now + 1000), now + 20_000);
   await assert.rejects(
-    requestAniListGraphQL('query Test { Viewer { id } }', { page: 1 }, { fetchImpl: limitedFetch, now: now + 1000 }),
+    requestAniListGraphQL('query Test { Viewer { id } }', { page: 1 }, { fetchImpl: limitedFetch, now: now + 1000, minIntervalMs: 0 }),
     error => error.code === 'ANILIST_RATE_LIMITED' && error.retryAfterAt === now + 20_000
   );
   assert.equal(requests, 1);
 
   const response = await requestAniListGraphQL('query Test { Viewer { id } }', { page: 1 }, {
-    fetchImpl: async () => { requests++; return { status: 200, ok: true }; }, now: now + 20_000
+    fetchImpl: async () => { requests++; return { status: 200, ok: true }; }, now: now + 20_000, minIntervalMs: 0
   });
   assert.equal(response.status, 200);
   assert.equal(requests, 2);
@@ -36,17 +53,17 @@ test('AniList sends GraphQL requests and shares Retry-After cooldown across call
 
 test('AniList uses HTTP-date Retry-After and a one-minute fallback', async t => {
   const now = 1_800_000_000_000;
-  t.after(clearAniListCooldown);
+  t.after(resetAniListClientState);
   const date = new Date(now + 45_000).toUTCString();
   await assert.rejects(
-    requestAniListGraphQL('query { Viewer { id } }', {}, { now, fetchImpl: async () => ({ status: 429, headers: { get: () => date } }) }),
+    requestAniListGraphQL('query { Viewer { id } }', {}, { now, minIntervalMs: 0, fetchImpl: async () => ({ status: 429, headers: { get: () => date } }) }),
     error => error.retryAfterAt === Date.parse(date)
   );
   assert.equal(getAniListCooldownUntil(now + 1000), Date.parse(date));
 
-  clearAniListCooldown();
+  resetAniListClientState();
   await assert.rejects(
-    requestAniListGraphQL('query { Viewer { id } }', {}, { now, fetchImpl: async () => ({ status: 429, headers: { get: () => null } }) }),
+    requestAniListGraphQL('query { Viewer { id } }', {}, { now, minIntervalMs: 0, fetchImpl: async () => ({ status: 429, headers: { get: () => null } }) }),
     error => error.retryAfterAt === now + 60_000
   );
 });
