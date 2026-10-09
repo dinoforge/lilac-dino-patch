@@ -347,8 +347,8 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 ## 2026-10-10 이어보기 통합 패키지 스모크
 
 - `tests/integrated-search.electron.cjs`를 확장해 기존 통합 검색 경합·출처 선택 검사 뒤 Re:Anime 회차를 연속 검증한다. 빌드된 `app.asar`의 실제 renderer·preload를 실행하고, IPC는 테스트 합성 응답으로 대체했다. 합성 MP4와 VTT는 격리 임시 폴더에서 생성했다.
-- 1화의 로컬 12초 MP4 재생, `srclang=ko` 자막 트랙, `showing` 상태와 활성 한국어 cue가 확인됐다. 3.25초 위치가 27% 이력으로 저장됐고 페이지 새로고침 후 이어보기 카드에서 재생해 3.26초로 복구됐다.
-- 전체 `node --test` 219/219, Electron 스모크, `node --check tests/integrated-search.electron.cjs`, `git diff --check`가 통과했다. 스모크 기록은 검색 IPC 22회·`provider:resolve` 2회·렌더러 오류 0건·외부 요청 시도 0건이다. 사용자 프로필은 사용하지 않았다.
+- 1화의 로컬 12초 MP4 재생, `srclang=ko` 자막 트랙, `showing` 상태와 활성 한국어 cue가 확인됐다. 3.25초 위치가 27% 이력으로 저장됐고 새로고침 후 이어보기 카드에서 재생해 약 3.3초(실행별 3.26–3.27초)로 복구됐다.
+- 반복 실행을 위해 `npm test`(전체 단위 테스트)와 `npm run test:phase1-electron`(패키지 UI 스모크)을 추가했다. 두 명령 모두 통과했고 전체 테스트는 219/219다. Electron 스모크는 검색 IPC 22회·`provider:resolve` 2회·렌더러 오류 0건·외부 요청 시도 0건이다. 사용자 프로필은 사용하지 않았다.
 - **PASS — 패키지 renderer/preload 검색→상세→로컬 회차 재생→한국어 자막→새로고침 후 이어보기(합성 데이터)**. 이 스모크는 앱 main handler와 라이브 공급원 응답, 실제 영상·자막 매칭, 설치 NSIS 앱 및 기존 프로필을 검증하지 않는다. 테스트 코드만 바뀌어 이번에는 패키지를 다시 빌드하지 않았다.
 
 ## 주요 결정

@@ -200,6 +200,7 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 
 - `tests/integrated-search.electron.cjs`는 빌드된 `app.asar`의 실제 renderer와 preload를 격리 Electron 창에서 실행한다. 검색·상세의 IPC 응답, 영상 resolve는 테스트 전용 합성 fixture로 제공하며 Chromium 외부 요청은 실행 전에 차단한다. 이 검증은 앱 `electron/main.cjs`나 실제 공급원 네트워크를 호출하지 않는다.
 - 기존 검색 경합·통합 ID·Miruro 필터·상세 공급원 선택 검사 뒤 Re:Anime 회차 목록에서 1화를 연다. 테스트 폴더에서 만든 12초 MP4와 2개 cue 한국어 VTT를 사용해 영상 metadata, `srclang=ko`, `showing` 상태 및 활성 한국어 문장을 확인한다.
-- 영상을 3.25초로 옮기면 27% 진행률이 로컬 이력에 저장된다. 같은 격리 세션에서 페이지를 새로고침한 다음 이어보기 카드를 눌러 회차 재조회·재생·3.26초 복구·한국어 자막 재적용을 확인한다.
-- 결과: 검색 IPC 22회, 영상 resolve 2회, 렌더러 오류 0건, 외부 요청 시도 0건. 전체 `node --test` 219/219, 스모크 구문 검사와 `git diff --check` 통과.
+- 영상을 3.25초로 옮기면 27% 진행률이 로컬 이력에 저장된다. 같은 격리 세션에서 페이지를 새로고침한 다음 이어보기 카드를 눌러 회차 재조회·재생·약 3.3초 복구·한국어 자막 재적용을 확인한다.
+- 결과: 검색 IPC 22회, 영상 resolve 2회, 렌더러 오류 0건, 외부 요청 시도 0건. `npm test` 전체 219/219, `npm run test:phase1-electron` 패키지 스모크, 구문 검사와 `git diff --check` 통과. 두 명령으로 반복 검증할 수 있다.
+- `test:phase1-electron`은 기존 `dist/win-unpacked/resources/app.asar`를 실행하므로 앱 코드를 바꿨다면 먼저 `npm run dist`로 패키지를 새로 만들어야 한다.
 - **PASS — 패키지 renderer/preload UI의 검색→상세→합성 영상→한국어 자막→새로고침 이어보기 흐름**. 실제 사이트의 회차·영상/자막 일치, 앱 main handler와 설치 NSIS 앱, 사용자 프로필은 미검증이다. 테스트 전용 변경으로 이번 검증에서는 패키지를 다시 빌드하지 않았다.

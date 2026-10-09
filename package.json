@@ -6,6 +6,8 @@
   "author": "LilacAnime Desktop",
   "license": "MIT",
   "scripts": {
+    "test": "node --test",
+    "test:phase1-electron": "node node_modules/electron/cli.js tests/integrated-search.electron.cjs",
     "vendor": "node scripts/build-jassub.cjs",
     "prestart": "npm run vendor",
     "start": "electron .",

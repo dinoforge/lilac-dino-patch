@@ -1,5 +1,5 @@
 // Packaged renderer/preload Phase 1 smoke test with synthetic IPC only; run with:
-// node node_modules/electron/cli.js tests/integrated-search.electron.cjs
+// npm run test:phase1-electron
 process.on('uncaughtException', fail);
 process.on('unhandledRejection', fail);
 
