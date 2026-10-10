@@ -4,13 +4,12 @@ process.on('unhandledRejection', fail);
 const { app, BrowserWindow, session } = require('electron');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
 const repo = path.resolve(__dirname, '..');
-const dist = path.join(repo, 'dist');
-fs.mkdirSync(dist, { recursive: true });
-const dir = path.join(dist, 'ass-renderer-smoke');
+const dir = path.join(os.tmpdir(), `lilac-ass-renderer-smoke-${process.pid}-${Date.now()}`);
 fs.mkdirSync(dir, { recursive: true });
 const userData = path.join(dir, 'profile');
 const fontFile = path.join(process.env.WINDIR || 'C:\\Windows', 'Fonts', 'malgun.ttf');

@@ -407,7 +407,7 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 ## 다음
 
 1. FFmpeg는 아직 선택하지 않는다. BtbN의 8.1.3·9.0.2 LGPL shared 후보는 합성 remux/디코딩을 통과했지만 기존 FFmpeg 6.1.1보다 큰 배포 폴더와 미확인 소스·외부 고지가 남았다. 최소 호환 빌드에는 shell 기반 빌드 환경이 필요하지만 현재 Docker·WSL 배포판·Bash·Make가 없어 설치하지 않고 보류했다. 해결 전까지 현행 의존성 유지, 설치 파일 공개 보류를 계속한다.
-2. JASSUB source commit 후보·다섯 submodule SHA를 확인했고, GPL-3.0 `rvfc-polyfill` fallback은 앱 빌드에서 제외했다. 기본 font는 공식 Liberation Sans 2.00.5와 glyph·metrics를 대조했고 OFL notice를 unpacked Windows 앱의 `resources/licenses`에 넣어 원본 파일과 해시가 같은 것을 확인했다. NSIS 빌드도 성공했다. 남은 항목은 pinned C/WASM source의 완전한 고지, upstream generator의 Expat 입력 불일치/실제 포함 여부, 세 번들 JS 보조 패키지의 원본 고지다. 이 환경에는 Docker/WSL 배포판, Bash, Make, `licensecheck`가 없어 upstream shell generator를 실행하지 않았다. 전체 재배포 조건은 미해결이다.
+2. JASSUB source commit 후보·다섯 submodule SHA를 확인했고, GPL-3.0 `rvfc-polyfill` fallback과 원격 Google Fonts fallback은 앱 빌드에서 제외한다. 2026-10-10 생성 worker에 Google Fonts 주소·목록이 없는지 확인하는 빌드 검사를 추가했다. 기본 font는 공식 Liberation Sans 2.00.5와 glyph·metrics를 대조했고 OFL notice를 unpacked Windows 앱의 `resources/licenses`에 넣어 원본 파일과 해시가 같은 것을 확인했다. 남은 항목은 pinned C/WASM source의 완전한 고지, upstream generator의 Expat 입력 불일치/실제 포함 여부, 번들에 남는 `abslink`·`throughput` 고지다. 이 환경에는 Docker/WSL 배포판, Bash, Make, `licensecheck`가 없어 upstream shell generator를 실행하지 않았다. 전체 재배포 조건은 미해결이다.
 3. Aya Expanse GGUF는 설정의 Cohere 조건 링크와 다운로드 전 사용자 확인을 제공한다. 앱이 약관 열람·법적 동의나 자격을 검증하지는 않는다. `ja-ko-vn` GGUF와 기반 모델 두 저장소는 Apache-2.0을 선언하지만 학습 대화 자료 출처·권리는 확인하지 못했다. 임의 GGUF의 약관은 앱이 검사하지 않는다. 8개 preset 다운로드 pin은 적용됐으며 기존 모델 파일은 새로 검사하거나 교체하지 않는다. HY-MT1.5 1.8B·7B는 앱에서 차단했고 기존 사용자 파일을 보존한다.
 4. 프로젝트 코드·로고·아이콘 재배포 허가와 AniList 보완성, TMDB·AI 기능 결합 조건을 해결하기 전까지 공개 저장소·설치 파일 배포와 실사이트 콘텐츠 요청은 보류한다. 권리 해결 후 검색→상세→회차 재생→자막→이어보기 실제 인수 검증을 계획한다. 그 전에는 합성·로컬 검증이 가능한 Phase 1 안정화 작업을 이어간다.
 
@@ -438,3 +438,10 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 재생 검증은 합성 320×180 HLS와 합성 한국어 VTT cue를 사용했다. 영상 디코드·cue 표시, 50% 이어보기 저장 후 약 2초 위치 복원, HD-2 오류 뒤 HD-1 대체 재생과 선택 자막 복구가 통과했다. 앱 프로세스·프로필은 격리했고 Kairan/Csora/Anissia 자동 검색은 이 경로에서 호출하지 않았다.
 - 최종 `npm run test:phase1-main` 결과: 합성 HTTP fixture 89회, FlixCloud 요청 4회가 로컬 fixture로 리디렉션, 알 수 없는 fetch 0, 외부 브라우저 요청 0, 외부 네트워크 0. `npm run test:phase1-electron`, `npm test`(221/221), `node --check tests/phase1-main.electron.cjs`, `git diff --check`도 통과했다.
 - 기능 코드는 바꾸지 않았고 `tests/phase1-main.electron.cjs`, `tests/phase1-source-restart.cjs`, `WORK_STATE.md`, `docs/FEATURE_GAP.md`만 수정했다. 실제 공급원 응답·작품/회차/영상판 일치·커뮤니티 자막 매칭·설치 NSIS UI는 여전히 미검증이다.
+
+## 2026-10-10 JASSUB 원격 글꼴 fallback 차단
+
+- 앱은 JASSUB `queryFonts: 'local'`로 Windows 시스템 글꼴과 자막에 동봉된 글꼴만 사용한다. 그런데 worker에는 사용되지 않는 Google Fonts 목록·원격 fallback 코드도 들어갈 수 있어, `lfa-ponyfill` import를 빈 결과를 반환하는 앱 소유 모듈로 alias하고 생성 worker에 Google Fonts URL 또는 `fonts.json`이 있으면 빌드를 실패시키도록 했다. JASSUB 옵션을 나중에 바꾸더라도 원격 글꼴 요청은 시작되지 않는다.
+- `npm run vendor`와 Windows `npm run dist`가 성공했다. 패키지 `app.asar`의 worker는 생성된 소스와 바이트 단위로 일치하며 Google Fonts URL·목록 문자열이 없다. 격리 Electron JASSUB/WASM 스모크에서 Windows Malgun Gothic으로 한글 ASS 자막을 738개 밝은 픽셀로 렌더링했고 외부 HTTP(S) 요청 시도는 0회였다. 테스트 harness는 기존 `dist\\ass-renderer-smoke` 폴더를 건드리지 않게 고유 임시 디렉터리를 사용한다.
+- `npm test` 221/221, `npm run test:phase1-electron`, `npm run test:phase1-main`, `npm run test:phase1-source-restart`, `node --check` 및 `git diff --check`가 통과했다. 통합 UI는 27% 진행률을 저장하고 3.27초로 이어졌으며, main-process smoke는 320×180 합성 HLS·한국어 cue와 50% 이어보기·HD-2 실패 후 HD-1 복구를 확인했다. 두 프로세스 재시작 후 Animenosub 설정, 50% 기록, 약 2.01초 재생 위치와 한국어 cue가 복구됐다.
+- 변경한 JASSUB font fallback은 라이브러리 자체의 pinned C/WASM 고지, Expat 포함 여부, 번들에 남는 `abslink`·`throughput` 고지를 해결하지 않는다. 외부 공급원·실제 작품/회차/영상판 자막 매칭, 기존 사용자 프로필과 설치 NSIS 앱은 미검증이며 설치 파일은 실행·배포하지 않았다. 저장소 공개와 설치 파일 배포 보류를 유지한다.
