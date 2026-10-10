@@ -223,7 +223,35 @@ async function main() {
     assert.equal(appInfo.arch, 'x64', JSON.stringify(appInfo));
     assert.ok(fs.existsSync(path.join(profileRoot, 'DevToolsActivePort')), 'remote debugging used the isolated temporary Chromium profile');
 
-    console.log(`Packaged Windows exe startup passed: ${path.basename(exe)} loaded app.asar, home/search UI, preload bridge and app-info IPC (${appInfo.version}, ${appInfo.platform}/${appInfo.arch}); profile and DNS resolution were isolated under ${tempRoot}.`);
+    const resumeBoundary = await evaluate(cdp, `(() => {
+      const episode = { provider: 'reanime', number: 3, name: '3' };
+      const primary = document.createElement('button'), alternate = document.createElement('button');
+      let selected = null;
+      bindResumeActions(primary, alternate, { episode, progress: 95 }, (pickedEpisode, options) => {
+        selected = { number: pickedEpisode.number, options };
+      });
+      const primaryLabel = primary.textContent, alternateLabel = alternate.textContent;
+      const alternateVisible = !alternate.classList.contains('hidden');
+      alternate.click();
+      return {
+        primaryLabel,
+        alternateLabel,
+        alternateVisible,
+        selected,
+        belowBoundary: resumePosition(94.99),
+        defaultAtBoundary: resumePosition(95),
+        explicitContinueAtBoundary: resumePosition(95, 'continue')
+      };
+    })()`);
+    assert.match(resumeBoundary.primaryLabel, /3화 처음부터/, JSON.stringify(resumeBoundary));
+    assert.match(resumeBoundary.alternateLabel, /3화 이어보기/, JSON.stringify(resumeBoundary));
+    assert.equal(resumeBoundary.alternateVisible, true, JSON.stringify(resumeBoundary));
+    assert.deepEqual(resumeBoundary.selected, { number: 3, options: { resumeMode: 'continue', resumeProgress: 95 } });
+    assert.equal(resumeBoundary.belowBoundary, 94.99, JSON.stringify(resumeBoundary));
+    assert.equal(resumeBoundary.defaultAtBoundary, 0, JSON.stringify(resumeBoundary));
+    assert.equal(resumeBoundary.explicitContinueAtBoundary, 95, JSON.stringify(resumeBoundary));
+
+    console.log(`Packaged Windows exe startup passed: ${path.basename(exe)} loaded app.asar, home/search UI, preload bridge and app-info IPC (${appInfo.version}, ${appInfo.platform}/${appInfo.arch}); its rendered resume choice and 95 percent boundary passed; profile and DNS resolution were isolated under ${tempRoot}.`);
   } finally {
     if (cdp) {
       try { await cdp.send('Browser.close'); } catch {}

@@ -542,4 +542,5 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 - `tests/resume-choice.test.cjs`에 94.99%와 정확히 95%의 사용자 선택 경계를 추가했다. 95% 미만은 이어보기가 기본이고, 95%부터는 처음부터 시작하되 사용자가 원하면 저장 위치에서 계속할 수 있음을 확인한다.
 - Phase 1 계획의 `playerAutoPlay` 설정·마이그레이션 문구를 실제 코드에 맞췄다. 별도 자동 다음 화 설정은 없고 `handleEpisodeEnded`는 다음 화 직접 선택 안내만 표시한다. 기존 프로필 설정을 변경하지 않는다.
-- `npm test` 242/242 및 `git diff --check` 통과. 경계 테스트는 UI 패키지 통합이 아니라 재생 선택 로직의 단위 검증이다. 실행 코드 변경은 없어 패키지를 다시 빌드하지 않았다.
+- `tests/windows-package-startup.cjs`를 확장해 실제 `dist/win-unpacked/LilacAnime.exe`의 번들 renderer에서 95% 경계 버튼 라벨·대체 버튼 클릭·저장 위치 이어가기 인자를 확인했다. 임시 사용자·앱 데이터 경로와 외부 DNS 차단을 사용했다. 기존 설치 NSIS 앱은 실행하지 않았다.
+- `npm test` 242/242, `npm run test:phase1-exe`, `git diff --check` 통과. 앱 런타임 코드는 변경하지 않아 NSIS 패키지를 다시 빌드하지 않았다.
