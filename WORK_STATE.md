@@ -582,3 +582,11 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - `tests/integrated-search.electron.cjs`가 패키지 앱의 실제 격리 `BrowserWindow`를 닫고 같은 임시 프로필로 다시 열어 복구를 확인한다. 영상 위치 6.25/12초와 메모리·디스크의 오래된 96% 기록을 준비한 뒤, 종료 후 52%가 저장되는 것을 검증했다.
 - `npm run pack`, `npm run test:phase1-electron`, `npm test` 243/243, `npm run test:phase1-exe`, `npm run test:phase1-source-restart`, `node --check src/app.js`, `node --check tests/integrated-search.electron.cjs`, `git diff --check` 통과. 통합 스모크는 검색 IPC 25회·회차 resolve 3회, renderer 오류 0회, 차단된 외부 요청 0회였다. Windows 실행 파일 시작 확인과 별도 Electron 프로세스 재시작 후 공급원·작품별 자막 선택·50% 이어보기·한국어 cue 복구도 통과했다.
 - 빌드는 로컬 unpacked 앱으로만 만들었고 설치 파일을 실행하지 않았다. 합성 MP4/VTT와 임시 프로필만 사용했으며, 실제 공급원 재생·자막 일치와 기존 사용자 프로필은 미검증이다. 최신 원본은 `upstream/main` v0.5.10 (`f38763949d9e8b3be2284bf97207a960bd642443`)으로 확인했다.
+
+## 2026-10-10 임시 NSIS 설치·실행 검증
+
+- 고유 앱 ID·제품명과 바로가기 비활성화를 적용한 테스트 전용 NSIS를 `%TEMP%` 아래 별도 폴더에 설치했다. 실행 프로필·`APPDATA`·`LOCALAPPDATA`도 임시 경로를 사용해 기존 앱 프로필을 열지 않았다.
+- 테스트 빌드에서 Node `fetch`와 Electron `net.fetch`를 차단하고 Chromium 외부 DNS를 막았다. `reanime.to` 3회, `api.jikan.moe` 2회의 차단을 기록했으며 실제 응답·영상·자막은 받지 않았다.
+- 설치된 `LilacAnime.exe`의 실제 `app.asar`로 홈·검색 UI, preload bridge, 앱 정보 IPC(0.5.9, win32/x64), 이어보기 94.99%/95% 경계, 회차 종료 시 진행률 100% 저장과 수동 다음 화 안내를 확인했다. 임시 설치본 시작 스모크가 정상 종료했다.
+- 전용 제거 프로그램으로 테스트 설치를 지웠다. 테스트 HKCU 등록은 사라졌고 기존 전체 사용자 설치 등록 및 ProgramData 시작 메뉴·공용 바탕화면 바로가기 해시는 유지됐다. 임시 진단 폴더는 검사 후 Recycle Bin으로 이동했다.
+- 테스트 전용 코드·식별자를 원복하고 표준 설정으로 `npm run dist`를 다시 성공시켰다. 현재 로컬 NSIS 파일은 124,549,154바이트다. 실제 공급원·콘텐츠, 기존 사용자 프로필, 이용 권한은 미검증이다.
