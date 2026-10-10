@@ -186,7 +186,7 @@ class DownloadManager {
       args.push('-c','copy','-movflags','+faststart','-f','mp4',job.partialPath);
       const [from,span]=local?[95,4]:[0,99];
       const child=spawn(ffmpeg,args,{windowsHide:true});this.active.set(job.id,{job,process:child});let duration=0,stderr='';
-      child.stderr.on('data',chunk=>{const text=chunk.toString();stderr=(stderr+text).slice(-12000);const d=text.match(/Duration:\s*([^,]+)/)?.[1];if(d){duration=seconds(d);job.duration=duration}const t=[...text.matchAll(/time=\s*([^\s]+)/g)].pop()?.[1];if(t&&duration){const progress=from+Math.max(0,Math.min(span,Math.round(seconds(t)/duration*span)));if(progress!==job.progress){job.progress=progress;job.updated=Date.now();this.save();}}});
+      child.stderr.on('data',chunk=>{const text=chunk.toString();stderr=(stderr+text).slice(-12000);const d=text.match(/Duration:\s*([^,]+)/)?.[1];if(d){duration=seconds(d);job.duration=duration}const t=[...text.matchAll(/time=\s*([^\s]+)/g)].pop()?.[1];if(t&&duration){const progress=from+Math.max(0,Math.min(span,Math.round(seconds(t)/duration*span)));if(progress!==job.progress){job.progress=progress;this.save();}}});
       child.once('error',reject);child.once('close',code=>{if(job.status==='paused')return resolve();if(code===0&&fs.existsSync(job.partialPath))resolve();else reject(new Error((stderr.match(/([^\r\n]+)$/)?.[1]||`FFmpeg 종료 코드 ${code}`).trim()));});
     });
   }
@@ -233,7 +233,7 @@ class DownloadManager {
     }
     let done=0,next=0;
     if(!tasks.length)throw new Error('영상 재생목록이 비어 있습니다.');
-    const report=()=>{const progress=Math.min(95,Math.floor(done/tasks.length*95));if(progress!==job.progress){job.progress=progress;job.updated=Date.now();this.save()}};
+    const report=()=>{const progress=Math.min(95,Math.floor(done/tasks.length*95));if(progress!==job.progress){job.progress=progress;this.save()}};
     await Promise.all(Array.from({length:HLS_PARALLEL},async()=>{
       while(next<tasks.length&&!controller.signal.aborted){
         const task=tasks[next++];
@@ -246,8 +246,8 @@ class DownloadManager {
 
   // Subtitles are fetched right after the video so the episode also plays offline with them.
   async attachSubtitle(job, stream) {
-    // 애니24: the Korean subtitle is in the video itself.
-    if (stream?.burnedKorean || job.episode?.provider === 'ohli24') { job.subtitleChecked = true; return; }
+    // 애니24: the Korean subtitle is in the picture unless its player supplied a separate subtitle file.
+    if (stream?.burnedKorean || (job.episode?.provider === 'ohli24' && !stream?.subtitleUrl)) { job.subtitleChecked = true; return; }
     let found = null;
     try { found = await this.findSubtitle?.(job, stream); } catch { /* fall back to the stream's own subtitle */ }
     job.subtitleChecked = true;
@@ -256,7 +256,7 @@ class DownloadManager {
     // Not when the site has its own Korean subtitle (a RE:Anime / Miruro Korean track, Linkkf's), which is the
     // episode's: no Jimaku file and no translation beside it (see attachTracks too).
     // Preserve subtitle handling for completed LinkAni downloads created before that online source was removed.
-    job.siteKorean = Boolean(stream?.subtitleUrl) && (job.resolveKind === 'linkkf' || ['reanime', 'miruro', 'linkani'].includes(job.episode?.provider));
+    job.siteKorean = Boolean(stream?.subtitleUrl) && (job.resolveKind === 'linkkf' || ['reanime', 'miruro', 'linkani', 'ohli24'].includes(job.episode?.provider));
     if (!found || found.stream) {
       await this.saveSubtitle(job, stream?.subtitleUrl); this.saveAssSubtitle(job, stream?.subtitleAss?.path);
       if (!job.siteKorean) await this.attachJimaku(job, stream, !found && !job.subtitlePath);

@@ -89,6 +89,7 @@ function updateLibraryButton(button,isSaved,withLabel=true){if(!button)return;bu
 const knownAnime=new Map();
 const searchGroupsByKey=new Map();
 let currentSearchGroups=[],currentSearchStatuses=[],currentSearchFilter='all',currentSearchQuery='';
+function invalidateIntegratedSearch(){doSearch.token=(doSearch.token||0)+1}
 function rememberAnime(a){if(a?.mal_id!=null&&!knownAnime.has(String(a.mal_id)))knownAnime.set(String(a.mal_id),a);return a}
 function animeById(id) { return [...(state.quarterShows||[]),...(state.current||[]),...(state.airing||[]),...state.season,...state.top,...state.library].find(x=>String(x.mal_id)===String(id))||knownAnime.get(String(id)); }
 function toast(message) { const el=$('#toast'); el.textContent=message; el.classList.add('show'); clearTimeout(toast.t); toast.t=setTimeout(()=>el.classList.remove('show'),2200); }
@@ -99,7 +100,7 @@ function enterPlayer(){const already=$('.view.active')?.id==='playerView';switch
 function switchView(name) {
   if(name!=='player'&&typeof finishSpaceHold==='function')finishSpaceHold(false);
   const current=$('.view.active')?.id?.replace(/View$/,'');
-  if(name!==current)cancelPendingPlaybackLookups();
+  if(name!==current){cancelPendingPlaybackLookups();if(current==='search')invalidateIntegratedSearch()}
   if(name==='player'&&current&&current!=='player')viewBeforePlayer=current;
   document.body.classList.toggle('player-mode',name==='player');
   $$('.view').forEach(v => v.classList.toggle('active', v.id === `${name}View`));
@@ -851,9 +852,9 @@ async function ensureSubtitle(stream,title,episode,{skipSaved=false}={}){
   const requestId=playbackRequestId,selectionRequestId=subtitleSelectionRequestId,isCurrentSelection=()=>requestId===playbackRequestId&&selectionRequestId===subtitleSelectionRequestId,preferred=preferredSubtitleSource(),key=subtitleStoreKey();
   $('#subtitleOffer').classList.add('hidden');
   const saved=key&&!skipSaved?await window.lilac.savedSubtitles(key).catch(()=>[]):[];if(!isCurrentSelection())return false;for(const source of ONLINE_SUBTITLE_SOURCES)if(saved.some(entry=>entry.source===source))setSubtitleAvailability(source,'available',requestId);
-  // 애니24: the Korean subtitle is in the picture, so nothing is put over it, searched or translated (a subtitle picked by
-  // hand still goes on; the next episode is not translated ahead).
-  if(!skipSaved&&(stream?.burnedKorean||currentPlaybackContext.episode?.provider==='ohli24')){currentPlaybackContext.siteKorean=true;$('#subtitleState').textContent='영상에 한국어 자막이 들어 있어요.';return true}
+  // 애니24: most videos have the Korean subtitle in the picture; a raw video with a player subtitle file applies that
+  // file below as the site's own Korean subtitle.
+  if(!skipSaved&&(stream?.burnedKorean||(currentPlaybackContext.episode?.provider==='ohli24'&&!stream?.subtitleUrl))){currentPlaybackContext.siteKorean=true;$('#subtitleState').textContent='영상에 한국어 자막이 들어 있어요.';return true}
   // A series the user watches in machine translation (see prefersAiSubtitle): the episode's saved translation, else one
   // made now from its best source (ready at once when it was translated ahead); the usual order when there is none.
   if(!skipSaved&&prefersAiSubtitle()){
@@ -1450,7 +1451,7 @@ $('#sourceNotice [data-notice="source"]').onclick=()=>{switchView('settings');wi
 
 $$('.nav').forEach(b=>b.onclick=()=>switchView(b.dataset.view));$$('[data-goto]').forEach(b=>b.onclick=()=>switchView(b.dataset.goto));
 // 홈 > "2026 가을 신작" / "방영 중" > 전체 보기: the whole list in the search view.
-function showHomeList(list,label){switchView('search');hideIntegratedSearchFilters();$('#filterBar').classList.toggle('hidden',state.source!=='linkkf');if(!list?.length)return;$('#pageSearch').value='';$('#filterMore')?.classList.add('hidden');renderCards('#searchGrid',list);$('#searchStatus').textContent=`${label} ${list.length}개 · 인기순`}
+function showHomeList(list,label){invalidateIntegratedSearch();switchView('search');hideIntegratedSearchFilters();$('#filterBar').classList.toggle('hidden',state.source!=='linkkf');if(!list?.length)return;$('#pageSearch').value='';$('#filterMore')?.classList.add('hidden');renderCards('#searchGrid',list);$('#searchStatus').textContent=`${label} ${list.length}개 · 인기순`}
 $('#seeAllSeason').onclick=()=>QUARTER_PROVIDERS.includes(state.source)?showHomeList(state.quarterShows,state.quarterSelection?.label||'분기별 작품'):showHomeList(state.current||state.season,'이번 시즌 신작');
 $('#seeAllAiring').onclick=()=>showHomeList(state.airing,'방영 중');
 $('#seeAllLatestEpisodes').onclick=()=>showHomeList(state.latestEpisodes,latestEpisodeSectionTitle(state.source));

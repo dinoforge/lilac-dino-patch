@@ -118,6 +118,26 @@ const localPlayerServer = http.createServer((request, response) => {
     </script></body></html>`);
     return;
   }
+  if (requestUrl.pathname === '/ohli-player') {
+    const masterUrl = `${localBase}/ohli-master.m3u8`;
+    const subtitleUrl = `${localBase}/ohli-caption.srt`;
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end(`<!doctype html><html><body><video></video><script>
+      window.jwplayer = () => ({ getPlaylist: () => [{ tracks: [{ kind: 'captions', file: ${JSON.stringify(subtitleUrl)} }] }], play: () => Promise.resolve() });
+      fetch(${JSON.stringify(masterUrl)}).catch(() => {});
+    </script></body></html>`);
+    return;
+  }
+  if (requestUrl.pathname === '/ohli-master.m3u8') {
+    response.writeHead(200, { 'content-type': 'application/vnd.apple.mpegurl' });
+    response.end('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000,RESOLUTION=640x360\n/ohli-variant.m3u8\n');
+    return;
+  }
+  if (requestUrl.pathname === '/ohli-caption.srt') {
+    response.writeHead(200, { 'content-type': 'application/x-subrip; charset=utf-8' });
+    response.end('1\n00:00:01,000 --> 00:00:02,000\n합성 애니24 원본 자막\n');
+    return;
+  }
   if (requestUrl.pathname === '/master.m3u8') {
     response.writeHead(200, { 'content-type': 'application/vnd.apple.mpegurl' });
     response.end(syntheticManifest);
@@ -265,6 +285,14 @@ function fixtureResponse(rawUrl, requestInit = {}) {
   if (url.hostname === 'www.ohli24.net' && url.pathname === '/ing') {
     fixtureRequests.push(url.href);
     return response('<div class="show-item"><a class="show-item-img-link" href="/81002/phase1-update.html"><img src="/poster.jpg" title="합성 애니24 최신작"></a><div class="show-item-title">합성 애니24 최신작</div><span class="show-item-eps">13화</span></div>', 200, 'text/html; charset=utf-8');
+  }
+  if (url.hostname === 'www.ohli24.net' && url.pathname === '/81002/phase1-special.html') {
+    fixtureRequests.push(url.href);
+    return response('<!doctype html><html><head><meta property="og:title" content="합성 애니24 특별 회차"></head><body><ul class="article-box-meta"><li><span>원제</span><span>합성 특별작</span></li><li><span>총화수</span><span>10화</span></li></ul><div class="eps-item"><a href="/81002/phase1-10.html">10화</a><a href="/81002/phase1-9-5.html">9.5화</a><a href="/81002/phase1-9.html">9화</a><a href="/81002/phase1-8.html">8화</a></div></body></html>', 200, 'text/html; charset=utf-8');
+  }
+  if (url.hostname === 'www.ohli24.net' && url.pathname === '/81002/phase1-9-5.html') {
+    fixtureRequests.push(url.href);
+    return response(`<!doctype html><html><body><iframe id="video" src="${localBase}/ohli-player"></iframe></body></html>`, 200, 'text/html; charset=utf-8');
   }
   if (url.hostname === 'www.miruro.to' && url.pathname === '/api/v1/anime') {
     fixtureRequests.push(url.href);
@@ -1082,6 +1110,21 @@ app.whenReady().then(async () => {
     assert.equal(ohliUpdates.data[0].url, 'https://www.ohli24.net/81002/phase1-update.html');
     assert.equal(ohliUpdates.done, true);
 
+    const ohliSpecial = await win.webContents.executeJavaScript(
+      "window.lilac.providerDetail({ provider: 'ohli24', id: 'ohli24:phase1-special', title: '합성 애니24 특별작', url: 'https://www.ohli24.net/81002/phase1-special.html' })"
+    );
+    assert.deepEqual(ohliSpecial.episodes.map(episode => episode.number), [8, 9, 9.5, 10]);
+    assert.equal(ohliSpecial.data.availableEpisodes, 10);
+    const ohliSpecialEpisode = ohliSpecial.episodes.find(episode => episode.number === 9.5);
+    const ohliStream = await win.webContents.executeJavaScript(
+      `window.lilac.providerResolve(${JSON.stringify(ohliSpecialEpisode)})`
+    );
+    assert.equal(ohliStream.burnedKorean, false);
+    assert.match(ohliStream.subtitleUrl, /^file:/);
+    assert.ok(fs.existsSync(ohliStream.subtitlePath));
+    assert.match(fs.readFileSync(ohliStream.subtitlePath, 'utf8'), /합성 애니24 원본 자막/);
+    assert.equal(ohliStream.subtitleLabel, '애니24 한국어 자막');
+
     const search = await win.webContents.executeJavaScript(
       `window.lilac.providerCatalog('reanime', ${JSON.stringify(SEARCH_TITLE)}, 0, '')`
     );
@@ -1388,6 +1431,9 @@ app.whenReady().then(async () => {
     assert.ok(fixtureRequests.some(url => url === 'https://subtitles.invalid/phase1-ko.vtt'), 'resolved stream downloaded the synthetic Korean VTT');
     assert.ok(fixtureRequests.some(url => localBase && url.startsWith(`${localBase}/master.m3u8`)), 'the app proxy fetched only the synthetic loopback manifest');
     assert.ok(fixtureRequests.some(url => localBase && url === `${localBase}/segment000.ts`), 'the app proxy fetched only the synthetic loopback segment');
+    assert.ok(localBrowserRequests.includes('/ohli-player'), 'the packaged Ohli24 resolver opened the synthetic local player');
+    assert.ok(localBrowserRequests.includes('/ohli-master.m3u8'), 'the Ohli24 fixture exposed a local HLS master');
+    assert.ok(localBrowserRequests.includes('/ohli-caption.srt'), 'the Ohli24 resolver downloaded the local caption file');
     assert.equal(redirectedFlixRequests.length, 4, 'all FlixCloud fixture loads were redirected before external network access');
     assert.ok(redirectedFlixRequests.some(url => new URL(url).searchParams.get('server') === 'HD-1'), 'the main process resolved the alternate HD-1 server');
     assert.ok(localBrowserRequests.some(url => url.startsWith(`/e/${SLUG}?server=`)), 'the resolver loaded both local server fixtures');
@@ -1398,7 +1444,7 @@ app.whenReady().then(async () => {
     assert.equal(deniedUnknownFetches.length, 0, `no unregistered main-process URL was requested: ${deniedUnknownFetches.join(', ')}`);
     assert.equal(deniedBrowserRequests.length, 0, `no external browser request was allowed or attempted: ${deniedBrowserRequests.join(', ')}`);
 
-    console.log('Packaged Phase 1 smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs and Re:Anime quarter selection UI, Re:Anime latest-airing UI, Linkkf current-day/weekday schedule UI, Animenosub/Ani24 update feeds and Animenosub recent-updates home card, settings source selection and reload into the Animenosub home, renderer search button → result card → detail → episode button → packaged resolver playback, Korean subtitle parsing and save, loopback HLS decode, persisted resume, automatic same-kind server fallback, and privacy-filtered diagnostics through the packaged clipboard IPC with an isolated test sink.');
+    console.log('Packaged Phase 1 smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs and Re:Anime quarter selection UI, Re:Anime latest-airing UI, Linkkf current-day/weekday schedule UI, Animenosub/Ani24 update feeds and synthetic Ohli24 9.5 episode plus local caption resolution, Animenosub recent-updates home card, settings source selection and reload into the Animenosub home, renderer search button → result card → detail → episode button → packaged resolver playback, Korean subtitle parsing and save, loopback HLS decode, persisted resume, automatic same-kind server fallback, and privacy-filtered diagnostics through the packaged clipboard IPC with an isolated test sink.');
     console.log(`Playback: ${playbackState.width}x${playbackState.height} at ${playbackState.currentTime.toFixed(2)}s; resume: ${resumeState.currentTime.toFixed(2)}s from saved 50%; fallback: ${fallbackState.server} at ${fallbackState.currentTime.toFixed(2)}s with selected subtitle; synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; renderer proxy requests: ${rendererProxyRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: 0; blocked browser requests: 0; external network calls: 0.`);
     await new Promise(resolve => localPlayerServer.close(resolve));
     app.quit();

@@ -49,6 +49,11 @@ const ipcCalls = [];
 const rendererErrors = [];
 let copiedDiagnostics = '';
 let titleVariantsResolved = false;
+let delayedProviderSearchStarted = false;
+let resolveDelayedProviderSearchStarted;
+let resolveDelayedProviderSearchResults;
+const delayedProviderSearchStartedPromise = new Promise(resolve => { resolveDelayedProviderSearchStarted = resolve; });
+const delayedProviderSearchResults = new Promise(resolve => { resolveDelayedProviderSearchResults = resolve; });
 let win;
 
 function fail(error) {
@@ -106,7 +111,13 @@ async function fixture(channel, args) {
     case 'anime:top': return { data: [] };
     case 'downloads:list': return [];
     case 'downloads:root': return downloadsRoot;
-    case 'provider:catalog': return providerSearch(args[0], args[1]);
+    case 'provider:catalog':
+      if (args[0] === 'reanime' && args[1] === '검색 전환 지연 테스트') {
+        delayedProviderSearchStarted = true;
+        resolveDelayedProviderSearchStarted();
+        return delayedProviderSearchResults;
+      }
+      return providerSearch(args[0], args[1]);
     case 'provider:season': return { data: [], label: '모의 시즌' };
     case 'provider:quarter': return { items: [], label: '모의 분기' };
     case 'provider:airing':
@@ -271,6 +282,32 @@ app.whenReady().then(async () => {
   assert.ok(afterStaleResponse.status.includes('경합 확인 테스트'), 'a late previous search cannot replace the current query');
   assert.equal(ipcCalls.filter(call => call.channel === 'provider:catalog' && call.args[1] === 'Unified Search Test').length, staleVariantSearchesBefore,
     'the stale title variant is never sent to providers after the search was superseded');
+
+  await win.webContents.executeJavaScript(`(() => {
+    state.top = ${JSON.stringify([items.ohli24])};
+    const input = document.querySelector('#pageSearch');
+    input.value = '검색 전환 지연 테스트';
+    document.querySelector('#searchButton').click();
+  })()`);
+  await waitFor('delayed provider search request', () => delayedProviderSearchStarted);
+  await win.webContents.executeJavaScript("document.querySelector('#seeAllTop').click()");
+  const homeListBeforeLateSearch = await win.webContents.executeJavaScript(`({
+    ids: [...document.querySelectorAll('#searchGrid .anime-card')].map(card => card.dataset.id),
+    status: document.querySelector('#searchStatus')?.textContent || ''
+  })`);
+  assert.deepEqual(homeListBeforeLateSearch, {
+    ids: [items.ohli24.mal_id], status: '인기 애니메이션 1개 · 인기순'
+  });
+  resolveDelayedProviderSearchResults({ data: [{
+    ...items.reanime, mal_id: 'reanime:late-search-result', title: '늦게 도착한 검색 결과', title_english: 'Late Search Result'
+  }] });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const homeListAfterLateSearch = await win.webContents.executeJavaScript(`({
+    ids: [...document.querySelectorAll('#searchGrid .anime-card')].map(card => card.dataset.id),
+    status: document.querySelector('#searchStatus')?.textContent || ''
+  })`);
+  assert.deepEqual(homeListAfterLateSearch, homeListBeforeLateSearch,
+    'a late search result must not replace the home discovery list currently shown in the search view');
 
   await win.webContents.executeJavaScript(`(() => {
     const input = document.querySelector('#pageSearch');

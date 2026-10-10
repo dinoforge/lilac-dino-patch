@@ -661,7 +661,7 @@ async function ohliDetail(anime){
   const poster=$('.article-box-img img').attr('src')||$('meta[property="og:image"]').attr('content')||imageOfMain(anime);
   const episodes=[];
   $('.eps-item a[href]').each((_,a)=>{
-    const el=$(a),date=el.find('.eps-date').text().replace(/\s+/g,' ').trim(),label=el.clone().children().remove().end().text().trim(),number=Number(label.match(/(\d+)\s*화/)?.[1]||label.match(/\d+/)?.[0])||null;
+    const el=$(a),date=el.find('.eps-date').text().replace(/\s+/g,' ').trim(),label=el.clone().children().remove().end().text().trim(),number=Number(label.match(/(\d+(?:\.\d+)?)\s*화/)?.[1]||label.match(/\d+(?:\.\d+)?/)?.[0])||null;
     episodes.push({name:number?String(number):label||'1',number,url:absoluteUrl(el.attr('href'),OHLI24_WEB),dub:false,provider:'ohli24',...(/^\d{4}-\d{2}-\d{2}$/.test(date)?{airedDate:date}:{})});
   });
   // Listed newest first; a movie's page has no list and plays itself.
@@ -671,7 +671,7 @@ async function ohliDetail(anime){
   if(ids)for(const episode of episodes)Object.assign(episode,ids);
   const data={...anime,...(ids||{}),title,title_japanese:native,images:{webp:{large_image_url:absoluteUrl(poster,OHLI24_WEB)}},
     synopsis:$('.movie-coment').first().text().replace(/\s+/g,' ').trim()||anime.synopsis||'',genres:(meta['장르']||'').split(/[,/·]/).map(name=>name.trim()).filter(Boolean).map(name=>({name})),
-    year:(meta['방영일']||'').match(/\d{4}/)?.[0]||anime.year||'',aired:meta['방영일']||'',availableEpisodes:Math.max(0,...episodes.map(episode=>Number(episode.number)||0)),
+    year:(meta['방영일']||'').match(/\d{4}/)?.[0]||anime.year||'',aired:meta['방영일']||'',availableEpisodes:Math.max(0,...episodes.map(episode=>Number.isInteger(episode.number)?episode.number:0)),
     totalEpisodes:Number((meta['총화수']||'').match(/\d+/)?.[0])||null,episodes:Number((meta['총화수']||'').match(/\d+/)?.[0])||episodes.length};
   return {data,episodes,unavailable:false};
 }
@@ -691,8 +691,9 @@ async function ohliStream(playerUrl){
       await new Promise(resolve=>setTimeout(resolve,500));
       if(i%4===3)win.webContents.executeJavaScript(`try{window.jwplayer?.().play?.()}catch{};document.querySelectorAll('video').forEach(v=>{v.muted=true;v.play().catch(()=>{})})`,true).catch(()=>{});
     }
-    if(!master&&media)return {url:media,headers:{'User-Agent':LINKKF_UA,Referer:playerUrl},referer:playerUrl};
-    if(!master)throw new Error('애니24 영상 주소를 찾지 못했습니다.');
+    if(!master&&!media)throw new Error('애니24 영상 주소를 찾지 못했습니다.');
+    const subtitle=await ohliCaption(win,playerUrl);
+    if(!master)return {url:media,headers:{'User-Agent':LINKKF_UA,Referer:playerUrl},referer:playerUrl,subtitle};
     const userAgent=headers?.['User-Agent']||LINKKF_UA;
     const text=await (await ses.fetch(master,{headers:{'User-Agent':userAgent,Accept:'*/*','Accept-Language':headers?.['Accept-Language']||'ko'}})).text();
     if(!text.startsWith('#EXTM3U'))throw new Error('애니24 영상 재생목록을 받지 못했습니다.');
@@ -700,14 +701,34 @@ async function ohliStream(playerUrl){
     if(!variants.length)throw new Error('애니24 영상 화질 목록이 없습니다.');
     // Its segments come from a different host each (ohli1…7ncloud5-nocdn.xyz), so a download fetches them itself, six at
     // a time (mirror), as Miruro's: FFmpeg opens a new connection for every one.
-    return {url:variants.sort((a,b)=>b.bandwidth-a.bandwidth)[0].url,headers:{'User-Agent':userAgent},referer:'',hls:true,mirror:true};
+    return {url:variants.sort((a,b)=>b.bandwidth-a.bandwidth)[0].url,headers:{'User-Agent':userAgent},referer:'',hls:true,mirror:true,subtitle};
   }finally{ses.webRequest.onSendHeaders(null);if(!win.isDestroyed())win.destroy()}
+}
+async function ohliCaption(win,playerUrl){
+  const files=await win.webContents.executeJavaScript(`(()=>{try{const item=window.jwplayer?.().getPlaylist?.()?.[0]||{};return [...(item.tracks||[]),...(item.sources||[]).flatMap(source=>source.tracks||[])].filter(track=>/^(captions|subtitles)$/i.test(track.kind||'')&&track.file).map(track=>String(track.file))}catch{return []}})()`,true).catch(()=>[]);
+  for(const file of new Set(files)){
+    try{
+      const url=new URL(file,playerUrl);if(!['http:','https:'].includes(url.protocol))continue;
+      const response=await win.webContents.session.fetch(url.href,{signal:AbortSignal.timeout(20000),headers:{'User-Agent':LINKKF_UA}});if(!response.ok)continue;
+      const data=Buffer.from(await response.arrayBuffer()),head=data.subarray(0,4096).toString('utf8').replace(/^\uFEFF/,'').trimStart();
+      if(!data.length||data.length>=20*1024*1024||/^<(?:!doctype|html|head)/i.test(head))continue;
+      const ext=/^webvtt/i.test(head)?'.vtt':/\[script info\]/i.test(head)?'.ass':/<sami/i.test(head)?'.smi':head.includes('-->')?'.srt':'';if(!ext)continue;
+      return {data,ext};
+    }catch{/* Try the next caption track. */}
+  }
+  return null;
 }
 async function resolveOhliEpisode(episode){
   const $=cheerio.load(await ohliFetch(episode.url));
   const player=absoluteUrl($('iframe#video').attr('src')||$('iframe[src*="cdndania"]').attr('src')||$('iframe[src]').first().attr('src')||'',episode.url);
   if(!player)throw new Error('이 회차의 영상 플레이어를 찾지 못했습니다.');
-  return {...await ohliStream(player),burnedKorean:true,subtitleTracks:[]};
+  const {subtitle,...stream}=await ohliStream(player);
+  if(!subtitle)return {...stream,burnedKorean:true,subtitleTracks:[]};
+  const dir=path.join(app.getPath('userData'),'subtitles','provider');fs.mkdirSync(dir,{recursive:true});
+  const file=path.join(dir,`ohli24_${Date.now()}_${Math.random().toString(36).slice(2,8)}${subtitle.ext}`);fs.writeFileSync(file,subtitle.data);
+  const saved=subtitleResult(file);
+  return {...stream,burnedKorean:false,subtitleTracks:[],subtitleUrl:saved.url,subtitlePath:saved.path,
+    subtitleAss:saved.assUrl?{url:saved.assUrl,path:saved.assPath,fonts:saved.fonts}:null,subtitleLabel:'애니24 한국어 자막'};
 }
 
 function openProviderPlayer(episode, title = 'LilacAnime Player') {

@@ -93,7 +93,7 @@ test('leaving playback navigation cancels an outstanding history detail lookup',
   await request;
 
   assert.equal(h.calls.some(call => call.type === 'player' || call.type === 'resolve'), false);
-  assert.match(appSource, /if\(name!==current\)cancelPendingPlaybackLookups\(\)/);
+  assert.match(appSource, /if\(name!==current\)\{cancelPendingPlaybackLookups\(\);if\(current==='search'\)invalidateIntegratedSearch\(\)\}/);
   assert.match(appSource, /async function openDetail\(id,\{groupKey='',sourceId=''\}=\{\}\)\s*\{\s*cancelPendingPlaybackLookups\(\)/);
   assert.match(appSource, /async function doSearch\(query\)\s*\{\s*query=query\.trim\(\);if\(!query\)return;cancelPendingPlaybackLookups\(\)/);
 });
