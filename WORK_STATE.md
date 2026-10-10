@@ -467,7 +467,7 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 두 번째 Electron 프로세스에서 기존 Re:Anime 작품별 출처와 50% 시청 기록을 복원하고 합성 영상 약 2.01초·한국어 cue를 확인했다. 기록 저장은 테스트가 수동 `timeupdate`를 보내므로 `saveHistorySoon()`을 명시 호출해 50%가 저장됐는지도 확인한다.
 - `npm run test:phase1-source-restart` 통과. 이 검증은 실제 앱 renderer/preload/main과 격리 fixture를 사용하며 실제 Kairan/Csora/Anissia 사이트, 자막 작품·회차·영상판 일치, 권리 조건, 설치 NSIS 앱은 검증하지 않았다.
 - 회귀 확인: `npm test` 225/225, `npm run test:phase1-electron`, `npm run test:phase1-main`(합성 HTTP fixture 89회, 미등록 fetch·외부 브라우저 요청 0), `node --check tests/phase1-main.electron.cjs`, `git diff --check` 통과.
-- 원격 `dinoforge/anime-player`는 비공개 저장소다. 현재 활성 `Build` workflow는 `v*` 태그와 수동 실행에 반응하고 릴리스 업로드 권한도 포함한다. `main` push는 workflow를 실행하지 않지만, CI 사전 비활성화 규칙과 릴리스 workflow 변경 승인 규칙이 맞물려 GitHub 반영은 사용자 결정 전 보류한다.
+- 원격 `dinoforge/anime-player`는 비공개 저장소다. 활성 `Build` workflow는 `v*` 태그와 수동 실행만 받는 릴리스 workflow이므로 `main` push에서 실행되지 않는다. 이 release workflow는 비활성화하거나 수정하지 않았다.
 
 ## 2026-10-10 Anissia API 권리 문서 확인
 
@@ -479,4 +479,10 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 - 두 Blogger 원문을 브라우저에서 읽었다. Kairan 공개 회차 글은 Google Drive 링크와 제작자가 작업을 언제든 멈출 수 있다는 설명을 포함한다. Csora 프로필은 자막 수익화와 사칭을 하지 말라고 요청하고, 공개 회차 글은 자막·폰트 링크를 제공한다.
 - 공개 링크와 개인 시청자 공유 의사는 앱의 자동 수집·저장·변환·재배포 허가가 아니다. 외부 Drive 파일이나 실제 자막은 열거나 내려받지 않았다. `docs/RIGHTS_REVIEW.md`에 출처별 문구와 한계를 기록했다.
-- 브라우저 CLI 런타임은 의존성 누락으로 시작되지 않았으나 Codex 브라우저를 통해 두 사이트를 읽었다. Anissia 공식 문서 검토 커밋 `a69e9f9`은 로컬에만 있고 GitHub push는 계속 보류 중이다.
+- 브라우저 CLI 런타임은 의존성 누락으로 시작되지 않았으나 Codex 브라우저를 통해 두 사이트를 읽었다. 이 내용은 공개 안내의 확인 범위를 기록하며 이용 허가 판정을 추가하지 않는다.
+
+## 2026-10-10 비공개 main push 확인
+
+- Push 전 `gh repo view`로 `dinoforge/anime-player`가 private이고 기본 브랜치가 `main`임을 확인했다. 활성 workflow는 `Build` 하나이며 `v*` 태그 push·수동 실행에만 반응한다. 일반 `main` push에는 실행되는 CI가 없고 릴리스 workflow도 변경하지 않았다.
+- `8a6f5e2`, `a69e9f9`, `b603163` 세 커밋의 outgoing diff와 추가된 텍스트를 검토했다. 의도된 테스트·권리 문서·상태 문서만 포함됐고 일반적인 자격 증명 패턴은 발견되지 않았다. `git diff --check`가 통과했다.
+- `git push origin main` 성공 후 원격 `main`과 로컬 HEAD가 모두 `b603163e50b5055caf17f5cafe00baac6135f142`임을 확인했다. `gh run list --branch main`은 빈 목록을 반환했다. 현재 작업 트리는 깨끗하다. 태그 생성·설치 파일 배포·공개 저장소 전환은 하지 않았다.
