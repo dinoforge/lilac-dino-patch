@@ -459,3 +459,12 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 프로세스를 완전히 종료하고 같은 임시 프로필로 다시 열었을 때 작품별 출처와 50% 시청 기록이 복원됐다. 이어보기 후 320×180 합성 영상이 약 2.01초에서 재생되고 `합성 한국어 자막` cue가 표시됐다. 초기화 버튼을 눌러 `설정 기본값: 자동`으로 돌아가고 버튼이 비활성화되는 것도 확인했다.
 - seed/verify 합성 HTTP 요청은 32회/20회였고 두 실행 모두 미등록 fetch 0, 차단된 브라우저 요청 0이었다. 전체 `npm test` 225/225, `npm run test:phase1-electron`, `npm run test:phase1-main`, `npm run test:phase1-source-restart`가 통과했다.
 - 검증은 테스트 전용 패키지와 임시 사용자 프로필, 합성 영상·자막이다. 실제 자막 공급원 매칭, 설치된 사용자 앱·프로필, 권리 조건은 확인하지 않았다. 설치 파일은 로컬 빌드만 했으며 배포하지 않았다.
+
+## 2026-10-10 Kairan·Csora·Anissia 출처 버튼 IPC 확인
+
+- `tests/phase1-main.electron.cjs`가 격리 패키지 플레이어에서 Kairan·Csora·Anissia 버튼을 각각 눌러 renderer→preload→main `subtitle:find` 경로를 탔다. 합성 Blogger 피드와 Anissia 작품 검색·제작자 API, 제작자 블로그, 합성 VTT 파일을 fixture로 제공했다.
+- 각 출처에서 파일을 임시 프로필 아래 저장하고 해당 회차의 `있음` 상태, 출처별 자막 이름, 플레이어 활성 한국어 cue까지 확인했다. seed 45회·verify 18회의 합성 HTTP 요청에서 미등록 fetch와 차단된 브라우저 요청은 모두 0회였다.
+- 두 번째 Electron 프로세스에서 기존 Re:Anime 작품별 출처와 50% 시청 기록을 복원하고 합성 영상 약 2.01초·한국어 cue를 확인했다. 기록 저장은 테스트가 수동 `timeupdate`를 보내므로 `saveHistorySoon()`을 명시 호출해 50%가 저장됐는지도 확인한다.
+- `npm run test:phase1-source-restart` 통과. 이 검증은 실제 앱 renderer/preload/main과 격리 fixture를 사용하며 실제 Kairan/Csora/Anissia 사이트, 자막 작품·회차·영상판 일치, 권리 조건, 설치 NSIS 앱은 검증하지 않았다.
+- 회귀 확인: `npm test` 225/225, `npm run test:phase1-electron`, `npm run test:phase1-main`(합성 HTTP fixture 89회, 미등록 fetch·외부 브라우저 요청 0), `node --check tests/phase1-main.electron.cjs`, `git diff --check` 통과.
+- 원격 `dinoforge/anime-player`는 비공개 저장소다. 현재 활성 `Build` workflow는 `v*` 태그와 수동 실행에 반응하고 릴리스 업로드 권한도 포함한다. `main` push는 workflow를 실행하지 않지만, CI 사전 비활성화 규칙과 릴리스 workflow 변경 승인 규칙이 맞물려 GitHub 반영은 사용자 결정 전 보류한다.

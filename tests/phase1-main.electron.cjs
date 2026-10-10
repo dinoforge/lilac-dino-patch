@@ -128,6 +128,19 @@ const animeFixture = {
   status: 'RELEASING',
   description: '합성 main-process 테스트 작품'
 };
+function communityBloggerFeed(source, host) {
+  const href = `https://subtitles.invalid/phase1-community-${source}.vtt`;
+  return {
+    feed: {
+      'openSearch$totalResults': { $t: '2' },
+      entry: [animeFixture.title.english, animeFixture.title.native].map((title, index) => ({
+        title: { $t: `${title} 1화` },
+        link: [{ rel: 'alternate', href: `https://${host}/posts/${source}-${index + 1}` }],
+        content: { $t: `<p>합성 ${source} 게시물</p><a href="${href}">1화 자막</a>` }
+      }))
+    }
+  };
+}
 const miruroQuarterFixture = {
   id: 'phase1-miruro-quarter',
   title: { english: 'Miruro Quarter Fixture', native: '미루로 분기 합성작', romaji: 'Miruro Quarter Fixture' },
@@ -165,6 +178,30 @@ function fixtureResponse(rawUrl, requestInit = {}) {
       { episode: 4, airingAt: now - 10, media: { id: 62008 } },
       { episode: 1, airingAt: now - 60, media: { id: 62002 } }
     ] } } });
+  }
+  if (url.hostname === 'api.anissia.net' && url.pathname.startsWith('/anime/list/0')) {
+    fixtureRequests.push(url.href);
+    return response({ code: 'ok', data: { content: [
+      { animeNo: 93001, subject: animeFixture.title.english },
+      { animeNo: 93002, subject: animeFixture.title.native }
+    ] } });
+  }
+  if (url.hostname === 'api.anissia.net' && /^\/anime\/caption\/animeNo\/(?:93001|93002)$/.test(url.pathname)) {
+    fixtureRequests.push(url.href);
+    return response({ code: 'ok', data: [{
+      name: '합성 자막 제작자', website: 'https://phase1-anissia.blogspot.com/posts/maker', updDt: '2026-10-10'
+    }] });
+  }
+  if (['kairan03.blogspot.com', 'csora556.blogspot.com', 'phase1-anissia.blogspot.com'].includes(url.hostname)
+    && url.pathname === '/feeds/posts/default') {
+    fixtureRequests.push(url.href);
+    const source = url.hostname === 'kairan03.blogspot.com' ? 'kairan'
+      : url.hostname === 'csora556.blogspot.com' ? 'csora' : 'anissia';
+    return response(communityBloggerFeed(source, url.hostname));
+  }
+  if (url.hostname === 'phase1-anissia.blogspot.com' && url.pathname.startsWith('/posts/')) {
+    fixtureRequests.push(url.href);
+    return response('<!doctype html><html><head><meta property="og:title" content="합성 자막 제작자 게시물"></head><body><a href="https://subtitles.invalid/phase1-community-anissia.vtt">1화 자막</a></body></html>', 200, 'text/html; charset=utf-8');
   }
   if (url.hostname === 'linkkf1.5imgdarr.top' && url.pathname === '/api/singlefilter.php') {
     fixtureRequests.push(url.href);
@@ -280,6 +317,12 @@ function fixtureResponse(rawUrl, requestInit = {}) {
     fixtureRequests.push(url.href);
     return response('WEBVTT\n\n00:00:01.000 --> 00:00:03.000\n합성 한국어 자막\n', 200, 'text/vtt');
   }
+  if (url.hostname === 'subtitles.invalid' && /^\/phase1-community-(?:kairan|csora|anissia)\.vtt$/.test(url.pathname)) {
+    fixtureRequests.push(url.href);
+    const source = url.pathname.match(/community-(kairan|csora|anissia)/)[1];
+    const label = source === 'kairan' ? 'Kairan' : source === 'csora' ? 'Csora' : 'Anissia';
+    return response(`WEBVTT\n\n00:00:00.000 --> 00:00:04.000\n합성 ${label} 한글 자막\n`, 200, 'text/vtt');
+  }
   if (url.hostname === 'jimaku.cc' && url.pathname === '/') {
     fixtureRequests.push(url.href);
     return response(`<!doctype html><html><body><div class="entry" data-extra='{"anilist_id":62001}'><a href="/entry/62001">Fixture</a></div></body></html>`, 200, 'text/html; charset=utf-8');
@@ -370,6 +413,7 @@ function requestLoopback(urlText) {
 
 async function runSourceRestartProbe(win) {
   let subtitlePreferenceState = null;
+  const communitySubtitleEvidence = [];
   if (restartMode === 'seed') {
     await waitFor('default source before selecting Animenosub', () => win.webContents.executeJavaScript(`(() =>
       state.source === 'reanime' && document.querySelector('#contentSource')?.value === 'reanime'
@@ -448,6 +492,62 @@ async function runSourceRestartProbe(win) {
         }))()`);
         throw new Error(`${error.message}; seed player snapshot: ${JSON.stringify(playback)}; recent fixture requests: ${JSON.stringify(fixtureRequests.slice(-12))}; denied fetches: ${JSON.stringify(deniedUnknownFetches)}`);
       });
+    const pausedAtCue = await win.webContents.executeJavaScript(`(() => {
+      const video = document.querySelector('#video');
+      if (!video) return false;
+      video.pause();
+      video.currentTime = 1;
+      return true;
+    })()`);
+    assert.equal(pausedAtCue, true, 'the packaged player can hold the synthetic video on a subtitle cue');
+    for (const provider of [
+      { source: 'kairan', host: 'kairan03.blogspot.com', cue: '합성 Kairan 한글 자막' },
+      { source: 'csora', host: 'csora556.blogspot.com', cue: '합성 Csora 한글 자막' },
+      { source: 'anissia', host: 'phase1-anissia.blogspot.com', cue: '합성 Anissia 한글 자막' }
+    ]) {
+      const requestOffset = fixtureRequests.length;
+      const clicked = await win.webContents.executeJavaScript(`(() => {
+        const button = document.querySelector('#psSubtitleSources button[data-source="${provider.source}"]');
+        if (!button) return false;
+        button.click();
+        return true;
+      })()`);
+      assert.equal(clicked, true, `the packaged player exposes the ${provider.source} subtitle source button`);
+      const applied = await waitFor(`packaged ${provider.source} source button → preload/main subtitle IPC → saved subtitle`, () =>
+        win.webContents.executeJavaScript(`(async () => {
+          const saved = await window.lilac.savedSubtitles(subtitleStoreKey());
+          const entry = saved.find(item => item.source === ${JSON.stringify(provider.source)});
+          const status = document.querySelector('#psSubtitleSources button[data-source="${provider.source}"] [data-source-status]');
+          return entry && status?.dataset.availability === 'available'
+            ? { source: entry.source, label: entry.label, path: entry.path, availability: status.dataset.availability }
+            : null;
+        })()`), 20000);
+      assert.equal(applied.source, provider.source);
+      assert.equal(applied.availability, 'available', `${provider.source} availability is shown for this episode`);
+      assert.match(applied.label, new RegExp(provider.source === 'kairan' ? 'Kairan' : provider.source === 'csora' ? 'Csora' : 'Anissia'));
+      assert.ok(applied.path && fs.existsSync(applied.path), `${provider.source} subtitle was saved under the isolated app profile`);
+      const activeCue = await waitFor(`${provider.source} subtitle cue is active in the packaged player`, () =>
+        win.webContents.executeJavaScript(`(() => {
+          const video = document.querySelector('#video');
+          const cues = [...(video?.textTracks || [])].flatMap(track => [...(track.activeCues || [])]).map(cue => cue.text).join(' ');
+          return cues.includes(${JSON.stringify(provider.cue)}) ? cues : '';
+        })()`), 10000);
+      assert.match(activeCue, new RegExp(provider.cue));
+      const providerRequests = fixtureRequests.slice(requestOffset).map(rawUrl => new URL(rawUrl));
+      assert.ok(providerRequests.some(url => url.hostname === provider.host && url.pathname === '/feeds/posts/default'),
+        `${provider.source} was resolved from its synthetic Blogger feed through main-process fetch`);
+      assert.ok(providerRequests.some(url => url.hostname === 'subtitles.invalid' && url.pathname === `/phase1-community-${provider.source}.vtt`),
+        `${provider.source} fixture subtitle was downloaded through main-process fetch`);
+      if (provider.source === 'anissia') {
+        assert.ok(providerRequests.some(url => url.hostname === 'api.anissia.net' && url.pathname.startsWith('/anime/list/0')),
+          'Anissia search reached the synthetic anime registry endpoint');
+        assert.ok(providerRequests.some(url => url.hostname === 'api.anissia.net' && url.pathname.startsWith('/anime/caption/animeNo/')),
+          'Anissia search reached the synthetic maker endpoint');
+        assert.ok(providerRequests.some(url => url.hostname === provider.host && url.pathname.startsWith('/posts/')),
+          'Anissia followed the maker post link through the synthetic fixture');
+      }
+      communitySubtitleEvidence.push({ source: provider.source, label: applied.label, availability: applied.availability, cue: provider.cue });
+    }
     const selectedSubtitleSource = await win.webContents.executeJavaScript(`(() => {
       const initialDefault = localStorage.getItem('subtitleSource');
       const button = document.querySelector('#psSubtitleSources button[data-source="reanime"]');
@@ -475,13 +575,19 @@ async function runSourceRestartProbe(win) {
       const video = document.querySelector('#video');
       video.currentTime = 2;
       video.dispatchEvent(new Event('timeupdate'));
+      saveHistorySoon();
+      const history = JSON.parse(localStorage.getItem('history') || '[]');
+      const saved = history.find(item => item.episode?.provider === 'reanime' && item.episode?.number === 1);
       video.pause();
-      return { currentTime: video.currentTime, duration: video.duration };
+      return { currentTime: video.currentTime, duration: video.duration, savedProgress: saved?.progress ?? null };
     })()`);
     assert.ok(savedPosition.duration >= 3.8 && savedPosition.duration <= 4.2, JSON.stringify(savedPosition));
+    assert.equal(savedPosition.savedProgress, 50, JSON.stringify(savedPosition));
     const savedCard = await waitFor('50 percent progress saved before the Electron process exits', () =>
       win.webContents.executeJavaScript("document.querySelector('#continueRail .continue-card')?.innerText || ''"), 10000);
     assert.match(savedCard, /EP\.1\s*·\s*50%/, savedCard);
+    // Let Chromium flush its isolated localStorage profile before this process exits.
+    await new Promise(resolve => setTimeout(resolve, 750));
     resumeState = { savedCard, savedPosition };
   } else {
     const persistedSubtitleSource = await win.webContents.executeJavaScript(`(() => {
@@ -495,7 +601,15 @@ async function runSourceRestartProbe(win) {
       win.webContents.executeJavaScript(`(() => {
         const text = document.querySelector('#continueRail .continue-card')?.innerText || '';
         return /EP\\.1\\s*·\\s*50%/.test(text) ? text : '';
-      })()`), 15000);
+      })()`), 15000).catch(async error => {
+      const state = await win.webContents.executeJavaScript(`(() => ({
+        history: state.history.map(item => ({ key: item.key, progress: item.progress, provider: item.episode?.provider, episode: item.episode?.number })),
+        historyStorage: JSON.parse(localStorage.getItem('history') || '[]').map(item => ({ key: item.key, progress: item.progress, provider: item.episode?.provider, episode: item.episode?.number })),
+        continueText: document.querySelector('#continueRail')?.innerText || '',
+        source: state.source
+      }))()`);
+      throw new Error(`${error.message}; restart profile diagnostics: ${JSON.stringify(state)}`);
+    });
     assert.match(persistedCard, /EP\.1\s*·\s*50%/, persistedCard);
     const resolveCallsBeforeResume = fixtureRequests.filter(url => url.includes(`/api/watch/${SLUG}/1`)).length;
     const savedEpisode = await win.webContents.executeJavaScript(`(() => {
@@ -559,7 +673,7 @@ async function runSourceRestartProbe(win) {
   }
   assert.equal(deniedUnknownFetches.length, 0, `the source restart used only registered fixture URLs: ${deniedUnknownFetches.join(', ')}`);
   assert.equal(deniedBrowserRequests.length, 0, `the source restart made no browser requests outside local fixtures: ${deniedBrowserRequests.join(', ')}`);
-  console.log(`Source restart ${restartMode} passed: ${restored.source}, ${restored.title}; subtitle preference: ${JSON.stringify(subtitlePreferenceState)}; resume evidence: ${JSON.stringify(resumeState)}; fixture calls: ${fixtureRequests.length}; unknown fetches: 0; blocked browser requests: 0.`);
+  console.log(`Source restart ${restartMode} passed: ${restored.source}, ${restored.title}; community subtitle buttons/IPC: ${JSON.stringify(communitySubtitleEvidence)}; subtitle preference: ${JSON.stringify(subtitlePreferenceState)}; resume evidence: ${JSON.stringify(resumeState)}; fixture calls: ${fixtureRequests.length}; unknown fetches: 0; blocked browser requests: 0.`);
 }
 
 app.on('session-created', blockSessionRequests);
