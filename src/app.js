@@ -1247,7 +1247,16 @@ async function startManualChatgptTranslation(){
 async function copyManualChatgptPrompt(){
   const state=manualChatgptTranslation;if(!manualChatgptIsCurrent(state))return;
   const batch=state.batches[state.index];if(!batch)return;
-  const prompt=window.LilacManualSubtitle.makePrompt({title:state.title,episode:state.episode,items:batch});
+  const sourceLanguage=window.LilacManualSubtitle.detectSourceLanguage(state.parsed.cues);
+  const cueIndexes=batch.map(item=>state.parsed.cues.findIndex(cue=>cue.id===item.id)).filter(index=>index>=0);
+  const first=Math.min(...cueIndexes),last=Math.max(...cueIndexes);
+  const contextBefore=state.parsed.cues.slice(Math.max(0,first-2),first).map(cue=>({id:cue.id,text:cue.text}));
+  const contextAfter=state.parsed.cues.slice(last+1,last+3).map(cue=>({id:cue.id,text:cue.text}));
+  let translationInstructions='';
+  try{translationInstructions=await window.lilac.translationPrompt(sourceLanguage)}
+  catch(error){$('#manualChatgptStatus').textContent=`번역 지침을 불러오지 못했습니다: ${error.message}`;return}
+  if(!manualChatgptIsCurrent(state))return;
+  const prompt=window.LilacManualSubtitle.makePrompt({title:state.title,episode:state.episode,items:batch,contextBefore,contextAfter,translationInstructions,sourceLanguage});
   try{
     await window.lilac.copyText(prompt);
     try{await window.lilac.openExternal('https://chatgpt.com/');$('#manualChatgptStatus').textContent='요청을 복사하고 ChatGPT를 열었습니다. 브라우저에서 붙여넣어 직접 보내세요.'}

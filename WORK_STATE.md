@@ -1,5 +1,13 @@
 # 작업 상태
 
+## 2026-10-10 패치 01·02 통합 검증
+
+- `codex/patch-01-auto-quarter` (`b79a69a`)에서 `codex/integration-01-02`를 만들고 `codex/patch-02-chatgpt-translation` (`2715f81`)를 통합했다. `main`, 패치 01·02 원본 브랜치 및 LilacAnime upstream은 수정하지 않았다. 충돌은 `WORK_STATE.md` 한 파일이었고, 두 패치의 기록을 모두 보존했다. 공통 소스·테스트 변경은 병합 결과에서 함께 확인했다.
+- Windows Git의 줄바꿈 변환이 사용자 제공 프롬프트 바이트를 바꾸지 않도록 `/docs/prompts/*.txt`를 `-text`로 지정하고 CRLF의 diff 공백 검사를 `cr-at-eol`로 처리한다. 영어 `582EAF421CABBCF89279579E5723AA07B070E5B1DF2E28EE044994B2E951E37E`, 일본어 `9FF7E860CF0C79396621C2EF65B364596EBB884AA5B3CE68E60AB0D4B42EC584`, Reazon `2DCB15B42D31BD6413D74E9A91303F0055574E030F875720CB1A1C07B814CCF8`의 원본·worktree·`app.asar` SHA-256이 일치한다.
+- 통합 `npm test` 283/283 통과. `npm run test:phase1-electron`, `npm run test:phase1-main`, `npm run test:phase1-exe`도 통과했다. 패키지 main smoke는 합성 HTTP fixture 104회, 알 수 없는 fetch·차단 브라우저 요청·실제 외부 네트워크 0회였다. 실제 Electron UI에서 합성 일본어 자막 26개 cue를 두 묶음으로 나눠 언어별 프롬프트·앞뒤 문맥·수동 결과 적용·회차별 저장을 확인하고 원래 26개 시간 코드와 순서가 유지됨을 검증했다. ChatGPT 열기와 클립보드는 테스트에서 가로챘으며 실제 ChatGPT 요청은 보내지 않았다.
+- `node --check`와 staged/working `git diff --check` 통과. 별도 worktree의 Windows x64 unpacked 패키지는 앱 ID `com.lilac.anime.desktop.integration-20261010`으로 `npm run pack` 빌드했고, `app.asar`의 소스 및 프롬프트 바이트를 확인했다. 실행 파일 스모크는 격리된 `%TEMP%` 프로필·APPDATA·LOCALAPPDATA를 사용했고 기존 설치본을 설치·변경하지 않았다.
+- 실제 Linkkf·AniList·다섯 영상 공급원 서비스 응답/회차 일치, ChatGPT 왕복과 번역 품질은 미검증이다. ChatGPT 완전 자동 연결은 구현하지 않았다. 다음 화 자동 재생 금지를 유지했다.
+
 ## 2026-10-10 패치 01 후속: 분기 자동 인식·요일표 갱신
 
 - `codex/patch-01-auto-quarter`를 패치 01 커밋 `5f40649`에서 분리했다. 선택 기록은 선택된 연도·분기와 선택 당시 달력 연도·분기를 함께 저장한다. 같은 달력 분기에서는 과거 분기 선택을 유지하고, 달력 분기가 바뀌면 현재 분기로 전환한다. 날짜 정보가 없는 기존 형식은 현재 분기와 일치할 때만 보존하고 나머지는 현재 분기로 안전하게 이전한다.
@@ -16,7 +24,13 @@
 - 방영 일정과 출처별 회차 상태를 캐시하고 겹치는 AniList/회차 확인 요청을 합친다. 이어보기와 기존 재생 동작 및 다음 화 자동 재생 금지는 변경하지 않았다.
 - 전체 `npm test` 270/270, 구문 검사와 `git diff --check` 통과. Windows x64 `electron-builder --dir` 패키지의 `app.asar`를 확인하고 `npm run test:phase1-main`을 실행했다. 7일 탭과 Linkkf·AniList IPC, 기존 검색→회차→합성 HLS 재생·한국어 자막·이어보기를 검증했다. 합성 fixture 요청 103회, 알 수 없는 fetch 0회, 브라우저 차단 0회, 실제 외부 네트워크 0회다.
 - 실제 Linkkf/AniList 및 다섯 공급원의 라이브 매칭·회차 재생은 검증하지 않았다. AniList 예정 일정은 Re:Anime·Miruro에만 있고, 다른 공급원은 확인 가능한 Linkkf 일정 및 작품 선택 후 정확한 회차 상태를 사용한다. NSIS 설치 UI와 설치본은 이번 패치에서 검증하지 않았다. 기존 설치·프로필·사용자 데이터는 접근하거나 변경하지 않았다.
+## 2026-10-10 패치 02: ChatGPT 수동 번역 프롬프트·연결 경계
 
+- 사용자가 준 영어·일본어 번역 프롬프트와 Reazon 작품 단어사전 예시를 `docs/prompts/`에 원문 바이트 그대로 보관했다. SHA-256으로 복사본을 비교했다. Reazon 파일은 음성인식 hotwords 자료이며 번역 사전으로 쓰지 않는다고 안내했다.
+- ChatGPT 수동 복사 요청은 VTT cue의 주된 원문 언어를 간단히 판별해 해당 전체 프롬프트를 선택한다. 번역할 묶음의 앞뒤 최대 두 cue를 문맥 전용으로 제공하며, 응답에는 지정 cue ID만 포함하도록 한다. 앱은 기존과 같이 반환 ID를 검증하고 원래 시간·WebVTT 구조를 보존한다. 원문 cue 안의 지시문은 데이터로 취급하라고 요청한다.
+- OpenAI의 Sign in with ChatGPT/요금제 사용량 공유는 공개 오픈소스 앱과 선택된 비공개 파트너를 대상으로 한다. 이 비공개 저장소가 승인된 파트너라는 근거가 없어 실제 OAuth 연결은 구현하지 않았다. 공식 연결 조건과 제한을 `docs/CHATGPT_TRANSLATION.md`에 기록했다. ChatGPT 수동 흐름은 자동 제출 없이 기존처럼 사용자가 직접 붙여넣고 전송한다. 기존 로컬 AI 및 설정 API 번역 경로는 변경하지 않았다.
+- `node --test tests/manual-subtitle-translation.test.cjs tests/manual-subtitle-translation-ui.test.cjs tests/translation-prompts.test.cjs`: 13/13 통과. 전체 `npm test`: 261/261 통과 (`NODE_PATH`는 기존 `main` checkout의 `node_modules`를 가리킴). 변경 JS `node --check`와 `git diff --check` 통과. 실제 ChatGPT 왕복·번역 품질, 설치 NSIS 패키지 실행은 미검증이다.
+- Windows x64 `electron-builder --dir` 패키지와 `npm run test:phase1-main` 합성 IPC 스모크가 통과했다. 설치 `app.asar`에 번역 프롬프트 로더와 제공된 세 원문 파일이 포함되고 작업 트리의 바이트와 일치했다. 기존 검색·회차 재생·한국어 자막 저장·이어보기 및 합성 HLS 재생도 통과했고, 알 수 없는 fetch 0건·브라우저 외부 요청 0건·실제 외부 네트워크 0건이다. NSIS 설치 UI와 ChatGPT 실전 왕복은 검증하지 않았다.
 ## 2026-10-10 최신 작업: 저장 자막 UI·설치 NSIS 통합 스모크
 
 - 플레이어 자막 패널에 현재 회차의 저장 자막 목록, 출처와 적용 상태, 항목 제거 버튼을 연결했다. 적용 중인 자막은 다른 자막을 고를 때까지 제거 버튼을 잠그고, 제거 전에 확인을 받는다. 앱이 받은 파일은 다른 회차에서 참조하지 않을 때만 지우며, 사용자가 PC에서 고른 파일은 원래 위치에 둔다.
