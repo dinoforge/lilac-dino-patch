@@ -382,7 +382,7 @@ test('LinkAni is absent from source choices and online provider adapters', () =>
 });
 
 function subtitleSourceHarness() {
-  const h = setup(), savedRequests = [], findRequests = [], searched = [], attached = [];
+  const h = setup(), savedRequests = [], findRequests = [], searched = [], attached = [], sourcePicks = [];
   const controls = new Map([
     ['#subtitleSource', { value: '' }],
     ['#subtitleState', { textContent: '' }],
@@ -403,6 +403,7 @@ function subtitleSourceHarness() {
     beginSubtitleSelection: () => ++h.context.subtitleSelectionRequestId,
     pressSubtitleSource: source => { h.context.currentPlaybackContext.pressedSource = source; h.context.currentPlaybackContext.pressedFor = h.context.currentSubtitle; },
     preferAiSubtitle() {},
+    rememberSeriesSubtitleSource(source) { sourcePicks.push(source); },
     syncSettingChoices() {},
     syncPlayerSettingsUI() {},
     subtitleStoreKey: () => h.context.currentPlaybackContext.episodeKey,
@@ -419,8 +420,89 @@ function subtitleSourceHarness() {
     }
   });
   vm.runInContext(section('async function selectSubtitleSource(source)', '// Quality: the HLS variants'), h.context);
-  return { ...h, controls, savedRequests, findRequests, searched, attached };
+  return { ...h, controls, savedRequests, findRequests, searched, attached, sourcePicks };
 }
+
+test('subtitle source preference is per series and reset preserves its other saved picks', () => {
+  const storage = new Map([
+    ['subtitleSource', 'kairan'],
+    ['seriesSubtitlePick', JSON.stringify({
+      'reanime:one': { source: 'csora', jimaku: { release: 'kept' }, ai: 'local', at: 1 },
+      'reanime:two': { source: 'linkkf', jimaku: { release: 'other' }, at: 2 }
+    })]
+  ]);
+  const preferenceStatus = { textContent: '' }, resetButton = { disabled: false };
+  const context = vm.createContext({
+    currentPlaybackContext: { anime: { provider: 'reanime', id: 'one' } },
+    localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)) },
+    $: selector => ({ '#seriesSubtitleSourceStatus': preferenceStatus, '#resetSeriesSubtitleSource': resetButton }[selector])
+  });
+  vm.runInContext(appSection('const SERIES_SUBTITLE_SOURCES=', 'const engineSide='), context);
+
+  assert.equal(context.preferredSubtitleSource(), 'csora');
+  context.renderSeriesSubtitlePreference();
+  assert.equal(preferenceStatus.textContent, '이 작품 출처: Csora');
+  assert.equal(resetButton.disabled, false);
+  assert.equal(context.preferredSubtitleSource({ provider: 'reanime', id: 'two' }), 'linkkf');
+  assert.equal(context.rememberSeriesSubtitleSource('anissia'), true);
+  assert.equal(context.preferredSubtitleSource(), 'anissia');
+  assert.equal(context.preferredSubtitleSource({ provider: 'reanime', id: 'two' }), 'linkkf');
+  assert.equal(context.rememberSeriesSubtitleSource('jimaku'), false);
+  assert.equal(context.resetSeriesSubtitleSource(), true);
+  assert.equal(context.preferredSubtitleSource(), 'kairan');
+  context.renderSeriesSubtitlePreference();
+  assert.equal(preferenceStatus.textContent, '설정 기본값: Kairan');
+  assert.equal(resetButton.disabled, true);
+
+  const picks = JSON.parse(storage.get('seriesSubtitlePick'));
+  assert.deepEqual(picks['reanime:one'].jimaku, { release: 'kept' });
+  assert.equal(picks['reanime:one'].ai, 'local');
+  assert.equal(picks['reanime:one'].source, undefined);
+  assert.deepEqual(picks['reanime:two'], { source: 'linkkf', jimaku: { release: 'other' }, at: 2 });
+});
+
+test('automatic subtitle search tries the selected series source first', async () => {
+  const searched = [];
+  const context = vm.createContext({
+    playbackRequestId: 7,
+    subtitleStoreKey: () => 'episode-one',
+    seriesKey: anime => `${anime.provider}:${anime.id}`,
+    preferredSubtitleSource: () => 'csora',
+    $$: () => [],
+    window: { lilac: { findSubtitle: async source => { searched.push(source); return source === 'csora' ? { id: 'csora-result' } : null; } } }
+  });
+  vm.runInContext(appSection('const ONLINE_SUBTITLE_SOURCES=', 'function attachOnlineSubtitle('), context);
+
+  const found = await context.onlineSubtitleFor('테스트 애니', 1, { provider: 'reanime', id: 'one' });
+  assert.equal(found.source, 'csora');
+  assert.deepEqual(searched, ['csora', 'kairan', 'anissia']);
+});
+
+test('manually choosing a Re:Anime subtitle track does not change the settings default', async () => {
+  const storage = new Map([['subtitleSource', 'kairan']]);
+  let selectedSource = null, context;
+  context = vm.createContext({
+    playbackRequestId: 4,
+    subtitleSelectionRequestId: 0,
+    currentPlaybackContext: { anime: { provider: 'reanime', id: 'one' }, subtitleTracks: [] },
+    localStorage: { getItem: key => storage.get(key) ?? null },
+    beginSubtitleSelection() { return ++context.subtitleSelectionRequestId; },
+    trackFile: async track => ({ url: track.url, path: '/subtitle.vtt' }),
+    isKoreanTrack: () => true,
+    preferAiSubtitle() {},
+    rememberSeriesSubtitleSource(source) { selectedSource = source; },
+    renderSeriesSubtitlePreference() {},
+    renderSubtitleTracks() {},
+    trackSourceLabel: () => 'Re:Anime',
+    attachSubtitle() {},
+    $: () => ({ textContent: '' })
+  });
+  vm.runInContext(appSection('async function selectSubtitleTrack(', '\nfunction formatTime('), context);
+
+  assert.equal(await context.selectSubtitleTrack({ label: '한국어', url: 'subtitle://korean' }), true);
+  assert.equal(selectedSource, 'reanime');
+  assert.equal(storage.get('subtitleSource'), 'kairan');
+});
 
 test('a late saved-subtitle lookup cannot replace the most recently selected source', async () => {
   const h = subtitleSourceHarness();
@@ -440,6 +522,20 @@ test('a late saved-subtitle lookup cannot replace the most recently selected sou
   await second;
   assert.deepEqual(h.searched, ['csora']);
   assert.deepEqual(h.attached, ['csora']);
+});
+
+test('choosing a subtitle source saves it for the series without changing the settings default', async () => {
+  const h = subtitleSourceHarness();
+  h.storage.set('subtitleSource', 'anissia');
+  const pending = h.context.selectSubtitleSource('csora');
+
+  assert.deepEqual(h.sourcePicks, ['csora']);
+  assert.equal(h.storage.get('subtitleSource'), 'anissia');
+  h.savedRequests[0].resolve([]);
+  await new Promise(resolve => setImmediate(resolve));
+  h.findRequests[0].resolve({ path: 'csora.vtt', url: 'subtitle://csora' });
+  await pending;
+  assert.equal(h.storage.get('subtitleSource'), 'anissia');
 });
 
 test('a saved-subtitle lookup started on the previous episode cannot apply to the new episode', async () => {
@@ -462,6 +558,7 @@ test('automatic subtitle lookup yields when the user changes the subtitle source
     currentPlaybackContext: {},
     ONLINE_SUBTITLE_SOURCES: [],
     localStorage: { getItem: () => null },
+    preferredSubtitleSource: () => 'reanime',
     subtitleStoreKey: () => 'reanime:one',
     window: { lilac: { savedSubtitles: () => new Promise(resolve => { resolveSaved = resolve; }) } },
     $: () => ({ classList: { add() {} } })

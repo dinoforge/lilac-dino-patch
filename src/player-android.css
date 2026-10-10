@@ -180,6 +180,10 @@
 .ps-sources button small { color: #ffffff8c; font-size: 10px; }
 .ps-sources button.selected small { color: #0000008c; }
 .ps-sources button.hidden { display: none; }
+.ps-source-preference { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 7px; }
+.ps-source-preference small { opacity: .75; font-size: 11px; line-height: 1.4; }
+.ps-source-preference button { flex: 0 0 auto; padding: 4px 0; border: 0; background: transparent; color: inherit; font: inherit; font-size: 11px; cursor: pointer; text-decoration: underline; }
+.ps-source-preference button:disabled { opacity: .45; cursor: default; text-decoration: none; }
 
 /* Keyboard shortcuts listed under the 재생 tab. */
 .ps-shortcuts { margin: 14px 0 4px; color: #ffffff8c; font-size: 11px; line-height: 1.7; }

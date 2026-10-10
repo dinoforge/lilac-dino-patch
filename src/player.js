@@ -59,8 +59,8 @@ function syncPlayerSettingsUI() {
   $('#psSkipButton').checked = playerFlag('playerSkipButton');
   $('#psAutoSkip').checked = playerFlag('playerAutoSkip', false);
   $('#assEffectsHint').textContent = assEffectsEnabled() ? '노래 가사·간판 번역 등의 위치·색·움직임을 그대로 보여 줍니다' : '효과를 줄여 가볍게 보여 줍니다 (영상이 버벅일 때)';
-  const source = localStorage.getItem('subtitleSource') || 'reanime';
   $$('#psSubtitleSources button').forEach(button => button.classList.toggle('selected', button.dataset.source === activeSubtitleSource()));
+  renderSeriesSubtitlePreference();
   const size = Number(localStorage.getItem('subtitleSize') || 100), position = Number(localStorage.getItem('subtitlePosition') || 12), outline = Number(localStorage.getItem('vttOutline') || 2), sync = Number(localStorage.getItem('subtitleSync') || 0);
   $('#psSubtitleSize').value = String(size); $('#psSizeLabel').textContent = `${size}%`;
   $('#psSubtitlePosition').value = String(position); $('#psPositionLabel').textContent = `${position}%`;
@@ -249,10 +249,9 @@ async function switchSubtitleSource(source, selectionRequestId, requestId) {
     return;
   }
   // The list of a source with several to pick from opens under the chips.
+  rememberSeriesSubtitleSource(source);
   currentPlaybackContext.sheetSource = ['reanime', 'anissia'].includes(source) ? source : null; pressSubtitleSource(source); renderSubtitleSheet();
   if (KOREAN_SOURCES.includes(source)) preferAiSubtitle(false); // back to a Korean subtitle (see prefersAiSubtitle)
-  localStorage.setItem('subtitleSource', source);
-  if ($('#subtitleSource')) { $('#subtitleSource').value = source; syncSettingChoices(); }
   syncPlayerSettingsUI();
   const key = subtitleStoreKey(), saved = key ? await window.lilac.savedSubtitles(key).catch(() => []) : [];
   if (!isCurrentSelection()) return;
@@ -733,6 +732,11 @@ $('#closePlayerSettings').onclick = () => { openPlayerSettings(false); $('#playe
 $('#psSkipButton').onchange = event => { localStorage.setItem('playerSkipButton', String(event.target.checked)); updateSkipState($('#video')); };
 $('#psAutoSkip').onchange = event => localStorage.setItem('playerAutoSkip', String(event.target.checked));
 $$('#psSubtitleSources button').forEach(button => button.onclick = () => selectSubtitleSource(button.dataset.source));
+$('#resetSeriesSubtitleSource').onclick = () => {
+  if (!resetSeriesSubtitleSource()) return;
+  renderSeriesSubtitlePreference();
+  toast('이 작품은 설정 기본 자막 출처를 사용합니다.');
+};
 $('#psSubtitleSize').oninput = event => { setSubtitleSetting('subtitleSize', event.target.value); applyCueStyle(); };
 $('#psSubtitlePosition').oninput = event => { setSubtitleSetting('subtitlePosition', event.target.value); applyVttLayout(); };
 $('#psSubtitleSync').onchange = event => { if (!setSubtitleSync(event.target.value)) syncPlayerSettingsUI(); };

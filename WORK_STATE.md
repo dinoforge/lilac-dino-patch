@@ -445,3 +445,10 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - `npm run vendor`와 Windows `npm run dist`가 성공했다. 패키지 `app.asar`의 worker는 생성된 소스와 바이트 단위로 일치하며 Google Fonts URL·목록 문자열이 없다. 격리 Electron JASSUB/WASM 스모크에서 Windows Malgun Gothic으로 한글 ASS 자막을 738개 밝은 픽셀로 렌더링했고 외부 HTTP(S) 요청 시도는 0회였다. 테스트 harness는 기존 `dist\\ass-renderer-smoke` 폴더를 건드리지 않게 고유 임시 디렉터리를 사용한다.
 - `npm test` 221/221, `npm run test:phase1-electron`, `npm run test:phase1-main`, `npm run test:phase1-source-restart`, `node --check` 및 `git diff --check`가 통과했다. 통합 UI는 27% 진행률을 저장하고 3.27초로 이어졌으며, main-process smoke는 320×180 합성 HLS·한국어 cue와 50% 이어보기·HD-2 실패 후 HD-1 복구를 확인했다. 두 프로세스 재시작 후 Animenosub 설정, 50% 기록, 약 2.01초 재생 위치와 한국어 cue가 복구됐다.
 - 변경한 JASSUB font fallback은 라이브러리 자체의 pinned C/WASM 고지, Expat 포함 여부, 번들에 남는 `abslink`·`throughput` 고지를 해결하지 않는다. 외부 공급원·실제 작품/회차/영상판 자막 매칭, 기존 사용자 프로필과 설치 NSIS 앱은 미검증이며 설치 파일은 실행·배포하지 않았다. 저장소 공개와 설치 파일 배포 보류를 유지한다.
+
+## 2026-10-10 작품별 자막 출처 기억
+
+- 플레이어에서 Re:Anime·Linkkf·Kairan·Csora·Anissia를 고르면 출처 우선순위를 현재 작품에 저장하고, 자동 자막 검색과 다운로드가 다음 회차부터 이를 먼저 사용한다. `subtitleSource` 설정은 전역 기본값으로 남겨 다른 작품에 적용한다. 작품별 초기화는 출처 필드만 지워 기존 Jimaku·AI 선택과 다른 작품 설정을 보존한다.
+- 한국어 자막 제안에서 사용자가 `바꾸기`를 누르거나 Re:Anime 트랙을 직접 고른 경우도 해당 작품의 출처 선택으로 기록한다. 재생 화면에 현재 작품 출처 또는 전역 기본값을 표시하고 `이 작품은 기본 출처 사용`으로 되돌릴 수 있다.
+- `npm test` 225/225, `npm run test:phase1-electron`, `npm run test:phase1-main`, `npm run test:phase1-source-restart`, 구문 검사와 `git diff --check`가 통과했다. Windows `npm run dist`도 성공했고, `app.asar`에서 상태 표시·초기화 UI·출처 helper가 포함됨을 확인했다.
+- 검증은 자동 테스트 및 격리 합성 fixture다. 실제 공급원 응답·자막 작품/회차/영상판 매칭·기존 프로필의 저장 상태는 확인하지 않았다. 설치 파일은 로컬 빌드만 했으며 실행·배포하지 않았다.
