@@ -1,6 +1,6 @@
 # LilacAnime Companion — Windows 무수정 도킹 오버레이 구현 계획
 
-상태: **1단계 지오메트리 코드만 작성됨. 실제 OS 창 탐색, 추적 UI, Windows 실행은 미구현/미검증.**
+상태: **Windows 창 탐색·독립 Electron 오버레이·합성 UI 코드 작성됨. 실제 Windows 실행, 화면 추적, DPI 호환성은 미검증.**
 기준: `codex/runtime-attach-unmodified-feasibility` / `c8b180bff0d36d7b523d0ae2f74b34d42a0ee994`.
 새 작업 브랜치: `codex/companion-window-overlay`.
 
