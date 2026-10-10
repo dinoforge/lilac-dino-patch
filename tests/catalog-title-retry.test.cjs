@@ -1,9 +1,10 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+const { createTmdbClient } = require('../electron/tmdb-client.cjs');
 
 const source = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
-const DAY = 86400000, RETRY = 30 * 60 * 1000;
+const DAY = 86400000, RETRY = 60 * 1000;
 function section(start, end) {
   const first = source.indexOf(start), last = source.indexOf(end, first);
   assert.ok(first >= 0 && last > first, `Missing section: ${start}`);
@@ -49,26 +50,31 @@ test('request errors are not cached as completed searches and retain a retry sta
 test('actual TMDB lookup propagates HTTP, transport and JSON failures to the retry path', async () => {
   for (const failure of [401, 429, 503, 'timeout', 'json']) {
     const h = setup(); let requests = 0;
-    Object.assign(h.context, { URL, AbortSignal, titleCompareKey: value => String(value).toLowerCase(), fetch: async () => {
+    let now = 0;
+    h.context.tmdbRequest = createTmdbClient({ now: () => now, sleep: async ms => { now += ms; }, interval: 0, fetch: async () => {
       requests++;
       if (failure === 'timeout') throw new DOMException('Timed out', 'TimeoutError');
-      return { ok: failure === 'json', status: failure, json: async () => { throw new SyntaxError('Invalid JSON'); } };
+      if (failure === 'json') return { ok: true, status: 200, json: async () => { throw new SyntaxError('Invalid JSON'); } };
+      return { ok: false, status: failure, headers: { get: () => null }, body: { cancel: async () => {} } };
     } });
-    vm.runInContext(section('async function tmdbFetch(', "// A work's story in Korean"), h.context);
+    vm.runInContext(section('async function tmdbFetch(', '// TMDB keeps seasons inside one series'), h.context);
+    h.context.tmdbKoreanTitles = async () => (await h.context.tmdbFetch('/search/tv', {}, 'stub-key')).results || [];
     await h.context.buildCatalogIndexes();
-    assert.equal(requests, 2); assert.equal(Object.keys(h.index.tried).length, 0);
+    assert.equal(requests, failure === 401 ? 1 : 3); assert.equal(Object.keys(h.index.tried).length, 0);
     assert.equal(h.index.status, 'tmdb-error'); assert.equal(h.timers.size, 1);
+    assert.equal(h.index.tmdbError.code, failure === 401 ? 'auth' : failure === 429 ? 'rate-limit' : failure === 503 ? 'http' : failure === 'json' ? 'response' : 'timeout');
   }
 });
 
 test('valid empty TMDB search responses are completed searches, not retry errors', async () => {
   const h = setup(); let requests = 0;
-  Object.assign(h.context, { URL, AbortSignal, titleCompareKey: value => String(value).toLowerCase(), fetch: async () => {
-    requests++; return { ok: true, json: async () => ({ results: [] }) };
+  h.context.tmdbRequest = createTmdbClient({ interval: 0, fetch: async () => {
+    requests++; return { ok: true, status: 200, json: async () => ({ results: [] }) };
   } });
-  vm.runInContext(section('async function tmdbFetch(', "// A work's story in Korean"), h.context);
+  vm.runInContext(section('async function tmdbFetch(', '// TMDB keeps seasons inside one series'), h.context);
+  h.context.tmdbKoreanTitles = async () => (await h.context.tmdbFetch('/search/tv', {}, 'stub-key')).results || [];
   await h.context.buildCatalogIndexes(); await h.context.buildCatalogIndexes();
-  assert.equal(requests, 4); assert.equal(Object.keys(h.index.tried).length, 1);
+  assert.equal(requests, 1); assert.equal(Object.keys(h.index.tried).length, 1);
   assert.equal(h.index.status, 'ready'); assert.equal(h.timers.size, 0);
 });
 
@@ -124,7 +130,9 @@ test('settings show request failures separately from the Korean title count', ()
   const first = appSource.indexOf('function renderCatalogIndex('), last = appSource.indexOf('window.lilac.onCatalogIndexState', first);
   const label = {}, context = vm.createContext({ $: () => label });
   vm.runInContext(appSource.slice(first, last), context);
-  context.renderCatalogIndex({ tmdb: true, sources: [{ label: 'Re:Anime', korean: 10206, total: 20707, status: 'tmdb-error' }] });
+  context.renderCatalogIndex({ tmdb: true, sources: [{ label: 'Re:Anime', korean: 10206, total: 20707, status: 'tmdb-error', error: { code: 'auth' }, retryAt: Date.now() + RETRY * 30 }] });
   assert.match(label.textContent, /10,206/); assert.match(label.textContent, /20,707/);
-  assert.match(label.textContent, /요청.*실패/); assert.match(label.textContent, /30분/);
+  assert.match(label.textContent, /API 키나 사용 권한/);
+  context.renderCatalogIndex({ tmdb: true, sources: [{ label: 'Re:Anime', korean: 10, total: 20, status: 'tmdb-error', error: { code: 'network' }, retryAt: Date.now() + 2 * 60 * 1000 }] });
+  assert.match(label.textContent, /TMDB에 연결하지 못했어요/); assert.match(label.textContent, /2분 뒤 다시 시도/);
 });

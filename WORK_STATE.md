@@ -522,3 +522,18 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - `tests/run-phase1-main.cjs`가 임시 프로필을 만들고 Electron 하위 프로세스가 완전히 닫힌 뒤 전용 폴더만 지우도록 바꿨다. 기존 `lilac-phase1-main-*` 임시 디렉터리 52개는 내용과 경로를 확인하고 정리했으며, 일반 main 스모크와 앱 PIP 스모크 뒤에도 폴더가 남지 않음을 확인했다.
 - 전체 `npm test`, `npm run test:phase1-main`, `npm run test:phase1-pip-app`, `npm run test:phase1-source-restart`가 통과했다. 재시작 테스트에서 공급원/회차별 자막 선택·기본값 초기화·50% 이어보기와 한국어 cue 복원을 다시 확인했다.
 - 설치 NSIS 앱과 실제 사용자 프로필은 실행하지 않았다. 빌드 파일은 로컬 테스트 산출물이며 설치·배포하지 않았다.
+
+## 2026-10-10 실제 Windows 실행 파일 시작 스모크
+
+- `npm run test:phase1-exe`는 `dist/win-unpacked/LilacAnime.exe`를 직접 실행해 실제 `app.asar`의 `src/index.html`을 열었다. 별도 임시 `APPDATA`, `LOCALAPPDATA`, Chromium userData, TEMP를 사용하고 Chromium 외부 DNS 해석을 차단했다.
+- 실제 창에서 홈·검색 DOM, 검색 입력/버튼, preload `window.lilac` bridge와 `appDiagnosticInfo()` IPC를 확인했다. 응답 버전은 0.5.9, 플랫폼은 win32/x64였다. CDP를 loopback에만 열고 앱 종료 후 테스트 프로필을 제거했다.
+- 실행 파일은 정상 종료했고 임시 프로필 경로가 사라진 것을 확인했다. 기존 설치 앱·사용자 프로필·NSIS 설치 화면 및 실제 공급원·영상·자막 요청은 검증하지 않았다.
+
+## 2026-10-10 최신 원본 v0.5.10 선택 반영 및 패키지 재검증
+
+- `upstream/main`의 `f38763949d9e8b3be2284bf97207a960bd642443`(v0.5.10)을 다시 비교하고 검색·자막에 직접 필요한 변경만 현재 파생 코드에 맞춰 적용했다. 트레이/창 상태와 대규모 다운로드 전송·재개 수명주기는 Phase 1 핵심 경로 밖이라 보류했다. 앱 package 버전은 0.5.9이며 새 릴리스 버전으로 올리지 않았다.
+- `electron/community-matching.cjs`의 회차 판별과 `electron/main.cjs` 연결을 추가했다. 시즌·소수 회차, 범위 파일, 검증된 AniList 누적 회차 오프셋, 잘못된 첨부 뒤 최대 5개 게시물 시도와 한 번의 강제 새로고침, 고유 임시 폴더, 원래 파일명 보존을 처리한다. 다른 회차 번호가 섞인 경우 무번호 자막을 대체로 고르지 않는다. ASS/SSA 선택 때 같은 작업에서 받은 폰트 파일을 보존한다.
+- `electron/tmdb-client.cjs`를 추가하고 전체 TMDB 요청에서 최소 150ms 간격·공유 429 Retry-After 대기·408/429/5xx/전송/JSON 재시도·오류 메시지 키 제거를 적용했다. 설정 화면은 인증·요청 제한·연결·응답·HTTP 실패와 재시도 시각을 구분한다. 공유 요청 간격과 장시간 429 대기도 합성 시계/응답으로 검증했다.
+- `npm test` 241/241, `node --check` 대상 파일과 `git diff --check`가 통과했다. 커뮤니티 매칭/다운로드 격리 및 재시도, TMDB 요청 클라이언트와 카탈로그 복구 테스트를 포함한다.
+- `npm run test:phase1-electron` 통과(검색·상세·회차·합성 VTT 재생, 27% 이어보기 3.27초, renderer 오류·차단 외부 요청 0). `npm run dist` Windows NSIS 빌드 성공. 새 `app.asar`로 `npm run test:phase1-main` 통과(합성 HTTP fixture 89회, 외부 네트워크 0), `npm run test:phase1-exe` 통과(실제 win32/x64 EXE의 홈·검색·preload·앱 정보 IPC), `npm run test:phase1-source-restart` 통과(공급원·작품별 자막 출처·50% 진행률·한국어 cue 복구).
+- 모든 실행은 테스트 전용 프로필과 합성 공급원·미디어를 썼다. 실제 Blogger/TMDB 결과, 공급원 콘텐츠의 작품·회차·영상판 일치, 권리 범위, 설치된 NSIS 앱과 기존 사용자 프로필은 검증하지 않았다. 빌드 산출물은 로컬에만 두고 배포하지 않는다.

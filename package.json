@@ -11,6 +11,7 @@
     "test:phase1-main": "node tests/run-phase1-main.cjs",
     "test:phase1-pip-app": "node tests/run-phase1-main.cjs --native-pip",
     "test:phase1-pip-native": "node tests/run-pip-native.cjs",
+    "test:phase1-exe": "node tests/windows-package-startup.cjs",
     "test:phase1-source-restart": "node tests/phase1-source-restart.cjs",
     "test:phase1-subtitle-layout": "node node_modules/electron/cli.js tests/subtitle-layout.electron.cjs",
     "vendor": "node scripts/build-jassub.cjs",

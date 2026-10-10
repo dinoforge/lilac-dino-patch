@@ -3,6 +3,7 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
+const { communityFileEpisode } = require('../electron/community-matching.cjs');
 
 const mainSource = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
 const start = mainSource.indexOf('// "S02E05" counts as episode 5 only');
@@ -10,7 +11,7 @@ const end = mainSource.indexOf('const COMMUNITY_FILE=', start);
 assert.ok(start >= 0 && end > start, 'Missing community subtitle file matching helpers');
 
 function setup() {
-  const context = vm.createContext({ fs, path });
+  const context = vm.createContext({ fs, path, communityFileEpisode });
   vm.runInContext(`${mainSource.slice(start, end)}\nthis.subtitleMatching = { communityFileEpisodeNumbers, communityFileMatches, selectCommunitySubtitleCandidate };`, context);
   return context.subtitleMatching;
 }

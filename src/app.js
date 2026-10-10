@@ -1556,8 +1556,14 @@ function renderTmdbState(value,message){$('#tmdbKey').value=value?.key||'';$('#t
 window.lilac.tmdbKey().then(value=>renderTmdbState(value)).catch(()=>{});
 // Progress of the catalog Korean title indexes (main process).
 function renderCatalogIndex(value){
-  if(!value?.sources)return;const step={catalog:'목록 받는 중',wikidata:'Wikidata 확인 중',waiting:'TMDB 대기 중',tmdb:'TMDB로 찾는 중','tmdb-error':'TMDB 요청에 실패했어요. 30분 뒤 다시 시도해요',error:'목록을 받지 못했어요. 30분마다 다시 시도해요'};
-  const lines=value.sources.map(source=>source.total?(source.korean==null?`${source.label} 전체 ${source.total.toLocaleString()}개를 불러왔어요`:`${source.label} ${source.total.toLocaleString()}개 중 ${source.korean.toLocaleString()}개의 한국어 제목을 알고 있어요`)+(step[source.status]?` (${step[source.status]}…)`:''):step[source.status]?`${source.label} ${step[source.status]}…`:'').filter(Boolean);
+  if(!value?.sources)return;const step={catalog:'목록 받는 중',wikidata:'Wikidata 확인 중',waiting:'TMDB 대기 중',tmdb:'TMDB로 찾는 중',error:'목록을 받지 못했어요. 30분마다 다시 시도해요'};
+  const lines=value.sources.map(source=>{
+    const failure={auth:'TMDB API 키나 사용 권한을 확인해 주세요','rate-limit':'TMDB 요청 제한으로 잠시 쉬는 중',timeout:'TMDB 응답 시간이 초과됐어요',network:'TMDB에 연결하지 못했어요',response:'TMDB 응답을 읽지 못했어요',source:'원본 작품 정보를 받지 못했어요',http:`TMDB 서버 요청에 실패했어요${source.error?.status?` (HTTP ${source.error.status})`:''}`};
+    const retryMinutes=Math.max(1,Math.ceil(((source.retryAt||Date.now()+60000)-Date.now())/60000));
+    const progress=source.status==='tmdb-error'?`${failure[source.error?.code]||'TMDB 요청에 실패했어요'}${source.error?.code==='auth'?'':`. ${retryMinutes}분 뒤 다시 시도해요`}`:step[source.status];
+    const count=source.total?(source.korean==null?`${source.label} 전체 ${source.total.toLocaleString()}개를 불러왔어요`:`${source.label} ${source.total.toLocaleString()}개 중 ${source.korean.toLocaleString()}개의 한국어 제목을 알고 있어요`):'';
+    return count+(progress?`${count?' (':`${source.label} `}${progress}…${count?')':''}`:'');
+  }).filter(Boolean);
   const needsTmdb=!value.tmdb&&value.sources.some(source=>source.korean!=null);
   $('#reanimeIndexState').textContent=lines.length?`${lines.join(' · ')}${needsTmdb?' — TMDB 키를 넣으면 나머지도 찾아요.':''}`:'';
 }

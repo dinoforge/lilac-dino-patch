@@ -10,6 +10,8 @@ const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 const { createFlixProxyUrl, createFlixAvProxyUrl, closeFlixProxy } = require('./flix-proxy.cjs');
 const { createPlayerStreamHeaders } = require('./player-stream-headers.cjs');
+const { communityFileEpisode, selectCommunityFile } = require('./community-matching.cjs');
+const { createTmdbClient } = require('./tmdb-client.cjs');
 const { detectOpEd } = require('./oped-fingerprint.cjs');
 const { requestAniListGraphQL } = require('./anilist-client.cjs');
 const { DownloadManager } = require('./download-manager.cjs');
@@ -23,6 +25,7 @@ const { createCatalogBrowser } = require('./catalog-browser.cjs');
 const { createCatalogUpdates } = require('./catalog-updates.cjs');
 const { filterProviderServers } = require('../src/player-failover.js');
 let catalogUpdates;
+const tmdbRequest=createTmdbClient();
 let subtitleTranslator = null;
 const translator = () => subtitleTranslator ||= createTranslator(app.getPath('userData'));
 
@@ -895,13 +898,7 @@ function tmdbSettingsFile(){return path.join(app.getPath('userData'),'tmdb.json'
 function tmdbKey(){try{return String(JSON.parse(fs.readFileSync(tmdbSettingsFile(),'utf8')).key||'').trim()}catch{return ''}}
 // A v4 "API Read Access Token" is a JWT sent as a bearer token; a v3 "API Key" goes in the query string.
 async function tmdbFetch(pathname,params={},key=tmdbKey()){
-  if(!key)throw new Error('TMDB API 키가 없습니다.');
-  const url=new URL(`https://api.themoviedb.org/3${pathname}`),bearer=key.includes('.');
-  for(const [name,value] of Object.entries(params))url.searchParams.set(name,value);
-  if(!bearer)url.searchParams.set('api_key',key);
-  const response=await fetch(url,{signal:AbortSignal.timeout(20000),headers:{Accept:'application/json',...(bearer?{Authorization:`Bearer ${key}`}:{})}});
-  if(!response.ok)throw new Error(response.status===401?'TMDB API 키가 올바르지 않습니다.':`TMDB HTTP ${response.status}`);
-  return response.json();
+  return tmdbRequest(pathname,params,key);
 }
 // TMDB keeps seasons inside one series, so season words are dropped; a subtitle after ":" is dropped on a
 // second try ("Ascendance of a Bookworm: Adopted Daughter of an Archduke" is listed as the series).
@@ -1142,7 +1139,7 @@ let catalogIndexRunning=false,catalogRetryTimer=null,catalogTitleRetryTimer=null
 // activeCatalogSource (declared with the Linkkf catalog): the source in use; only that one loads in the background.
 function catalogIndex(provider){
   if(catalogIndexes[provider])return catalogIndexes[provider];
-  const index={items:[],updated:0,wikidata:0,tried:{},status:'idle'};
+  const index={items:[],updated:0,wikidata:0,tried:{},status:'idle',tmdbError:null,tmdbRetryAt:0};
   const file=name=>path.join(app.getPath('userData'),`${provider}-${name}.json`);
   try{Object.assign(index,JSON.parse(fs.readFileSync(file('index'),'utf8')))}catch{/* first run */}
   try{index.tried={...index.tried,...JSON.parse(fs.readFileSync(file('tried'),'utf8'))}}catch{/* none yet */}
@@ -1195,7 +1192,7 @@ async function sortedCatalog(provider,sort,offset){
   throw new Error('이 소스는 정렬을 지원하지 않습니다.');
 }
 const indexKorean=(provider,item)=>{const cached=displayTitleStore()[`${provider}:${item.id}`];return isFreshTimestamp(cached?.time,CATALOG_TITLE_TTL)?withSeason(cached?.ko||'',item.title,item.type):''};
-function catalogIndexState(){return {tmdb:Boolean(tmdbKey()),sources:Object.entries(CATALOGS).filter(([provider])=>provider===activeCatalogSource).map(([provider,{label,korean}])=>{const index=catalogIndex(provider);return {provider,label,status:index.status,total:index.items.length,korean:korean===false?null:index.items.filter(item=>indexKorean(provider,item)).length}})}}
+function catalogIndexState(){return {tmdb:Boolean(tmdbKey()),sources:Object.entries(CATALOGS).filter(([provider])=>provider===activeCatalogSource).map(([provider,{label,korean}])=>{const index=catalogIndex(provider);return {provider,label,status:index.status,error:index.tmdbError||null,retryAt:index.tmdbRetryAt||0,total:index.items.length,korean:korean===false?null:index.items.filter(item=>indexKorean(provider,item)).length}})}}
 function reportCatalogIndex(provider,status){
   catalogIndex(provider).status=status;const state=catalogIndexState();
   BrowserWindow.getAllWindows().forEach(win=>{if(!win.isDestroyed())win.webContents.send('catalog-index:state',state)});
@@ -1267,26 +1264,35 @@ async function refreshCatalogList(provider){
 async function lookupCatalogKorean(provider){
   if(CATALOGS[provider].korean===false)return true;
   clearTimeout(catalogTitleRetryTimer);catalogTitleRetryTimer=null;
-  // Numeric legacy marks also recorded failed requests. Retry those once; keep known Korean titles.
-  // Only completed searches get a {time} mark, including a valid search with no Korean result.
+  // Legacy numeric marks included request failures. Recheck unknown titles once; keep known Korean titles.
+  // Only a completed search gets a {time} mark, including a valid search with no Korean result.
   const index=catalogIndex(provider),queue=index.items.filter(item=>!indexKorean(provider,item)&&!(Date.now()-(index.tried[item.id]?.time||0)<30*DAY));
+  index.tmdbError=null;index.tmdbRetryAt=0;
   let done=0,titled=false,failed=false;
   while(tmdbKey()&&queue.length&&activeCatalogSource===provider&&!failed){
     reportCatalogIndex(provider,'tmdb');
     await Promise.all(queue.splice(0,6).map(async item=>{
+      let stage='source';
       try{
         // A failed series-page request must not cache a miss for an incomplete slug title.
         if(item.slugTitle){await CATALOGS[provider].title?.(item);titled=true}
+        stage='tmdb';
         const ko=(await tmdbKoreanTitles([item.title],{light:true})).find(hasHangul);
         index.tried[item.id]={time:Date.now()};if(ko)storeIndexKorean(provider,item,ko,'tmdb');
-      }catch{failed=true}
+      }catch(error){
+        failed=true;
+        // Only fixed codes/statuses reach the renderer; network errors can contain a URL with the API key.
+        const code=stage==='source'?'source':['auth','rate-limit','timeout','network','response','http'].includes(error.code)?error.code:'network';
+        if(!index.tmdbError||code==='auth')index.tmdbError={code,status:Number(error.status)||0};
+        index.tmdbRetryAt=Math.max(index.tmdbRetryAt,Date.now()+Math.max(code==='auth'?30*60*1000:60*1000,Number(error.retryAfterMs)||0));
+      }
     }));
     if(++done%50===0){saveDisplayTitles();saveCatalogTried(provider);if(titled){saveCatalogIndex(provider);titled=false}}
     await new Promise(resolve=>setTimeout(resolve,200));
   }
   if(done){saveDisplayTitles();saveCatalogTried(provider);if(titled)saveCatalogIndex(provider)}
   if(failed&&activeCatalogSource===provider&&tmdbKey()){
-    catalogTitleRetryTimer=setTimeout(()=>buildCatalogIndexes().catch(()=>{}),30*60*1000);catalogTitleRetryTimer.unref?.();
+    catalogTitleRetryTimer=setTimeout(()=>buildCatalogIndexes().catch(()=>{}),Math.max(0,index.tmdbRetryAt-Date.now()));catalogTitleRetryTimer.unref?.();
   }
   return !failed;
 }
@@ -1447,27 +1453,32 @@ function communityPostTitle(title=''){return communityTitle(String(title).normal
 function communityTitle(text=''){return String(text).replace(/(\d+)\s*[~∼\-,]\s*(?=\d)/g,'').replace(/\d+\s*(?:화|회|편)|\((?:끝|완)\)|작업\s*중|블루레이판|자막/g,' ').trim()}
 // Picks the post's download links for one episode: per-episode posts (Kairan) carry the number in the
 // title, series posts (Csora) label each link ("13화", "1 ~ 12화") and add a separate "폰트" link.
-function communityLinks(post,episode){
+function communityLinks(post,episode,{offsets=[],allowOffset=false}={}){
   const $=cheerio.load(post.html),anchors=[];
   $('a[href]').each((_,a)=>{const href=absoluteUrl($(a).attr('href'),post.url);if(/drive\.google\.com|docs\.google\.com|\.zip(?:$|\?)|\.(?:ass|ssa|srt|vtt|smi)(?:$|\?)/i.test(href))anchors.push({href,label:$(a).text().trim()})});
   const fonts=anchors.filter(a=>/폰트|font/i.test(a.label)),subs=anchors.filter(a=>!fonts.includes(a)),withFonts=list=>list.length?[...new Set([...list,...fonts].map(a=>a.href))]:[];
   const titleEpisodes=communityPostEpisodes(post.title);
-  if(titleEpisodes.any)return titleEpisodes.has(episode)?{links:withFonts(subs),episode}:{links:[],episode};
+  const matchedEpisode=episodes=>{
+    if(episodes.has(episode))return Number(episode);
+    if(allowOffset)for(const offset of offsets){const shifted=Number(episode)+Number(offset);if(episodes.has(shifted))return shifted}
+    return null;
+  };
+  if(titleEpisodes.any){
+    const number=matchedEpisode(titleEpisodes),bundle=titleEpisodes.ranges.length>0||titleEpisodes.list.length>1;
+    return number!=null?{links:withFonts(subs),episode:number,strict:bundle,bundle,episodeMatched:true}:{links:[],episode,bundle,episodeMatched:false};
+  }
   const labeled=subs.map(a=>({...a,episodes:communityEpisodes(a.label)})).filter(a=>a.episodes.any);
   // No numbers at all: a movie or a whole-season bundle, whose file has to be matched by episode.
-  if(!labeled.length)return {links:withFonts(subs),episode,strict:true};
-  const pick=ep=>labeled.find(a=>a.episodes.list.includes(ep))||labeled.find(a=>a.episodes.has(ep));
-  // Later seasons often continue the numbering (2기 = 13~24화) while the player counts from 1.
-  const first=Math.min(...labeled.flatMap(a=>[...a.episodes.list,...a.episodes.ranges.map(r=>r[0])]));
-  const direct=pick(episode),shifted=!direct&&first>1?pick(episode+first-1):null,chosen=direct||shifted;
-  const number=direct?episode:shifted?episode+first-1:episode;
-  // A range link ("1 ~ 12화") is a bundle, so its file must be matched by episode number.
-  return {links:chosen?withFonts([chosen]):[],episode:number,strict:Boolean(chosen&&!chosen.episodes.list.includes(number))};
+  if(!labeled.length)return {links:withFonts(subs),episode,strict:true,bundle:false,episodeMatched:false};
+  const pick=number=>labeled.find(a=>a.episodes.list.includes(number))||labeled.find(a=>a.episodes.has(number));
+  const direct=matchedEpisode({has:number=>labeled.some(a=>a.episodes.has(number))});
+  const chosen=direct==null?null:pick(direct),bundle=Boolean(chosen&&(chosen.episodes.ranges.length||chosen.episodes.list.length>1));
+  return {links:chosen?withFonts([chosen]):[],episode:direct??episode,strict:bundle,bundle,episodeMatched:direct!=null};
 }
 // "S02E05" counts as episode 5 only, and a CRC tag ("[5A2B3C4D]") is not an episode number.
 function communityFileEpisodeNumbers(file){
-  const name=path.basename(file).normalize('NFKC').replace(/\.[^.]+$/,'').replace(/\b\d+\.\d+\b|\b\d+\s*[- ]?bit\b/gi,' ').replace(/\b(?:s\d+|season\s*\d+|\d{3,4}p|x26[45]|h\.?26[45]|(?:19|20)\d{2})\b|\bs\d{1,2}(?=e\d)|\[[0-9a-f]{8}\]|\d+\s*기/gi,' ');
-  return new Set([...name.matchAll(/(?:\b(?:episode|ep|e)\s*0*(\d{1,3})(?:v\d)?\b|(?<![\p{L}\p{N}])0*(\d{1,3})(?:v\d)?(?![\p{L}\p{N}]))/giu)].map(match=>Number(match[1]||match[2])).filter(number=>number>0));
+  const episode=communityFileEpisode(file).episode;
+  return episode==null?new Set():new Set([Number(episode)]);
 }
 function communityFileMatches(file,episode){return communityFileEpisodeNumbers(file).has(Number(episode))}
 function selectCommunitySubtitleCandidate(candidates,episode,strict=false,fileSize=file=>fs.statSync(file).size){
@@ -1515,7 +1526,7 @@ function communitySubtitleExt(buffer){const bom=buffer[0]===0xff&&buffer[1]===0x
 function rankCommunityPosts(posts,title,episode,originalTitle='',{offsets=[]}={}){
   const season=searchSeason(title,originalTitle)??1,wanted=communityTitle(title);
   const rank=(list,name,number)=>list.map(post=>({post,score:communityScore(name,communityPostTitle(post.title))})).filter(x=>x.score>=.52) // Android MIN_SIMILARITY
-    .map(x=>({...x,...communityLinks(x.post,number)})).filter(x=>x.links.length)
+    .map(x=>({...x,...communityLinks(x.post,number,{offsets,allowOffset:season>1&&offsets.length>0}),season})).filter(x=>x.links.length)
     // Per-episode links beat bundles of a similarly named post; newer posts come first in the feed.
     .sort((a,b)=>Math.round((b.score-a.score)*20)||Number(Boolean(a.strict))-Number(Boolean(b.strict)));
   const usable=posts.filter(post=>!/작업\s*중|하차/.test(post.title));
@@ -1527,7 +1538,7 @@ function rankCommunityPosts(posts,title,episode,originalTitle='',{offsets=[]}={}
   const base=communityTitle(wanted.replace(/\s*(?:\d+\s*기(?![가-힣])|season\s*\d+|시즌\s*\d+|\d+(?:st|nd|rd|th)\s*season)/gi,' '));
   const unmarked=usable.filter(post=>communitySeason(communityPostTitle(post.title))==null);
   for(const offset of offsets){
-    const number=episode+offset,found=rank(unmarked,base,number).filter(x=>x.episode===number&&(communityPostEpisodes(x.post.title).has(number)||!x.strict));
+    const number=episode+offset,found=rank(unmarked,base,number).filter(x=>x.episode===number&&(x.episodeMatched||communityPostEpisodes(x.post.title).has(number)||!x.strict));
     if(found.length)return found;
   }
   return [];
@@ -1555,26 +1566,50 @@ async function previousSeasonEpisodes(anime={},title=''){
 }
 async function findCommunitySubtitle(source,title,episode,{originalTitle='',offsets=[]}={}){
   const blog=source==='kairan'?'https://kairan03.blogspot.com':'https://csora556.blogspot.com',label=source==='kairan'?'Kairan':'Csora';
-  // A cached index can predate the episode (Csora adds links to existing posts), so a miss refreshes once.
-  let match=rankCommunityPosts(await communityPosts(blog),title,episode,originalTitle,{offsets})[0];
-  if(!match)match=rankCommunityPosts(await communityPosts(blog,{force:true}),title,episode,originalTitle,{offsets})[0];
-  if(!match)throw subtitleNotFoundError(`${label} 자막 게시물을 찾지 못했습니다.`);
-  return downloadCommunityMatch(match,source,title,episode);
+  // Try several ranked posts before refreshing; old posts may still be indexed while their attachments are gone.
+  const attempted=new Set();let lastError=null;
+  for(const force of [false,true]){
+    let posts;
+    try{posts=await communityPosts(blog,{force})}catch(error){lastError=error;continue}
+    const matches=rankCommunityPosts(posts,title,episode,originalTitle,{offsets})
+      .filter(match=>!attempted.has(JSON.stringify([match.post.url,match.links]))).slice(0,5);
+    for(const match of matches){
+      attempted.add(JSON.stringify([match.post.url,match.links]));
+      try{return await downloadCommunityMatch(match,source,title,episode)}catch(error){lastError=error}
+    }
+  }
+  if(lastError)throw lastError;
+  throw subtitleNotFoundError(`${label} 자막 게시물을 찾지 못했습니다.`);
 }
 // Downloads a ranked post's links (Drive, zip/7z/RAR, subtitle files) and picks the episode's file.
 async function downloadCommunityMatch(match,source,title,episode){
-  const dir=path.join(app.getPath('userData'),'subtitles',simpleTitle(title).replace(/\s+/g,'_')||'anime',String(episode));fs.mkdirSync(dir,{recursive:true});const candidates=[];
-  for(const original of match.links){
-    try{
-      const id=driveId(original),url=id?`https://drive.usercontent.google.com/download?id=${encodeURIComponent(id)}&export=download&confirm=t`:original,buffer=await downloadDriveBuffer(url,id?undefined:match.post.url);
-      if(buffer.length<16||buffer.length>300*1024*1024)continue;
-      const unpacked=await extractCommunityArchive(buffer,dir);
-      if(unpacked){candidates.push(...unpacked.filter(file=>/\.(ass|ssa|srt|vtt|smi)$/i.test(file)));continue}
-      const ext=communitySubtitleExt(buffer);if(!ext)continue;
-      const out=path.join(dir,`${source}_${Date.now()}_${candidates.length}${ext}`);fs.writeFileSync(out,buffer);candidates.push(out);
-    }catch{/* Try remaining links. */}
-  }
-  const selected=selectCommunitySubtitleCandidate(candidates,match.episode,Boolean(match.strict));if(!selected)throw subtitleNotFoundError('요청한 회차에 맞는 자막 파일을 찾지 못했습니다.');return subtitleResult(selected,{source,post:match.post.url,postTitle:match.post.title,all:candidates});
+  const dir=path.join(app.getPath('userData'),'subtitles',simpleTitle(title).replace(/\s+/g,'_')||'anime',String(episode));fs.mkdirSync(dir,{recursive:true});
+  const work=fs.mkdtempSync(path.join(dir,`${source}-`)),candidates=[];
+  try{
+    for(let index=0;index<match.links.length;index++){
+      const original=match.links[index];
+      try{
+        const id=driveId(original),url=id?`https://drive.usercontent.google.com/download?id=${encodeURIComponent(id)}&export=download&confirm=t`:original,buffer=await downloadDriveBuffer(url,id?undefined:match.post.url);
+        if(buffer.length<16||buffer.length>300*1024*1024)continue;
+        const unpacked=await extractCommunityArchive(buffer,work);
+        if(unpacked){candidates.push(...unpacked.filter(file=>/\.(ass|ssa|srt|vtt|smi)$/i.test(file)));continue}
+        const ext=communitySubtitleExt(buffer);if(!ext)continue;
+        let name='';try{name=decodeURIComponent(path.basename(new URL(original).pathname))}catch{/* Use a generated filename when the link has no readable basename. */}
+        if(!/\.(ass|ssa|srt|vtt|smi)$/i.test(name)||path.extname(name).toLowerCase()!==ext)name=`${source}_file${index}${ext}`;
+        const out=path.join(work,`${index}_${communityFileName(name)}`);fs.writeFileSync(out,buffer);candidates.push(out);
+      }catch{/* Try remaining links. */}
+    }
+    const files=candidates.map(file=>({file,name:path.basename(file),size:fs.statSync(file).size}));
+    const hasEpisodeNumber=files.some(file=>communityFileEpisode(file.name).episode!=null);
+    const selected=selectCommunityFile(files,{episode:match.episode,strict:Boolean(match.strict||hasEpisodeNumber),bundle:Boolean(match.bundle),season:match.season||null});
+    if(!selected)throw subtitleNotFoundError('요청한 회차에 맞는 자막 파일을 찾지 못했습니다.');
+    const storedName=`${source}_${Date.now()}_${Math.random().toString(36).slice(2,8)}_${communityFileName(path.basename(selected.file))}`;
+    const stored=path.join(dir,storedName);fs.copyFileSync(selected.file,stored);
+    if(/\.(ass|ssa)$/i.test(stored))for(const name of fs.readdirSync(work).filter(file=>/\.(ttf|otf|ttc|woff2?)$/i.test(file))){
+      const fontName=`${source}_${Date.now()}_${Math.random().toString(36).slice(2,6)}_${communityFileName(name)}`;fs.copyFileSync(path.join(work,name),path.join(dir,fontName));
+    }
+    return subtitleResult(stored,{source,post:match.post.url,postTitle:match.post.title,all:[stored]});
+  }finally{fs.rmSync(work,{recursive:true,force:true})}
 }
 // Some makers pack their subtitles into the post's image instead of linking a file (WinPNG,
 // https://github.com/harnenim/WinPNG). The blog's own viewer decodes the image and converts Jamaker projects (.jmk) to
@@ -1619,9 +1654,10 @@ async function winPngSubtitle(pageUrl,title,episode,{matched=false}={}){
     const ext=entry.ass?'.ass':entry.raw?path.extname(entry.name).toLowerCase():'.smi',out=path.join(dir,`winpng_${index}_${communityFileName(entry.name.replace(/\.[^.]+$/,''))}${ext}`);
     fs.writeFileSync(out,String(entry.ass||entry.raw||entry.smi).replace(/^﻿/,''),'utf8');return {file:out,name:entry.name};
   });
-  const main=files.filter(item=>!WINPNG_EXTRA.test(item.name)),pool=main.length?main:files,largest=()=>pool.slice().sort((a,b)=>fs.statSync(b.file).size-fs.statSync(a.file).size)[0];
-  const unnumbered=!pool.some(item=>Array.from({length:60},(_,index)=>index+1).some(number=>communityFileMatches(item.name,number)));
-  const selected=pool.find(item=>communityFileMatches(item.name,episode))||(unnumbered||(matched&&pool.length===1)?largest():null);
+  const main=files.filter(item=>!WINPNG_EXTRA.test(item.name)),pool=main.length?main:files;
+  const unnumbered=pool.every(item=>communityFileEpisode(item.name).episode==null),allowUnnumbered=unnumbered&&(!matched||pool.length===1);
+  const selected=selectCommunityFile(pool.map(item=>({file:item.file,name:item.name,size:fs.statSync(item.file).size})),
+    {episode,strict:!allowUnnumbered,bundle:false,season:searchSeason(title,title)});
   return selected?subtitleResult(selected.file,{source:'anissia',post:pageUrl,postTitle:title,all:files.map(item=>item.file)}):null;
 }
 // --- Jimaku (Japanese subtitles, jimaku.cc) ------------------------------------------------------------------------
