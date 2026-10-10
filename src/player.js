@@ -500,13 +500,15 @@ async function togglePictureInPicture() {
   if (document.pictureInPictureElement) { await document.exitPictureInPicture().catch(() => {}); return; }
   const real = $('#video');
   if (real.readyState < 2) { toast('먼저 영상을 재생하세요.'); return; }
-  const video = pipSourceVideo();
-  pip.canvas ||= document.createElement('canvas');
-  drawPipFrame();
-  // A timer rather than animation frames: those stop while the app window is minimized.
-  clearInterval(pip.timer); pip.timer = setInterval(drawPipFrame, 1000 / 30);
-  video.srcObject = pip.canvas.captureStream(30);
   try {
+    const video = pipSourceVideo();
+    pip.canvas ||= document.createElement('canvas');
+    drawPipFrame();
+    if (typeof pip.canvas.captureStream !== 'function') throw new Error('이 환경은 PIP 영상 캡처를 지원하지 않습니다.');
+    if (typeof video.requestPictureInPicture !== 'function') throw new Error('이 환경은 PIP를 지원하지 않습니다.');
+    video.srcObject = pip.canvas.captureStream(30);
+    // A timer rather than animation frames: those stop while the app window is minimized.
+    clearInterval(pip.timer); pip.timer = setInterval(drawPipFrame, 1000 / 30);
     await video.play();
     await video.requestPictureInPicture();
     if (real.paused) video.pause();

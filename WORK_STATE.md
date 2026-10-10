@@ -514,6 +514,7 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 ## 2026-10-10 PIP 종료 리소스 정리
 
 - `src/player.js`에서 PIP 종료 또는 열기 실패 때 숨은 합성 영상도 명시적으로 일시 정지한다. 기존 캡처 트랙 종료, `srcObject` 해제, 30fps 타이머 정지와 미니플레이어 버튼 상태 초기화는 그대로 유지한다.
-- `tests/player-interactions.test.cjs`에서 실제 미니플레이어 버튼 바인딩을 통해 디코드 전 안내, 영상 프레임·한국어 VTT cue 합성, PIP 성공 뒤 닫기, PIP 요청 실패를 확인했다. 두 종료 경로 모두 숨은 영상 정지·캡처 트랙 해제·타이머 정지를 검증한다.
-- 전체 `npm test` 227/227 통과. `npm run dist`로 Windows NSIS를 재빌드하고 새 패키지에서 `npm run test:phase1-electron`과 `npm run test:phase1-main`이 통과했다. main 스모크는 합성 HTTP fixture 89회, 미등록 fetch·차단 브라우저 요청·외부 네트워크 호출 0회다.
+- `togglePictureInPicture`의 스트림 생성과 capability 확인을 예외 처리 안으로 옮겼다. Canvas 캡처 또는 브라우저 PIP API가 없는 경우 한국어 안내를 보이고 부분 생성된 타이머·캡처·숨은 영상을 정리한다.
+- `tests/player-interactions.test.cjs`에서 실제 미니플레이어 버튼 바인딩을 통해 디코드 전 안내, 영상 프레임·한국어 VTT cue 합성, PIP 재생/일시정지 동기화, 닫기, 요청 실패와 API 미지원 경로를 확인했다. 종료 경로는 숨은 영상 정지·캡처 트랙 해제·타이머 정리를 검증한다.
+- 전체 `npm test` 228/228 및 상호작용 파일 37/37 통과. `npm run dist`로 Windows NSIS를 재빌드하고 새 패키지에서 `npm run test:phase1-electron`과 `npm run test:phase1-main`이 통과했다. main 스모크는 합성 HTTP fixture 89회, 미등록 fetch·차단 브라우저 요청·외부 네트워크 호출 0회다.
 - PIP 창과 `requestPictureInPicture`/닫기 이벤트는 테스트에서 모의했다. Windows 네이티브 PIP UI·설치 NSIS 실행과 실제 사용자 프로필은 미검증이다. 빌드 파일은 로컬 테스트 산출물이며 설치·배포하지 않았다.

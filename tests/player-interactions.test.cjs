@@ -307,6 +307,24 @@ test('PIP request failure stops the hidden video and capture stream', async () =
   assert.deepEqual(h.toasts, ['PIP를 열지 못했습니다: PIP unsupported']);
 });
 
+test('PIP capability failures are explained and leave no timer, capture stream, or active state', async () => {
+  for (const removeCapability of [
+    h => { delete h.canvas.captureStream; },
+    h => { delete h.hiddenVideo.requestPictureInPicture; }
+  ]) {
+    const h = setupPip();
+    h.realVideo.readyState = 2;
+    removeCapability(h);
+    await h.miniPlayer.onclick();
+    assert.equal(h.hiddenVideo.paused, true);
+    assert.equal(h.hiddenVideo.srcObject, null);
+    assert.equal(h.miniPlayer.classList.contains('active'), false);
+    assert.equal(h.intervalCallbacks.size, 0);
+    assert.equal(h.toasts.length, 1);
+    assert.match(h.toasts[0], /^PIP를 열지 못했습니다: /);
+  }
+});
+
 test('ASS canvas follows stretched video bounds and returns to the original bounds', async () => {
   const rendererSource = fs.readFileSync(path.join(__dirname, '../src/ass-renderer.js'), 'utf8').replace(/^import JASSUB[^\n]*\n/m, '');
   const created = [], video = { style: { objectFit: 'fill' }, clientWidth: 2100, clientHeight: 900, offsetLeft: 0, offsetTop: 0 };
