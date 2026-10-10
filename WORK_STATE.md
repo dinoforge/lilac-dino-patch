@@ -1,5 +1,16 @@
 # 작업 상태
 
+## 2026-10-11 LilacAnime Companion 원본 무수정 프로토타입
+
+- `codex/runtime-companion-prototype`를 통합 기준 `4610a45f52e9a076b67a6774bcf3887dc390e485`에서 새 worktree `D:\Codex-Coding-Folder\LilacAnime-Player-runtime-companion-prototype`로 만들었다. 중단된 `codex/audit-integration-01-02` 작업 폴더와 임시 산출물은 수정·정리하지 않았다.
+- 공개 원본 최신 태그 `v0.5.14` (`f095fc3d775451e144ed780e1fa081f739927652`)를 읽기 전용으로 확인했다. 원본 창은 내부 `src/index.html`을 로드하고 내부 `window.lilac` preload bridge를 쓴다. 외부 Companion/플러그인 API나 재생 딥링크는 확인되지 않았다.
+- 별도 `companion/` Electron 프로토타입을 추가했다. 고유 앱 ID·제품명·`userData`·`sessionData`·cache 경로, 격리 preload, renderer 외부 네트워크 차단을 설정했다. 인앱 삽입·원본 프로세스 제어·실제 공급원 조회·영상 재생은 구현하지 않았다.
+- 방영표는 합성 데이터만 표시하고 기존 분기 선택·요일 병합·정확 회차 상태 함수를 재사용한다. 영어/일본어 VTT 수동 번역은 기존 parser·프롬프트·응답 검증을 재사용하고, 사용자 선택 파일을 원본에 덮어쓰지 않고 새 VTT로만 내보낸다.
+- 제공 프롬프트 2종과 Reazon 예시 파일의 SHA-256/바이트 수를 테스트로 확인했다. Reazon 예시는 ASR 자료로만 보존하며 번역 프롬프트로 사용하지 않는다.
+- Companion 테스트 13/13, 전체 `npm test` 296/296, Companion JS/CJS 구문 검사 8/8 통과. 전체 테스트는 격리 worktree에 `node_modules`를 복사하거나 연결하지 않고 기존 개발 체크아웃의 종속성을 `NODE_PATH`로 참조했다.
+- Windows 앱 화면 실행·UI 자동 조작·NSIS·패키징·원본 설치본/프로필/업데이트 캐시 조회는 하지 않았다. 따라서 화면·실제 원본 호환성·실제 공급원·ChatGPT 왕복·실제 영상은 미검증이다. 자동 테스트 결과만으로 사용자 의도 충족이나 Companion 실행을 완료했다고 보지 않는다.
+- 자세한 근거와 상태표: `docs/verification/RUNTIME_COMPANION_PROTOTYPE.md`.
+
 ## 2026-10-10 패치 01·02 통합 검증
 
 - `codex/patch-01-auto-quarter` (`b79a69a`)에서 `codex/integration-01-02`를 만들고 `codex/patch-02-chatgpt-translation` (`2715f81`)를 통합했다. `main`, 패치 01·02 원본 브랜치 및 LilacAnime upstream은 수정하지 않았다. 충돌은 `WORK_STATE.md` 한 파일이었고, 두 패치의 기록을 모두 보존했다. 공통 소스·테스트 변경은 병합 결과에서 함께 확인했다.

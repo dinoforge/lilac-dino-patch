@@ -1,0 +1,21 @@
+{
+  "targetOriginalVersions": ">=0.5.14",
+  "versionStates": {
+    "0.5.14": {
+      "state": "untested",
+      "basis": "Static source review only; no original installation or process was opened."
+    }
+  },
+  "inAppExtensionApi": {
+    "state": "unsupported",
+    "basis": "The inspected upstream source exposes an internal preload bridge and IPC handlers, but no external plugin or companion API."
+  },
+  "playbackControl": {
+    "state": "unsupported",
+    "basis": "No official deep link or external playback-control contract was found in the inspected source."
+  },
+  "independentCompanionWindow": {
+    "state": "untested",
+    "basis": "Prototype code exists; direct Windows UI launch was intentionally not performed."
+  }
+}
