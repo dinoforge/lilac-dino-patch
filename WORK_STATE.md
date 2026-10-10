@@ -452,3 +452,10 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 한국어 자막 제안에서 사용자가 `바꾸기`를 누르거나 Re:Anime 트랙을 직접 고른 경우도 해당 작품의 출처 선택으로 기록한다. 재생 화면에 현재 작품 출처 또는 전역 기본값을 표시하고 `이 작품은 기본 출처 사용`으로 되돌릴 수 있다.
 - `npm test` 225/225, `npm run test:phase1-electron`, `npm run test:phase1-main`, `npm run test:phase1-source-restart`, 구문 검사와 `git diff --check`가 통과했다. Windows `npm run dist`도 성공했고, `app.asar`에서 상태 표시·초기화 UI·출처 helper가 포함됨을 확인했다.
 - 검증은 자동 테스트 및 격리 합성 fixture다. 실제 공급원 응답·자막 작품/회차/영상판 매칭·기존 프로필의 저장 상태는 확인하지 않았다. 설치 파일은 로컬 빌드만 했으며 실행·배포하지 않았다.
+
+## 2026-10-10 작품별 자막 출처 패키지 재시작 확인
+
+- `npm run test:phase1-source-restart`의 격리 패키지 앱에서 Re:Anime 자막 출처 버튼을 실제로 눌렀다. 작품별 출처가 저장되고 재생 화면에 `이 작품 출처: Re:Anime`와 초기화 버튼이 나타났으며 전역 `subtitleSource` 기본값은 바뀌지 않았다.
+- 프로세스를 완전히 종료하고 같은 임시 프로필로 다시 열었을 때 작품별 출처와 50% 시청 기록이 복원됐다. 이어보기 후 320×180 합성 영상이 약 2.01초에서 재생되고 `합성 한국어 자막` cue가 표시됐다. 초기화 버튼을 눌러 `설정 기본값: 자동`으로 돌아가고 버튼이 비활성화되는 것도 확인했다.
+- seed/verify 합성 HTTP 요청은 32회/20회였고 두 실행 모두 미등록 fetch 0, 차단된 브라우저 요청 0이었다. 전체 `npm test` 225/225, `npm run test:phase1-electron`, `npm run test:phase1-main`, `npm run test:phase1-source-restart`가 통과했다.
+- 검증은 테스트 전용 패키지와 임시 사용자 프로필, 합성 영상·자막이다. 실제 자막 공급원 매칭, 설치된 사용자 앱·프로필, 권리 조건은 확인하지 않았다. 설치 파일은 로컬 빌드만 했으며 배포하지 않았다.

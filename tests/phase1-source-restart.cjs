@@ -54,7 +54,7 @@ function runProcess(mode) {
     console.log(seeded);
     const restored = await runProcess('verify');
     console.log(restored);
-    console.log('Packaged source setting and 50 percent playback progress survived a full Electron process exit and restart; the saved episode resumed with its Korean subtitle cue.');
+    console.log('Packaged provider setting, per-series subtitle source and 50 percent playback progress survived a full Electron process exit and restart; the subtitle choice appeared in the resumed player, reset returned it to the settings default, and the saved episode resumed with its Korean subtitle cue.');
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }

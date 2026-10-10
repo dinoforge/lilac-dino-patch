@@ -369,6 +369,7 @@ function requestLoopback(urlText) {
 }
 
 async function runSourceRestartProbe(win) {
+  let subtitlePreferenceState = null;
   if (restartMode === 'seed') {
     await waitFor('default source before selecting Animenosub', () => win.webContents.executeJavaScript(`(() =>
       state.source === 'reanime' && document.querySelector('#contentSource')?.value === 'reanime'
@@ -447,6 +448,29 @@ async function runSourceRestartProbe(win) {
         }))()`);
         throw new Error(`${error.message}; seed player snapshot: ${JSON.stringify(playback)}; recent fixture requests: ${JSON.stringify(fixtureRequests.slice(-12))}; denied fetches: ${JSON.stringify(deniedUnknownFetches)}`);
       });
+    const selectedSubtitleSource = await win.webContents.executeJavaScript(`(() => {
+      const initialDefault = localStorage.getItem('subtitleSource');
+      const button = document.querySelector('#psSubtitleSources button[data-source="reanime"]');
+      if (!button) return null;
+      button.click();
+      const anime = currentPlaybackContext.anime;
+      const key = anime?.id ? (anime.provider || '') + ':' + anime.id : '';
+      const picks = JSON.parse(localStorage.getItem('seriesSubtitlePick') || '{}');
+      const selected = picks[key];
+      return {
+        source: selected?.source || null,
+        status: document.querySelector('#seriesSubtitleSourceStatus')?.textContent || '',
+        resetDisabled: document.querySelector('#resetSeriesSubtitleSource')?.disabled ?? true,
+        initialDefault,
+        currentDefault: localStorage.getItem('subtitleSource')
+      };
+    })()`);
+    assert.ok(selectedSubtitleSource, 'the packaged Re:Anime subtitle source button is present');
+    assert.equal(selectedSubtitleSource.source, 'reanime', 'the real source button saves a per-series subtitle preference');
+    assert.equal(selectedSubtitleSource.status, '이 작품 출처: Re:Anime');
+    assert.equal(selectedSubtitleSource.resetDisabled, false);
+    assert.equal(selectedSubtitleSource.currentDefault, selectedSubtitleSource.initialDefault, 'choosing a work source does not change the settings default');
+    subtitlePreferenceState = { selected: selectedSubtitleSource.source, settingsDefault: selectedSubtitleSource.currentDefault };
     const savedPosition = await win.webContents.executeJavaScript(`(() => {
       const video = document.querySelector('#video');
       video.currentTime = 2;
@@ -460,6 +484,13 @@ async function runSourceRestartProbe(win) {
     assert.match(savedCard, /EP\.1\s*·\s*50%/, savedCard);
     resumeState = { savedCard, savedPosition };
   } else {
+    const persistedSubtitleSource = await win.webContents.executeJavaScript(`(() => {
+      const picks = JSON.parse(localStorage.getItem('seriesSubtitlePick') || '{}');
+      const selected = picks['reanime:${SLUG}'];
+      return { source: selected?.source || null, settingsDefault: localStorage.getItem('subtitleSource') };
+    })()`);
+    assert.equal(persistedSubtitleSource.source, 'reanime', 'the per-series subtitle source survived the process restart');
+    subtitlePreferenceState = { persisted: persistedSubtitleSource.source, settingsDefault: persistedSubtitleSource.settingsDefault };
     const persistedCard = await waitFor('saved 50 percent watch history after a full app restart', () =>
       win.webContents.executeJavaScript(`(() => {
         const text = document.querySelector('#continueRail .continue-card')?.innerText || '';
@@ -498,10 +529,37 @@ async function runSourceRestartProbe(win) {
     })()`);
     assert.ok(resumeState.currentTime >= 1.8 && resumeState.currentTime < 2.8, JSON.stringify(resumeState));
     assert.match(resumeState.cue, /합성 한국어 자막/);
+    const restoredSubtitlePreferenceUi = await waitFor('restored per-series subtitle source appears in the resumed player', () =>
+      win.webContents.executeJavaScript(`(() => {
+        const status = document.querySelector('#seriesSubtitleSourceStatus');
+        const reset = document.querySelector('#resetSeriesSubtitleSource');
+        return status?.textContent === '이 작품 출처: Re:Anime' && reset && !reset.disabled
+          ? { status: status.textContent, resetDisabled: reset.disabled } : null;
+      })()`), 5000);
+    assert.equal(restoredSubtitlePreferenceUi.status, '이 작품 출처: Re:Anime');
+    assert.equal(restoredSubtitlePreferenceUi.resetDisabled, false);
+    const resetPreference = await win.webContents.executeJavaScript(`(() => {
+      const button = document.querySelector('#resetSeriesSubtitleSource');
+      if (!button) return null;
+      button.click();
+      const picks = JSON.parse(localStorage.getItem('seriesSubtitlePick') || '{}');
+      const selected = picks['reanime:${SLUG}'];
+      return {
+        source: selected?.source || null,
+        status: document.querySelector('#seriesSubtitleSourceStatus')?.textContent || '',
+        disabled: button.disabled
+      };
+    })()`);
+    assert.ok(resetPreference, 'the packaged per-series source reset button is present');
+    assert.equal(resetPreference.source, null, 'reset removes the per-series source preference');
+    assert.equal(resetPreference.status, '설정 기본값: 자동');
+    assert.equal(resetPreference.disabled, true);
+    subtitlePreferenceState.restoredStatus = restoredSubtitlePreferenceUi.status;
+    subtitlePreferenceState.resetStatus = resetPreference.status;
   }
   assert.equal(deniedUnknownFetches.length, 0, `the source restart used only registered fixture URLs: ${deniedUnknownFetches.join(', ')}`);
   assert.equal(deniedBrowserRequests.length, 0, `the source restart made no browser requests outside local fixtures: ${deniedBrowserRequests.join(', ')}`);
-  console.log(`Source restart ${restartMode} passed: ${restored.source}, ${restored.title}; resume evidence: ${JSON.stringify(resumeState)}; fixture calls: ${fixtureRequests.length}; unknown fetches: 0; blocked browser requests: 0.`);
+  console.log(`Source restart ${restartMode} passed: ${restored.source}, ${restored.title}; subtitle preference: ${JSON.stringify(subtitlePreferenceState)}; resume evidence: ${JSON.stringify(resumeState)}; fixture calls: ${fixtureRequests.length}; unknown fetches: 0; blocked browser requests: 0.`);
 }
 
 app.on('session-created', blockSessionRequests);
