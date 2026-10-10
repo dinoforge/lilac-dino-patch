@@ -510,3 +510,10 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - `tests/phase1-main.electron.cjs`의 격리 Electron 프로세스에서 `clipboard.writeText`만 테스트 수신기로 대체했다. 실제 시스템 클립보드에 쓰지 않고 빌드된 `app.asar`의 main·preload·renderer 연결을 유지했다.
 - 패키지 renderer에서 실제 앱 정보 IPC를 호출하고 7개 합성 오류로 만든 진단 보고서를 실제 `window.lilac.copyText`→`clipboard:copy-text` main IPC에 전달했다. 허용된 최근 5건만 남고 작품명·전체 URL·토큰·쿠키는 제외됐으며 테스트 수신기는 보고서만 받았다. 이어 실제 `오류 정보 복사` 버튼을 눌러 같은 IPC와 `오류 정보가 복사됐어요` 성공 안내를 확인했다. 빈 문자열과 2MB 초과 입력은 거부되고 수신기에 기록되지 않았다.
 - `npm run test:phase1-main`과 `npm run test:phase1-source-restart` 통과. main 스모크는 합성 HTTP fixture 89회, 등록되지 않은 fetch·차단된 브라우저 요청·외부 네트워크 호출 0회였다. `node --check tests/phase1-main.electron.cjs` 및 `git diff --check` 통과. 시스템 클립보드와 설치 NSIS UI는 검증하지 않았다.
+
+## 2026-10-10 PIP 종료 리소스 정리
+
+- `src/player.js`에서 PIP 종료 또는 열기 실패 때 숨은 합성 영상도 명시적으로 일시 정지한다. 기존 캡처 트랙 종료, `srcObject` 해제, 30fps 타이머 정지와 미니플레이어 버튼 상태 초기화는 그대로 유지한다.
+- `tests/player-interactions.test.cjs`에서 실제 미니플레이어 버튼 바인딩을 통해 디코드 전 안내, 영상 프레임·한국어 VTT cue 합성, PIP 성공 뒤 닫기, PIP 요청 실패를 확인했다. 두 종료 경로 모두 숨은 영상 정지·캡처 트랙 해제·타이머 정지를 검증한다.
+- 전체 `npm test` 227/227 통과. `npm run dist`로 Windows NSIS를 재빌드하고 새 패키지에서 `npm run test:phase1-electron`과 `npm run test:phase1-main`이 통과했다. main 스모크는 합성 HTTP fixture 89회, 미등록 fetch·차단 브라우저 요청·외부 네트워크 호출 0회다.
+- PIP 창과 `requestPictureInPicture`/닫기 이벤트는 테스트에서 모의했다. Windows 네이티브 PIP UI·설치 NSIS 실행과 실제 사용자 프로필은 미검증이다. 빌드 파일은 로컬 테스트 산출물이며 설치·배포하지 않았다.

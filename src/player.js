@@ -489,7 +489,11 @@ function drawPipFrame() {
 }
 function stopPictureInPicture() {
   clearInterval(pip.timer); pip.timer = 0;
-  if (pip.video) { pip.video.srcObject?.getTracks().forEach(track => track.stop()); pip.video.srcObject = null; }
+  if (pip.video) {
+    pip.video.pause();
+    pip.video.srcObject?.getTracks().forEach(track => track.stop());
+    pip.video.srcObject = null;
+  }
   $('#miniPlayer').classList.remove('active');
 }
 async function togglePictureInPicture() {

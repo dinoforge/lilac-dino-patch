@@ -47,6 +47,68 @@ function setup() {
   return { context, video, player, playerEvents, indicator, events, storage, stage, key, advance, document };
 }
 
+function setupPip({ rejectPip = false } = {}) {
+  const storage = new Map(), intervalCallbacks = new Map(), toasts = [];
+  let intervalId = 0, streamFps = 0, videoCreates = 0;
+  const miniPlayer = { classList: classList() }, subtitleEnabled = { checked: true };
+  const canvasContext = {
+    drawCalls: 0, captions: [],
+    fillRect() {},
+    drawImage() { this.drawCalls++; },
+    measureText(value) { return { width: [...value].length * 10 }; },
+    strokeText() {},
+    fillText(value) { this.captions.push(value); }
+  };
+  const captureTrack = { stopped: false, stop() { this.stopped = true; } };
+  const stream = { getTracks: () => [captureTrack] };
+  const canvas = {
+    width: 0, height: 0,
+    getContext: () => canvasContext,
+    captureStream(fps) { streamFps = fps; return stream; }
+  };
+  const videoListeners = new Map();
+  const emit = (listeners, name) => { for (const listener of listeners.get(name) || []) listener(); };
+  const realVideoListeners = new Map();
+  const realVideo = {
+    readyState: 0, videoWidth: 640, videoHeight: 360, paused: false,
+    textTracks: [{ activeCues: [{ text: '한국어 PIP 자막' }] }], playCount: 0, pauseCount: 0,
+    addEventListener(name, listener) { (realVideoListeners.get(name) || realVideoListeners.set(name, []).get(name)).push(listener); },
+    play() { if (!this.paused) return Promise.resolve(); this.paused = false; this.playCount++; emit(realVideoListeners, 'play'); return Promise.resolve(); },
+    pause() { if (this.paused) return; this.paused = true; this.pauseCount++; emit(realVideoListeners, 'pause'); }
+  };
+  const hiddenVideo = {
+    className: '', muted: false, playsInline: false, paused: true, srcObject: null, playCount: 0,
+    addEventListener(name, listener) { (videoListeners.get(name) || videoListeners.set(name, []).get(name)).push(listener); },
+    async play() { if (this.paused) { this.paused = false; this.playCount++; emit(videoListeners, 'play'); } },
+    pause() { if (!this.paused) { this.paused = true; emit(videoListeners, 'pause'); } },
+    async requestPictureInPicture() {
+      if (rejectPip) throw new Error('PIP unsupported');
+      document.pictureInPictureElement = this;
+    },
+    emit(name) { emit(videoListeners, name); }
+  };
+  const player = { clientWidth: 1280, clientHeight: 720 };
+  const document = {
+    pictureInPictureElement: null,
+    body: { append() {} },
+    createElement(name) { if (name === 'video') { videoCreates++; return hiddenVideo; } return canvas; },
+    async exitPictureInPicture() { this.pictureInPictureElement = null; hiddenVideo.emit('leavepictureinpicture'); }
+  };
+  const context = vm.createContext({
+    document, window: { LilacAss: null },
+    $: selector => ({ '#video': realVideo, '#immersivePlayer': player, '#miniPlayer': miniPlayer, '#subtitleEnabled': subtitleEnabled }[selector]),
+    localStorage: { getItem: key => storage.get(key) ?? null },
+    playerAspect: () => 'original', PLAYER_ASPECTS: { original: 16 / 9 }, vttBaseline: () => 85,
+    currentSubtitle: null, toast: message => toasts.push(message),
+    setInterval(fn, ms) { const id = ++intervalId; intervalCallbacks.set(id, { fn, ms }); return id; },
+    clearInterval(id) { intervalCallbacks.delete(id); }
+  });
+  vm.runInContext(section('// --- Picture-in-picture', '// --- Media controls'), context);
+  vm.runInContext(appSection("$('#miniPlayer').onclick", "$('#togglePlayer').onclick"), context);
+  return { document, realVideo, hiddenVideo, canvas, canvasContext, captureTrack, intervalCallbacks,
+    miniPlayer, toasts, getVideoCreates: () => videoCreates, getStreamFps: () => streamFps };
+}
+
 test('short Space press toggles once on release despite repeated keydown', () => {
   const h = setup(); h.context.handlePlayerKey(h.key());
   h.advance(100); h.context.handlePlayerKey(h.key(true));
@@ -198,6 +260,51 @@ test('PIP wraps long Korean and unspaced Japanese text, including explicit newli
     const lines = h.context.vttLines(ctx, text, 80);
     assert.ok(lines.length > 1); assert.ok(lines.every(line => ctx.measureText(line).width <= 80));
   }
+});
+
+test('PIP button waits for decoded video, composes Korean captions, and releases capture on close', async () => {
+  const h = setupPip();
+  await h.miniPlayer.onclick();
+  assert.deepEqual(h.toasts, ['먼저 영상을 재생하세요.']);
+  assert.equal(h.getVideoCreates(), 0);
+
+  h.realVideo.readyState = 2;
+  await h.miniPlayer.onclick();
+  assert.equal(h.document.pictureInPictureElement, h.hiddenVideo);
+  assert.equal(h.miniPlayer.classList.contains('active'), true);
+  assert.equal(h.hiddenVideo.className, 'pip-source');
+  assert.equal(h.canvas.width, 640); assert.equal(h.canvas.height, 360);
+  assert.equal(h.canvasContext.drawCalls, 1);
+  assert.ok(h.canvasContext.captions.includes('한국어 PIP 자막'));
+  assert.equal(h.getStreamFps(), 30);
+  assert.equal(h.intervalCallbacks.size, 1);
+  assert.equal(h.captureTrack.stopped, false);
+
+  h.hiddenVideo.pause();
+  assert.equal(h.realVideo.paused, true);
+  await h.realVideo.play();
+  assert.equal(h.hiddenVideo.paused, false);
+
+  await h.miniPlayer.onclick();
+  assert.equal(h.document.pictureInPictureElement, null);
+  assert.equal(h.hiddenVideo.paused, true);
+  assert.equal(h.hiddenVideo.srcObject, null);
+  assert.equal(h.captureTrack.stopped, true);
+  assert.equal(h.miniPlayer.classList.contains('active'), false);
+  assert.equal(h.intervalCallbacks.size, 0);
+  assert.equal(h.realVideo.paused, false);
+});
+
+test('PIP request failure stops the hidden video and capture stream', async () => {
+  const h = setupPip({ rejectPip: true });
+  h.realVideo.readyState = 2;
+  await h.miniPlayer.onclick();
+  assert.equal(h.hiddenVideo.paused, true);
+  assert.equal(h.hiddenVideo.srcObject, null);
+  assert.equal(h.captureTrack.stopped, true);
+  assert.equal(h.miniPlayer.classList.contains('active'), false);
+  assert.equal(h.intervalCallbacks.size, 0);
+  assert.deepEqual(h.toasts, ['PIP를 열지 못했습니다: PIP unsupported']);
 });
 
 test('ASS canvas follows stretched video bounds and returns to the original bounds', async () => {
