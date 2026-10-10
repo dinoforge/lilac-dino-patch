@@ -43,3 +43,14 @@ test('matching season, full scripts, ASS and revised versions are preferred in t
   assert.equal(selectCommunityFile(['Show 01 NCOP.ass', 'Show 01.srt'], { episode: 1 }).file, 'Show 01.srt');
   assert.equal(selectCommunityFile(['Show_01_NCOP.ass', 'Show 01.srt'], { episode: 1 }).file, 'Show 01.srt');
 });
+
+test('an exact season file outranks an unseasoned episode file and excludes other seasons', () => {
+  const selected = selectCommunityFile([
+    'Show E05v9.ass',
+    'Show S01E05.ass',
+    'Show S02E05.srt'
+  ], { episode: 5, season: 2 });
+  assert.equal(selected.file, 'Show S02E05.srt');
+  assert.equal(selectCommunityFile(['Show S01E05.ass'], { episode: 5, season: 2 }), undefined);
+  assert.equal(selectCommunityFile(['Show E05.ass'], { episode: 5, season: 2 }).file, 'Show E05.ass');
+});

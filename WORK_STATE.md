@@ -625,3 +625,11 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 설치본의 실제 `LilacAnime.exe`/`app.asar`에서 홈·검색 UI, preload bridge, 앱 정보 IPC(0.5.9, win32/x64), 94.99%/95% 이어보기 경계, 완료 진행률 100% 저장과 수동 다음 화 안내를 검증했다. 임시 앱 main 프로세스의 네트워크 guard가 로드됐음을 확인한 뒤 검색 IPC를 호출했고, 외부 요청 5건은 차단되어 합성 빈 응답만 사용했다. 실제 공급원 응답·영상·자막은 요청하지 않았다.
 - 설치 시 전용 HKCU 제거 등록 1개·HKLM 등록 0개를 확인했다. 테스트 제거 프로그램 실행 뒤 전용 등록과 설치 폴더가 사라졌고, 검증기 임시 프로필도 제거됐다.
 - 표준 NSIS를 재빌드하거나 배포하지 않았다. 실제 공급원 매칭과 이용 권한은 계속 미검증이다. 임시 빌드 복사본은 `%TEMP%\lilac-nsis-smoke-a7c3d9e102`에 남아 있으며 그 안 `source\node_modules`는 프로젝트의 `node_modules`를 가리키는 junction이다. 안전 검사가 junction 제거를 거부해 전체 임시 폴더는 보존했다.
+
+## 2026-10-10 동일 회차 번호의 시즌 자막 선택
+
+- 자막 압축 파일에 요청 시즌의 정확한 `SxxExx` 자막과 시즌 표기가 없는 같은 회차 파일이 함께 있으면 확장자·개정 번호 순위가 앞서는 무표기 파일을 고를 수 있었다. `electron/community-matching.cjs`에서 요청 시즌이 명시된 정확한 파일을 우선하도록 했다. 다른 시즌 표기는 기존 필터에서 제외되며, 시즌 표기 파일이 없으면 무표기 파일을 계속 허용한다.
+- 회귀 테스트로 `S02E05`가 고품질 `E05v9`보다 선택되는지, `S01E05`만 있을 때 제외하는지, 시즌 표기 없는 `E05`는 유지되는지 확인했다. 대상 자막 매칭 테스트 9/9, 전체 `npm test` 250/250 통과.
+- `npm run pack`, `npm run test:phase1-main`, `npm run test:phase1-electron`, `npm run test:phase1-exe` 통과. 패키지 main smoke는 합성 HTTP fixture 91회, 외부 네트워크 요청 0회였고 renderer smoke 오류와 차단된 외부 요청도 0회였다.
+- 사용자 승인으로 고유 앱 ID의 per-user NSIS(124,485,145바이트)를 `%TEMP%` 임시 폴더에 설치하고 설치본 `LilacAnime.exe`를 임시 `APPDATA`/`LOCALAPPDATA`/Chromium 프로필로 실행했다. 홈·검색 UI, preload bridge, 앱 정보 IPC, 이어보기 경계와 회차 종료가 통과했다. 전용 HKCU 등록과 설치 폴더를 제거했으며 기존 `LilacAnime 0.5.9` HKLM 등록 경로는 유지됐다. 실제 공급원·영상·자막은 요청하지 않았다.
+- NSIS 산출물을 담은 임시 폴더 `%TEMP%\lilac-nsis-season-d90875ee6d49403aa4884d9b7b6158d9`와 옵션 충돌로 중단된 첫 빌드 폴더 `%TEMP%\lilac-nsis-season-28191216e1ea444f8ceadf6697007068`는 남아 있다. 임시 폴더 재귀 삭제 명령이 자동 검토에서 거부되어 제거하지 않았다. 앱 설치와 HKCU 등록은 이미 정상 제거했다.

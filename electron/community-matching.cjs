@@ -46,6 +46,10 @@ function selectCommunityFile(files, { episode, strict = false, bundle = false, s
     Math.min(9, Number(item.name.match(/(?:\d|[ _.-])v(\d+)(?=[ ._\]-]|$)/i)?.[1]) || 0);
   const rank = list => list.sort((a, b) => quality(b) - quality(a) || (b.size || 0) - (a.size || 0))[0];
   const exact = pool.filter(item => item.parsed.episode === Number(episode));
+  if (season) {
+    const exactSeason = exact.filter(item => item.parsed.season === Number(season));
+    if (exactSeason.length) return rank(exactSeason);
+  }
   if (exact.length) return rank(exact);
   const unnumbered = pool.filter(item => item.parsed.episode == null);
   // A numbered bundle never falls back to an unrelated episode or arbitrary unnumbered file.
