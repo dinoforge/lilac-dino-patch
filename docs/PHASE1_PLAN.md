@@ -269,3 +269,11 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 - `npm test` 244/244, `npm run test:phase1-electron`, `npm run test:phase1-main`, 변경 파일 구문 검사와 `git diff --check`가 통과했다. Windows NSIS를 다시 빌드했으며 새 패키지의 renderer와 main 스모크도 통과했다.
 - 수정 후 별도 앱 ID·제품명, 바로가기 비활성화, 임시 설치 폴더와 프로필, 외부 요청 차단을 적용한 NSIS를 설치해 같은 실행 파일 smoke를 돌렸다. 홈·검색 UI, preload와 앱 정보 IPC, 이어보기 경계·회차 종료 동작이 통과했고 외부 main-process 요청 6건은 거부됐다. NSIS를 무인 제거한 뒤 전용 등록이 사라지고 기존 `LilacAnime 0.5.9` machine-wide 등록이 남는 것을 확인했다.
 - 테스트 전용 설정·네트워크 guard를 원복하고 표준 설정으로 NSIS를 다시 빌드했다. 표준 설치 파일은 로컬 산출물로만 두며 배포하지 않는다. 실제 공급원 자막 검색·작품/회차/영상판 일치는 권리·접근 조건 확인 전 미검증이다.
+
+## 2026-10-10 회차 전환 중 자막 검색 재사용 및 원본 비교
+
+- 기존 단일 검색 캐시는 회차 A 검색 중 B로 갔다가 A로 돌아오면 A의 provider 검색을 다시 시작했다. 이를 작품·제목·회차·선호 출처별 Map으로 바꾸고 최근 64개 key까지만 유지한다. 캐시를 재사용할 때 현재 `playbackRequestId`와 회차별 출처 상태를 갱신하며, 아무 결과도 못 찾은 검색은 제거해 다음 재생에서 다시 시도한다.
+- Kairan/Csora/Anissia 조회를 A→B→A로 전환하며 중복 요청 없음, 결과 상태의 회차 격리, 실패 검색 재시도를 확인했다. Anissia 제작자 A/B 선택에서도 늦은 이전 결과·오류가 최신 선택을 덮지 않는 테스트를 추가했다.
+- 최신 `upstream/main`은 `f2ee438`로 v0.5.10 이후 Anissia 제작자와 수동 출처 검색의 늦은 결과가 최근 선택을 덮지 않도록 했다. 이 파생 앱에는 이미 `beginSubtitleSelection()` 요청 순번이 chip·Anissia maker 양쪽에 있어 같은 보호가 적용된다. 새 main 로직을 중복 이식하지 않고 maker 경합 테스트로 확인했다.
+- `npm test` 247/247, 자막/플레이어 상호작용 테스트, `npm run test:phase1-electron`, `npm run test:phase1-main`, `npm run test:phase1-exe`, `npm run test:phase1-source-restart`, JS 구문 검사와 `git diff --check`가 통과했다. 표준 NSIS도 다시 빌드했지만 이번 캐시 변경을 포함한 별도 설치 smoke는 실행하지 않았다.
+- 검증은 합성 데이터다. 실서비스 자막 응답, 회차·영상판 정확성, 공급원 이용 권한은 여전히 미확인이다.

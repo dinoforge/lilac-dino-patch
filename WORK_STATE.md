@@ -600,3 +600,11 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 별도 앱 ID·제품명·무바로가기 설정과 임시 설치·프로필을 사용해 현재 수정본으로 NSIS를 설치했다. 홈·검색 UI, preload, 앱 정보 IPC, 이어보기 경계와 회차 종료 동작이 통과했고 외부 main-process 요청 6건을 차단했다. 무인 제거 뒤 전용 등록은 사라졌고 기존 `LilacAnime 0.5.9` machine-wide 등록이 남았다. 임시 프로필과 설치 폴더는 정리했다.
 - 테스트 전용 네트워크 guard·앱 식별자·설치 옵션을 원복해 표준 설정으로 `npm run dist`를 성공시켰다. 최종 확인: `npm test` 244/244, `npm run test:phase1-electron`, `npm run test:phase1-main`, `npm run test:phase1-exe`, 구문 검사와 `git diff --check` 통과. main smoke는 fixture 89회, 외부 네트워크 호출 0회다.
 - 실제 공급원 자막 응답·정확한 작품/회차/영상판 일치와 이용 권한은 미검증이다. 설치 파일은 로컬에만 두며 배포하지 않는다. 다음은 문서와 outgoing diff를 검토한 뒤 관련 소스·테스트·문서만 커밋·push하는 것이다.
+
+## 2026-10-10 회차 전환 중 자막 검색 재사용 및 최신 원본 비교
+
+- 직전 단일 전역 검색 슬롯은 A회 검색 중 B회로 이동한 뒤 A회로 돌아오면 A회의 세 provider 조회를 다시 실행했다. `onlineSubtitleSearches`를 작품·제목·회차·선호 출처별 Map으로 바꾸고 최근 64개 key까지만 보관한다. 검색 재사용 시 활성 `playbackRequestId`와 회차별 provider 상태를 갱신한다. 미발견 검색은 캐시에서 빼 다음 재생에 재시도한다.
+- 회귀 테스트에서 A→B→A 전환 후 조회 6회만 실행되고 각 회차의 Kairan/Csora/Anissia 상태가 분리되는 것을 확인했다. 미발견 뒤 재생 시 새 provider batch가 생기는 것도 확인했다.
+- `upstream/main`은 기록된 v0.5.10(`f387639`)에서 `f2ee438`로 진행했다. 원본은 수동 source chip과 Anissia 제작자 검색에 `subtitleSearchId`를 추가해 이전 응답을 억제한다. 현재 파생 코드는 두 경로 모두 `beginSubtitleSelection()`/`subtitleSelectionRequestId`로 이미 이를 막는다. 기존 source-chip 경합 테스트와 추가한 Anissia 제작자 A→B 지연 응답 테스트로 확인했으며 원본의 중복 상태 변수를 이식하지 않았다.
+- 대상 테스트 13/13, 플레이어 상호작용 38/38, 전체 `npm test` 247/247 통과. `npm run dist` 및 패키지 renderer/main/EXE/프로세스 재시작 스모크 통과. main fixture 89회, 미등록 fetch·차단 browser 요청·외부 네트워크 호출 각각 0회.
+- 이 변경 이후 별도 임시 NSIS 설치는 하지 않았다. 표준 NSIS는 빌드했으며 로컬에만 둔다. 실공급원 자막 검색·작품/회차/영상판 일치와 이용 권한은 계속 미확인이다. 다음은 이 변경의 diff와 저장소 상태를 검토한 뒤 source/test/docs만 커밋·push하는 것이다.

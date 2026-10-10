@@ -663,6 +663,32 @@ test('choosing a subtitle source saves it for the series without changing the se
   assert.equal(h.storage.get('subtitleSource'), 'anissia');
 });
 
+test('a late Anissia maker result cannot replace the maker selected afterwards', async () => {
+  const controls = new Map([['#skipTitle', { value: '테스트 애니' }], ['#skipEpisode', { value: '1' }], ['#subtitleState', { textContent: '' }]]);
+  const pending = [], attached = [];
+  const context = vm.createContext({
+    playbackRequestId: 1, subtitleSelectionRequestId: 0, currentSubtitlePath: null,
+    $: selector => controls.get(selector),
+    beginSubtitleSelection() { return ++context.subtitleSelectionRequestId; },
+    subtitleSearchAnime: () => ({ provider: 'reanime', id: 'one' }),
+    communityLabel: (_source, result) => `Anissia · ${result.maker} 자막`,
+    renderAnissiaMakers() {},
+    attachSubtitle(url, label, options) { attached.push({ url, label, source: options.source }); },
+    window: { lilac: { findSubtitle: (_source, _title, _episode, _anime, options) => new Promise((resolve, reject) => pending.push({ maker: options.maker, resolve, reject })) } }
+  });
+  vm.runInContext(section('async function selectAnissiaMaker(', '// Writes one subtitle setting'), context);
+
+  const first = context.selectAnissiaMaker('A');
+  const second = context.selectAnissiaMaker('B');
+  pending[1].resolve({ maker: 'B', path: 'b.vtt', url: 'subtitle://b' });
+  await second;
+  pending[0].reject(new Error('earlier maker failed late'));
+  await first;
+
+  assert.deepEqual(attached, [{ url: 'subtitle://b', label: 'Anissia · B 자막', source: 'anissia' }]);
+  assert.equal(context.currentSubtitlePath, 'b.vtt');
+});
+
 test('a saved-subtitle lookup started on the previous episode cannot apply to the new episode', async () => {
   const h = subtitleSourceHarness();
   const pending = h.context.selectSubtitleSource('kairan');

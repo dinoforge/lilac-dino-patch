@@ -48,7 +48,7 @@ function createOnlineSubtitleContext() {
     },
     $$: () => []
   });
-  vm.runInContext(`${onlineSubtitleSource}\nthis.subtitleAvailabilityMap = subtitleAvailabilityByEpisode;`, context);
+  vm.runInContext(`${onlineSubtitleSource}\nthis.subtitleAvailabilityMap = subtitleAvailabilityByEpisode; this.onlineSubtitleSearchMap = onlineSubtitleSearches;`, context);
   return { context, requests };
 }
 
@@ -80,6 +80,62 @@ test('reused pending subtitle search updates availability for the current playba
     kairan: 'available', csora: 'unavailable', anissia: 'unavailable'
   });
   assert.equal(h.requests.length, 3, 'replay does not duplicate subtitle network requests');
+});
+
+test('switching episodes and back reuses each pending subtitle search without cross-episode status updates', async () => {
+  const h = createOnlineSubtitleContext(), anime = { provider: 'reanime', id: 'show-1' };
+  const firstEpisodeSearch = h.context.onlineSubtitleFor('테스트 애니', 1, anime);
+  h.context.playbackRequestId++;
+  h.context.currentEpisodeKey = 'reanime:episode-2';
+  const secondEpisodeSearch = h.context.onlineSubtitleFor('테스트 애니', 2, anime);
+  assert.equal(h.requests.length, 6);
+
+  h.context.playbackRequestId++;
+  h.context.currentEpisodeKey = 'reanime:episode-1';
+  const replayFirstEpisode = h.context.onlineSubtitleFor('테스트 애니', 1, anime);
+  assert.strictEqual(replayFirstEpisode, firstEpisodeSearch, 'returning to episode one reuses its original search');
+  assert.equal(h.requests.length, 6, 'switching back does not start duplicate provider requests');
+
+  h.requests.find(request => request.episode === 1 && request.source === 'kairan').resolve({ path: 'episode-1.vtt', url: 'subtitle://episode-1' });
+  h.requests.filter(request => request.episode === 1 && request.source !== 'kairan').forEach(request => request.resolve(null));
+  assert.equal((await replayFirstEpisode).source, 'kairan');
+  assert.deepEqual(JSON.parse(JSON.stringify(h.context.subtitleAvailabilityMap.get('reanime:episode-1'))), {
+    kairan: 'available', csora: 'unavailable', anissia: 'unavailable'
+  });
+
+  h.requests.find(request => request.episode === 2 && request.source === 'kairan').resolve({ path: 'episode-2.vtt', url: 'subtitle://episode-2' });
+  h.requests.filter(request => request.episode === 2 && request.source !== 'kairan').forEach(request => request.resolve(null));
+  await secondEpisodeSearch;
+  assert.deepEqual(JSON.parse(JSON.stringify(h.context.subtitleAvailabilityMap.get('reanime:episode-1'))), {
+    kairan: 'available', csora: 'unavailable', anissia: 'unavailable'
+  }, 'late episode-two results do not overwrite episode one');
+
+  h.context.playbackRequestId++;
+  h.context.currentEpisodeKey = 'reanime:episode-2';
+  const replaySecondEpisode = h.context.onlineSubtitleFor('테스트 애니', 2, anime);
+  assert.strictEqual(replaySecondEpisode, secondEpisodeSearch, 'returning to episode two reuses its completed search');
+  assert.equal(h.requests.length, 6, 'neither episode creates a second provider search');
+  assert.equal((await replaySecondEpisode).source, 'kairan');
+  assert.deepEqual(JSON.parse(JSON.stringify(h.context.subtitleAvailabilityMap.get('reanime:episode-2'))), {
+    kairan: 'available', csora: 'unavailable', anissia: 'unavailable'
+  });
+});
+
+test('a subtitle search with no matches is evicted so a later replay can retry', async () => {
+  const h = createOnlineSubtitleContext(), anime = { provider: 'reanime', id: 'show-1' };
+  const first = h.context.onlineSubtitleFor('테스트 애니', 1, anime);
+  h.requests.forEach(request => request.resolve(null));
+  assert.equal(await first, null);
+  assert.equal(h.context.onlineSubtitleSearchMap.size, 0);
+
+  const retry = h.context.onlineSubtitleFor('테스트 애니', 1, anime);
+  assert.equal(h.requests.length, 6, 'a later replay starts one fresh provider batch');
+  const retryRequests = h.requests.slice(3);
+  retryRequests.find(request => request.source === 'kairan').resolve(null);
+  retryRequests.find(request => request.source === 'csora').resolve({ path: 'episode-1-csora.vtt', url: 'subtitle://episode-1-csora' });
+  retryRequests.find(request => request.source === 'anissia').resolve(null);
+  assert.equal((await retry).source, 'csora');
+  assert.equal(h.requests.length, 6, 'the retry did not duplicate its own providers');
 });
 
 function extractMain(startMarker, endMarker) {

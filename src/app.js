@@ -812,13 +812,15 @@ function setSubtitleAvailability(source,status,requestId=playbackRequestId){
   availability[source]=status;renderSubtitleSourceAvailability();
 }
 // Kairan → Csora → Anissia (the preferred one first), started while the stream is still being resolved so the
-// result is usually ready when playback starts. One search per title and episode. The three are asked at once and
-// taken in that order, so a miss on the first no longer waits for the next search to start.
-let onlineSubtitleSearch=null;
+// result is usually ready when playback starts. Cache searches per title and episode across the 64 most recent keys,
+// but evict misses so another playback can retry. The three are asked at once and taken in that order, so a miss on
+// the first no longer waits for the next search to start.
+const onlineSubtitleSearches=new Map();
 function onlineSubtitleFor(title,episode,anime){
   const preferred=preferredSubtitleSource(anime),key=`${seriesKey(anime)}|${title}|${episode}|${preferred}`,requestId=playbackRequestId;
-  if(onlineSubtitleSearch?.key===key){
-    const search=onlineSubtitleSearch;search.requestId=requestId;
+  const cached=onlineSubtitleSearches.get(key);
+  if(cached){
+    const search=cached;search.requestId=requestId;onlineSubtitleSearches.delete(key);onlineSubtitleSearches.set(key,search);
     for(const [source,status] of Object.entries(search.statuses))setSubtitleAvailability(source,status,requestId);
     return search.promise;
   }
@@ -827,8 +829,9 @@ function onlineSubtitleFor(title,episode,anime){
   sources.forEach(source=>updateStatus(source,'checking'));
   const searches=sources.map(source=>window.lilac.findSubtitle(source,title,episode,anime).then(result=>{updateStatus(source,result?'available':'unavailable');return result?{source,result}:null},error=>{updateStatus(source,subtitleAvailabilityStatusFromError(error));return null}));
   const promise=(async()=>{for(const searchPromise of searches){const found=await searchPromise;if(found)return found}return null})();
-  search.promise=promise;onlineSubtitleSearch=search;
-  promise.then(found=>{if(!found&&onlineSubtitleSearch===search)onlineSubtitleSearch=null});
+  search.promise=promise;onlineSubtitleSearches.set(key,search);
+  if(onlineSubtitleSearches.size>64)onlineSubtitleSearches.delete(onlineSubtitleSearches.keys().next().value);
+  promise.then(found=>{if(!found&&onlineSubtitleSearches.get(key)===search)onlineSubtitleSearches.delete(key)});
   return promise;
 }
 function attachOnlineSubtitle({source,result}){currentSubtitlePath=result.path;attachSubtitle(result.url,communityLabel(source,result),{path:result.path,assUrl:result.assUrl,assPath:result.assPath,fonts:result.fonts,source})}
