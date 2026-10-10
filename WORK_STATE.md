@@ -1,5 +1,13 @@
 # 작업 상태
 
+## 2026-10-11 v0.5.14 원본 무수정 Companion 연결 가능성
+
+- 기준 `codex/runtime-attach-native-style` / `9dd99abb59ccd904e212aff315274f87b720840f`에서 `codex/runtime-attach-unmodified-feasibility` worktree를 분리했다. 이전 스타일 브랜치의 미추적 캡처 31개와 로그 5개는 새 worktree로 옮기지 않았고 삭제하거나 커밋하지 않았다.
+- v0.5.14 소스 commit `f095fc3d775451e144ed780e1fa081f739927652`를 `%TEMP%`의 별도 아카이브로 검사했다. `main.cjs`, `preload.cjs`, `index.html`, `app.js`, `package.json`의 Git blob ID가 모두 일치했다. 검사 사본 파일은 편집하지 않았다.
+- `window.lilac`는 renderer 전용 contextBridge이고, 공개된 Companion IPC/plugin/deep-link API는 발견하지 못했다. Electron `webContents.debugger`는 앱 main process가 소유한 WebContents API다. 외부 연결용 TCP/CDP 포트, DLL/메모리 개입은 사용하지 않았다.
+- 격리된 홈 renderer를 실행하면 초기화가 선택된 공급원의 카탈로그 요청을 일으킬 수 있어, 실제 공급원 요청을 금지한 조건에서 실행하지 않았다. 따라서 실제 attach는 미실시이며 성공으로 보고하지 않는다.
+- 결론·공식 브리지 설계·연동 대안은 `docs/verification/RUNTIME_ATTACH_UNMODIFIED.md`에 기록했다. `D:\LilacAnime`, 실제 사용자 프로필, 업데이트 캐시, 기존 설치본과 기존 캡처/로그는 접근·수정·삭제하지 않았다.
+
 ## 2026-10-11 Companion 요일표 원본 스타일 검증
 
 - 요청 기준 `codex/runtime-attach-feasibility` / `b1889ae5d7e45658c2670c55152c0d4e6e717d9c`에서 `codex/runtime-attach-native-style` 브랜치를 만들었다. `main`, 원본 저장소와 원본 설치본은 수정하지 않았다.
