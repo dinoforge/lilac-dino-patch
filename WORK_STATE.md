@@ -1,5 +1,13 @@
 # 작업 상태
 
+## 2026-10-11 v0.5.14 런타임 Companion 연결 실증
+
+- 요청 기준 `codex/runtime-companion-prototype` / `dcd6b9818c0f13fd9970cc3c94e4539fd33aeb64`에서 `codex/runtime-attach-feasibility`를 만들었다. upstream v0.5.14 (`f095fc3d775451e144ed780e1fa081f739927652`) 소스 아카이브를 시스템 임시 폴더에 풀어 실제 Electron renderer를 시험했다.
+- 임시 사본 `electron/main.cjs`에만 시험 고리를 추가해 원본 `#homeView`의 `#scheduleSection` 앞에 Companion 요일표를 넣었다. `companion/core/catalog.cjs`의 합성 7일·5개 출처 데이터를 별도 자식 프로세스 stdio로 전달했고 월~일 선택을 모두 확인했다. 캡처: `docs/verification/assets/runtime-attach-v0.5.14-20261010T180559Z.png`.
+- 자식 종료 후 삽입 DOM을 제거하고 in-process CDP를 분리했다. 원본 검색·상세 다이얼로그·설정 DOM 동작과 앱 창 생존을 확인했다. 설치본 `D:\LilacAnime`, 기존 프로필·캐시·감사 파일은 접근하지 않았다. 앱 ID와 프로필 경로는 임시 폴더 전용이며 임시 프로필 47개 파일의 SHA-256을 기록하고 정리했다. 디버깅 TCP 포트는 열지 않았고 앱 네트워크 요청은 시험 사본에서 차단했다.
+- v0.5.14 원본 `src/index.html`, preload 해시는 불변이고 사본 main만 시험 중 변경됐다가 임시 트리와 함께 삭제됐다. upstream 원본·app.asar 수정 없음. 실제 Companion Electron 창, 라이브 출처 조회, 재생 제어, 프로덕션 설치본 연동은 미검증이며 이번 결과만으로 제품 적용을 승인하지 않는다.
+- 런타임 로그: `docs/verification/runtime-attach-evidence-20261010T180559Z.jsonl`; 전체 재현·해시·보안 경계·업데이트 제한은 `docs/verification/RUNTIME_ATTACH_FEASIBILITY.md`. `npm test` 296/296 통과.
+
 ## 2026-10-11 LilacAnime Companion 원본 무수정 프로토타입
 
 - `codex/runtime-companion-prototype`를 통합 기준 `4610a45f52e9a076b67a6774bcf3887dc390e485`에서 새 worktree `D:\Codex-Coding-Folder\LilacAnime-Player-runtime-companion-prototype`로 만들었다. 중단된 `codex/audit-integration-01-02` 작업 폴더와 임시 산출물은 수정·정리하지 않았다.
