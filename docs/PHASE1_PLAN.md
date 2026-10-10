@@ -277,3 +277,10 @@ Phase 1에서는 원본 LilacAnime를 전면 재작성하지 않는다. 기존 E
 - 최신 `upstream/main`은 `f2ee438`로 v0.5.10 이후 Anissia 제작자와 수동 출처 검색의 늦은 결과가 최근 선택을 덮지 않도록 했다. 이 파생 앱에는 이미 `beginSubtitleSelection()` 요청 순번이 chip·Anissia maker 양쪽에 있어 같은 보호가 적용된다. 새 main 로직을 중복 이식하지 않고 maker 경합 테스트로 확인했다.
 - `npm test` 247/247, 자막/플레이어 상호작용 테스트, `npm run test:phase1-electron`, `npm run test:phase1-main`, `npm run test:phase1-exe`, `npm run test:phase1-source-restart`, JS 구문 검사와 `git diff --check`가 통과했다. 이후 이 캐시 변경을 포함한 별도 앱 ID의 per-user NSIS를 설치해 실제 설치 실행 파일의 UI·IPC·이어보기·회차 종료 스모크를 통과시켰고, 테스트 guard가 차단한 외부 main-process 요청 5건을 확인했다.
 - 검증은 합성 데이터다. 실서비스 자막 응답, 회차·영상판 정확성, 공급원 이용 권한은 여전히 미확인이다.
+
+## 2026-10-10 설치 NSIS의 Phase 1 통합 검색·재생 스모크
+
+- 고유 앱 ID·제품명, per-user 설치, 바로가기 비활성화로 임시 NSIS를 설치하고 별도 `APPDATA`, `LOCALAPPDATA`, `TEMP`, `userData`, `sessionData`를 사용했다. 테스트 harness는 설치 폴더의 실제 `resources/app.asar`를 열고 main·preload·renderer 파일이 현재 소스와 같은지 확인했다.
+- 설치 실행 파일에서 실제 main/preload/renderer 흐름으로 검색 UI → Re:Anime 합성 결과 → 상세 → 회차 선택 → main resolver → loopback HLS → 한국어 자막 → 진행률 저장·이어보기 → 같은 종류의 대체 서버 전환을 검증했다. 홈의 분기·최신 방영·요일별 방영표·공급원 업데이트 표시도 기존 합성 fixture로 확인했다.
+- 결과: 320×180 HLS 영상 디코드, 저장된 50%에서 약 2초 이어재생, HD-2 실패 후 HD-1과 선택 자막 복구, 합성 HTTP fixture 91회, 알 수 없는 main fetch 0, 외부 브라우저 요청 0, 실제 외부 네트워크 0. 테스트 전용 오류 로그는 거부 입력 및 재생 불가 후보 경로를 예상대로 기록했고 프로세스는 0으로 종료했다.
+- 임시 NSIS는 정상 제거했다. 설치 폴더·전용 HKCU 제거 등록과 임시 사용자 프로필·앱 데이터가 제거됐고, 기존 `LilacAnime 0.5.9` HKLM 설치는 유지됐다. 실제 공급원·콘텐츠 권리와 영상/자막판 일치는 여전히 미검증이다.

@@ -1,10 +1,11 @@
 # 작업 상태
 
-## 2026-10-10 최신 작업: 회차별 저장 자막 목록·삭제 UI
+## 2026-10-10 최신 작업: 저장 자막 UI·설치 NSIS 통합 스모크
 
 - 플레이어 자막 패널에 현재 회차의 저장 자막 목록, 출처와 적용 상태, 항목 제거 버튼을 연결했다. 적용 중인 자막은 다른 자막을 고를 때까지 제거 버튼을 잠그고, 제거 전에 확인을 받는다. 앱이 받은 파일은 다른 회차에서 참조하지 않을 때만 지우며, 사용자가 PC에서 고른 파일은 원래 위치에 둔다.
 - 전체 `npm test` 257/257, `npm run test:phase1-electron`, `npm run test:phase1-main`, `node --check`와 `git diff --check`가 통과했다. main 테스트는 합성 HTTP fixture 91회, 알 수 없는 fetch 0회, 브라우저 차단 0회, 외부 네트워크 0회였다.
 - 사용자 승인으로 임시 앱 ID `com.lilac.anime.desktop.smoke.dcf19f78`를 사용해 NSIS per-user 설치본을 빌드·설치하고 격리 프로필에서 실행했다. 실제 설치 앱의 renderer → preload → main 저장/목록/제거 IPC가 통과했고, 테스트용 PC 자막 파일은 보존됐다. main process 외부 요청 6건(Re:Anime 4, Jikan 2)은 차단됐다. 실제 사용자 파일·라이브 공급원·영상은 사용하지 않았다.
+- 추가로 임시 앱 ID `com.lilac.anime.desktop.phase1.e2e.20261010`의 설치본에서 현재 설치 경로 `resources/app.asar`를 직접 열어 main·preload·renderer가 소스와 일치함을 확인하고, 검색 UI→결과 카드→상세→회차→실제 main resolver→합성 HLS→한국어 자막→이어보기·대체 서버 전환을 검증했다. 320×180 영상 디코드, 저장 위치 50%에서 약 2초 재개, HD-2 오류 뒤 HD-1과 선택 자막 복구가 통과했다. 합성 fixture 91회, 알 수 없는 fetch·브라우저 외부 요청·실제 외부 네트워크는 모두 0회였다.
 - 임시 앱은 제거 종료 코드 0, 설치 폴더와 전용 HKCU 등록은 제거됐으며 기존 `LilacAnime 0.5.9` HKLM 설치가 남아 있음을 확인했다. 테스트 프로필도 실행기가 정리했다.
 - 임시 빌드 폴더 `C:\Users\공룡\AppData\Local\Temp\lilac-nsis-subtitle-safety-dcf19f78`는 남아 있다. 그 안의 `source\node_modules` junction은 프로젝트 `node_modules`를 가리키며, 이번 정리 요청은 정책에서 거부돼 제거되지 않았다. 프로젝트 종속성은 존재한다.
 
