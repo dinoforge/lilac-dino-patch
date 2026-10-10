@@ -537,3 +537,9 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - `npm test` 241/241, `node --check` 대상 파일과 `git diff --check`가 통과했다. 커뮤니티 매칭/다운로드 격리 및 재시도, TMDB 요청 클라이언트와 카탈로그 복구 테스트를 포함한다.
 - `npm run test:phase1-electron` 통과(검색·상세·회차·합성 VTT 재생, 27% 이어보기 3.27초, renderer 오류·차단 외부 요청 0). `npm run dist` Windows NSIS 빌드 성공. 새 `app.asar`로 `npm run test:phase1-main` 통과(합성 HTTP fixture 89회, 외부 네트워크 0), `npm run test:phase1-exe` 통과(실제 win32/x64 EXE의 홈·검색·preload·앱 정보 IPC), `npm run test:phase1-source-restart` 통과(공급원·작품별 자막 출처·50% 진행률·한국어 cue 복구).
 - 모든 실행은 테스트 전용 프로필과 합성 공급원·미디어를 썼다. 실제 Blogger/TMDB 결과, 공급원 콘텐츠의 작품·회차·영상판 일치, 권리 범위, 설치된 NSIS 앱과 기존 사용자 프로필은 검증하지 않았다. 빌드 산출물은 로컬에만 두고 배포하지 않는다.
+
+## 2026-10-10 이어보기 95% 경계
+
+- `tests/resume-choice.test.cjs`에 94.99%와 정확히 95%의 사용자 선택 경계를 추가했다. 95% 미만은 이어보기가 기본이고, 95%부터는 처음부터 시작하되 사용자가 원하면 저장 위치에서 계속할 수 있음을 확인한다.
+- Phase 1 계획의 `playerAutoPlay` 설정·마이그레이션 문구를 실제 코드에 맞췄다. 별도 자동 다음 화 설정은 없고 `handleEpisodeEnded`는 다음 화 직접 선택 안내만 표시한다. 기존 프로필 설정을 변경하지 않는다.
+- `npm test` 242/242 및 `git diff --check` 통과. 경계 테스트는 UI 패키지 통합이 아니라 재생 선택 로직의 단위 검증이다. 실행 코드 변경은 없어 패키지를 다시 빌드하지 않았다.

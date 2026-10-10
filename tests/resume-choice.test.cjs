@@ -129,6 +129,24 @@ test('resumePosition preserves the 95 percent default and honors an explicit con
   assert.match(appSource, /pendingResumeProgress=resumePosition\(savedProgress,context\.resumeMode\)/);
 });
 
+test('resume choice treats exactly 95 percent as the start-over boundary', () => {
+  const context = setup(), episodeTarget = { episode: episode('reanime', 3), progress: 94.99 };
+  const belowBoundary = context.resumeAction(episodeTarget);
+  assert.equal(belowBoundary.label, '3화 이어보기');
+  assert.deepEqual(JSON.parse(JSON.stringify(belowBoundary.options)), { resumeMode: 'continue', resumeProgress: 94.99 });
+  assert.equal(context.resumePosition(94.99), 94.99);
+
+  episodeTarget.progress = 95;
+  const atBoundary = context.resumeAction(episodeTarget);
+  const explicitContinue = context.resumeAction(episodeTarget, 'alternate');
+  assert.equal(atBoundary.label, '3화 처음부터');
+  assert.deepEqual(JSON.parse(JSON.stringify(atBoundary.options)), { resumeProgress: 0 });
+  assert.equal(explicitContinue.label, '3화 이어보기');
+  assert.deepEqual(JSON.parse(JSON.stringify(explicitContinue.options)), { resumeMode: 'continue', resumeProgress: 95 });
+  assert.equal(context.resumePosition(95), 0);
+  assert.equal(context.resumePosition(95, 'continue'), 95);
+});
+
 test('detail buttons bind the alternate action and its explicit resume position', () => {
   const context = setup(), classes = new Set(['hidden']), primary = { innerHTML: '' }, selected = [];
   const alternate = {
