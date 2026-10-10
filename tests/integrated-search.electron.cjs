@@ -390,6 +390,45 @@ app.whenReady().then(async () => {
   assert.ok(ipcCalls.some(call => call.channel === 'provider:detail' && call.args[0]?.provider === 'miruro'));
 
   await win.webContents.executeJavaScript(`(() => {
+    const history = JSON.parse(localStorage.getItem('history') || '[]');
+    const episode = history.find(entry => entry.episode?.provider === 'reanime' && Number(entry.episode?.number) === 1);
+    if (!episode) throw new Error('The saved Re:Anime episode is missing before the detail resume check');
+    episode.progress = 96;
+    localStorage.setItem('history', JSON.stringify(history));
+  })()`);
+  const detailReloaded = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
+  win.webContents.reload();
+  await detailReloaded;
+  await win.webContents.executeJavaScript(`(() => {
+    window.rememberAnime(${JSON.stringify(items.reanime)});
+    window.openDetail(${JSON.stringify(items.reanime.mal_id)});
+  })()`);
+  const detailResumeChoice = await waitFor('detail screen resume choice at 96 percent', () => win.webContents.executeJavaScript(`(() => {
+    const primary = document.querySelector('#detailContent .detail-play');
+    const alternate = document.querySelector('#detailContent .detail-resume-choice');
+    return primary && alternate && !alternate.classList.contains('hidden')
+      ? { primary: primary.textContent.trim(), alternate: alternate.textContent.trim() }
+      : null;
+  })()`));
+  assert.match(detailResumeChoice.primary, /1화 처음부터/);
+  assert.match(detailResumeChoice.alternate, /1화 이어보기/);
+  await win.webContents.executeJavaScript(`(() => {
+    const video = document.querySelector('#video');
+    video.addEventListener('seeked', () => video.pause(), { once: true });
+    document.querySelector('#detailContent .detail-resume-choice').click();
+  })()`);
+  const detailResumedPlayback = await waitFor('detail resume choice restores saved position', () => win.webContents.executeJavaScript(`(() => {
+    const video = document.querySelector('#video');
+    if (video?.duration >= 11.9 && video.currentTime >= 11.3) {
+      video.pause();
+      return { currentTime: video.currentTime, duration: video.duration };
+    }
+    return null;
+  })()`), 8000);
+  assert.ok(detailResumedPlayback.currentTime < detailResumedPlayback.duration,
+    'the explicit detail choice resumes before the episode ends');
+
+  await win.webContents.executeJavaScript(`(() => {
     window.showPlayerFailure('합성 재생 실패', {
       stage: 'hls-playback', mediaType: 'hls', errorCategory: 'networkError',
       message: 'PRIVATE_DIAGNOSTIC_DETAIL_SHOULD_NOT_COPY',
@@ -418,8 +457,9 @@ app.whenReady().then(async () => {
   assert.deepEqual(rendererErrors, [], `renderer console errors: ${rendererErrors.join('; ')}`);
   const searchCalls = ipcCalls.filter(call => ['provider:catalog', 'catalog:search-korean', 'linkkf:search'].includes(call.channel));
   assert.ok(searchCalls.length >= 8, `synthetic provider search calls recorded (${searchCalls.length})`);
-  console.log(`Packaged Phase 1 smoke passed: expired proxy history preservation, integrated search, source picker, local episode playback, active Korean VTT, saved progress and continue-watch resume, and user-invoked privacy-filtered diagnostics copy.`);
+  console.log(`Packaged Phase 1 smoke passed: expired proxy history preservation, integrated search, source picker, local episode playback, active Korean VTT, saved progress and continue-watch resume, 96% detail start-over/continue choice, and user-invoked privacy-filtered diagnostics copy.`);
   console.log(`Synthetic search IPC calls: ${searchCalls.length}; provider resolve calls: ${ipcCalls.filter(call => call.channel === 'provider:resolve').length}; saved progress: ${savedProgress.progress}%; resumed at: ${resumedPlayback.currentTime.toFixed(2)}s.`);
+  console.log(`Detail alternate resume position: ${detailResumedPlayback.currentTime.toFixed(2)}s / ${detailResumedPlayback.duration.toFixed(2)}s.`);
   console.log(`Renderer errors: ${rendererErrors.length}; blocked external request attempts: ${blockedRequests.length}; userData and synthetic media: isolated temp folder.`);
   win.destroy();
   app.quit();

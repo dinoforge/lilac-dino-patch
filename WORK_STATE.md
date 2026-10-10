@@ -563,3 +563,9 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - `tests/windows-package-startup.cjs`가 실제 `LilacAnime.exe`의 `app.asar` renderer에서 합성 시청 기록으로 `handleEpisodeEnded()`를 호출하도록 확장했다. 완료 진행률이 100%로 저장되고, 다음 회차가 있어도 안내만 보이며 자동 재생 함수는 호출되지 않는지 확인한다.
 - `npm run test:phase1-exe`와 `npm test` 243/243, `git diff --check`가 통과했다. 실제 영상·회차 공급원은 쓰지 않았으며 테스트 전용 프로필과 합성 다음 회차를 사용했다.
 - `docs/FEATURE_GAP.md`의 재생 항목 9에도 이 패키지 검증을 반영하고, 실제 HLS 복구·설치 NSIS 오류 화면·실제 공급원 검증은 미완료로 유지했다.
+
+## 2026-10-10 패키지 상세 화면 이어보기 선택
+
+- `tests/integrated-search.electron.cjs`의 격리 패키지 앱 스모크에 실제 상세 화면 경로를 추가했다. 96% 시청 기록을 저장·재로드하고 Re:Anime 작품 상세를 연 뒤 기본 `1화 처음부터`와 보조 `1화 이어보기`가 표시되는지, 보조 버튼을 누르면 12초 합성 영상의 11.50초에서 재생을 재개하는지 확인한다.
+- `npm run test:phase1-electron`, `node --check tests/integrated-search.electron.cjs` 통과. 통합 검색 24회, resolve 3회, 기존 이어보기 27% 기록이 3.27초로 복구됐다. 렌더러 오류와 외부 HTTP(S) 차단 요청은 각각 0회였다.
+- 이 스모크는 패키지 앱·임시 프로필·합성 공급원 IPC·로컬 MP4/VTT를 쓴다. 실제 공급원 회차·영상·자막 매칭, 설치 NSIS 실행, 기존 사용자 프로필은 검증하지 않았다.
