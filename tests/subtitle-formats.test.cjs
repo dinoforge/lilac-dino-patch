@@ -196,3 +196,32 @@ test('a failed saved-subtitle conversion remains eligible for migration on the n
     assert.equal(attempts, 2);
   });
 });
+
+test('removing saved subtitles preserves similarly prefixed user files and cleans only unused managed files', () => {
+  withFixtureDirectory(directory => {
+    const userData = path.join(directory, 'app-data');
+    const managed = path.join(userData, 'subtitles'), backup = path.join(userData, 'subtitles-backup');
+    fs.mkdirSync(managed, { recursive: true }); fs.mkdirSync(backup, { recursive: true });
+    const app = { getPath: name => name === 'userData' ? userData : directory };
+    const store = new SubtitleStore({ app });
+    const userFile = path.join(backup, 'keep.vtt'); fs.writeFileSync(userFile, 'user data');
+    const userEntry = store.save('user-episode', { source: 'user', label: 'Picked file', path: userFile });
+    assert.equal(store.remove('user-episode', userEntry.id), true);
+    assert.equal(fs.readFileSync(userFile, 'utf8'), 'user data', 'a sibling prefix is outside managed storage');
+    if (process.platform === 'win32') {
+      const junction = path.join(managed, 'redirected'); fs.symlinkSync(backup, junction, 'junction');
+      const redirectedEntry = store.save('redirected-user', { source: 'user', path: path.join(junction, path.basename(userFile)) });
+      assert.equal(store.remove('redirected-user', redirectedEntry.id), true);
+      assert.equal(fs.readFileSync(userFile, 'utf8'), 'user data', 'a junction cannot redirect deletion outside managed storage');
+    }
+
+    const managedFile = path.join(managed, 'download.vtt'); fs.writeFileSync(managedFile, 'managed data');
+    const first = store.save('episode-one', { source: 'kairan', path: managedFile });
+    const second = store.save('episode-two', { source: 'csora', path: managedFile });
+    assert.equal(store.remove('episode-one', first.id), true);
+    assert.equal(fs.existsSync(managedFile), true, 'a file still used by another episode is retained');
+    assert.equal(store.remove('episode-two', second.id), true);
+    assert.equal(fs.existsSync(managedFile), false, 'an unused app-managed file is removed');
+    assert.equal(fs.readFileSync(userFile, 'utf8'), 'user data');
+  });
+});

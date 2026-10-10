@@ -6,6 +6,13 @@ const { pathToFileURL } = require('url');
 
 const SOURCES = ['linkkf', 'reanime', 'kairan', 'csora', 'anissia', 'jimaku', 'user', 'provider', 'download', 'gemini', 'chatgpt'];
 
+function isInside(root, candidate) {
+  let realRoot, realCandidate;
+  try { realRoot = fs.realpathSync(root); realCandidate = fs.realpathSync(candidate); } catch { return false; }
+  const relative = path.relative(realRoot, realCandidate);
+  return Boolean(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
 class SubtitleStore {
   constructor({ app, reconvert = null }) {
     this.reconvert = reconvert;
@@ -64,7 +71,7 @@ class SubtitleStore {
     // Only delete files the app downloaded itself; user-picked files stay where they are.
     const stillUsed = file => Object.values(this.data).some(items => items.some(item => item.path === file || item.assPath === file));
     for (const file of [entry.path, entry.assPath]) {
-      if (file && path.resolve(file).startsWith(path.resolve(this.managedRoot)) && !stillUsed(file)) { try { fs.unlinkSync(file); } catch { /* already gone */ } }
+      if (file && isInside(this.managedRoot, file) && !stillUsed(file)) { try { fs.unlinkSync(file); } catch { /* already gone */ } }
     }
     return true;
   }

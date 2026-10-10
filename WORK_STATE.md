@@ -1,6 +1,13 @@
 # 작업 상태
 
-## 2026-10-10 최신 작업: upstream v0.5.12 자막 변환 보정 선별 반영
+## 2026-10-10 최신 작업: 자막 저장소 삭제 경로 경계 수정
+
+- `SubtitleStore.remove()`가 저장 자막 파일의 소유권을 `startsWith(managedRoot)`로 판단해 `subtitles-backup` 형제 폴더나 관리 폴더 내부 junction 바깥의 파일까지 앱 소유로 오인할 수 있었다. 루트와 대상의 실제 경로를 구한 뒤 `path.relative()`로 하위 여부를 확인한다.
+- 회귀 테스트는 형제 폴더·junction 대상의 사용자 파일 보존, 다른 회차에서 참조 중인 관리 파일 보존, 마지막 참조 제거 뒤 관리 파일 삭제를 확인한다.
+- 자막 형식·저장소·플레이어 상호작용 테스트 53/53, 전체 `npm test` 257/257, `npm run pack`, `npm run test:phase1-main`, `npm run test:phase1-electron`, `npm run test:phase1-exe`, 구문 검사와 `git diff --check`가 통과했다. 패키지 main fixture 91회·외부 네트워크 0회, Electron renderer 오류 0회였다.
+- 검증은 저장소 단위 테스트와 격리 합성 스모크다. 실제 사용자 파일·삭제 UI·라이브 공급원 동작은 확인하지 않았다.
+
+## 2026-10-10 이전 작업: upstream v0.5.12 자막 변환 보정 선별 반영
 
 - `upstream/main`의 v0.5.12 (`2b9e40c`)와 자막 변환 버그 수정 `9b22e44`를 비교했다. SMI·SRT의 `<br>` 줄바꿈과 일반 `<`, `-->` 문자, ASS 빈 줄·그림 명령을 안전하게 처리하도록 변환기를 보강하고 PiP에서 WebVTT named/numeric 문자 참조를 표시한다.
 - 이전에 앱이 만든 자막 변환본은 `userData/subtitles` 내부의 원본 SMI/SAMI/SRT/ASS/SSA가 있을 때만 새 형제 VTT로 재변환하고 저장 목록 경로를 바꾼다. 이전 VTT와 원본 자막은 덮어쓰지 않으며, 실제 경로를 따라 Windows junction이 폴더 밖으로 연결되는 경우도 변환하지 않는다. 변환 실패는 다음 목록 조회 때 재시도한다.
