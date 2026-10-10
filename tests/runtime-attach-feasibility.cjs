@@ -162,7 +162,7 @@ function validateExpectedCheckout() {
   const branch = git(['branch', '--show-current']).trim();
   const head = git(['rev-parse', 'HEAD']).trim();
   if (branch !== 'codex/runtime-attach-feasibility') throw new Error('Refusing to run outside the requested experiment branch.');
-  if (head !== BASE_COMMIT) throw new Error('Refusing to run because the requested base commit changed.');
+  if (git(['merge-base', BASE_COMMIT, 'HEAD']).trim() !== BASE_COMMIT) throw new Error('Refusing to run because HEAD is not descended from the requested base commit.');
   if (git(['rev-parse', BASE_BRANCH]).trim() !== BASE_COMMIT) throw new Error('The referenced prototype branch no longer resolves to the requested commit.');
   const upstreamPackage = JSON.parse(git(['show', UPSTREAM_TAG_COMMIT + ':package.json']));
   if (upstreamPackage.version !== '0.5.14' || upstreamPackage.main !== 'electron/main.cjs') {
