@@ -816,13 +816,19 @@ function setSubtitleAvailability(source,status,requestId=playbackRequestId){
 // taken in that order, so a miss on the first no longer waits for the next search to start.
 let onlineSubtitleSearch=null;
 function onlineSubtitleFor(title,episode,anime){
-  const preferred=preferredSubtitleSource(anime),key=`${seriesKey(anime)}|${title}|${episode}|${preferred}`;if(onlineSubtitleSearch?.key===key)return onlineSubtitleSearch.promise;
-  const sources=ONLINE_SUBTITLE_SOURCES.includes(preferred)?[preferred,...ONLINE_SUBTITLE_SOURCES.filter(x=>x!==preferred)]:ONLINE_SUBTITLE_SOURCES,requestId=playbackRequestId;
-  sources.forEach(source=>setSubtitleAvailability(source,'checking',requestId));
-  const searches=sources.map(source=>window.lilac.findSubtitle(source,title,episode,anime).then(result=>{setSubtitleAvailability(source,result?'available':'unavailable',requestId);return result?{source,result}:null},error=>{setSubtitleAvailability(source,subtitleAvailabilityStatusFromError(error),requestId);return null}));
-  const promise=(async()=>{for(const search of searches){const found=await search;if(found)return found}return null})();
-  onlineSubtitleSearch={key,promise};
-  promise.then(found=>{if(!found&&onlineSubtitleSearch?.promise===promise)onlineSubtitleSearch=null});
+  const preferred=preferredSubtitleSource(anime),key=`${seriesKey(anime)}|${title}|${episode}|${preferred}`,requestId=playbackRequestId;
+  if(onlineSubtitleSearch?.key===key){
+    const search=onlineSubtitleSearch;search.requestId=requestId;
+    for(const [source,status] of Object.entries(search.statuses))setSubtitleAvailability(source,status,requestId);
+    return search.promise;
+  }
+  const sources=ONLINE_SUBTITLE_SOURCES.includes(preferred)?[preferred,...ONLINE_SUBTITLE_SOURCES.filter(x=>x!==preferred)]:ONLINE_SUBTITLE_SOURCES,search={key,requestId,statuses:{},promise:null};
+  const updateStatus=(source,status)=>{search.statuses[source]=status;setSubtitleAvailability(source,status,search.requestId)};
+  sources.forEach(source=>updateStatus(source,'checking'));
+  const searches=sources.map(source=>window.lilac.findSubtitle(source,title,episode,anime).then(result=>{updateStatus(source,result?'available':'unavailable');return result?{source,result}:null},error=>{updateStatus(source,subtitleAvailabilityStatusFromError(error));return null}));
+  const promise=(async()=>{for(const searchPromise of searches){const found=await searchPromise;if(found)return found}return null})();
+  search.promise=promise;onlineSubtitleSearch=search;
+  promise.then(found=>{if(!found&&onlineSubtitleSearch===search)onlineSubtitleSearch=null});
   return promise;
 }
 function attachOnlineSubtitle({source,result}){currentSubtitlePath=result.path;attachSubtitle(result.url,communityLabel(source,result),{path:result.path,assUrl:result.assUrl,assPath:result.assPath,fonts:result.fonts,source})}

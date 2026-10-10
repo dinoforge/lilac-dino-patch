@@ -25,6 +25,63 @@ test('subtitle provider status distinguishes found, missing, checking, and faile
   assert.equal(helpers.subtitleAvailabilityStatusFromError(new Error('Csora HTTP 503')), 'error');
 });
 
+const onlineSubtitleStart = appSource.indexOf('const ONLINE_SUBTITLE_SOURCES=');
+const onlineSubtitleEnd = appSource.indexOf('\nfunction attachOnlineSubtitle(', onlineSubtitleStart);
+assert.ok(onlineSubtitleStart >= 0 && onlineSubtitleEnd > onlineSubtitleStart, 'Missing online subtitle search state');
+const onlineSubtitleSource = appSource.slice(onlineSubtitleStart, onlineSubtitleEnd);
+
+function createOnlineSubtitleContext() {
+  const requests = [];
+  let context;
+  context = vm.createContext({
+    playbackRequestId: 1,
+    currentEpisodeKey: 'reanime:episode-1',
+    subtitleStoreKey: () => context.currentEpisodeKey,
+    seriesKey: () => 'reanime:show-1',
+    preferredSubtitleSource: () => 'kairan',
+    window: {
+      lilac: {
+        findSubtitle(source, title, episode, anime) {
+          return new Promise(resolve => requests.push({ source, title, episode, anime, resolve }));
+        }
+      }
+    },
+    $$: () => []
+  });
+  vm.runInContext(`${onlineSubtitleSource}\nthis.subtitleAvailabilityMap = subtitleAvailabilityByEpisode;`, context);
+  return { context, requests };
+}
+
+test('reused pending subtitle search updates availability for the current playback request', async () => {
+  const h = createOnlineSubtitleContext(), anime = { provider: 'reanime', id: 'show-1' };
+  const firstPlayback = h.context.onlineSubtitleFor('테스트 애니', 1, anime);
+  assert.equal(h.requests.length, 3);
+  h.context.playbackRequestId++;
+  const replay = h.context.onlineSubtitleFor('테스트 애니', 1, anime);
+  assert.strictEqual(replay, firstPlayback, 'the pending episode search is reused');
+
+  h.requests.find(request => request.source === 'kairan').resolve({ path: 'episode-1.vtt', url: 'subtitle://episode-1' });
+  h.requests.find(request => request.source === 'csora').resolve(null);
+  h.requests.find(request => request.source === 'anissia').resolve(null);
+  const result = await replay;
+
+  assert.equal(result.source, 'kairan');
+  assert.deepEqual(JSON.parse(JSON.stringify(h.context.subtitleAvailabilityMap.get('reanime:episode-1'))), {
+    kairan: 'available', csora: 'unavailable', anissia: 'unavailable'
+  });
+
+  h.context.playbackRequestId++;
+  const availability = h.context.subtitleAvailabilityMap.get('reanime:episode-1');
+  for (const source of ['kairan', 'csora', 'anissia']) availability[source] = 'checking';
+  const cachedResult = h.context.onlineSubtitleFor('테스트 애니', 1, anime);
+  assert.strictEqual(cachedResult, firstPlayback, 'a completed match is cached for the episode');
+  await cachedResult;
+  assert.deepEqual(JSON.parse(JSON.stringify(availability)), {
+    kairan: 'available', csora: 'unavailable', anissia: 'unavailable'
+  });
+  assert.equal(h.requests.length, 3, 'replay does not duplicate subtitle network requests');
+});
+
 function extractMain(startMarker, endMarker) {
   const start = mainSource.indexOf(startMarker), end = mainSource.indexOf(endMarker, start);
   assert.ok(start >= 0 && end > start, `Missing main-process source between ${startMarker} and ${endMarker}`);

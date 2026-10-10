@@ -590,3 +590,13 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 설치된 `LilacAnime.exe`의 실제 `app.asar`로 홈·검색 UI, preload bridge, 앱 정보 IPC(0.5.9, win32/x64), 이어보기 94.99%/95% 경계, 회차 종료 시 진행률 100% 저장과 수동 다음 화 안내를 확인했다. 임시 설치본 시작 스모크가 정상 종료했다.
 - 전용 제거 프로그램으로 테스트 설치를 지웠다. 테스트 HKCU 등록은 사라졌고 기존 전체 사용자 설치 등록 및 ProgramData 시작 메뉴·공용 바탕화면 바로가기 해시는 유지됐다. 임시 진단 폴더는 검사 후 Recycle Bin으로 이동했다.
 - 테스트 전용 코드·식별자를 원복하고 표준 설정으로 `npm run dist`를 다시 성공시켰다. 현재 로컬 NSIS 파일은 124,549,154바이트다. 실제 공급원·콘텐츠, 기존 사용자 프로필, 이용 권한은 미검증이다.
+
+## 2026-10-10 반복 재생 자막 상태 수정
+
+- 같은 작품·회차·선호 출처의 온라인 자막 검색을 반복 재생에서 재사용할 때, 결과 콜백이 오래된 `playbackRequestId`를 붙잡아 Kairan·Csora·Anissia 상태 표시가 `확인 중`에 남을 수 있었다. 재사용된 검색 상태에 현재 요청 ID를 연결하고, 캐시된 상태와 늦게 완료된 출처 결과를 현재 재생 상태에 적용하도록 수정했다. 기존 검색 promise와 네트워크 요청 수는 그대로 재사용한다.
+- `tests/subtitle-availability.test.cjs`에 진행 중 요청 재사용·완료 캐시 재사용·상태 복원·중복 요청 방지 회귀 테스트를 추가했다. 대상 테스트와 전체 `npm test` 244/244 통과.
+- `node --check src/app.js`, `node --check tests/subtitle-availability.test.cjs`, `git diff --check` 통과. `npm run dist`로 현재 소스의 NSIS를 재빌드했고, `npm run test:phase1-electron` 및 `npm run test:phase1-main` 통과했다. main 패키지 스모크는 합성 HTTP fixture 89회, 등록되지 않은 fetch·차단된 브라우저 요청·외부 네트워크 호출 각각 0회였다.
+- `tests/windows-package-startup.cjs`에 `LILAC_PHASE1_EXE_PATH` 입력을 추가해 unpacked 실행 파일뿐 아니라 설치된 실행 파일도 같은 검증기로 확인할 수 있게 했다. 기본 경로 실행은 `npm run test:phase1-exe`에서 계속 통과한다.
+- 별도 앱 ID·제품명·무바로가기 설정과 임시 설치·프로필을 사용해 현재 수정본으로 NSIS를 설치했다. 홈·검색 UI, preload, 앱 정보 IPC, 이어보기 경계와 회차 종료 동작이 통과했고 외부 main-process 요청 6건을 차단했다. 무인 제거 뒤 전용 등록은 사라졌고 기존 `LilacAnime 0.5.9` machine-wide 등록이 남았다. 임시 프로필과 설치 폴더는 정리했다.
+- 테스트 전용 네트워크 guard·앱 식별자·설치 옵션을 원복해 표준 설정으로 `npm run dist`를 성공시켰다. 최종 확인: `npm test` 244/244, `npm run test:phase1-electron`, `npm run test:phase1-main`, `npm run test:phase1-exe`, 구문 검사와 `git diff --check` 통과. main smoke는 fixture 89회, 외부 네트워크 호출 0회다.
+- 실제 공급원 자막 응답·정확한 작품/회차/영상판 일치와 이용 권한은 미검증이다. 설치 파일은 로컬에만 두며 배포하지 않는다. 다음은 문서와 outgoing diff를 검토한 뒤 관련 소스·테스트·문서만 커밋·push하는 것이다.

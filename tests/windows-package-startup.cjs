@@ -9,8 +9,8 @@ const path = require('node:path');
 if (process.platform !== 'win32') throw new Error('The packaged executable smoke test only runs on Windows.');
 
 const repo = path.resolve(__dirname, '..');
-const exe = path.join(repo, 'dist', 'win-unpacked', 'LilacAnime.exe');
-const appAsar = path.join(repo, 'dist', 'win-unpacked', 'resources', 'app.asar');
+const exe = process.env.LILAC_PHASE1_EXE_PATH ? path.resolve(process.env.LILAC_PHASE1_EXE_PATH) : path.join(repo, 'dist', 'win-unpacked', 'LilacAnime.exe');
+const appAsar = path.join(path.dirname(exe), 'resources', 'app.asar');
 const expectedVersion = require('../package.json').version;
 assert.ok(fs.existsSync(exe), `the unpacked Windows executable exists: ${exe}`);
 assert.ok(fs.existsSync(appAsar), `the packaged app archive exists: ${appAsar}`);
@@ -278,7 +278,9 @@ async function main() {
     assert.equal(episodeEnd.automaticPlayCalls, 0, JSON.stringify(episodeEnd));
     assert.equal(episodeEnd.completedProgress, 100, JSON.stringify(episodeEnd));
 
-    console.log(`Packaged Windows exe startup passed: ${path.basename(exe)} loaded app.asar, home/search UI, preload bridge and app-info IPC (${appInfo.version}, ${appInfo.platform}/${appInfo.arch}); resume boundary, 100 percent completion save and manual next-episode behavior passed; profile and DNS resolution were isolated under ${tempRoot}.`);
+    const blockedExternalRequests = (output.match(/\[NSIS_SMOKE_BLOCKED_(?:FETCH|NET_FETCH)\]/g) || []).length;
+    if (process.env.LILAC_TEMP_NSIS_SMOKE === '1') assert.ok(blockedExternalRequests > 0, 'The temporary smoke build denied external main-process requests.');
+    console.log(`Packaged Windows exe startup passed: ${path.basename(exe)} loaded app.asar, home/search UI, preload bridge and app-info IPC (${appInfo.version}, ${appInfo.platform}/${appInfo.arch}); resume boundary, 100 percent completion save and manual next-episode behavior passed; external main-process requests denied: ${blockedExternalRequests}; isolated profile: ${tempRoot}.`);
   } finally {
     if (cdp) {
       try { await cdp.send('Browser.close'); } catch {}
