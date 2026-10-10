@@ -468,3 +468,9 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - `npm run test:phase1-source-restart` 통과. 이 검증은 실제 앱 renderer/preload/main과 격리 fixture를 사용하며 실제 Kairan/Csora/Anissia 사이트, 자막 작품·회차·영상판 일치, 권리 조건, 설치 NSIS 앱은 검증하지 않았다.
 - 회귀 확인: `npm test` 225/225, `npm run test:phase1-electron`, `npm run test:phase1-main`(합성 HTTP fixture 89회, 미등록 fetch·외부 브라우저 요청 0), `node --check tests/phase1-main.electron.cjs`, `git diff --check` 통과.
 - 원격 `dinoforge/anime-player`는 비공개 저장소다. 현재 활성 `Build` workflow는 `v*` 태그와 수동 실행에 반응하고 릴리스 업로드 권한도 포함한다. `main` push는 workflow를 실행하지 않지만, CI 사전 비활성화 규칙과 릴리스 workflow 변경 승인 규칙이 맞물려 GitHub 반영은 사용자 결정 전 보류한다.
+
+## 2026-10-10 Anissia API 권리 문서 확인
+
+- Anissia 공식 README와 편성표 API 문서를 확인했다. API 문서는 편성·회차 자막 endpoint, 회차·등록일·외부 웹사이트·제작자 필드를 정의하고 브라우저 직접 JavaScript 요청을 권장한다. `captionCount`는 약 5분 캐시로 실시간 자막 정보와 다를 수 있어 사용 비권장이라고 적혀 있다.
+- 기술적 CORS/API 접근 안내는 API, 자막 파일의 저장·번역·재배포 권리를 부여하는 문구가 아니다. 공개 문서에서 그런 사용 허가를 찾지 못했고 제작자 블로그별 파일 권리도 미확인이다. 앱은 회차 자막 항목을 조회하며 캐시된 `captionCount`로 존재 여부를 정하지 않는다.
+- `docs/RIGHTS_REVIEW.md`에 공식 출처와 확인 범위를 추가했다. 실제 API·자막 파일 요청, 코드 변경, 사용자 데이터 접근은 하지 않았다. 비공개 개발·미배포와 GitHub push 보류를 유지한다.
