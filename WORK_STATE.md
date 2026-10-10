@@ -608,3 +608,10 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - `upstream/main`은 기록된 v0.5.10(`f387639`)에서 `f2ee438`로 진행했다. 원본은 수동 source chip과 Anissia 제작자 검색에 `subtitleSearchId`를 추가해 이전 응답을 억제한다. 현재 파생 코드는 두 경로 모두 `beginSubtitleSelection()`/`subtitleSelectionRequestId`로 이미 이를 막는다. 기존 source-chip 경합 테스트와 추가한 Anissia 제작자 A→B 지연 응답 테스트로 확인했으며 원본의 중복 상태 변수를 이식하지 않았다.
 - 대상 테스트 13/13, 플레이어 상호작용 38/38, 전체 `npm test` 247/247 통과. `npm run dist` 및 패키지 renderer/main/EXE/프로세스 재시작 스모크 통과. main fixture 89회, 미등록 fetch·차단 browser 요청·외부 네트워크 호출 각각 0회.
 - 이 변경 이후 별도 임시 NSIS 설치는 하지 않았다. 표준 NSIS는 빌드했으며 로컬에만 둔다. 실공급원 자막 검색·작품/회차/영상판 일치와 이용 권한은 계속 미확인이다. 다음은 이 변경의 diff와 저장소 상태를 검토한 뒤 source/test/docs만 커밋·push하는 것이다.
+
+## 2026-10-10 자막 회차 전환 캐시 변경 후 NSIS 설치 검증
+
+- `f3a7f95446a612ea956a7fbe64fcf1bf06d0f158`의 깨끗한 소스 복사본에서 고유 앱 ID·제품명, 바로가기 비활성화, per-user 설정을 적용해 별도 NSIS(124,546,483바이트)를 만들었다. 설치 대상은 `%TEMP%` 아래 전용 폴더였고 기존 앱 데이터 경로는 사용하지 않았다.
+- 설치본의 실제 `LilacAnime.exe`/`app.asar`에서 홈·검색 UI, preload bridge, 앱 정보 IPC(0.5.9, win32/x64), 94.99%/95% 이어보기 경계, 완료 진행률 100% 저장과 수동 다음 화 안내를 검증했다. 임시 앱 main 프로세스의 네트워크 guard가 로드됐음을 확인한 뒤 검색 IPC를 호출했고, 외부 요청 5건은 차단되어 합성 빈 응답만 사용했다. 실제 공급원 응답·영상·자막은 요청하지 않았다.
+- 설치 시 전용 HKCU 제거 등록 1개·HKLM 등록 0개를 확인했다. 테스트 제거 프로그램 실행 뒤 전용 등록과 설치 폴더가 사라졌고, 검증기 임시 프로필도 제거됐다.
+- 표준 NSIS를 재빌드하거나 배포하지 않았다. 실제 공급원 매칭과 이용 권한은 계속 미검증이다. 임시 빌드 복사본은 `%TEMP%\lilac-nsis-smoke-a7c3d9e102`에 남아 있으며 그 안 `source\node_modules`는 프로젝트의 `node_modules`를 가리키는 junction이다. 안전 검사가 junction 제거를 거부해 전체 임시 폴더는 보존했다.
