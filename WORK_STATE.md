@@ -551,3 +551,9 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 권리 검토 전 잘못된 태그가 올라가도 파일이 생성·업로드되지 않도록 `.github/workflows/build.yml`의 `build`와 `release` 두 job에 `LILAC_RELEASE_RIGHTS_APPROVED == 'true'` 조건을 추가했다. 변수는 만들거나 설정하지 않았고, 기존 Release 워크플로 파일·태그·수동 실행 트리거는 보존한다.
 - `node --test tests/release-rights-gate.test.cjs` 1/1, 전체 `npm test` 243/243, `git diff --check`, js-yaml 구문 검사 통과. `e740feb` push 후 `gh workflow view Build --yaml`이 새 조건을 포함해 반환됐고 워크플로는 `active` 상태다. `gh run list --branch main`은 빈 목록이며, 해당 검증 시점의 원격/로컬 HEAD가 일치했다.
 - 저장소는 private, Releases 목록과 Actions 변수 목록은 비어 있다. 이 gate는 설치 파일 생성·배포를 막는 설정이며 권리 확인을 완료한 것은 아니다.
+
+## 2026-10-10 AniList·TMDB 약관 재확인
+
+- AniList 공식 약관을 다시 열어 비상업적 이용과 대량 수집·비보완적 동종 서비스 제한을 확인했다. 작품 목록·시청 기록을 제공하는 이 앱의 선택 작품 방영 정보 조회가 허용 범위인지는 여전히 미확인이다.
+- TMDB 공식 약관은 검색으로 관련 제한을 확인했지만, 직접 페이지 열기는 robots 정책에 막혔다. AI 기반 애플리케이션과의 연결 제한을 현재 앱에 적용할지 문서만으로 확정할 수 없어 서면 확인 전 배포 보류를 유지한다.
+- `docs/RIGHTS_REVIEW.md`에 근거와 확인 한계를 기록했다. API 요청, 실제 콘텐츠 요청, 권리자 연락은 하지 않았다. 설치 생성·배포 게이트 변수는 계속 미설정이다.
