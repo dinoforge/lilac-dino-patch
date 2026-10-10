@@ -549,4 +549,5 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 - 현재 `Build` workflow는 `v*` 태그와 수동 실행에 반응해 세 플랫폼 설치 파일 산출물을 만들고, 태그 실행에서는 Release에 올리는 구성이다. GitHub 저장소는 비공개이고 Releases 목록은 비어 있으며 저장소 Actions 변수도 설정돼 있지 않다.
 - 권리 검토 전 잘못된 태그가 올라가도 파일이 생성·업로드되지 않도록 `.github/workflows/build.yml`의 `build`와 `release` 두 job에 `LILAC_RELEASE_RIGHTS_APPROVED == 'true'` 조건을 추가했다. 변수는 만들거나 설정하지 않았고, 기존 Release 워크플로 파일·태그·수동 실행 트리거는 보존한다.
-- `node --test tests/release-rights-gate.test.cjs` 1/1, 전체 `npm test` 243/243, `git diff --check` 통과. GitHub에서 workflow YAML 인식과 main push가 Actions를 실행하지 않는지 원격 반영 뒤 확인한다. 이 gate는 설치 파일 생성·배포를 막는 설정이며 권리 확인을 완료한 것은 아니다.
+- `node --test tests/release-rights-gate.test.cjs` 1/1, 전체 `npm test` 243/243, `git diff --check`, js-yaml 구문 검사 통과. `e740feb` push 후 `gh workflow view Build --yaml`이 새 조건을 포함해 반환됐고 워크플로는 `active` 상태다. `gh run list --branch main`은 빈 목록이며, 해당 검증 시점의 원격/로컬 HEAD가 일치했다.
+- 저장소는 private, Releases 목록과 Actions 변수 목록은 비어 있다. 이 gate는 설치 파일 생성·배포를 막는 설정이며 권리 확인을 완료한 것은 아니다.
