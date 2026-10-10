@@ -884,16 +884,62 @@ function readSubtitleText(file){
   if(data[0]===0xfe&&data[1]===0xff)return new TextDecoder('utf-16be').decode(data.subarray(2));
   try{return new TextDecoder('utf-8',{fatal:true}).decode(data).replace(/^\uFEFF/,'')}catch{return new TextDecoder('euc-kr').decode(data)}
 }
+// Plain text as a VTT cue. Empty lines end cues and "-->" starts a new timing line, so text is normalized first.
+function vttCueText(text){return String(text).split(/\r?\n|\r/).map(line=>line.trim()).filter(Boolean).join('\n').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/--&gt;/g,'→')}
 // Android prepareSmiAsVttFile: each <SYNC Start=ms> cue lasts until the next SYNC (or 5 s for the last one).
-function smiToVtt(file){
+function smiToVtt(file,output=file.replace(/\.(smi|sami)$/i,'.vtt')){
   const source=readSubtitleText(file),syncs=[...source.matchAll(/<sync\s+start\s*=\s*["']?(\d+)["']?[^>]*>([\s\S]*?)(?=<sync\s+start\s*=|$)/gi)];
-  const clean=raw=>raw.replace(/<br\s*\/?>/gi,'\n').replace(/<\/p\s*>/gi,'\n').replace(/<[^>]+>/g,'').replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&lt;/gi,'<').replace(/&gt;/gi,'>').replace(/&quot;/gi,'"').replace(/&#39;/g,"'").split('\n').map(line=>line.trim()).join('\n').trim();
+  const char=code=>{try{return String.fromCodePoint(code)}catch{return ''}};
+  const clean=raw=>vttCueText(raw.replace(/\s*[\r\n]+\s*/g,' ').replace(/<br\s*\/?>/gi,'\n').replace(/<\/p\s*>/gi,'\n').replace(/<[^>]+>/g,'').replace(/&nbsp;/gi,' ').replace(/&lt;/gi,'<').replace(/&gt;/gi,'>').replace(/&quot;/gi,'"').replace(/&apos;/gi,"'")
+    .replace(/&#x([0-9a-f]+);/gi,(_,hex)=>char(parseInt(hex,16))).replace(/&#(\d+);/g,(_,dec)=>char(Number(dec))).replace(/&amp;/gi,'&'));
   const clock=ms=>{const h=Math.floor(ms/3600000),m=Math.floor(ms/60000)%60,sec=Math.floor(ms/1000)%60;return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}.${String(ms%1000).padStart(3,'0')}`};
   const cues=syncs.map((match,index)=>{const start=Number(match[1]),end=syncs[index+1]?Number(syncs[index+1][1]):start+5000,text=clean(match[2]);return end>start&&text?`${index+1}\n${clock(start)} --> ${clock(end)}\n${text}`:null}).filter(Boolean);
-  const out=file.replace(/\.(smi|sami)$/i,'.vtt');fs.writeFileSync(out,`WEBVTT\n\n${cues.join('\n\n')}\n`,'utf8');return out;
+  fs.writeFileSync(output,`WEBVTT\n\n${cues.join('\n\n')}\n`,'utf8');return output;
 }
-function srtToVtt(file){const text=readSubtitleText(file).replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g,'$1.$2');const out=file.replace(/\.srt$/i,'.vtt');fs.writeFileSync(out,`WEBVTT\n\n${text}`,'utf8');return out}
-function assToVtt(file){const lines=readSubtitleText(file).split(/\r?\n/);let inEvents=false,fields=[];const cues=[];const stamp=value=>{const match=String(value).trim().match(/(\d+):(\d{2}):(\d{2})[.](\d{1,3})/);if(!match)return null;return `${String(match[1]).padStart(2,'0')}:${match[2]}:${match[3]}.${match[4].padEnd(3,'0').slice(0,3)}`};for(const line of lines){if(/^\[Events]/i.test(line)){inEvents=true;continue}if(/^\[/.test(line)){inEvents=false;continue}if(!inEvents)continue;if(/^Format:/i.test(line)){fields=line.slice(line.indexOf(':')+1).split(',').map(x=>x.trim().toLowerCase());continue}if(!/^Dialogue:/i.test(line)||!fields.length)continue;const raw=line.slice(line.indexOf(':')+1),parts=raw.split(','),values=parts.slice(0,fields.length-1);values.push(parts.slice(fields.length-1).join(','));const row=Object.fromEntries(fields.map((field,index)=>[field,values[index]||'']));const start=stamp(row.start),end=stamp(row.end);if(!start||!end)continue;const text=(row.text||'').replace(/\{[^}]*}/g,'').replace(/\\[Nn]/g,'\n').replace(/\\h/g,' ').trim();if(text)cues.push(`${start} --> ${end}\n${text}`)}const out=file.replace(/\.(ass|ssa)$/i,'.vtt');fs.writeFileSync(out,`WEBVTT\n\n${cues.join('\n\n')}\n`,'utf8');return out}
+function srtToVtt(file,output=file.replace(/\.srt$/i,'.vtt')){
+  const timing=/^\s*[\d:.,]+\s*-->\s*[\d:.,]+/;
+  const text=readSubtitleText(file).replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g,'$1.$2').replace(/(?:\r?\n)?(?:[ \t]*<br\s*\/?>[ \t]*)+(?:\r?\n)?/gi,'\n')
+    .split('\n').map(line=>timing.test(line)?line:line.replace(/<(?!\/?[a-z][^<>]*>)/gi,'&lt;').replace(/-->/g,'→')).join('\n');
+  fs.writeFileSync(output,`WEBVTT\n\n${text}`,'utf8');return output;
+}
+// Rebuild old app-generated VTTs beside their source without overwriting the previously saved file.
+function reconvertSubtitle(vtt){
+  if(!/\.vtt$/i.test(vtt))return null;
+  let managed,subtitle;
+  try{managed=fs.realpathSync(path.resolve(app.getPath('userData'),'subtitles'));subtitle=fs.realpathSync(vtt)}catch{return null}
+  const relative=path.relative(managed,subtitle);
+  if(!relative||relative==='..'||relative.startsWith(`..${path.sep}`)||path.isAbsolute(relative))return null;
+  const dir=path.dirname(subtitle);
+  for(const [ext,convert] of [['.smi',smiToVtt],['.sami',smiToVtt],['.srt',srtToVtt],['.ass',assToVtt],['.ssa',assToVtt]]){
+    let original;try{original=fs.realpathSync(subtitle.replace(/\.vtt$/i,ext))}catch{continue}
+    const sourceRelative=path.relative(managed,original);
+    if(!sourceRelative||sourceRelative==='..'||sourceRelative.startsWith(`..${path.sep}`)||path.isAbsolute(sourceRelative))continue;
+    const temp=fs.mkdtempSync(path.join(dir,'.lilac-subtitle-v2-'));
+    try{
+      const staged=path.join(temp,'converted.vtt');convert(original,staged);if(!fs.existsSync(staged))return null;
+      const stem=path.parse(vtt).name;let output;
+      do{output=path.join(dir,`${stem}.lilac-v2-${Date.now()}-${Math.random().toString(36).slice(2,8)}.vtt`)}while(fs.existsSync(output));
+      fs.renameSync(staged,output);return output;
+    }finally{fs.rmSync(temp,{recursive:true,force:true})}
+  }
+  return null;
+}
+function assToVtt(file,output=file.replace(/\.(ass|ssa)$/i,'.vtt')){
+  const lines=readSubtitleText(file).split(/\r?\n/);let inEvents=false,fields=[];const cues=[];
+  const stamp=value=>{const match=String(value).trim().match(/(\d+):(\d{2}):(\d{2})[.](\d{1,3})/);if(!match)return null;return String(match[1]).padStart(2,'0')+':'+match[2]+':'+match[3]+'.'+match[4].padEnd(3,'0').slice(0,3)};
+  for(const line of lines){
+    if(/^\[Events]/i.test(line)){inEvents=true;continue}
+    if(/^\[/.test(line)){inEvents=false;continue}
+    if(!inEvents)continue;
+    if(/^Format:/i.test(line)){fields=line.slice(line.indexOf(':')+1).split(',').map(x=>x.trim().toLowerCase());continue}
+    if(!/^Dialogue:/i.test(line)||!fields.length)continue;
+    const raw=line.slice(line.indexOf(':')+1),parts=raw.split(','),values=parts.slice(0,fields.length-1);values.push(parts.slice(fields.length-1).join(','));
+    const row=Object.fromEntries(fields.map((field,index)=>[field,values[index]||''])),start=stamp(row.start),end=stamp(row.end);if(!start||!end)continue;
+    const text=vttCueText((row.text||'').replace(/\{[^}]*\\p[1-9][^}]*\}[^{]*/g,'').replace(/\{[^}]*}/g,'').replace(/\\[Nn]/g,'\n').replace(/\\h/g,' '));
+    if(text)cues.push(start+' --> '+end+'\n'+text);
+  }
+  fs.writeFileSync(output,'WEBVTT\n\n'+cues.join('\n\n')+'\n','utf8');return output;
+}
 // Local audio analysis over downloaded episodes only (Android LinkkfChapterService.detectSkipSegmentsOffline).
 // Results are cached per title and episode.
 async function analyzeOfflineOpEd({title,episode,currentUrl,duration,candidates,status=()=>{}}){
@@ -1959,7 +2005,7 @@ app.whenReady().then(async () => {
   tmdbOverviewDisk=readTmdbOverviewCache();
   displayTitleStore();
   const broadcast=(channel,value)=>BrowserWindow.getAllWindows().forEach(win=>{if(!win.isDestroyed())win.webContents.send(channel,value)});
-  const subtitleStore=new SubtitleStore({app});
+  const subtitleStore=new SubtitleStore({app,reconvert:reconvertSubtitle});
   // Same order as the player's ensureSubtitle: the preferred source's saved file, the stream's own
   // subtitle, any saved file, then Kairan/Csora.
   const downloadSubtitleKey=job=>{const episode=job.episode||{};return encodeURIComponent(String(episode.url||episode.token||episode.id||episode.number||''))};

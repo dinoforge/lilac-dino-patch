@@ -103,11 +103,19 @@ function setupPip({ rejectPip = false } = {}) {
     setInterval(fn, ms) { const id = ++intervalId; intervalCallbacks.set(id, { fn, ms }); return id; },
     clearInterval(id) { intervalCallbacks.delete(id); }
   });
+  vm.runInContext(section('function vttPipText(', '\nfunction vttLines('), context);
   vm.runInContext(section('// --- Picture-in-picture', '// --- Media controls'), context);
   vm.runInContext(appSection("$('#miniPlayer').onclick", "$('#togglePlayer').onclick"), context);
   return { document, realVideo, hiddenVideo, canvas, canvasContext, captureTrack, intervalCallbacks,
     miniPlayer, toasts, getVideoCreates: () => videoCreates, getStreamFps: () => streamFps };
 }
+
+test('picture-in-picture VTT captions decode named and numeric references', () => {
+  const context = vm.createContext({});
+  vm.runInContext(section('function vttPipText(', '// VTT cues drawn'), context);
+  const lines = context.vttLines({ measureText: value => ({ width: [...value].length }) }, '&lt;3 &quot;hello&quot; &#39;yes&#39; &#12354; &amp;', 1000);
+  assert.deepEqual(Array.from(lines), ['<3 "hello" \'yes\' あ &']);
+});
 
 test('short Space press toggles once on release despite repeated keydown', () => {
   const h = setup(); h.context.handlePlayerKey(h.key());
@@ -254,7 +262,9 @@ test('VTT dialogue stays centered within a safe width and retains sync and top p
 });
 
 test('PIP wraps long Korean and unspaced Japanese text, including explicit newlines', () => {
-  const h = setup(); vm.runInContext(section('function vttLines(', '// VTT cues drawn'), h.context);
+  const h = setup();
+  vm.runInContext(section('function vttPipText(', '\nfunction vttLines('), h.context);
+  vm.runInContext(section('function vttLines(', '// VTT cues drawn'), h.context);
   const ctx = { measureText: value => ({ width: [...value].length * 10 }) };
   for (const text of ['아주 긴 대사가 창 너비를 넘어도 잘리지 않습니다', '空白のないとても長い字幕も折り返します', '<i>첫째 줄</i>\n둘째 줄 &amp; 마지막']) {
     const lines = h.context.vttLines(ctx, text, 80);

@@ -439,8 +439,14 @@ function pipSourceVideo() {
   document.body.append(video);
   return pip.video = video;
 }
+function vttPipText(text) {
+  const char = code => { try { return String.fromCodePoint(code); } catch { return ''; } };
+  return String(text).replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"').replace(/&apos;/gi, "'").replace(/&lrm;|&rlm;/gi, '')
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => char(parseInt(hex, 16))).replace(/&#(\d+);/g, (_, dec) => char(Number(dec))).replace(/&amp;/gi, '&');
+}
 function vttLines(ctx, text, maxWidth) {
-  const plain = text.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  const plain = vttPipText(text);
   return plain.split(/\r?\n/).flatMap(line => {
     const words = line.split(' '), lines = [];
     let current = '';
