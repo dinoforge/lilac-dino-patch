@@ -97,4 +97,5 @@
 
 - 저장된 자막을 제거할 때 파일 경로가 앱의 `subtitles` 폴더 접두사로 시작하기만 하면 앱 소유라고 판단하던 부분을 실제 경로 확인과 `path.relative()` 하위 경로 검사로 바꿨다. `subtitles-backup` 형제 폴더나 관리 폴더 내부 junction을 거쳐 연결된 외부 파일은 지우지 않는다.
 - 회귀 테스트가 형제 폴더·junction 사용자 자막 보존, 다른 회차가 공유하는 관리 파일 보존, 관리 파일의 마지막 참조를 제거했을 때만 삭제되는 동작을 확인한다. `tests/subtitle-formats.test.cjs` 10/10, 전체 `npm test` 257/257 통과.
-- 패키지와 Phase 1 main/Electron/EXE 스모크도 통과했다. 이 검증은 `SubtitleStore.remove()` 규칙을 직접 호출한 단위 테스트이며 앱의 실제 삭제 화면과 사용자 파일 경로는 미검증이다.
+- 고유 앱 ID의 per-user NSIS 임시 설치본을 격리 프로필에서 실행했다. 설치 EXE 시작·홈/검색·preload·앱 정보 IPC·이어보기 경계·100% 완료 저장·수동 다음 화가 통과했고, 설치본에서 외부 main-process fetch 6건을 차단했다. 임시 설치/HKCU 등록은 제거했고 기존 HKLM 설치는 유지했다. 공급원·실제 사용자 자막 파일은 사용하지 않았다.
+- `removeSavedSubtitle`은 preload/main IPC에만 연결돼 있고 renderer 삭제 버튼 호출은 없어 실제 삭제 화면이 아직 없다. 저장소 삭제 규칙은 단위 테스트로 검증됐지만 앱 UI 및 사용자 파일 경로를 통한 삭제는 미검증이다.
