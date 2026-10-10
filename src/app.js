@@ -1507,8 +1507,11 @@ function handleDirectVideoError(){
 }
 $('#video').addEventListener('error',handleDirectVideoError);
 $('#video').addEventListener('playing',()=>{$('#immersivePlayer').classList.add('is-playing');$('#playerEmpty').classList.add('hidden');showPlayerControls()});
-// Progress is saved every few seconds while playing, and right away on pause and when leaving the player.
-function saveHistorySoon(){saveHistorySoon.last=Date.now();store.set('history',state.history)}
+// Persist the live media time too, so a close between periodic timeupdate writes does not lose progress.
+function saveHistorySoon(){const video=$('#video'),duration=playbackDuration();if(duration&&currentHistoryKey&&Number.isFinite(video.currentTime)){const item=state.history.find(x=>(x.key||x.src)===currentHistoryKey);if(item){item.progress=Math.max(0,Math.min(100,Math.round(video.currentTime/duration*100)));item.updated=Date.now()}}saveHistorySoon.last=Date.now();store.set('history',state.history)}
+function flushPlaybackHistory(){if(currentHistoryKey)saveHistorySoon()}
+window.addEventListener('beforeunload',flushPlaybackHistory);
+window.addEventListener('pagehide',flushPlaybackHistory);
 $('#video').addEventListener('pause',()=>{saveHistorySoon();$('#immersivePlayer').classList.remove('is-playing');showPlayerControls()});
 $('#video').addEventListener('waiting',()=>{$('#playerEmpty').classList.remove('hidden')});
 $('#video').addEventListener('canplay',()=>{$('#playerEmpty').classList.add('hidden');applyPendingResume()});

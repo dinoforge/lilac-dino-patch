@@ -575,3 +575,10 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 공식 AniList API 문서의 현재 주소에서 대량 수집과 비보완적 애니 목록/추적 서비스 제한을 재확인했다. 이 앱의 작품 목록·시청 기록과 AniList 방영 정보 조회가 허용되는지 판단할 앱별 확인은 없다.
 - TMDB 개발자 FAQ를 직접 열어 비상업 사용의 크레딧·로고·고지 요건을 확인했다. TMDB API 약관은 직접 페이지 열기가 robots 정책으로 막혔지만 검색 가능한 공식 본문은 AI/ML 기반 애플리케이션 관련 제한을 포함한다. 앱에서 TMDB 메타데이터와 선택형 AI 번역을 함께 제공하는 것이 허용되는지는 미확인이다.
 - Re:Anime 홈페이지의 현재 소개는 스트리밍 서비스임을 보여 주지만 앱 연동·자동 조회·캐시·재배포 허가를 증명하지 않는다. `docs/RIGHTS_REVIEW.md`에 공식 링크와 확인 한계를 기록했다. API 호출·실제 영상/자막 요청·파일 다운로드·권리자 연락은 하지 않았고, 비공개 저장소·미배포 및 설치 파일 권리 게이트를 유지한다.
+
+## 2026-10-10 창 종료 시 이어보기 위치 저장
+
+- `src/app.js`의 재생 기록 저장 직전에 현재 영상 시각으로 진행률을 다시 계산하고, Electron 창 종료(`beforeunload`)와 문서 이탈(`pagehide`) 때 현재 회차 기록을 즉시 저장한다. 재생 중이 아닌 페이지 종료에서는 오래된 메모리 기록을 덮어쓰지 않는다.
+- `tests/integrated-search.electron.cjs`가 패키지 앱의 실제 격리 `BrowserWindow`를 닫고 같은 임시 프로필로 다시 열어 복구를 확인한다. 영상 위치 6.25/12초와 메모리·디스크의 오래된 96% 기록을 준비한 뒤, 종료 후 52%가 저장되는 것을 검증했다.
+- `npm run pack`, `npm run test:phase1-electron`, `npm test` 243/243, `npm run test:phase1-exe`, `npm run test:phase1-source-restart`, `node --check src/app.js`, `node --check tests/integrated-search.electron.cjs`, `git diff --check` 통과. 통합 스모크는 검색 IPC 25회·회차 resolve 3회, renderer 오류 0회, 차단된 외부 요청 0회였다. Windows 실행 파일 시작 확인과 별도 Electron 프로세스 재시작 후 공급원·작품별 자막 선택·50% 이어보기·한국어 cue 복구도 통과했다.
+- 빌드는 로컬 unpacked 앱으로만 만들었고 설치 파일을 실행하지 않았다. 합성 MP4/VTT와 임시 프로필만 사용했으며, 실제 공급원 재생·자막 일치와 기존 사용자 프로필은 미검증이다. 최신 원본은 `upstream/main` v0.5.10 (`f38763949d9e8b3be2284bf97207a960bd642443`)으로 확인했다.

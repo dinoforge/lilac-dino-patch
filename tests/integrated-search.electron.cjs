@@ -167,23 +167,27 @@ app.whenReady().then(async () => {
 
   for (const channel of channels) ipcMain.handle(channel, (_event, ...args) => fixture(channel, args));
 
-  win = new BrowserWindow({
-    show: false,
-    width: 1200,
-    height: 900,
-    webPreferences: {
-      preload: preloadPath,
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-      backgroundThrottling: false
-    }
-  });
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  win.webContents.on('console-message', (_event, details) => {
-    if (details.level >= 3) rendererErrors.push(`${details.message} (${details.sourceId}:${details.lineNumber})`);
-  });
-  win.webContents.on('render-process-gone', (_event, details) => fail(new Error(`Renderer exited: ${details.reason}`)));
+  const createWindow = () => {
+    const window = new BrowserWindow({
+      show: false,
+      width: 1200,
+      height: 900,
+      webPreferences: {
+        preload: preloadPath,
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        backgroundThrottling: false
+      }
+    });
+    window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    window.webContents.on('console-message', (_event, details) => {
+      if (details.level >= 3) rendererErrors.push(`${details.message} (${details.sourceId}:${details.lineNumber})`);
+    });
+    window.webContents.on('render-process-gone', (_event, details) => fail(new Error(`Renderer exited: ${details.reason}`)));
+    return window;
+  };
+  win = createWindow();
   await win.loadFile(htmlPath);
 
   await waitFor('initial app render', () => win.webContents.executeJavaScript('Boolean(window.lilac && document.querySelector("#searchButton"))'));
@@ -389,12 +393,20 @@ app.whenReady().then(async () => {
   assert.ok(ipcCalls.some(call => call.channel === 'provider:detail' && call.args[0]?.provider === 'reanime'));
   assert.ok(ipcCalls.some(call => call.channel === 'provider:detail' && call.args[0]?.provider === 'miruro'));
 
-  await win.webContents.executeJavaScript(`(() => {
+  await win.webContents.executeJavaScript(`(async () => {
+    const video = document.querySelector('#video');
+    const seeked = new Promise(resolve => video.addEventListener('seeked', resolve, { once: true }));
+    video.currentTime = 11.5;
+    await Promise.race([seeked, new Promise(resolve => setTimeout(resolve, 1000))]);
+    video.pause();
     const history = JSON.parse(localStorage.getItem('history') || '[]');
     const episode = history.find(entry => entry.episode?.provider === 'reanime' && Number(entry.episode?.number) === 1);
     if (!episode) throw new Error('The saved Re:Anime episode is missing before the detail resume check');
     episode.progress = 96;
     localStorage.setItem('history', JSON.stringify(history));
+    const inMemoryEpisode = state.history.find(entry => entry.episode?.provider === 'reanime' && Number(entry.episode?.number) === 1);
+    if (!inMemoryEpisode) throw new Error('The in-memory Re:Anime episode is missing before the detail resume check');
+    inMemoryEpisode.progress = 96;
   })()`);
   const detailReloaded = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
   win.webContents.reload();
@@ -453,13 +465,46 @@ app.whenReady().then(async () => {
   assert.doesNotMatch(copiedDiagnostics, /PRIVATE_DIAGNOSTIC_DETAIL_SHOULD_NOT_COPY|private\.example\.test|secret\.m3u8|synthetic-secret/i,
     'arbitrary error text and full media URLs are excluded from the copied report');
 
+  const closeTime = await win.webContents.executeJavaScript(`(async () => {
+    const video = document.querySelector('#video');
+    const seeked = new Promise(resolve => video.addEventListener('seeked', resolve, { once: true }));
+    video.currentTime = 6.25;
+    await Promise.race([seeked, new Promise(resolve => setTimeout(resolve, 1000))]);
+    const history = JSON.parse(localStorage.getItem('history') || '[]');
+    const episode = history.find(entry => entry.episode?.provider === 'reanime' && Number(entry.episode?.number) === 1);
+    if (!episode) throw new Error('The current Re:Anime episode is missing before the window-close check');
+    episode.progress = 96;
+    localStorage.setItem('history', JSON.stringify(history));
+    const inMemoryEpisode = state.history.find(entry => entry.episode?.provider === 'reanime' && Number(entry.episode?.number) === 1);
+    if (!inMemoryEpisode) throw new Error('The in-memory Re:Anime episode is missing before the window-close check');
+    inMemoryEpisode.progress = 96;
+    return { currentTime: video.currentTime, duration: video.duration };
+  })()`);
+  assert.equal(closeTime.currentTime, 6.25);
+  assert.equal(closeTime.duration, 12);
+  const windowClosed = new Promise(resolve => win.once('closed', resolve));
+  win.close();
+  await windowClosed;
+  win = createWindow();
+  await win.loadFile(htmlPath);
+  await waitFor('application reload after window close', () => win.webContents.executeJavaScript(
+    'Boolean(window.lilac && document.querySelector("#searchButton"))'
+  ));
+  const closeResumedProgress = await win.webContents.executeJavaScript(`(() => {
+    const history = JSON.parse(localStorage.getItem('history') || '[]');
+    return history.find(entry => entry.episode?.provider === 'reanime' && Number(entry.episode?.number) === 1)?.progress ?? null;
+  })()`);
+  assert.equal(closeResumedProgress, 52,
+    'closing the Electron window flushes the live position instead of retaining the older saved value');
+
   assert.deepEqual(blockedRequests, [], `unexpected external request attempts were blocked: ${blockedRequests.join(', ')}`);
   assert.deepEqual(rendererErrors, [], `renderer console errors: ${rendererErrors.join('; ')}`);
   const searchCalls = ipcCalls.filter(call => ['provider:catalog', 'catalog:search-korean', 'linkkf:search'].includes(call.channel));
   assert.ok(searchCalls.length >= 8, `synthetic provider search calls recorded (${searchCalls.length})`);
-  console.log(`Packaged Phase 1 smoke passed: expired proxy history preservation, integrated search, source picker, local episode playback, active Korean VTT, saved progress and continue-watch resume, 96% detail start-over/continue choice, and user-invoked privacy-filtered diagnostics copy.`);
+  console.log(`Packaged Phase 1 smoke passed: expired proxy history preservation, integrated search, source picker, local episode playback, active Korean VTT, saved progress and continue-watch resume, 96% detail start-over/continue choice, live progress flush on Electron window close, and user-invoked privacy-filtered diagnostics copy.`);
   console.log(`Synthetic search IPC calls: ${searchCalls.length}; provider resolve calls: ${ipcCalls.filter(call => call.channel === 'provider:resolve').length}; saved progress: ${savedProgress.progress}%; resumed at: ${resumedPlayback.currentTime.toFixed(2)}s.`);
   console.log(`Detail alternate resume position: ${detailResumedPlayback.currentTime.toFixed(2)}s / ${detailResumedPlayback.duration.toFixed(2)}s.`);
+  console.log(`Window-close resume position: ${closeResumedProgress}% (current playback was ${closeTime.currentTime.toFixed(2)}s / ${closeTime.duration.toFixed(2)}s).`);
   console.log(`Renderer errors: ${rendererErrors.length}; blocked external request attempts: ${blockedRequests.length}; userData and synthetic media: isolated temp folder.`);
   win.destroy();
   app.quit();
