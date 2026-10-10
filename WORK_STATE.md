@@ -508,5 +508,5 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 ## 2026-10-10 패키지 오류 진단 복사 IPC 검증
 
 - `tests/phase1-main.electron.cjs`의 격리 Electron 프로세스에서 `clipboard.writeText`만 테스트 수신기로 대체했다. 실제 시스템 클립보드에 쓰지 않고 빌드된 `app.asar`의 main·preload·renderer 연결을 유지했다.
-- 패키지 renderer에서 실제 앱 정보 IPC를 호출하고 7개 합성 오류로 만든 진단 보고서를 실제 `window.lilac.copyText`→`clipboard:copy-text` main IPC에 전달했다. 허용된 최근 5건만 남고 작품명·전체 URL·토큰·쿠키는 제외됐으며 테스트 수신기는 보고서만 받았다. 빈 문자열과 2MB 초과 입력은 거부되고 수신기에 기록되지 않았다.
+- 패키지 renderer에서 실제 앱 정보 IPC를 호출하고 7개 합성 오류로 만든 진단 보고서를 실제 `window.lilac.copyText`→`clipboard:copy-text` main IPC에 전달했다. 허용된 최근 5건만 남고 작품명·전체 URL·토큰·쿠키는 제외됐으며 테스트 수신기는 보고서만 받았다. 이어 실제 `오류 정보 복사` 버튼을 눌러 같은 IPC와 `오류 정보가 복사됐어요` 성공 안내를 확인했다. 빈 문자열과 2MB 초과 입력은 거부되고 수신기에 기록되지 않았다.
 - `npm run test:phase1-main`과 `npm run test:phase1-source-restart` 통과. main 스모크는 합성 HTTP fixture 89회, 등록되지 않은 fetch·차단된 브라우저 요청·외부 네트워크 호출 0회였다. `node --check tests/phase1-main.electron.cjs` 및 `git diff --check` 통과. 시스템 클립보드와 설치 NSIS UI는 검증하지 않았다.

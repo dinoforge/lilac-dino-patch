@@ -730,6 +730,17 @@ app.whenReady().then(async () => {
     );
     assert.match(largeCopyError, /너무 큽니다/);
     assert.deepEqual(clipboardWrites, [diagnosticReport], 'invalid clipboard inputs never reach the clipboard sink');
+    const uiCopyStart = clipboardWrites.length;
+    assert.equal(await win.webContents.executeJavaScript("Boolean(document.querySelector('#copyPlayerDiagnostics'))"), true);
+    await win.webContents.executeJavaScript("document.querySelector('#copyPlayerDiagnostics').click()");
+    const uiDiagnosticReport = await waitFor('diagnostics button reaches packaged clipboard IPC', () =>
+      clipboardWrites.length > uiCopyStart ? clipboardWrites[uiCopyStart] : null);
+    assert.match(uiDiagnosticReport, /LilacAnime 재생 진단 정보/);
+    assert.ok(uiDiagnosticReport.includes(`앱 버전: ${actualAppInfo.version}`));
+    assert.doesNotMatch(uiDiagnosticReport, /private title|secret\.example|token=abc|cookie/i);
+    const diagnosticStatus = await waitFor('diagnostics UI shows successful copy status', () =>
+      win.webContents.executeJavaScript("document.querySelector('#playerDiagnosticStatus')?.textContent || ''"));
+    assert.match(diagnosticStatus, /복사됐어요/);
 
     const quarterResult = await win.webContents.executeJavaScript(
       "window.lilac.providerQuarter('reanime', 2026, 4)"
