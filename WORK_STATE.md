@@ -518,4 +518,7 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - `tests/player-interactions.test.cjs`에서 실제 미니플레이어 버튼 바인딩을 통해 디코드 전 안내, 영상 프레임·한국어 VTT cue 합성, PIP 재생/일시정지 동기화, 닫기, 요청 실패와 API 미지원 경로를 확인했다. 종료 경로는 숨은 영상 정지·캡처 트랙 해제·타이머 정리를 검증한다.
 - 전체 `npm test` 228/228 및 상호작용 파일 37/37 통과. `npm run dist`로 Windows NSIS를 재빌드하고 새 패키지에서 `npm run test:phase1-electron`과 `npm run test:phase1-main`이 통과했다. main 스모크는 합성 HTTP fixture 89회, 미등록 fetch·차단 브라우저 요청·외부 네트워크 호출 0회다.
 - `npm run test:phase1-pip-native`는 격리 Electron 38.8.6 Windows 창에서 640×360 캔버스 영상을 CDP 사용자 클릭으로 네이티브 PIP에 진입·종료했다. 닫기 이벤트 뒤 트랙 종료·숨은 영상 정지·스트림 해제를 확인했고 외부 HTTP(S) 요청은 0회였다. 실행기는 Electron이 종료된 뒤에만 자체 임시 프로필을 지우도록 해 Windows 잠금 파일이 남지 않게 한다.
-- 앱 전용 PIP 통합은 상호작용 테스트에서 모의 API로 검증했으며, 네이티브 런타임 스모크는 별도의 합성 테스트 화면이다. 설치 NSIS 앱과 실제 사용자 프로필은 실행하지 않았다. 빌드 파일은 로컬 테스트 산출물이며 설치·배포하지 않았다.
+- `npm run test:phase1-pip-app`는 빌드된 앱 `app.asar`의 실제 미니플레이어 버튼을 CDP 사용자 클릭으로 실행했다. 합성 HLS와 한국어 VTT가 재생되는 동안 320×180 캡처 스트림의 네이티브 PIP 진입·닫기를 확인하고 버튼 초기화·숨은 영상 정지·`srcObject` 해제·모든 트랙 종료를 검증했다. 합성 HTTP fixture 89회, 미등록 fetch·차단된 브라우저 요청·외부 네트워크 호출 0회였다.
+- `tests/run-phase1-main.cjs`가 임시 프로필을 만들고 Electron 하위 프로세스가 완전히 닫힌 뒤 전용 폴더만 지우도록 바꿨다. 기존 `lilac-phase1-main-*` 임시 디렉터리 52개는 내용과 경로를 확인하고 정리했으며, 일반 main 스모크와 앱 PIP 스모크 뒤에도 폴더가 남지 않음을 확인했다.
+- 전체 `npm test`, `npm run test:phase1-main`, `npm run test:phase1-pip-app`, `npm run test:phase1-source-restart`가 통과했다. 재시작 테스트에서 공급원/회차별 자막 선택·기본값 초기화·50% 이어보기와 한국어 cue 복원을 다시 확인했다.
+- 설치 NSIS 앱과 실제 사용자 프로필은 실행하지 않았다. 빌드 파일은 로컬 테스트 산출물이며 설치·배포하지 않았다.

@@ -21,10 +21,22 @@ const zlib = require('node:zlib');
 const repo = path.resolve(__dirname, '..');
 const restartMode = process.env.LILAC_PHASE1_RESTART_MODE || '';
 const sharedTempRoot = process.env.LILAC_PHASE1_SHARED_ROOT ? path.resolve(process.env.LILAC_PHASE1_SHARED_ROOT) : '';
+const parentTempRoot = process.env.LILAC_PHASE1_TEMP_ROOT ? path.resolve(process.env.LILAC_PHASE1_TEMP_ROOT) : '';
 if (restartMode && !['seed', 'verify'].includes(restartMode)) throw new Error(`Unknown source restart mode: ${restartMode}`);
 if (Boolean(restartMode) !== Boolean(sharedTempRoot)) throw new Error('Source restart mode requires a shared temporary profile root.');
+if (restartMode && parentTempRoot) throw new Error('Source restart mode cannot use the standalone Phase 1 temporary profile root.');
 if (sharedTempRoot && !path.basename(sharedTempRoot).startsWith('lilac-source-restart-')) {
   throw new Error(`Refusing an unexpected shared profile path: ${sharedTempRoot}`);
+}
+if (parentTempRoot) {
+  const tempParent = path.resolve(os.tmpdir());
+  if (path.dirname(parentTempRoot) !== tempParent || !path.basename(parentTempRoot).startsWith('lilac-phase1-main-')) {
+    throw new Error(`Refusing an unexpected Phase 1 profile path: ${parentTempRoot}`);
+  }
+  const tempStat = fs.lstatSync(parentTempRoot);
+  if (!tempStat.isDirectory() || tempStat.isSymbolicLink()) {
+    throw new Error(`Refusing a non-directory or linked Phase 1 profile path: ${parentTempRoot}`);
+  }
 }
 const appAsar = path.join(repo, 'dist', 'win-unpacked', 'resources', 'app.asar');
 assert.ok(fs.existsSync(appAsar), `packaged app.asar exists: ${appAsar}`);
@@ -47,7 +59,7 @@ for (const file of ['src/app.js', 'src/player.js']) {
   );
 }
 
-const tempRoot = sharedTempRoot || fs.mkdtempSync(path.join(os.tmpdir(), 'lilac-phase1-main-'));
+const tempRoot = sharedTempRoot || parentTempRoot || fs.mkdtempSync(path.join(os.tmpdir(), 'lilac-phase1-main-'));
 const userData = path.join(tempRoot, 'profile');
 const sessionData = path.join(tempRoot, 'session');
 fs.mkdirSync(userData, { recursive: true });
@@ -70,6 +82,8 @@ app.setPath('sessionData', sessionData);
 app.commandLine.appendSwitch('disable-background-networking');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.disableHardwareAcceleration();
+const nativeAppPipMode = process.env.LILAC_PHASE1_NATIVE_PIP === '1';
+const originalBrowserWindowShow = BrowserWindow.prototype.show;
 BrowserWindow.prototype.show = function hideSmokeWindow() {};
 
 const fetchAttempts = [];
@@ -398,6 +412,70 @@ function waitFor(label, predicate, timeoutMs = 8000) {
     };
     poll();
   });
+}
+
+async function dispatchTrustedClick(win, selector) {
+  const point = await win.webContents.executeJavaScript(`(() => {
+    const rect = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect();
+    return rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null;
+  })()`);
+  assert.ok(point, `control exists for native click: ${selector}`);
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+    type: 'mouseMoved', x: point.x, y: point.y, button: 'none'
+  });
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+    type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1
+  });
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1
+  });
+}
+
+async function runNativeAppPipProbe(win) {
+  originalBrowserWindowShow.call(win);
+  win.focus();
+  await win.webContents.executeJavaScript('showPlayerControls()');
+  await waitFor('visible packaged PIP button', () => win.webContents.executeJavaScript(`(() => {
+    const player = document.querySelector('#immersivePlayer');
+    const button = document.querySelector('#miniPlayer');
+    const rect = button?.getBoundingClientRect();
+    return player?.classList.contains('controls-visible') && rect?.width > 0 && rect?.height > 0;
+  })()`));
+  await win.webContents.debugger.attach('1.3');
+  await dispatchTrustedClick(win, '#miniPlayer');
+
+  const entered = await waitFor('the packaged player enters native PIP', () => win.webContents.executeJavaScript(`(() => {
+    const video = document.pictureInPictureElement;
+    const button = document.querySelector('#miniPlayer');
+    if (!video || !button?.classList.contains('active')) return null;
+    window.__phase1NativePipTracks = video.srcObject?.getTracks() || [];
+    return { source: video.classList.contains('pip-source'), width: video.videoWidth,
+      height: video.videoHeight, tracks: window.__phase1NativePipTracks.length };
+  })()`), 10000);
+  assert.equal(entered.source, true, JSON.stringify(entered));
+  assert.equal(entered.width, 320, JSON.stringify(entered));
+  assert.equal(entered.height, 180, JSON.stringify(entered));
+  assert.ok(entered.tracks > 0, JSON.stringify(entered));
+
+  await win.webContents.executeJavaScript('showPlayerControls()');
+  await dispatchTrustedClick(win, '#miniPlayer');
+  const closed = await waitFor('the packaged player releases native PIP resources', () => win.webContents.executeJavaScript(`(() => {
+    const video = document.querySelector('video.pip-source');
+    const tracks = window.__phase1NativePipTracks || [];
+    const clean = !document.pictureInPictureElement
+      && !document.querySelector('#miniPlayer')?.classList.contains('active')
+      && video?.paused && video.srcObject === null && tracks.length > 0
+      && tracks.every(track => track.readyState === 'ended');
+    return clean ? { closed: true, paused: video.paused, sourceReleased: video.srcObject === null,
+      tracksEnded: tracks.every(track => track.readyState === 'ended') } : null;
+  })()`), 10000);
+  assert.equal(closed.closed, true, JSON.stringify(closed));
+  assert.equal(closed.paused, true, JSON.stringify(closed));
+  assert.equal(closed.sourceReleased, true, JSON.stringify(closed));
+  assert.equal(closed.tracksEnded, true, JSON.stringify(closed));
+  win.webContents.debugger.detach();
+  win.hide();
+  console.log('Native PIP app integration passed: packaged player button entered and exited PIP with Korean HLS playback paused; capture track ended and stream released.');
 }
 
 function requestLoopback(urlText) {
@@ -1140,6 +1218,7 @@ app.whenReady().then(async () => {
     assert.ok(playbackState.currentTime >= 1 && playbackState.currentTime < 3, JSON.stringify(playbackState));
     assert.equal(playbackState.subtitleMode, 'showing');
     assert.match(playbackState.activeCueText, /합성 한국어 자막/);
+    if (nativeAppPipMode) await runNativeAppPipProbe(win);
 
     await new Promise(resolve => setTimeout(resolve, 5200));
     const progressCardText = await win.webContents.executeJavaScript(`(() => {
@@ -1328,5 +1407,5 @@ app.whenReady().then(async () => {
 
 process.on('exit', () => {
   try { if (localPlayerServer.listening) localPlayerServer.close(); } catch {}
-  if (!sharedTempRoot) try { fs.rmSync(tempRoot, { recursive: true, force: true }); } catch {}
+  if (!sharedTempRoot && !parentTempRoot) try { fs.rmSync(tempRoot, { recursive: true, force: true }); } catch {}
 });
