@@ -116,6 +116,7 @@ body.player-mode .update-banner { display: none; }
 .saved-subtitle .track-option span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .saved-remove { flex: 0 0 34px; border: 1px solid #ffffff1f; border-radius: 10px; background: transparent; color: #ffffffb3; font-size: 16px; cursor: pointer; }
 .saved-remove:hover { color: #e07a86; border-color: #e07a86; }
+.saved-remove:disabled { opacity: .45; cursor: not-allowed; }
 .immersive-player canvas.JASSUB { z-index: 0; }
 .saved-subtitle .track-option span { flex: 1; min-width: 0; }
 .saved-subtitle .track-option small { flex: 0 0 auto; white-space: nowrap; }

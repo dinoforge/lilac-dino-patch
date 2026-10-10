@@ -255,6 +255,7 @@ async function switchSubtitleSource(source, selectionRequestId, requestId) {
   syncPlayerSettingsUI();
   const key = subtitleStoreKey(), saved = key ? await window.lilac.savedSubtitles(key).catch(() => []) : [];
   if (!isCurrentSelection()) return;
+  currentPlaybackContext.savedSubtitleEntries = saved; if (typeof renderSavedSubtitleList === 'function') renderSavedSubtitleList(saved);
   // Re:Anime / Miruro: the site's Korean track; without one the episode's machine translation, the one already made
   // (from whichever source) or one made now from the best source as the automatic translation picks it (Jimaku, then
   // the site's Japanese and English tracks); with 자막 자동 번역 off or not set up, the track that would be translated.

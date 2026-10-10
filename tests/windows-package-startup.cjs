@@ -278,9 +278,39 @@ async function main() {
     assert.equal(episodeEnd.automaticPlayCalls, 0, JSON.stringify(episodeEnd));
     assert.equal(episodeEnd.completedProgress, 100, JSON.stringify(episodeEnd));
 
+    const userSubtitlePath = path.join(tempFilesRoot, 'user-picked-subtitle.srt');
+    fs.writeFileSync(userSubtitlePath, '1\n00:00:00,000 --> 00:00:01,000\n임시 사용자 자막\n');
+    const savedSubtitleRemoval = await evaluate(cdp, `(async () => {
+      const previousEpisode = currentPlaybackContext.episode, previousEntries = currentPlaybackContext.savedSubtitleEntries;
+      const episode = { provider: 'reanime', id: 'phase1-subtitle-removal', url: 'fixture:subtitle-removal' };
+      currentPlaybackContext.episode = episode;
+      const key = subtitleStoreKey();
+      try {
+        const saved = await window.lilac.saveSubtitle(key, { source: 'user', label: '임시 사용자 자막', path: ${JSON.stringify(userSubtitlePath)} });
+        if (!saved?.id) throw new Error('The real subtitle-store save IPC did not return a saved entry.');
+        currentPlaybackContext.savedSubtitleEntries = await window.lilac.savedSubtitles(key);
+        renderSavedSubtitleList();
+        const row = document.querySelector('#savedSubtitleList .saved-subtitle');
+        const remove = row?.querySelector('.saved-remove');
+        if (!remove || remove.disabled) throw new Error('The saved subtitle row did not render an enabled remove button.');
+        const oldConfirm = window.confirm;
+        window.confirm = () => true;
+        try { await remove.onclick(); } finally { window.confirm = oldConfirm; }
+        const remaining = await window.lilac.savedSubtitles(key);
+        return { key, savedId: saved.id, remaining: remaining.length, renderedRows: document.querySelectorAll('#savedSubtitleList .saved-subtitle').length };
+      } finally {
+        currentPlaybackContext.episode = previousEpisode;
+        currentPlaybackContext.savedSubtitleEntries = previousEntries;
+        renderSavedSubtitleList();
+      }
+    })()`);
+    assert.equal(savedSubtitleRemoval.remaining, 0, JSON.stringify(savedSubtitleRemoval));
+    assert.equal(savedSubtitleRemoval.renderedRows, 0, JSON.stringify(savedSubtitleRemoval));
+    assert.ok(fs.existsSync(userSubtitlePath), 'Removing a saved user-picked subtitle preserves its file outside the managed subtitles folder.');
+
     const blockedExternalRequests = (output.match(/\[NSIS_SMOKE_BLOCKED_(?:FETCH|NET_FETCH)\]/g) || []).length;
     if (process.env.LILAC_TEMP_NSIS_SMOKE === '1') assert.ok(blockedExternalRequests > 0, 'The temporary smoke build denied external main-process requests.');
-    console.log(`Packaged Windows exe startup passed: ${path.basename(exe)} loaded app.asar, home/search UI, preload bridge and app-info IPC (${appInfo.version}, ${appInfo.platform}/${appInfo.arch}); resume boundary, 100 percent completion save and manual next-episode behavior passed; external main-process requests denied: ${blockedExternalRequests}; isolated profile: ${tempRoot}.`);
+    console.log(`Packaged Windows exe startup passed: ${path.basename(exe)} loaded app.asar, home/search UI, preload bridge and app-info IPC (${appInfo.version}, ${appInfo.platform}/${appInfo.arch}); resume boundary, 100 percent completion save, manual next-episode behavior and saved-subtitle renderer → preload → main removal passed; user-picked file preserved: ${fs.existsSync(userSubtitlePath)}; external main-process requests denied: ${blockedExternalRequests}; isolated profile: ${tempRoot}.`);
   } finally {
     if (cdp) {
       try { await cdp.send('Browser.close'); } catch {}

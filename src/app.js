@@ -772,7 +772,20 @@ function renderSeriesSubtitlePreference(){const status=$('#seriesSubtitleSourceS
 const engineSide=result=>result.engine==='로컬 AI'?'local':'cloud';
 // Android SubtitleStore parity: subtitles are remembered per episode and source.
 function subtitleStoreKey(){const episode=currentPlaybackContext.episode;return episode?episodeRef(episode):''}
-async function rememberSubtitle(subtitle){const key=subtitleStoreKey();if(!key)return;try{await window.lilac.saveSubtitle(key,{source:subtitle.source,label:subtitle.label,path:subtitle.path,assPath:subtitle.assPath||null,fonts:subtitle.fonts||[],from:subtitle.from||null,fromName:subtitle.fromName||''})}catch{}renderSubtitleSheet()}
+async function rememberSubtitle(subtitle){const key=subtitleStoreKey();if(!key)return;try{await window.lilac.saveSubtitle(key,{source:subtitle.source,label:subtitle.label,path:subtitle.path,assPath:subtitle.assPath||null,fonts:subtitle.fonts||[],from:subtitle.from||null,fromName:subtitle.fromName||''});const saved=await window.lilac.savedSubtitles(key).catch(()=>null);if(saved&&key===subtitleStoreKey())currentPlaybackContext.savedSubtitleEntries=saved}catch{}renderSubtitleSheet()}
+const SAVED_SUBTITLE_SOURCE_NAMES={linkkf:'Linkkf',reanime:'Re:Anime',kairan:'Kairan',csora:'Csora',anissia:'Anissia',jimaku:'Jimaku',user:'내 PC 자막',provider:'사이트 자막',download:'다운로드 자막',gemini:'AI 번역',chatgpt:'ChatGPT 번역'};
+function renderSavedSubtitleList(entries=currentPlaybackContext.savedSubtitleEntries){
+  const box=$('#savedSubtitleBox'),list=$('#savedSubtitleList'),rows=Array.isArray(entries)?entries:[];box.classList.toggle('hidden',!rows.length);$('#savedSubtitleCount').textContent=rows.length?`${rows.length}개`:'';
+  list.replaceChildren(...rows.map(entry=>{const row=document.createElement('div');row.className='saved-subtitle';const summary=document.createElement('div');summary.className='track-option';const details=document.createElement('span'),label=document.createElement('b'),source=document.createElement('em'),status=document.createElement('small');label.textContent=String(entry.label||'저장된 자막');source.textContent=SAVED_SUBTITLE_SOURCE_NAMES[entry.source]||'자막';details.append(label,source);summary.append(details);const active=Boolean(currentSubtitle?.path&&entry.path===currentSubtitle.path);status.textContent=active?'적용 중':'';summary.append(status);const remove=document.createElement('button');remove.type='button';remove.className='saved-remove';remove.textContent='×';remove.setAttribute('aria-label',`${label.textContent} 목록에서 제거`);remove.title=active?'현재 적용 중인 자막은 다른 자막을 고른 뒤 지울 수 있어요.':'저장된 자막을 이 회차 목록에서 제거합니다.';remove.disabled=active;remove.onclick=()=>removeSavedSubtitleEntry(subtitleStoreKey(),entry,remove);row.append(summary,remove);return row}));
+}
+async function removeSavedSubtitleEntry(key,entry,button){
+  if(!key||!entry?.id)return;if(currentSubtitle?.path&&entry.path===currentSubtitle.path){toast('현재 적용 중인 자막은 다른 자막을 고른 뒤 지울 수 있어요.');return}
+  if(!confirm('이 회차에서 저장된 자막을 지울까요? 앱이 받은 파일은 다른 회차에서 쓰지 않을 때 함께 삭제되고, 내 PC에서 고른 파일은 원래 위치에 남습니다.'))return;
+  const requestId=playbackRequestId;button.disabled=true;
+  try{const removed=await window.lilac.removeSavedSubtitle(key,entry.id);if(!removed){toast('저장된 자막 항목을 찾지 못했습니다. 목록을 새로 불러옵니다.');const saved=await window.lilac.savedSubtitles(key).catch(()=>[]);if(key===subtitleStoreKey()&&requestId===playbackRequestId){currentPlaybackContext.savedSubtitleEntries=saved;renderSavedSubtitleList(saved)}return}
+    if(key===subtitleStoreKey()&&requestId===playbackRequestId){const saved=(currentPlaybackContext.savedSubtitleEntries||[]).filter(item=>item.id!==entry.id);currentPlaybackContext.savedSubtitleEntries=saved;renderSavedSubtitleList(saved)}toast('저장된 자막을 이 회차 목록에서 제거했습니다.');
+  }catch(error){toast(`저장 자막을 지우지 못했습니다: ${String(error?.message||error)}`)}finally{if(button.isConnected)button.disabled=Boolean(currentSubtitle?.path&&entry.path===currentSubtitle.path)}
+}
 // A saved Re:Anime / Miruro track is matched to its track by name ("Re:Anime English (Dialogue) 자막"), so the list marks it and 번역 knows it.
 function applySavedSubtitle(entry){if(entry.source==='jimaku')return applySavedJimaku(entry);if(entry.source==='reanime'){const track=(currentPlaybackContext.subtitleTracks||[]).find(item=>entry.label===`${trackSourceLabel()} ${item.label} 자막`);if(track)currentPlaybackContext.selectedSubtitleTrack=track.url}currentSubtitlePath=entry.path;attachSubtitle(entry.url,entry.label,{path:entry.path,assUrl:entry.assUrl,assPath:entry.assPath,fonts:entry.fonts,source:entry.source,from:entry.from||null,fromName:entry.fromName||'',saved:true})}
 // The subtitle sheet: the chip of the source on screen is lit (a machine translation lights AI 번역), the list of the
@@ -797,6 +810,7 @@ function labelTranslateButtons(){
 function renderSubtitleSheet(){
   $$('#psSubtitleSources button').forEach(button=>button.classList.toggle('selected',button.dataset.source===activeSubtitleSource()));
   renderSeriesSubtitlePreference();
+  renderSavedSubtitleList();
   renderSubtitleSourceAvailability();
   $('#subtitleTranslateRow').classList.toggle('hidden',!translatableSubtitle()&&!retranslatable()&&!['#translateNow','#translateNowLocal'].some(id=>$(id).dataset.run));labelTranslateButtons();
   renderManualChatgptPanel();
@@ -851,7 +865,7 @@ async function offerKoreanSubtitle(title,episode,requestId,selectionRequestId,cu
 async function ensureSubtitle(stream,title,episode,{skipSaved=false}={}){
   const requestId=playbackRequestId,selectionRequestId=subtitleSelectionRequestId,isCurrentSelection=()=>requestId===playbackRequestId&&selectionRequestId===subtitleSelectionRequestId,preferred=preferredSubtitleSource(),key=subtitleStoreKey();
   $('#subtitleOffer').classList.add('hidden');
-  const saved=key&&!skipSaved?await window.lilac.savedSubtitles(key).catch(()=>[]):[];if(!isCurrentSelection())return false;for(const source of ONLINE_SUBTITLE_SOURCES)if(saved.some(entry=>entry.source===source))setSubtitleAvailability(source,'available',requestId);
+  const stored=key?await window.lilac.savedSubtitles(key).catch(()=>[]):[];if(!isCurrentSelection())return false;currentPlaybackContext.savedSubtitleEntries=stored;renderSavedSubtitleList(stored);const saved=skipSaved?[]:stored;for(const source of ONLINE_SUBTITLE_SOURCES)if(saved.some(entry=>entry.source===source))setSubtitleAvailability(source,'available',requestId);
   // 애니24: most videos have the Korean subtitle in the picture; a raw video with a player subtitle file applies that
   // file below as the site's own Korean subtitle.
   if(!skipSaved&&(stream?.burnedKorean||(currentPlaybackContext.episode?.provider==='ohli24'&&!stream?.subtitleUrl))){currentPlaybackContext.siteKorean=true;$('#subtitleState').textContent='영상에 한국어 자막이 들어 있어요.';return true}
@@ -929,6 +943,7 @@ async function translateAlongside(source,requestId){
     try{
       const result=await window.lilac.translateSubtitle({path:file.path,title:currentPlaybackContext.subtitleTitle||$('#skipTitle').value.trim(),id:run,provider,anime,anySide:true});
       await window.lilac.saveSubtitle(key,{source:'gemini',label:translatedLabel(result,name),path:result.path,behind:true,from:file.path,fromName:name});
+      if(key===subtitleStoreKey()){currentPlaybackContext.savedSubtitleEntries=await window.lilac.savedSubtitles(key).catch(()=>currentPlaybackContext.savedSubtitleEntries||[]);renderSavedSubtitleList()}
       if((result.engine==='로컬 AI'||translationSettings?.prepareNextCloud)&&requestId===playbackRequestId&&!currentPlaybackContext.siteKorean)prepareNextEpisode(engineSide(result));
       if(key===subtitleStoreKey()){renderSubtitleSheet();if(!alongsideNoted.has(seriesKey())){alongsideNoted.add(seriesKey());toast('번역본도 만들어 뒀어요. 한국어 자막이 맞지 않으면 플레이어 설정 > 자막 > 저장된 자막에서 골라 보세요.')}}
     }finally{translationEpisodes.delete(run)}
@@ -1170,6 +1185,9 @@ async function saveManualChatgptResult(state){
     const text=window.LilacManualSubtitle.renderWebVtt(state.parsed,state.translations);
     const result=await window.lilac.saveManualSubtitle({key:state.episodeKey,text,from:state.sourcePath,fromName:state.sourceLabel});
     if(manualChatgptTranslation!==state||!manualChatgptIsCurrent(state))return;
+    const saved=typeof window.lilac.savedSubtitles==='function'?await window.lilac.savedSubtitles(state.episodeKey).catch(()=>null):null;
+    if(manualChatgptTranslation!==state||!manualChatgptIsCurrent(state))return;
+    if(saved&&state.episodeKey===subtitleStoreKey())currentPlaybackContext.savedSubtitleEntries=saved;
     manualChatgptTranslation=null;manualChatgptPanelOpen=false;currentSubtitlePath=result.path;
     attachSubtitle(result.url,'ChatGPT 수동 번역',{path:result.path,source:'chatgpt',from:state.sourcePath,fromName:state.sourceLabel,saved:true});
     $('#subtitleState').textContent='ChatGPT 수동 번역을 적용했습니다.';

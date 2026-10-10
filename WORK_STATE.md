@@ -1,14 +1,22 @@
 # 작업 상태
 
-## 2026-10-10 최신 작업: 격리 NSIS 설치 앱 스모크
+## 2026-10-10 최신 작업: 회차별 저장 자막 목록·삭제 UI
+
+- 플레이어 자막 패널에 현재 회차의 저장 자막 목록, 출처와 적용 상태, 항목 제거 버튼을 연결했다. 적용 중인 자막은 다른 자막을 고를 때까지 제거 버튼을 잠그고, 제거 전에 확인을 받는다. 앱이 받은 파일은 다른 회차에서 참조하지 않을 때만 지우며, 사용자가 PC에서 고른 파일은 원래 위치에 둔다.
+- 전체 `npm test` 257/257, `npm run test:phase1-electron`, `npm run test:phase1-main`, `node --check`와 `git diff --check`가 통과했다. main 테스트는 합성 HTTP fixture 91회, 알 수 없는 fetch 0회, 브라우저 차단 0회, 외부 네트워크 0회였다.
+- 사용자 승인으로 임시 앱 ID `com.lilac.anime.desktop.smoke.dcf19f78`를 사용해 NSIS per-user 설치본을 빌드·설치하고 격리 프로필에서 실행했다. 실제 설치 앱의 renderer → preload → main 저장/목록/제거 IPC가 통과했고, 테스트용 PC 자막 파일은 보존됐다. main process 외부 요청 6건(Re:Anime 4, Jikan 2)은 차단됐다. 실제 사용자 파일·라이브 공급원·영상은 사용하지 않았다.
+- 임시 앱은 제거 종료 코드 0, 설치 폴더와 전용 HKCU 등록은 제거됐으며 기존 `LilacAnime 0.5.9` HKLM 설치가 남아 있음을 확인했다. 테스트 프로필도 실행기가 정리했다.
+- 임시 빌드 폴더 `C:\Users\공룡\AppData\Local\Temp\lilac-nsis-subtitle-safety-dcf19f78`는 남아 있다. 그 안의 `source\node_modules` junction은 프로젝트 `node_modules`를 가리키며, 이번 정리 요청은 정책에서 거부돼 제거되지 않았다. 프로젝트 종속성은 존재한다.
+
+## 2026-10-10 이전 작업: 격리 NSIS 설치 앱 스모크
 
 - 현재 `main`의 소스를 `%TEMP%` 임시 복사본에서 별도 앱 ID `com.lilac.anime.desktop.smoke.dcf19f78`와 per-user 설치 설정으로 빌드했다. 설치 파일은 124,546,766바이트이며 SHA-256은 `1B139BB5F196D1D960A216C2976E3C53AFC1E12002CFEEA8BD535EFA10B255B5`다. 작업 저장소의 소스·`dist` 산출물은 바꾸지 않았다.
 - 사용자 승인에 따라 임시 설치 경로와 격리 프로필에서 실행했다. 설치된 EXE에서 홈과 검색 입력·버튼, preload bridge, 앱 정보 IPC를 확인했다. renderer 함수 스모크에서 이어보기 경계(95%), 종료 시 진행률 100% 저장, 자동 다음 화 미실행도 통과했다.
 - 설치 패키지에만 네트워크 차단 하네스를 연결했다. main process의 외부 fetch 6건(Re:Anime 4건, Jikan 2건)을 차단했고 loopback DevTools로 화면을 확인했다. 실제 공급원 응답·영상·자막은 사용하지 않았다.
-- 임시 앱을 제거하고 전용 HKCU 등록과 프로필을 정리했다. 기존 `LilacAnime 0.5.9` HKLM 설치 등록은 남아 있다. 임시 빌드 폴더 `C:\Users\공룡\AppData\Local\Temp\lilac-nsis-subtitle-safety-dcf19f78`는 자동 검토 정책이 재귀 삭제를 거부해 남아 있다. 그 안의 프로젝트 `node_modules` junction은 따로 제거했고 원본 종속성이 유지됨을 확인했다.
+- 당시 임시 앱을 제거하고 전용 HKCU 등록과 프로필을 정리했다. 기존 `LilacAnime 0.5.9` HKLM 설치 등록은 남아 있다. 임시 빌드 폴더는 자동 검토 정책이 재귀 삭제를 거부해 남아 있으며, 이후 검증을 위해 `source\node_modules` junction을 다시 만들었다.
 - 삭제 기능 점검 중 renderer에는 저장 자막 삭제 UI 호출이 없고 `removeSavedSubtitle`은 preload/main 경계에만 노출된 것을 확인했다. 따라서 실제 앱의 삭제 화면은 아직 없으며, 저장소 안전성은 단위 테스트만 검증한다.
 
-## 2026-10-10 최신 작업: 자막 저장소 삭제 경로 경계 수정
+## 2026-10-10 이전 작업: 자막 저장소 삭제 경로 경계 수정
 
 - `SubtitleStore.remove()`가 저장 자막 파일의 소유권을 `startsWith(managedRoot)`로 판단해 `subtitles-backup` 형제 폴더나 관리 폴더 내부 junction 바깥의 파일까지 앱 소유로 오인할 수 있었다. 루트와 대상의 실제 경로를 구한 뒤 `path.relative()`로 하위 여부를 확인한다.
 - 회귀 테스트는 형제 폴더·junction 대상의 사용자 파일 보존, 다른 회차에서 참조 중인 관리 파일 보존, 마지막 참조 제거 뒤 관리 파일 삭제를 확인한다.
