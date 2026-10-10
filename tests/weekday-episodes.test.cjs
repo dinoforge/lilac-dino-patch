@@ -34,6 +34,26 @@ test('weekday schedule query accepts next episode beyond current uploads and cac
   assert.equal(requestBody.variables.until - requestBody.variables.after, 7 * 24 * 60 * 60);
 });
 
+test('quarter refresh bypasses cached AniList data and a late older request cannot overwrite it', async () => {
+  const now = 1_800_000_000_000, anime = { provider: 'reanime', anilistId: 303, subbed: 5 };
+  let calls = 0, releaseOld;
+  const oldResponse = new Promise(resolve => { releaseOld = resolve; });
+  const fetchImpl = async () => {
+    calls++;
+    if (calls === 1) return oldResponse;
+    return { ok: true, status: 200, json: async () => ({ data: { Page: { airingSchedules: [{ media: { id: 303 }, episode: 9, airingAt: now / 1000 + 900 }] } } }) };
+  };
+  const oldRequest = fetchWeekdayEpisodes('reanime', [anime], { fetchImpl, now, minIntervalMs: 0 });
+  const refreshed = await fetchWeekdayEpisodes('reanime', [anime], { fetchImpl, now: now + 1000, minIntervalMs: 0, refresh: true });
+  releaseOld({ ok: true, status: 200, json: async () => ({ data: { Page: { airingSchedules: [{ media: { id: 303 }, episode: 8, airingAt: now / 1000 + 800 }] } } }) });
+  await oldRequest;
+  const cached = await fetchWeekdayEpisodes('reanime', [anime], { fetchImpl, now: now + 2000, minIntervalMs: 0 });
+  assert.equal(calls, 2);
+  assert.equal(refreshed.data[0].episode, 9);
+  assert.equal(cached.fromCache, true);
+  assert.equal(cached.data[0].episode, 9);
+});
+
 test('concurrent weekday schedule requests for the same provider candidates share one query', async () => {
   const now = 1_800_000_000_000, anime = { provider: 'reanime', anilistId: 202, subbed: 4 };
   let calls = 0, release;

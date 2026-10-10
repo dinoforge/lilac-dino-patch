@@ -58,15 +58,16 @@ function cacheKey(provider, byId) {
   return `${provider}:${[...byId.keys()].sort((a, b) => a - b).join(',')}`;
 }
 
-async function fetchWeekdayEpisodes(provider, candidates, { fetchImpl = globalThis.fetch, now = Date.now, minIntervalMs } = {}) {
+async function fetchWeekdayEpisodes(provider, candidates, { fetchImpl = globalThis.fetch, now = Date.now, minIntervalMs, refresh = false } = {}) {
   if (!SUPPORTED_PROVIDERS.has(provider)) return { supported: false, data: [] };
   const currentTime = typeof now === 'function' ? now() : now;
   const byId = validCandidates(provider, candidates);
   if (!byId.size) return { supported: true, data: [] };
 
   const key = cacheKey(provider, byId), current = cache.get(key);
-  if (current && current.expiresAt > currentTime) return { supported: true, data: current.data, fromCache: true };
-  if (inFlight.has(key)) return inFlight.get(key);
+  if (current && current.expiresAt > currentTime && !refresh) return { supported: true, data: current.data, fromCache: true };
+  const requestKey = refresh ? `${key}:refresh` : key;
+  if (inFlight.has(requestKey)) return inFlight.get(requestKey);
   const retryAfterAt = Math.max(current?.retryAfterAt || 0, getAniListCooldownUntil(currentTime));
   if (retryAfterAt > currentTime) return rateLimitedResult(key, current, retryAfterAt);
 
@@ -89,18 +90,19 @@ async function fetchWeekdayEpisodes(provider, candidates, { fetchImpl = globalTh
     if (payload.errors?.length) throw new Error(String(payload.errors[0]?.message || 'AniList 조회 실패'));
 
     const data = mapWeekdayEpisodes(provider, byId, payload.data?.Page?.airingSchedules, nowSeconds, untilSeconds);
-    cache.set(key, { data, expiresAt: currentTime + CACHE_TTL });
+    const latest = cache.get(key);
+    if (!latest || Number(latest.fetchedAt) <= currentTime) cache.set(key, { data, fetchedAt: currentTime, expiresAt: currentTime + CACHE_TTL });
     while (cache.size > 8) cache.delete(cache.keys().next().value);
     return { supported: true, data, fromCache: false };
   })();
-  inFlight.set(key, pending);
+  inFlight.set(requestKey, pending);
   try { return await pending; }
-  finally { if (inFlight.get(key) === pending) inFlight.delete(key); }
+  finally { if (inFlight.get(requestKey) === pending) inFlight.delete(requestKey); }
 }
 
 function rateLimitedResult(key, current, retryAfterAt) {
   const data = current?.data || [];
-  cache.set(key, { data, expiresAt: current?.expiresAt || 0, retryAfterAt });
+  cache.set(key, { data, fetchedAt: current?.fetchedAt || 0, expiresAt: current?.expiresAt || 0, retryAfterAt });
   while (cache.size > 8) cache.delete(cache.keys().next().value);
   return { supported: true, data, fromCache: Boolean(current), rateLimited: true, retryAfterAt };
 }

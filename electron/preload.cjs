@@ -28,7 +28,7 @@ contextBridge.exposeInMainWorld('lilac', {
   providerQuarter: (provider, year, quarter) => ipcRenderer.invoke('provider:quarter', provider, year, quarter),
   providerAiring: provider => ipcRenderer.invoke('provider:airing', provider),
   providerLatestEpisodes: (provider, candidates) => ipcRenderer.invoke('provider:latest-episodes', provider, candidates),
-  providerWeekdayEpisodes: (provider, candidates) => ipcRenderer.invoke('provider:weekday-episodes', provider, candidates),
+  providerWeekdayEpisodes: (provider, candidates, refresh = false) => ipcRenderer.invoke('provider:weekday-episodes', provider, candidates, refresh === true),
   providerDetail: anime => ipcRenderer.invoke('provider:detail', anime),
   providerPlay: (episode, title) => ipcRenderer.invoke('provider:play', episode, title),
   providerResolve: episode => ipcRenderer.invoke('provider:resolve', episode),

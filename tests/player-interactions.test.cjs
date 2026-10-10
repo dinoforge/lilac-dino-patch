@@ -460,24 +460,53 @@ test('continue card progress markup closes its width attribute before the episod
   assert.equal(progress[1], '">');
 });
 
-function scheduleHarness(linkkfSchedule) {
+function scheduleHarness(linkkfSchedule, options = {}) {
   const buttons = Array.from({ length: 7 }, () => ({ classList: classList(), attrs: {}, setAttribute(name, value) { this.attrs[name] = value; } }));
   const rail = { classList: classList(), innerHTML: '', replaceChildren() { this.innerHTML = ''; } };
   const retry = { classList: classList('hidden'), onclick: null };
   const status = { textContent: '' }, storage = new Map();
+  const listeners = {}, ui = new Map([
+    ['#scheduleRail', rail], ['#scheduleRetry', retry], ['#scheduleStatus', status],
+    ['#airingSection', { classList: classList() }], ['#airingRail', { innerHTML: '' }],
+    ['#latestEpisodeSection', { classList: classList() }], ['#latestEpisodeTitle', { textContent: '' }],
+    ['#latestEpisodeStatus', { textContent: '' }], ['#latestEpisodeRetry', { classList: classList('hidden') }]
+  ]);
+  let nextCalendarChange = null;
+  const lilacQuarterSelection = { createCalendarWatcher: () => ({ check: () => { const change = nextCalendarChange; nextCalendarChange = null; return change; } }) };
+  const lilac = {
+    linkkfSchedule,
+    providerAiring: options.providerAiring || (async () => ({ data: [] })),
+    providerWeekdayEpisodes: options.providerWeekdayEpisodes || (async () => ({ supported: true, data: [] }))
+  };
   const context = vm.createContext({
-    state: { season: [{ id: 'latest' }] }, window: { lilac: { linkkfSchedule } },
+    state: { season: [{ id: 'latest' }], source: options.source, airing: options.airing || [], current: [] },
+    QUARTER_PROVIDERS: ['reanime', 'miruro', 'animenosub'],
+    window: { lilac, addEventListener(type, listener) { listeners[`window:${type}`] = listener; } },
+    document: { visibilityState: 'visible', addEventListener(type, listener) { listeners[`document:${type}`] = listener; } },
+    LilacQuarterSelection: lilacQuarterSelection,
     LilacWeekdaySchedule: {
       PROVIDERS: ['reanime', 'miruro', 'animenosub', 'ohli24', 'linkkf'],
-      mergeWeekdaySchedules: days => days
+      mergeWeekdaySchedules: days => days,
+      scheduleCacheKey: source => `weekdaySchedule:v3:2026:4:${source || 'test'}`
     },
+    readQuarterSelection: () => ({ year: 2027, quarter: 1, label: '2027년 1분기' }),
+    syncQuarterControls() {},
+    selectHomeQuarter: options.selectHomeQuarter || (async () => {}),
+    loadLatestEpisodeRail: options.loadLatestEpisodeRail || (() => {}),
+    latestEpisodeSectionTitle: provider => `${provider} 최신 회차`,
+    renderHero() {},
     store: { get: key => storage.get(key) ?? null, set: (key, value) => storage.set(key, value) },
-    $: selector => selector === '#scheduleRail' ? rail : selector === '#scheduleRetry' ? retry : selector === '#scheduleStatus' ? status : null,
+    $: selector => ui.get(selector) || null,
     $$: selector => selector === '#scheduleTabs button' ? buttons : [],
-    renderCards: (_, items) => { rail.innerHTML = `cards:${items.map(item => item.id).join(',')}`; }
+    renderCards: (selector, items) => { const target = ui.get(selector); if(target)target.innerHTML = `cards:${items.map(item => item.id).join(',')}`; }
   });
   vm.runInContext(appSection('const SCHEDULE_TABS=', '\nfunction loadLinkkfHome()'), context);
-  return { context, rail, retry, status, buttons, storage };
+  return {
+    context, rail, retry, status, buttons, storage,
+    setHomeCalendarReady() { vm.runInContext('homeCalendarReady=true', context); },
+    triggerCalendarChange(change) { nextCalendarChange = change; listeners['window:focus']?.(); },
+    triggerDocumentVisibilityChange(change) { nextCalendarChange = change; listeners['document:visibilitychange']?.(); }
+  };
 }
 
 test('weekday schedule distinguishes an empty day from a failed day and offers retry', async () => {
@@ -509,6 +538,49 @@ test('weekday schedule caches verified days and a fresh cache avoids another pro
   await h.context.loadLinkkfSchedule(0);
   assert.equal(calls, 1);
   assert.match(h.status.textContent, /저장된 통합 요일표/);
+});
+
+test('quarter activation refreshes the quarter catalog, airing list, Linkkf days and AniList schedule once', async () => {
+  const calls = { quarter: [], airing: 0, linkkf: 0, weekday: [] };
+  const h = scheduleHarness(async () => { calls.linkkf++; return { days: Array.from({ length: 7 }, () => []), unavailableDays: [] }; }, {
+    source: 'reanime',
+    airing: [{ provider: 'reanime', id: 'old', anilistId: 10 }],
+    selectHomeQuarter: async (...args) => { calls.quarter.push(args); },
+    providerAiring: async () => { calls.airing++; return { data: [{ provider: 'reanime', id: 'current', anilistId: 20 }] }; },
+    providerWeekdayEpisodes: async (...args) => { calls.weekday.push(args); return { supported: true, data: [] }; }
+  });
+  h.setHomeCalendarReady();
+  const change = { dateChanged: true, quarterChanged: true, current: { year: 2027, quarter: 1, label: '2027년 1분기' } };
+  h.triggerCalendarChange(change);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(JSON.stringify(calls.quarter), JSON.stringify([[2027, 1, { refresh: true }]]));
+  assert.equal(calls.airing, 1);
+  assert.equal(calls.linkkf, 1);
+  assert.equal(calls.weekday.length, 1);
+  assert.equal(calls.weekday[0][0], 'reanime');
+  assert.equal(calls.weekday[0][1][0].id, 'current');
+  assert.equal(calls.weekday[0][2], true);
+
+  h.triggerCalendarChange(null);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.linkkf, 1, 'a repeated activation on the same date sends no extra refresh');
+});
+
+test('quarter airing refresh failure keeps saved airing data and reports the schedule failure', async () => {
+  let weekdayCalls = 0;
+  const h = scheduleHarness(async () => ({ days: Array.from({ length: 7 }, () => []), unavailableDays: [] }), {
+    source: 'reanime',
+    airing: [{ provider: 'reanime', id: 'saved', anilistId: 30 }],
+    providerAiring: async () => { throw new Error('offline'); },
+    providerWeekdayEpisodes: async () => { weekdayCalls++; return { supported: true, data: [] }; }
+  });
+  h.setHomeCalendarReady();
+  h.triggerCalendarChange({ dateChanged: true, quarterChanged: true, current: { year: 2027, quarter: 1, label: '2027년 1분기' } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.context.state.airing[0].id, 'saved');
+  assert.equal(weekdayCalls, 0, 'a failed airing refresh must not query AniList with stale candidates');
+  assert.match(h.context.$('#latestEpisodeStatus').textContent, /저장된 목록을 유지합니다: offline/);
+  assert.match(h.status.textContent, /Re:Anime 일정 확인 실패/);
 });
 
 test('removing LinkAni migrates only the saved content source and preserves user data', () => {

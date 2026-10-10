@@ -2211,7 +2211,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('provider:quarter', (_, provider, year, quarter) => homeShows(provider,'quarter',year,quarter));
   ipcMain.handle('provider:airing', (_, provider) => homeShows(provider,'airing'));
   ipcMain.handle('provider:latest-episodes', (_, provider, candidates) => fetchLatestEpisodes(provider, candidates));
-  ipcMain.handle('provider:weekday-episodes', (_, provider, candidates) => fetchWeekdayEpisodes(provider, candidates));
+  ipcMain.handle('provider:weekday-episodes', (_, provider, candidates, refresh) => fetchWeekdayEpisodes(provider, candidates, { refresh: refresh === true }));
   catalogUpdates = createCatalogUpdates({
     reanimeBase: REANIME_WEB,
     reanimeFetch: url => providerFetch(url, { json: true, referer: `${REANIME_WEB}/` }),

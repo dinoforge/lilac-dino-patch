@@ -194,15 +194,15 @@ const ALL_SORTS={reanime:['popular','year','updated','score'],miruro:['popular',
 const OWN_ORDER={reanime:'popular',miruro:'popular',linkkf:'default',ohli24:'default'};
 const QUARTER_PROVIDERS=['reanime','miruro','animenosub'],QUARTER_CACHE_TTL=12*60*60*1000,QUARTER_CACHE_LIMIT=16;
 function currentQuarterSelection(date=new Date()){
-  const year=date.getFullYear(),quarter=Math.floor(date.getMonth()/3)+1;
-  return {year,quarter,label:`${year}년 ${quarter}분기`};
+  return LilacQuarterSelection.quarterForDate(date);
 }
 function quarterLabel(year,quarter){return `${year}년 ${quarter}분기`}
 function readQuarterSelection(provider){
   const current=currentQuarterSelection();if(!QUARTER_PROVIDERS.includes(provider))return current;
   try{
-    const saved=JSON.parse(localStorage.getItem(`quarterSelection:${provider}`)||'null'),year=Number(saved?.year),quarter=Number(saved?.quarter);
-    if(Number.isInteger(year)&&year>=1960&&year<=current.year&&Number.isInteger(quarter)&&quarter>=1&&quarter<=4)return {year,quarter,label:quarterLabel(year,quarter)};
+    const key=`quarterSelection:${provider}`,saved=JSON.parse(localStorage.getItem(key)||'null'),resolved=LilacQuarterSelection.resolveSelection(saved);
+    if(resolved.migrated)localStorage.setItem(key,JSON.stringify(resolved.record));
+    return resolved.selection;
   }catch{}
   return current;
 }
@@ -255,22 +255,24 @@ function setupQuarterControls(provider){
 let quarterRequest=0;
 async function selectHomeQuarter(year,quarter,{refresh=false}={}){
   if(!QUARTER_PROVIDERS.includes(state.source)||!Number.isInteger(year)||year<1960||year>new Date().getFullYear()||!Number.isInteger(quarter)||quarter<1||quarter>4)return;
-  state.quarterSelection={year,quarter,label:quarterLabel(year,quarter)};
-  try{localStorage.setItem(`quarterSelection:${state.source}`,JSON.stringify({year,quarter}))}catch{}
-  syncQuarterControls();const request=++quarterRequest,cached=readQuarterCache(state.source,year,quarter),rail=$('#seasonRail'),status=$('#quarterStatus'),retry=$('#quarterRetry');retry.classList.add('hidden');
+  const provider=state.source;state.quarterSelection={year,quarter,label:quarterLabel(year,quarter)};
+  try{localStorage.setItem(`quarterSelection:${provider}`,JSON.stringify(LilacQuarterSelection.selectionRecord(year,quarter)))}catch{}
+  syncQuarterControls();const request=++quarterRequest,cached=readQuarterCache(provider,year,quarter),rail=$('#seasonRail'),status=$('#quarterStatus'),retry=$('#quarterRetry');retry.classList.add('hidden');
   if(cached?.fresh&&!refresh){
     state.quarterShows=cached.items;rail.classList.remove('loading-cards');renderCards('#seasonRail',state.quarterShows.slice(0,30));
+    const current=currentQuarterSelection();if(year===current.year&&quarter===current.quarter){state.current=state.quarterShows;state.currentLabel=current.label}
     status.textContent=state.quarterShows.length?'목록을 저장해 두었습니다.':'이 분기에 등록된 작품이 없습니다.';if(typeof catalogUpdateUI!=='undefined')catalogUpdateUI.renderHome();return;
   }
   if(cached){state.quarterShows=cached.items;rail.classList.remove('loading-cards');renderCards('#seasonRail',state.quarterShows.slice(0,30));status.textContent='저장한 목록을 확인하고 있습니다...'}
   else{state.quarterShows=[];rail.classList.add('loading-cards');rail.replaceChildren();status.textContent='분기별 작품을 불러오는 중...'}
   try{
-    const result=await fetchQuarterItems(state.source,year,quarter,{refresh});if(request!==quarterRequest)return;
+    const result=await fetchQuarterItems(provider,year,quarter,{refresh});if(request!==quarterRequest||provider!==state.source)return;
     state.quarterShows=result.items;rail.classList.remove('loading-cards');renderCards('#seasonRail',state.quarterShows.slice(0,30));
+    const current=currentQuarterSelection();if(year===current.year&&quarter===current.quarter){state.current=state.quarterShows;state.currentLabel=current.label}
     status.textContent=result.stale?'최신 목록을 가져오지 못해 저장된 목록을 표시합니다.':result.fromCache?'목록을 저장해 두었습니다.':state.quarterShows.length?'':'이 분기에 등록된 작품이 없습니다.';
     retry.classList.toggle('hidden',!result.stale);if(typeof catalogUpdateUI!=='undefined')catalogUpdateUI.renderHome();
   }catch(error){
-    if(request!==quarterRequest)return;state.quarterShows=[];rail.classList.remove('loading-cards');renderCards('#seasonRail',[]);
+    if(request!==quarterRequest||provider!==state.source)return;state.quarterShows=[];rail.classList.remove('loading-cards');renderCards('#seasonRail',[]);
     status.textContent=`분기별 목록을 불러오지 못했습니다: ${error.message}`;retry.classList.remove('hidden');if(typeof catalogUpdateUI!=='undefined')catalogUpdateUI.renderHome();
   }
 }
@@ -1324,7 +1326,7 @@ function applyTheme(value){const systemLight=matchMedia('(prefers-color-scheme: 
 
 // Linkkf supplies the weekday schedule; a selected work is checked against all supported sources on demand.
 const SCHEDULE_TABS=['월','화','수','목','금','토','일'];
-const scheduleCacheKey=()=>`weekdaySchedule:v2:${state.source}`;
+const scheduleCacheKey=()=>LilacWeekdaySchedule.scheduleCacheKey(state.source);
 let linkkfSchedule=null;
 let linkkfScheduleUnavailableDays=[];
 let scheduleRequest=0;
@@ -1344,8 +1346,8 @@ function renderScheduleTab(index){
 }
 function scheduleCache(){try{const value=store.get(scheduleCacheKey(),null),age=Date.now()-Number(value?.savedAt||0);return Array.isArray(value?.days)&&value.days.length===7&&age>=0&&age<12*60*60*1000?{...value,age}:null}catch{return null}}
 function showScheduleStatus(text,failed=false){$('#scheduleStatus').textContent=text;$('#scheduleRetry').classList.toggle('hidden',!failed)}
-async function loadLinkkfSchedule(selected,{force=false}={}){
-  selected=Math.max(0,Math.min(6,Number(selected)||0));const request=++scheduleRequest;activeScheduleDay=selected;const cached=scheduleCache();
+async function loadLinkkfSchedule(selected,{force=false,refreshEpisodes=false,skipUpcoming=false}={}){
+  selected=Math.max(0,Math.min(6,Number(selected)||0));const request=++scheduleRequest,cacheKey=scheduleCacheKey();activeScheduleDay=selected;const cached=scheduleCache();
   if(!linkkfSchedule&&cached){linkkfSchedule=cached.days;linkkfScheduleUnavailableDays=Array.isArray(cached.unavailableDays)?cached.unavailableDays:[]}
   if(!linkkfSchedule){linkkfScheduleUnavailableDays=[];$('#scheduleRail').classList.add('loading-cards');$('#scheduleRail').replaceChildren()}
   renderScheduleTab(selected);
@@ -1354,20 +1356,21 @@ async function loadLinkkfSchedule(selected,{force=false}={}){
   try{
     let linkkfDays=Array.from({length:7},()=>[]),linkkfFailed=false,upcoming=[],upcomingFailed=false,providerLabel='';
     try{const result=await window.lilac.linkkfSchedule(),days=Array.isArray(result)?result:result?.days;if(!Array.isArray(days))throw new Error('Invalid schedule response');linkkfDays=Array.from({length:7},(_,index)=>Array.isArray(days[index])?days[index].slice(0,50):[]);linkkfScheduleUnavailableDays=Array.isArray(result?.unavailableDays)?result.unavailableDays.filter(index=>Number.isInteger(index)&&index>=0&&index<7):[]}catch{linkkfFailed=true;linkkfScheduleUnavailableDays=Array.from({length:7},(_,index)=>index)}
-    if(['reanime','miruro'].includes(state.source)&&Array.isArray(state.airing)&&state.airing.length){
+    if(['reanime','miruro'].includes(state.source)){
       providerLabel=state.source==='reanime'?'Re:Anime':'Miruro';
-      try{const result=await window.lilac.providerWeekdayEpisodes(state.source,state.airing.slice(0,120));if(result?.supported)upcoming=Array.isArray(result.data)?result.data:[];else upcomingFailed=true}catch{upcomingFailed=true}
+      if(skipUpcoming)upcomingFailed=true;
+      else if(Array.isArray(state.airing)&&state.airing.length){try{const result=await window.lilac.providerWeekdayEpisodes(state.source,state.airing.slice(0,120),refreshEpisodes);if(result?.supported){upcoming=Array.isArray(result.data)?result.data:[];upcomingFailed=Boolean(result.rateLimited)}else upcomingFailed=true}catch{upcomingFailed=true}}
     }
-    if(request!==scheduleRequest)return;
+    if(request!==scheduleRequest||cacheKey!==scheduleCacheKey())return;
     linkkfSchedule=LilacWeekdaySchedule.mergeWeekdaySchedules(linkkfDays,upcoming);
-    const savedAt=Date.now();try{store.set(scheduleCacheKey(),{savedAt,days:linkkfSchedule,unavailableDays:linkkfScheduleUnavailableDays,upcomingCount:upcoming.length})}catch{}
+    const savedAt=Date.now();try{store.set(cacheKey,{savedAt,days:linkkfSchedule,unavailableDays:linkkfScheduleUnavailableDays,upcomingCount:upcoming.length})}catch{}
     const goodDays=7-linkkfScheduleUnavailableDays.length,segments=[];
     if(!linkkfFailed)segments.push(`Linkkf ${goodDays}/7일`);else segments.push('Linkkf 확인 실패');
     if(providerLabel)segments.push(upcomingFailed?`${providerLabel} 일정 확인 실패`:`${providerLabel} ${upcoming.length}개 회차 일정`);
     segments.push(`작품을 열면 ${LilacWeekdaySchedule.PROVIDERS.length}개 공급원의 같은 회차를 확인합니다.`);
     showScheduleStatus(segments.join(' · '),linkkfFailed||upcomingFailed||linkkfScheduleUnavailableDays.length>0);
   }catch{
-    if(request!==scheduleRequest)return;
+    if(request!==scheduleRequest||cacheKey!==scheduleCacheKey())return;
     if(linkkfSchedule){showScheduleStatus('일정 갱신 실패 · 저장된 요일표를 표시합니다.',true)}
     else{linkkfSchedule=Array.from({length:7},()=>[]);linkkfScheduleUnavailableDays=Array.from({length:7},(_,index)=>index);showScheduleStatus('요일별 방영표 확인에 실패했습니다.',true)}
   }
@@ -1379,6 +1382,49 @@ function loadWeekdaySchedule(){
   $('#scheduleTabs').replaceChildren(...SCHEDULE_TABS.map((label,index)=>{const button=document.createElement('button');button.type='button';button.setAttribute('role','tab');button.textContent=label;button.onclick=()=>renderScheduleTab(index);return button}));
   $('#scheduleRetry').onclick=()=>loadLinkkfSchedule(activeScheduleDay,{force:true});loadLinkkfSchedule(today);
 }
+const calendarWatcher=LilacQuarterSelection.createCalendarWatcher();
+let homeCalendarReady=false,homeCalendarRefreshRequest=0;
+async function handleCalendarChange(change){
+  if(!change||!homeCalendarReady)return;
+  const provider=state.source,today=(new Date().getDay()+6)%7;let request;
+  activeScheduleDay=today;
+  if(change.quarterChanged){
+    request=++homeCalendarRefreshRequest;
+    linkkfSchedule=null;linkkfScheduleUnavailableDays=[];scheduleRequest++;weekdayAvailabilityCache.clear();
+    renderScheduleTab(today);
+  }else{
+    renderScheduleTab(today);
+    if(change.dateChanged)loadLinkkfSchedule(today);
+    return;
+  }
+
+  let quarterTask=Promise.resolve();
+  if(QUARTER_PROVIDERS.includes(provider)){
+    const selection=readQuarterSelection(provider);state.quarterSelection=selection;syncQuarterControls();
+    quarterTask=selectHomeQuarter(change.current.year,change.current.quarter,{refresh:true});
+  }
+  let airingError=null;
+  const airingTask=QUARTER_PROVIDERS.includes(provider)?window.lilac.providerAiring(provider).then(result=>{
+    if(request!==homeCalendarRefreshRequest||provider!==state.source)return;
+    if(!Array.isArray(result?.data))throw new Error('방영 목록 응답이 올바르지 않습니다.');
+    state.airing=result.data;$('#airingSection').classList.toggle('hidden',!state.airing.length);if(state.airing.length)renderCards('#airingRail',state.airing.slice(0,30));
+    loadLatestEpisodeRail(provider,state.airing);
+  }).catch(error=>{airingError=error}):Promise.resolve();
+  await Promise.all([quarterTask,airingTask]);
+  if(request!==homeCalendarRefreshRequest||provider!==state.source)return;
+  if(airingError){
+    $('#latestEpisodeSection').classList.remove('hidden');$('#latestEpisodeTitle').textContent=latestEpisodeSectionTitle(provider);
+    $('#latestEpisodeStatus').textContent=`방영 중인 작품을 갱신하지 못했습니다. 저장된 목록을 유지합니다: ${airingError.message}`;$('#latestEpisodeRetry').classList.remove('hidden');
+  }
+  if(state.current?.length)renderHero(state.current,'이번 분기 추천');
+  loadLinkkfSchedule(today,{force:true,refreshEpisodes:true,skipUpcoming:Boolean(airingError)});
+}
+function checkCalendarOnResume(){
+  if(document.visibilityState==='hidden'||!homeCalendarReady)return;
+  void handleCalendarChange(calendarWatcher.check(new Date()));
+}
+window.addEventListener('focus',checkCalendarOnResume);
+document.addEventListener('visibilitychange',checkCalendarOnResume);
 function loadLinkkfHome(){
   $('#seasonTitle').textContent='최신 애니메이션';
   window.lilac.linkkfSections().then(sections=>{[['pv','#pvSection','#pvRail'],['movie','#movieSection','#movieRail'],['adult16','#adultSection','#adultRail']].forEach(([key,section,rail])=>{const items=sections?.[key]||[];$(section).classList.toggle('hidden',!items.length);if(items.length)renderCards(rail,items)})}).catch(()=>{});
@@ -1558,6 +1604,7 @@ async function init(){
     const heroPool=[[state.current,'이번 시즌 추천'],[state.season,'이번 시즌 추천'],[state.top,'인기 작품']].find(([list])=>list?.length);if(heroPool)renderHero(heroPool[0],heroPool[1]);
   } catch(e){$('#seasonRail').classList.remove('loading-cards');$('#topRail').classList.remove('loading-cards');if(QUARTER_PROVIDERS.includes(state.source)){$('#quarterStatus').textContent=`분기별 목록을 불러오지 못했습니다: ${e.message}`;$('#quarterRetry').classList.remove('hidden')}showSourceNotice(null);}
   if(typeof catalogUpdateUI!=='undefined'){catalogUpdateUI.renderHome();catalogUpdateUI.renderLibrary();}
+  homeCalendarReady=true;checkCalendarOnResume();
 }
 // A source whose server does not answer (Linkkf's API behind Cloudflare 522 in October 2026): said above the home page
 // until the app is opened again, not in a passing toast, with the source's name as the settings show it, what the list

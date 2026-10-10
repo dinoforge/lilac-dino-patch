@@ -1,6 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { matchesScheduledWork, matchScheduledSources, combineScheduledSources, mergeWeekdaySchedules, localWeekday, episodeAvailability, providerFallbackState } = require('../src/weekday-schedule.js');
+const { matchesScheduledWork, matchScheduledSources, combineScheduledSources, mergeWeekdaySchedules, localWeekday, scheduleCacheKey, episodeAvailability, providerFallbackState } = require('../src/weekday-schedule.js');
+
+test('weekday cache keys are isolated by calendar quarter and keep old keys addressable', () => {
+  const prior = scheduleCacheKey('reanime', new Date(2026, 2, 31));
+  const current = scheduleCacheKey('reanime', new Date(2026, 3, 1));
+  assert.equal(prior, 'weekdaySchedule:v3:2026:1:reanime');
+  assert.equal(current, 'weekdaySchedule:v3:2026:2:reanime');
+  assert.notEqual(prior, current);
+  assert.notEqual(current, 'weekdaySchedule:v2:reanime');
+});
 
 test('weekday source matching uses AniList identity when both sources have it', () => {
   const anchor = { provider: 'linkkf', anilistId: 101, title: 'Series', year: '2026' };

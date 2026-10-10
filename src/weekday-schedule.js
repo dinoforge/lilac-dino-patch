@@ -77,6 +77,12 @@
     return (day + 6) % 7;
   }
 
+  function scheduleCacheKey(source, date = new Date()) {
+    if (!(date instanceof Date) || !Number.isFinite(date.getTime())) throw new TypeError('유효한 날짜가 필요합니다.');
+    const year = date.getFullYear(), quarter = Math.floor(date.getMonth() / 3) + 1;
+    return `weekdaySchedule:v3:${year}:${quarter}:${String(source || '')}`;
+  }
+
   function mergeWeekdaySchedules(linkkfDays, upcomingItems) {
     const days = Array.from({ length: 7 }, () => []);
     for (let day = 0; day < 7; day++) {
@@ -124,7 +130,7 @@
     return 'missing';
   }
 
-  const api = { PROVIDERS, matchesScheduledWork, matchScheduledSources, combineScheduledSources, localWeekday, mergeWeekdaySchedules, episodeAvailability, providerFallbackState };
+  const api = { PROVIDERS, matchesScheduledWork, matchScheduledSources, combineScheduledSources, localWeekday, scheduleCacheKey, mergeWeekdaySchedules, episodeAvailability, providerFallbackState };
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.LilacWeekdaySchedule = api;
 })(typeof window !== 'undefined' ? window : globalThis);
