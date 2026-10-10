@@ -544,3 +544,9 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - Phase 1 계획의 `playerAutoPlay` 설정·마이그레이션 문구를 실제 코드에 맞췄다. 별도 자동 다음 화 설정은 없고 `handleEpisodeEnded`는 다음 화 직접 선택 안내만 표시한다. 기존 프로필 설정을 변경하지 않는다.
 - `tests/windows-package-startup.cjs`를 확장해 실제 `dist/win-unpacked/LilacAnime.exe`의 번들 renderer에서 95% 경계 버튼 라벨·대체 버튼 클릭·저장 위치 이어가기 인자를 확인했다. 임시 사용자·앱 데이터 경로와 외부 DNS 차단을 사용했다. 기존 설치 NSIS 앱은 실행하지 않았다.
 - `npm test` 242/242, `npm run test:phase1-exe`, `git diff --check` 통과. 앱 런타임 코드는 변경하지 않아 NSIS 패키지를 다시 빌드하지 않았다.
+
+## 2026-10-10 설치 파일 권리 게이트
+
+- 현재 `Build` workflow는 `v*` 태그와 수동 실행에 반응해 세 플랫폼 설치 파일 산출물을 만들고, 태그 실행에서는 Release에 올리는 구성이다. GitHub 저장소는 비공개이고 Releases 목록은 비어 있으며 저장소 Actions 변수도 설정돼 있지 않다.
+- 권리 검토 전 잘못된 태그가 올라가도 파일이 생성·업로드되지 않도록 `.github/workflows/build.yml`의 `build`와 `release` 두 job에 `LILAC_RELEASE_RIGHTS_APPROVED == 'true'` 조건을 추가했다. 변수는 만들거나 설정하지 않았고, 기존 Release 워크플로 파일·태그·수동 실행 트리거는 보존한다.
+- `node --test tests/release-rights-gate.test.cjs` 1/1, 전체 `npm test` 243/243, `git diff --check` 통과. GitHub에서 workflow YAML 인식과 main push가 Actions를 실행하지 않는지 원격 반영 뒤 확인한다. 이 gate는 설치 파일 생성·배포를 막는 설정이며 권리 확인을 완료한 것은 아니다.

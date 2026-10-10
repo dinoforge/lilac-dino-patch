@@ -366,7 +366,7 @@ npm run dist
 
 `dist\LilacAnime-Setup.exe`가 로컬에 만들어집니다. 앱 버전은 `package.json`의 `version`을 따릅니다. 이 설치 파일은 개발·검증용이며 공개하거나 다른 사람에게 배포하지 마세요.
 
-GitHub Actions 워크플로는 릴리스 태그 또는 수동 실행에만 반응합니다. 권리와 배포 범위를 확인하기 전에는 태그를 만들거나 워크플로를 실행하지 않습니다.
+GitHub Actions 빌드와 릴리스는 저장소 Actions 변수 `LILAC_RELEASE_RIGHTS_APPROVED=true`를 설정해야 실행됩니다. 코드·에셋·API·콘텐츠 이용 권리와 배포 범위를 확인하기 전에는 이 변수를 설정하거나 태그를 만들지 마세요.
 
 | 폴더 | 내용 |
 |---|---|
