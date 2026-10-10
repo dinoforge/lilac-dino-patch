@@ -177,6 +177,29 @@ test('detail source picker identifies the active raw provider item and hides for
   assert.equal(context.renderPicker({ sourceItems: [item('reanime', 'one')] }, item('reanime', 'one')), '');
 });
 
+test('weekday picker does not count unrelated search results as episode availability', () => {
+  const start = appSource.indexOf('function detailSourcePickerMarkup(');
+  const end = appSource.indexOf('\nasync function checkWeekdaySourceEpisodes', start);
+  assert.ok(start >= 0 && end > start, 'Missing weekday availability helpers');
+  const weekdays = require('../src/weekday-schedule.js');
+  const context = vm.createContext({
+    SOURCE_LABELS: { reanime: 'RE:Anime', miruro: 'Miruro', animenosub: 'Animenosub', ohli24: '애니24', linkkf: 'Linkkf' },
+    LilacWeekdaySchedule: weekdays,
+    openDetail: { currentGroupKey: '', currentSourceId: '' },
+    $: () => null,
+    escapeHtml: value => String(value)
+  });
+  vm.runInContext(`${appSource.slice(start, end)}\nthis.renderPicker = detailSourcePickerMarkup;`, context);
+  const group = {
+    weekdaySchedule: true, scheduleSearchReady: true, sourceItems: [], scheduleAvailability: {},
+    scheduleSearchStatuses: [{ provider: 'reanime', state: 'ready', resultCount: 7 }]
+  };
+  const markup = context.renderPicker(group, { mal_id: 'reanime:anchor' });
+  const reanimeRow = markup.match(/<div class="weekday-source-state" data-schedule-provider="reanime"[^>]*>(.*?)<\/div>/)?.[1] || '';
+  assert.match(reanimeRow, /미제공/);
+  assert.doesNotMatch(reanimeRow, /제공 확인/);
+});
+
 test('search UI loads the grouping model before app code and routes source changes through real item IDs', () => {
   assert.match(htmlSource, /id="searchProviderFilters"[^>]*role="group"/);
   assert.ok(htmlSource.indexOf('src="integrated-search.js"') < htmlSource.indexOf('src="app.js"'));

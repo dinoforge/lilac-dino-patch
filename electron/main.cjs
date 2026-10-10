@@ -21,6 +21,7 @@ const { SubtitleStore } = require('./subtitle-store.cjs');
 const { createTranslator } = require('./subtitle-translator.cjs');
 const { QUARTER_PROVIDERS, quarterForDate, quarterPeriod, quarterQuery } = require('./quarter-catalog.cjs');
 const { fetchLatestEpisodes } = require('./latest-episodes.cjs');
+const { fetchWeekdayEpisodes } = require('./weekday-episodes.cjs');
 const { createCatalogBrowser } = require('./catalog-browser.cjs');
 const { createCatalogUpdates } = require('./catalog-updates.cjs');
 const { filterProviderServers } = require('../src/player-failover.js');
@@ -2210,6 +2211,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('provider:quarter', (_, provider, year, quarter) => homeShows(provider,'quarter',year,quarter));
   ipcMain.handle('provider:airing', (_, provider) => homeShows(provider,'airing'));
   ipcMain.handle('provider:latest-episodes', (_, provider, candidates) => fetchLatestEpisodes(provider, candidates));
+  ipcMain.handle('provider:weekday-episodes', (_, provider, candidates) => fetchWeekdayEpisodes(provider, candidates));
   catalogUpdates = createCatalogUpdates({
     reanimeBase: REANIME_WEB,
     reanimeFetch: url => providerFetch(url, { json: true, referer: `${REANIME_WEB}/` }),

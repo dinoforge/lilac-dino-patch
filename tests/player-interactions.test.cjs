@@ -461,17 +461,23 @@ test('continue card progress markup closes its width attribute before the episod
 });
 
 function scheduleHarness(linkkfSchedule) {
-  const buttons = Array.from({ length: 8 }, () => ({ classList: classList(), attrs: {}, setAttribute(name, value) { this.attrs[name] = value; } }));
+  const buttons = Array.from({ length: 7 }, () => ({ classList: classList(), attrs: {}, setAttribute(name, value) { this.attrs[name] = value; } }));
   const rail = { classList: classList(), innerHTML: '', replaceChildren() { this.innerHTML = ''; } };
   const retry = { classList: classList('hidden'), onclick: null };
+  const status = { textContent: '' }, storage = new Map();
   const context = vm.createContext({
     state: { season: [{ id: 'latest' }] }, window: { lilac: { linkkfSchedule } },
-    $: selector => selector === '#scheduleRail' ? rail : selector === '#scheduleRetry' ? retry : null,
+    LilacWeekdaySchedule: {
+      PROVIDERS: ['reanime', 'miruro', 'animenosub', 'ohli24', 'linkkf'],
+      mergeWeekdaySchedules: days => days
+    },
+    store: { get: key => storage.get(key) ?? null, set: (key, value) => storage.set(key, value) },
+    $: selector => selector === '#scheduleRail' ? rail : selector === '#scheduleRetry' ? retry : selector === '#scheduleStatus' ? status : null,
     $$: selector => selector === '#scheduleTabs button' ? buttons : [],
     renderCards: (_, items) => { rail.innerHTML = `cards:${items.map(item => item.id).join(',')}`; }
   });
-  vm.runInContext(appSection('const SCHEDULE_TABS=', '\nasync function loadLinkkfHome()'), context);
-  return { context, rail, retry, buttons };
+  vm.runInContext(appSection('const SCHEDULE_TABS=', '\nfunction loadLinkkfHome()'), context);
+  return { context, rail, retry, status, buttons, storage };
 }
 
 test('weekday schedule distinguishes an empty day from a failed day and offers retry', async () => {
@@ -481,17 +487,28 @@ test('weekday schedule distinguishes an empty day from a failed day and offers r
   assert.equal(empty.retry.classList.contains('hidden'), true);
 
   const failed = scheduleHarness(async () => ({ days: Array.from({ length: 7 }, () => []), unavailableDays: [0] }));
-  await failed.context.loadLinkkfSchedule(1);
+  await failed.context.loadLinkkfSchedule(0);
   assert.match(failed.rail.innerHTML, /일정 정보를 불러오지 못했습니다/);
   assert.equal(failed.retry.classList.contains('hidden'), false);
 });
 
 test('weekday schedule marks all days unavailable when the schedule request fails', async () => {
   const h = scheduleHarness(async () => { throw new Error('offline'); });
-  await h.context.loadLinkkfSchedule(7);
+  await h.context.loadLinkkfSchedule(6);
   assert.match(h.rail.innerHTML, /일정 정보를 불러오지 못했습니다/);
   assert.equal(h.retry.classList.contains('hidden'), false);
-  assert.equal(h.buttons[7].attrs['aria-selected'], 'true');
+  assert.equal(h.buttons[6].attrs['aria-selected'], 'true');
+});
+
+test('weekday schedule caches verified days and a fresh cache avoids another provider request', async () => {
+  let calls = 0;
+  const h = scheduleHarness(async () => { calls++; return { days: Array.from({ length: 7 }, (_, index) => index === 0 ? [{ id: 'monday' }] : []), unavailableDays: [] }; });
+  await h.context.loadLinkkfSchedule(0);
+  assert.equal(calls, 1);
+  assert.match(h.rail.innerHTML, /monday/);
+  await h.context.loadLinkkfSchedule(0);
+  assert.equal(calls, 1);
+  assert.match(h.status.textContent, /저장된 통합 요일표/);
 });
 
 test('removing LinkAni migrates only the saved content source and preserves user data', () => {
