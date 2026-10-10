@@ -9,6 +9,7 @@
     "test": "node --test",
     "test:phase1-electron": "node node_modules/electron/cli.js tests/integrated-search.electron.cjs",
     "test:phase1-main": "node node_modules/electron/cli.js tests/phase1-main.electron.cjs",
+    "test:phase1-pip-native": "node tests/run-pip-native.cjs",
     "test:phase1-source-restart": "node tests/phase1-source-restart.cjs",
     "test:phase1-subtitle-layout": "node node_modules/electron/cli.js tests/subtitle-layout.electron.cjs",
     "vendor": "node scripts/build-jassub.cjs",
