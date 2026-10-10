@@ -41,6 +41,7 @@
     "files": [
       "electron/**/*",
       "src/**/*",
+      "docs/prompts/**/*",
       "build/icon.png",
       "build/icon.ico",
       "package.json"

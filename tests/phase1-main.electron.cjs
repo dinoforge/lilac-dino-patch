@@ -53,9 +53,21 @@ assert.deepEqual(
 );
 for (const file of ['src/app.js', 'src/player.js']) {
   assert.deepEqual(
-    asar.extractFile(appAsar, file),
+    asar.extractFile(appAsar, file.replaceAll('/', '\\')),
     fs.readFileSync(path.join(repo, file)),
     `the packaged renderer ${file} matches the current source`
+  );
+}
+for (const file of [
+  'electron/translation-prompts.cjs',
+  'docs/prompts/영어 번역 프롬프트.txt',
+  'docs/prompts/일본어 번역 프롬프트.txt',
+  'docs/prompts/Reazon_작품용_단어사전_예시.txt'
+]) {
+  assert.deepEqual(
+    asar.extractFile(appAsar, file.replaceAll('/', '\\')),
+    fs.readFileSync(path.join(repo, file)),
+    `the packaged prompt resource ${file} matches the supplied source`
   );
 }
 

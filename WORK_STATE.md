@@ -1,5 +1,13 @@
 # 작업 상태
 
+## 2026-10-10 패치 02: ChatGPT 수동 번역 프롬프트·연결 경계
+
+- 사용자가 준 영어·일본어 번역 프롬프트와 Reazon 작품 단어사전 예시를 `docs/prompts/`에 원문 바이트 그대로 보관했다. SHA-256으로 복사본을 비교했다. Reazon 파일은 음성인식 hotwords 자료이며 번역 사전으로 쓰지 않는다고 안내했다.
+- ChatGPT 수동 복사 요청은 VTT cue의 주된 원문 언어를 간단히 판별해 해당 전체 프롬프트를 선택한다. 번역할 묶음의 앞뒤 최대 두 cue를 문맥 전용으로 제공하며, 응답에는 지정 cue ID만 포함하도록 한다. 앱은 기존과 같이 반환 ID를 검증하고 원래 시간·WebVTT 구조를 보존한다. 원문 cue 안의 지시문은 데이터로 취급하라고 요청한다.
+- OpenAI의 Sign in with ChatGPT/요금제 사용량 공유는 공개 오픈소스 앱과 선택된 비공개 파트너를 대상으로 한다. 이 비공개 저장소가 승인된 파트너라는 근거가 없어 실제 OAuth 연결은 구현하지 않았다. 공식 연결 조건과 제한을 `docs/CHATGPT_TRANSLATION.md`에 기록했다. ChatGPT 수동 흐름은 자동 제출 없이 기존처럼 사용자가 직접 붙여넣고 전송한다. 기존 로컬 AI 및 설정 API 번역 경로는 변경하지 않았다.
+- `node --test tests/manual-subtitle-translation.test.cjs tests/manual-subtitle-translation-ui.test.cjs tests/translation-prompts.test.cjs`: 13/13 통과. 전체 `npm test`: 261/261 통과 (`NODE_PATH`는 기존 `main` checkout의 `node_modules`를 가리킴). 변경 JS `node --check`와 `git diff --check` 통과. 실제 ChatGPT 왕복·번역 품질, 설치 NSIS 패키지 실행은 미검증이다.
+- Windows x64 `electron-builder --dir` 패키지와 `npm run test:phase1-main` 합성 IPC 스모크가 통과했다. 설치 `app.asar`에 번역 프롬프트 로더와 제공된 세 원문 파일이 포함되고 작업 트리의 바이트와 일치했다. 기존 검색·회차 재생·한국어 자막 저장·이어보기 및 합성 HLS 재생도 통과했고, 알 수 없는 fetch 0건·브라우저 외부 요청 0건·실제 외부 네트워크 0건이다. NSIS 설치 UI와 ChatGPT 실전 왕복은 검증하지 않았다.
+
 ## 2026-10-10 최신 작업: 저장 자막 UI·설치 NSIS 통합 스모크
 
 - 플레이어 자막 패널에 현재 회차의 저장 자막 목록, 출처와 적용 상태, 항목 제거 버튼을 연결했다. 적용 중인 자막은 다른 자막을 고를 때까지 제거 버튼을 잠그고, 제거 전에 확인을 받는다. 앱이 받은 파일은 다른 회차에서 참조하지 않을 때만 지우며, 사용자가 PC에서 고른 파일은 원래 위치에 둔다.
