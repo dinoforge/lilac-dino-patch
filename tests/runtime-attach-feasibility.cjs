@@ -7,10 +7,20 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 
 const REPO = path.resolve(__dirname, '..');
-const BASE_BRANCH = 'codex/runtime-companion-prototype';
-const BASE_COMMIT = 'dcd6b9818c0f13fd9970cc3c94e4539fd33aeb64';
+const BASE_BRANCH = 'codex/runtime-attach-feasibility';
+const BASE_COMMIT = 'b1889ae5d7e45658c2670c55152c0d4e6e717d9c';
 const UPSTREAM_TAG_COMMIT = 'f095fc3d775451e144ed780e1fa081f739927652';
 const TEMP_PREFIX = 'lilac-runtime-attach-';
+const DEPENDENCY_ROOT = path.resolve(REPO, '..', 'LilacAnime-Player');
+const SCREENSHOT_VARIANTS = {
+  'original-dark-1440x900': [1440, 900],
+  'companion-dark-1440x900': [1440, 900],
+  'original-dark-1280x720': [1280, 720],
+  'companion-dark-1280x720': [1280, 720],
+  'original-dark-760x700': [760, 700],
+  'companion-dark-760x700': [760, 700],
+  'companion-light-1440x900': [1440, 900],
+};
 
 function git(args, options = {}) {
   const result = spawnSync('git', args, { cwd: REPO, encoding: options.encoding || 'utf8', maxBuffer: 64 * 1024 * 1024 });
@@ -78,7 +88,7 @@ function removeProjectDependencyJunction(sourceRoot) {
   }
   if (!stat.isSymbolicLink()) throw new Error('Refusing cleanup because source/node_modules is not the expected junction.');
   const linkTarget = path.resolve(path.dirname(junction), fs.readlinkSync(junction));
-  const expectedTarget = path.resolve(REPO, 'node_modules');
+  const expectedTarget = path.resolve(DEPENDENCY_ROOT, 'node_modules');
   if (linkTarget.toLowerCase() !== expectedTarget.toLowerCase()) {
     throw new Error('Refusing cleanup because the dependency junction target differs from this project node_modules.');
   }
@@ -161,7 +171,7 @@ function validateExpectedCheckout() {
   if (process.platform !== 'win32') throw new Error('This experiment is constrained to the requested Windows test environment.');
   const branch = git(['branch', '--show-current']).trim();
   const head = git(['rev-parse', 'HEAD']).trim();
-  if (branch !== 'codex/runtime-attach-feasibility') throw new Error('Refusing to run outside the requested experiment branch.');
+  if (branch !== 'codex/runtime-attach-native-style') throw new Error('Refusing to run outside the requested native-style branch.');
   if (git(['merge-base', BASE_COMMIT, 'HEAD']).trim() !== BASE_COMMIT) throw new Error('Refusing to run because HEAD is not descended from the requested base commit.');
   if (git(['rev-parse', BASE_BRANCH]).trim() !== BASE_COMMIT) throw new Error('The referenced prototype branch no longer resolves to the requested commit.');
   const upstreamPackage = JSON.parse(git(['show', UPSTREAM_TAG_COMMIT + ':package.json']));
@@ -171,23 +181,22 @@ function validateExpectedCheckout() {
   const gitStatus = git(['status', '--porcelain', '--untracked-files=all']);
   const expectedAddedFiles = new Set([
     'tests/runtime-attach-feasibility.cjs',
-    'tests/runtime-attach-fixture/agent.cjs',
     'tests/runtime-attach-fixture/host-hook.cjs',
-    'docs/verification/RUNTIME_ATTACH_FEASIBILITY.md',
+    'docs/verification/RUNTIME_ATTACH_NATIVE_STYLE.md',
     'WORK_STATE.md'
   ]);
-  const isExperimentEvidence = file => /^docs\/verification\/runtime-attach-evidence-\d{8}T\d{6}Z(?:-\d+)?\.jsonl$/.test(file)
-    || /^docs\/verification\/assets\/runtime-attach-v0\.5\.14-\d{8}T\d{6}Z(?:-\d+)?\.png$/.test(file);
+  const isExperimentEvidence = file => /^docs\/verification\/runtime-attach-native-style-evidence-\d{8}T\d{6}Z(?:-\d+)?\.jsonl$/.test(file)
+    || /^docs\/verification\/assets\/runtime-attach-v0\.5\.14-native-style-\d{8}T\d{6}Z(?:-\d+)?-(?:original-dark-1440x900|companion-dark-1440x900|original-dark-1280x720|companion-dark-1280x720|original-dark-760x700|companion-dark-760x700|companion-light-1440x900)\.png$/.test(file);
   const unexpected = gitStatus.split(/\r?\n/).filter(Boolean).map(line => line.slice(3)).filter(file => !expectedAddedFiles.has(file) && !isExperimentEvidence(file));
   if (unexpected.length) throw new Error('Unexpected user changes are present; refusing to include or rely on them: ' + unexpected.join(', '));
 }
 
 async function run() {
   validateExpectedCheckout();
-  const electronExe = path.join(REPO, 'node_modules', 'electron', 'dist', 'electron.exe');
-  const hlsPackage = path.join(REPO, 'node_modules', 'hls.js');
+  const electronExe = path.join(DEPENDENCY_ROOT, 'node_modules', 'electron', 'dist', 'electron.exe');
+  const hlsPackage = path.join(DEPENDENCY_ROOT, 'node_modules', 'hls.js');
   if (!fs.existsSync(electronExe) || !fs.existsSync(hlsPackage)) throw new Error('Existing local Electron/hls.js dependencies are missing; no installation will be performed.');
-  const electronPackage = JSON.parse(fs.readFileSync(path.join(REPO, 'node_modules', 'electron', 'package.json'), 'utf8'));
+  const electronPackage = JSON.parse(fs.readFileSync(path.join(DEPENDENCY_ROOT, 'node_modules', 'electron', 'package.json'), 'utf8'));
   if (!/^38\./.test(electronPackage.version)) throw new Error('The existing Electron runtime is outside the v0.5.14 major version.');
   const sharedHlsFiles = ['dist/hls.min.js', 'package.json'];
   const sharedHlsHashesBefore = Object.fromEntries(sharedHlsFiles.map(file => [file, hashFile(path.join(hlsPackage, file))]));
@@ -196,10 +205,13 @@ async function run() {
   const assetDirectory = path.join(verificationDirectory, 'assets');
   fs.mkdirSync(assetDirectory, { recursive: true });
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
-  const logPath = chooseArtifact(path.join(verificationDirectory, 'runtime-attach-evidence-' + stamp + '.jsonl'));
-  const screenshotPath = chooseArtifact(path.join(assetDirectory, 'runtime-attach-v0.5.14-' + stamp + '.png'));
+  const screenshotPaths = Object.fromEntries(Object.entries(SCREENSHOT_VARIANTS).map(([variant]) => [
+    variant,
+    chooseArtifact(path.join(assetDirectory, 'runtime-attach-v0.5.14-native-style-' + stamp + '-' + variant + '.png'))
+  ]));
+  const logPath = chooseArtifact(path.join(verificationDirectory, 'runtime-attach-native-style-evidence-' + stamp + '.jsonl'));
   appendLog(logPath, 'preflight', {
-    branch: 'codex/runtime-attach-feasibility',
+    branch: 'codex/runtime-attach-native-style',
     baseCommit: BASE_COMMIT,
     upstreamSource: 'dinoforge/anime-player v0.5.14',
     upstreamCommit: UPSTREAM_TAG_COMMIT,
@@ -207,7 +219,10 @@ async function run() {
     npmInstallPerformed: false,
     installerUsed: false,
     computerUseUsed: false,
-    remoteDebuggingPort: false
+    remoteDebuggingPort: false,
+    dependencyRoot: DEPENDENCY_ROOT,
+    dependencyInstallPerformed: false,
+    screenshots: Object.fromEntries(Object.entries(screenshotPaths).map(([name, file]) => [name, path.relative(REPO, file).split(path.sep).join('/')]))
   });
 
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), TEMP_PREFIX));
@@ -247,7 +262,7 @@ async function run() {
     fs.writeFileSync(originalMainPath, instrumented, 'utf8');
     const patchedMainHash = hashFile(originalMainPath);
 
-    fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(sourceRoot, 'node_modules'), 'junction');
+    fs.symlinkSync(path.join(DEPENDENCY_ROOT, 'node_modules'), path.join(sourceRoot, 'node_modules'), 'junction');
     const initialProfile = snapshotDirectory(profileRoot);
     if (initialProfile.files !== 0) throw new Error('The isolated test profile was not empty before launch.');
 
@@ -262,7 +277,7 @@ async function run() {
       profileInitiallyEmpty: true,
       pathsConfinedToUniqueSystemTempDirectory: true,
       sourceInstrumentation: ['electron/main.cjs only; temporary copy only'],
-      localDependencies: 'temporary node_modules junction to existing project dependencies; no installation',
+      localDependencies: 'temporary source-copy node_modules junction to the existing sibling project dependency tree; read-only reuse, no installation',
       testHookOutsideSourceArchive: true
     });
 
@@ -270,7 +285,7 @@ async function run() {
     delete environment.NODE_OPTIONS;
     delete environment.ELECTRON_RUN_AS_NODE;
     delete environment.ELECTRON_NO_ATTACH_CONSOLE;
-    environment.NODE_PATH = path.join(REPO, 'node_modules');
+    environment.NODE_PATH = path.join(DEPENDENCY_ROOT, 'node_modules');
     environment.LILAC_RUNTIME_ATTACH_TEMP = tempRoot;
     environment.LILAC_RUNTIME_ATTACH_PROFILE = profileRoot;
     environment.LILAC_RUNTIME_ATTACH_SOURCE = sourceRoot;
@@ -280,8 +295,8 @@ async function run() {
     environment.LILAC_RUNTIME_ATTACH_AGENT = path.join(__dirname, 'runtime-attach-fixture', 'agent.cjs');
     environment.LILAC_RUNTIME_ATTACH_CATALOG = path.join(REPO, 'companion', 'core', 'catalog.cjs');
     environment.LILAC_RUNTIME_ATTACH_LOG = logPath;
-    environment.LILAC_RUNTIME_ATTACH_SCREENSHOT = screenshotPath;
-    environment.LILAC_RUNTIME_ATTACH_SCREENSHOT_RELATIVE = path.relative(REPO, screenshotPath).split(path.sep).join('/');
+    environment.LILAC_RUNTIME_ATTACH_SCREENSHOTS = JSON.stringify(Object.fromEntries(Object.entries(screenshotPaths).map(([name, file]) => [name, file])));
+    environment.LILAC_RUNTIME_ATTACH_SCREENSHOT_RELATIVES = JSON.stringify(Object.fromEntries(Object.entries(screenshotPaths).map(([name, file]) => [name, path.relative(REPO, file).split(path.sep).join('/')])));
 
     electronChild = spawn(electronExe, [sourceRoot], {
       cwd: sourceRoot,
@@ -319,7 +334,14 @@ async function run() {
       throw new Error('The v0.5.14 temporary source copy changed outside the single disclosed test-hook insertion.');
     }
     if (JSON.stringify(sharedHlsHashesAfter) !== JSON.stringify(sharedHlsHashesBefore)) throw new Error('The shared hls.js dependency changed during the experiment.');
-    if (!fs.existsSync(screenshotPath)) throw new Error('The renderer evidence screenshot was not written.');
+    for (const [variant, [width, height]] of Object.entries(SCREENSHOT_VARIANTS)) {
+      const screenshotPath = screenshotPaths[variant];
+      if (!fs.existsSync(screenshotPath)) throw new Error('The renderer evidence screenshot was not written: ' + variant);
+      const png = fs.readFileSync(screenshotPath);
+      if (png.length < 100 || png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a' || png.readUInt32BE(16) !== width || png.readUInt32BE(20) !== height) {
+        throw new Error('The renderer screenshot did not match its requested viewport: ' + variant);
+      }
+    }
 
     appendLog(logPath, 'isolation-integrity', {
       sourceFilesBefore: Object.keys(originalManifest).length,
@@ -342,7 +364,7 @@ async function run() {
     const cleanup = cleanupOwnedTempTree(tempRoot, sourceRoot, osTempReal);
     cleanupComplete = true;
     appendLog(logPath, 'temporary-test-copy-cleanup', cleanup);
-    console.log(JSON.stringify({ passed: true, log: path.relative(REPO, logPath), screenshot: path.relative(REPO, screenshotPath), cleanupComplete }));
+    console.log(JSON.stringify({ passed: true, log: path.relative(REPO, logPath), screenshots: Object.fromEntries(Object.entries(screenshotPaths).map(([name, file]) => [name, path.relative(REPO, file)])), cleanupComplete }));
   } catch (error) {
     if (electronChild && !exited && electronChild.pid && electronChild.exitCode === null && electronChild.signalCode === null) {
       appendLog(logPath, 'cleanup-deferred', { reason: 'Electron process has not exited; no process termination was attempted.' });

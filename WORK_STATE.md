@@ -1,5 +1,13 @@
 # 작업 상태
 
+## 2026-10-11 Companion 요일표 원본 스타일 검증
+
+- 요청 기준 `codex/runtime-attach-feasibility` / `b1889ae5d7e45658c2670c55152c0d4e6e717d9c`에서 `codex/runtime-attach-native-style` 브랜치를 만들었다. `main`, 원본 저장소와 원본 설치본은 수정하지 않았다.
+- `tests/runtime-attach-fixture/host-hook.cjs`의 시험 UI를 원본 홈의 `#scheduleSection` 안에 넣도록 바꿨다. 기존 “방영 일정” 제목을 재사용하고 `.chip-row`, `.poster-rail`, `.anime-card`, `.poster` 스타일을 적용한다. 중복 방지를 위해 기존 `#scheduleTabs`, `#scheduleRail`은 표시 상태만 임시 변경하고 DOM identity·내부 HTML을 유지한다. 출처 상태도 한국어로 구분 표시한다.
+- 원본 v0.5.14 아카이브를 임시 디렉터리에서 실행해 1440×900, 1280×720, 760×700 원본·삽입 비교와 라이트 테마 캡처를 만들었다. 계산 스타일 비교 9개 모두 일치하고, 월~일 선택·오늘 요일 기본 선택·카드 스크롤·연결 해제 후 원본 표시 상태 복구가 통과했다.
+- `npm test` 296/296 통과. 런타임 시험과 두 대상 파일 `node --check`, `git diff --check` 통과. 최종 로그와 캡처 및 판정은 `docs/verification/RUNTIME_ATTACH_NATIVE_STYLE.md`에 기록했다.
+- 시험 사본에서만 `electron/main.cjs`가 달라졌고 `src/index.html`과 preload는 그대로였다. 사용자 설치본·프로필·업데이트 캐시는 접근하지 않았다. 고유 임시 프로필을 사용했고 시험용 임시 트리는 종료 뒤 정리했다. 패키지 설치·실제 공급원·영상 재생·무수정 설치본에 Companion 연결은 검증하지 않았다.
+
 ## 2026-10-11 v0.5.14 런타임 Companion 연결 실증
 
 - 요청 기준 `codex/runtime-companion-prototype` / `dcd6b9818c0f13fd9970cc3c94e4539fd33aeb64`에서 `codex/runtime-attach-feasibility`를 만들었다. upstream v0.5.14 (`f095fc3d775451e144ed780e1fa081f739927652`) 소스 아카이브를 시스템 임시 폴더에 풀어 실제 Electron renderer를 시험했다.
