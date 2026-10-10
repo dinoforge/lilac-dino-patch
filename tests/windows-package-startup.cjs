@@ -251,7 +251,26 @@ async function main() {
     assert.equal(resumeBoundary.defaultAtBoundary, 0, JSON.stringify(resumeBoundary));
     assert.equal(resumeBoundary.explicitContinueAtBoundary, 95, JSON.stringify(resumeBoundary));
 
-    console.log(`Packaged Windows exe startup passed: ${path.basename(exe)} loaded app.asar, home/search UI, preload bridge and app-info IPC (${appInfo.version}, ${appInfo.platform}/${appInfo.arch}); its rendered resume choice and 95 percent boundary passed; profile and DNS resolution were isolated under ${tempRoot}.`);
+    const episodeEnd = await evaluate(cdp, `(() => {
+      const previousSibling = window.siblingEpisode, previousPlay = window.playSiblingEpisode;
+      let automaticPlayCalls = 0;
+      try {
+        window.siblingEpisode = () => ({ provider: 'reanime', number: 4, name: '4' });
+        window.playSiblingEpisode = () => { automaticPlayCalls++; };
+        handleEpisodeEnded();
+        return {
+          message: document.querySelector('#downloadStatus')?.textContent || '',
+          automaticPlayCalls
+        };
+      } finally {
+        window.siblingEpisode = previousSibling;
+        window.playSiblingEpisode = previousPlay;
+      }
+    })()`);
+    assert.equal(episodeEnd.message, '재생이 끝났습니다. 다음 화는 직접 선택해 주세요.', JSON.stringify(episodeEnd));
+    assert.equal(episodeEnd.automaticPlayCalls, 0, JSON.stringify(episodeEnd));
+
+    console.log(`Packaged Windows exe startup passed: ${path.basename(exe)} loaded app.asar, home/search UI, preload bridge and app-info IPC (${appInfo.version}, ${appInfo.platform}/${appInfo.arch}); its resume boundary and manual next-episode behavior passed; profile and DNS resolution were isolated under ${tempRoot}.`);
   } finally {
     if (cdp) {
       try { await cdp.send('Browser.close'); } catch {}
