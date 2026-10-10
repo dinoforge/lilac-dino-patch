@@ -20,6 +20,12 @@
 2. 로고, 아이콘, 스크린샷, 폰트, 원본 앱 에셋의 별도 권리와 필수 크레딧을 확인한다.
 3. 각 npm 종속성의 개별 라이선스 고지와 번들 요건을 확인한다.
 
+## 2026-10-10 원본 저장소 공개 라이선스 재확인
+
+- GitHub 저장소 API의 `license.spdx_id`는 [LilacAnime Desktop](https://github.com/whispelyn-byte/LilacAnime-desktop)과 [Android 원본](https://github.com/dream150/LilacAnime) 모두 `null`이다. 데스크톱 `upstream/main`의 현재 트리와 Android 원본의 공개 루트 파일 목록에서 `LICENSE`, `COPYING`, `NOTICE`를 찾지 못했다.
+- 데스크톱 업스트림 README에는 원작자의 허락을 받아 Electron 데스크톱으로 포팅했다고 적혀 있다. 이는 포크 관리자의 공개 설명으로 기록한다. 허락의 원문·대상 코드와 에셋·파생 수정본·재배포·상표 범위는 저장소에 공개돼 있지 않으며, 이번 확인으로 독립 검증하지 못했다.
+- GitHub의 공개 라이선스 파일·메타데이터가 없다는 사실만으로 별도 서면 허락의 존재 여부를 판정할 수는 없다. 반대로 `package.json`의 `MIT` 표기만으로 upstream 원본과 에셋을 다시 배포할 권리가 생기지도 않는다. 범위가 확인되기 전까지 저장소 비공개와 설치 파일 미배포를 유지한다.
+
 ## 영상·작품 공급원
 
 저장소의 활성 공급원 어댑터는 RE:Anime, Miruro, Animenosub, Linkkf, 애니24다. 아래의 사이트 소개나 도메인 확인 페이지는 사이트가 존재하거나 해당 주소가 공식이라는 근거일 뿐, 이 앱이 콘텐츠를 요청·재생·저장·재배포할 권리를 주는 자료는 아니다.
