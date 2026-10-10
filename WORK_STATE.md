@@ -3,7 +3,7 @@
 ## 2026-10-10 최신 작업: 격리 NSIS 설치 앱 스모크
 
 - 현재 `main`의 소스를 `%TEMP%` 임시 복사본에서 별도 앱 ID `com.lilac.anime.desktop.smoke.dcf19f78`와 per-user 설치 설정으로 빌드했다. 설치 파일은 124,546,766바이트이며 SHA-256은 `1B139BB5F196D1D960A216C2976E3C53AFC1E12002CFEEA8BD535EFA10B255B5`다. 작업 저장소의 소스·`dist` 산출물은 바꾸지 않았다.
-- 사용자 승인에 따라 임시 설치 경로와 격리 프로필에서 실행했다. 설치된 EXE의 홈·검색 화면, preload bridge, 앱 정보 IPC, 이어보기 경계(95%), 완료 진행률 100% 저장, 수동 다음 화 동작이 통과했다.
+- 사용자 승인에 따라 임시 설치 경로와 격리 프로필에서 실행했다. 설치된 EXE에서 홈과 검색 입력·버튼, preload bridge, 앱 정보 IPC를 확인했다. renderer 함수 스모크에서 이어보기 경계(95%), 종료 시 진행률 100% 저장, 자동 다음 화 미실행도 통과했다.
 - 설치 패키지에만 네트워크 차단 하네스를 연결했다. main process의 외부 fetch 6건(Re:Anime 4건, Jikan 2건)을 차단했고 loopback DevTools로 화면을 확인했다. 실제 공급원 응답·영상·자막은 사용하지 않았다.
 - 임시 앱을 제거하고 전용 HKCU 등록과 프로필을 정리했다. 기존 `LilacAnime 0.5.9` HKLM 설치 등록은 남아 있다. 임시 빌드 폴더 `C:\Users\공룡\AppData\Local\Temp\lilac-nsis-subtitle-safety-dcf19f78`는 자동 검토 정책이 재귀 삭제를 거부해 남아 있다. 그 안의 프로젝트 `node_modules` junction은 따로 제거했고 원본 종속성이 유지됨을 확인했다.
 - 삭제 기능 점검 중 renderer에는 저장 자막 삭제 UI 호출이 없고 `removeSavedSubtitle`은 preload/main 경계에만 노출된 것을 확인했다. 따라서 실제 앱의 삭제 화면은 아직 없으며, 저장소 안전성은 단위 테스트만 검증한다.
