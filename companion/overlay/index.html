@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>LilacAnime Companion 오버레이</title>
+<link rel="stylesheet" href="overlay.css">
+<script src="renderer.js" defer></script>
+</head>
+<body>
+<main class="overlay-app">
+  <div class="topline">
+    <span class="app-label">LilacAnime Companion</span>
+    <button type="button" id="theme" class="text-action" aria-label="테마 바꾸기">라이트</button>
+  </div>
+  <section class="content-section" aria-label="방영 일정">
+    <header class="section-title">
+      <div>
+        <h1>방영 일정</h1>
+        <p id="quarter">분기를 불러오는 중…</p>
+      </div>
+      <span class="fixture">합성 데이터</span>
+    </header>
+    <nav class="chip-row" id="days" aria-label="요일 선택" role="tablist"></nav>
+    <div id="card" class="work-card"></div>
+  </section>
+  <section class="content-section" aria-labelledby="providers-heading">
+    <header class="section-title"><h2 id="providers-heading">영상 출처 확인</h2></header>
+    <div id="providers" class="provider-list"></div>
+    <p class="note">출처 상태는 UI 시험용 가상 값입니다. 실제 영상 재생 가능 여부가 아닙니다.</p>
+  </section>
+  <section class="content-section connection">
+    <div class="button-row">
+      <button type="button" id="follow" class="chip">원본 창 따라가기</button>
+      <button type="button" id="stop" class="chip" disabled>따라가기 해제</button>
+    </div>
+    <p id="connection-status" role="status" aria-live="polite">연동하지 않음 · 원본은 변경하지 않습니다.</p>
+  </section>
+  <footer>
+    <span>자막 번역은 기존 Companion 파일 방식 이용</span>
+    <span>테스트 버전</span>
+  </footer>
+</main>
+</body>
+</html>
