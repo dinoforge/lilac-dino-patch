@@ -3,10 +3,15 @@
 process.on('uncaughtException', fail);
 process.on('unhandledRejection', fail);
 
-const { app, BrowserWindow, net, session } = require('electron');
+const electron = require('electron');
+const { app, BrowserWindow, net, session } = electron;
+const clipboardWrites = [];
+const originalClipboardWriteText = electron.clipboard.writeText;
+electron.clipboard.writeText = text => { clipboardWrites.push(String(text)); };
 const { execFileSync } = require('node:child_process');
 const asar = require('@electron/asar');
 const assert = require('node:assert/strict');
+assert.notEqual(electron.clipboard.writeText, originalClipboardWriteText, 'the smoke test intercepts clipboard writes before loading the packaged main process');
 const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
@@ -697,6 +702,35 @@ app.whenReady().then(async () => {
       return;
     }
 
+    const actualAppInfo = await win.webContents.executeJavaScript('window.lilac.appDiagnosticInfo()');
+    assert.equal(actualAppInfo.platform, process.platform);
+    assert.equal(actualAppInfo.arch, process.arch);
+    assert.match(actualAppInfo.version, /^\d+\.\d+\.\d+$/);
+    const diagnosticPayload = {
+      app: { version: actualAppInfo.version, platform: actualAppInfo.platform, arch: actualAppInfo.arch, token: 'private-token' },
+      entries: Array.from({ length: 7 }, (_, index) => ({
+        occurredAt: `2026-10-10T00:00:0${index}.000Z`, provider: 'reanime', stage: 'hls-playback',
+        playback: 'online', mediaType: 'hls', serverHost: 'edge.example', videoErrorCode: 3,
+        errorCategory: 'networkError', title: 'private title', url: 'https://secret.example/?token=abc', cookie: 'secret'
+      }))
+    };
+    const diagnosticReport = await win.webContents.executeJavaScript(
+      `window.LilacPlayerDiagnostics.formatReport(${JSON.stringify(diagnosticPayload)})`
+    );
+    assert.equal((diagnosticReport.match(/공급원=reanime/g) || []).length, 5);
+    assert.doesNotMatch(diagnosticReport, /private title|secret\.example|token=abc|cookie/i);
+    assert.equal(await win.webContents.executeJavaScript(`window.lilac.copyText(${JSON.stringify(diagnosticReport)})`), true);
+    assert.deepEqual(clipboardWrites, [diagnosticReport], 'the real packaged preload/main IPC reaches only the test clipboard sink');
+    const emptyCopyError = await win.webContents.executeJavaScript(
+      "window.lilac.copyText('').then(() => '', error => error.message)"
+    );
+    assert.match(emptyCopyError, /비어 있거나/);
+    const largeCopyError = await win.webContents.executeJavaScript(
+      "window.lilac.copyText('x'.repeat(2_000_001)).then(() => '', error => error.message)"
+    );
+    assert.match(largeCopyError, /너무 큽니다/);
+    assert.deepEqual(clipboardWrites, [diagnosticReport], 'invalid clipboard inputs never reach the clipboard sink');
+
     const quarterResult = await win.webContents.executeJavaScript(
       "window.lilac.providerQuarter('reanime', 2026, 4)"
     );
@@ -1274,7 +1308,7 @@ app.whenReady().then(async () => {
     assert.equal(deniedUnknownFetches.length, 0, `no unregistered main-process URL was requested: ${deniedUnknownFetches.join(', ')}`);
     assert.equal(deniedBrowserRequests.length, 0, `no external browser request was allowed or attempted: ${deniedBrowserRequests.join(', ')}`);
 
-    console.log('Packaged Phase 1 smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs and Re:Anime quarter selection UI, Re:Anime latest-airing UI, Linkkf current-day/weekday schedule UI, Animenosub/Ani24 update feeds and Animenosub recent-updates home card, settings source selection and reload into the Animenosub home, renderer search button → result card → detail → episode button → packaged resolver playback, Korean subtitle parsing and save, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
+    console.log('Packaged Phase 1 smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs and Re:Anime quarter selection UI, Re:Anime latest-airing UI, Linkkf current-day/weekday schedule UI, Animenosub/Ani24 update feeds and Animenosub recent-updates home card, settings source selection and reload into the Animenosub home, renderer search button → result card → detail → episode button → packaged resolver playback, Korean subtitle parsing and save, loopback HLS decode, persisted resume, automatic same-kind server fallback, and privacy-filtered diagnostics through the packaged clipboard IPC with an isolated test sink.');
     console.log(`Playback: ${playbackState.width}x${playbackState.height} at ${playbackState.currentTime.toFixed(2)}s; resume: ${resumeState.currentTime.toFixed(2)}s from saved 50%; fallback: ${fallbackState.server} at ${fallbackState.currentTime.toFixed(2)}s with selected subtitle; synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; renderer proxy requests: ${rendererProxyRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: 0; blocked browser requests: 0; external network calls: 0.`);
     await new Promise(resolve => localPlayerServer.close(resolve));
     app.quit();

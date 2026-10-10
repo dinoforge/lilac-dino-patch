@@ -504,3 +504,9 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 - GitHub API의 `license.spdx_id`는 `whispelyn-byte/LilacAnime-desktop`과 `dream150/LilacAnime` 모두 `null`이다. 데스크톱 v0.5.9 `upstream/main` 트리 및 Android 원본 루트 파일 목록에서 `LICENSE`·`COPYING`·`NOTICE`를 찾지 못했다.
 - 데스크톱 업스트림 README의 원작자 허락 주장은 확인했으나, 허락 문서와 이 파생 앱에 적용되는 범위는 공개 근거로 검증되지 않았다. 설치 파일 배포와 공개 전환은 계속 보류하고, 실제 공급원 콘텐츠 요청은 하지 않았다.
+
+## 2026-10-10 패키지 오류 진단 복사 IPC 검증
+
+- `tests/phase1-main.electron.cjs`의 격리 Electron 프로세스에서 `clipboard.writeText`만 테스트 수신기로 대체했다. 실제 시스템 클립보드에 쓰지 않고 빌드된 `app.asar`의 main·preload·renderer 연결을 유지했다.
+- 패키지 renderer에서 실제 앱 정보 IPC를 호출하고 7개 합성 오류로 만든 진단 보고서를 실제 `window.lilac.copyText`→`clipboard:copy-text` main IPC에 전달했다. 허용된 최근 5건만 남고 작품명·전체 URL·토큰·쿠키는 제외됐으며 테스트 수신기는 보고서만 받았다. 빈 문자열과 2MB 초과 입력은 거부되고 수신기에 기록되지 않았다.
+- `npm run test:phase1-main`과 `npm run test:phase1-source-restart` 통과. main 스모크는 합성 HTTP fixture 89회, 등록되지 않은 fetch·차단된 브라우저 요청·외부 네트워크 호출 0회였다. `node --check tests/phase1-main.electron.cjs` 및 `git diff --check` 통과. 시스템 클립보드와 설치 NSIS UI는 검증하지 않았다.
