@@ -560,5 +560,5 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 
 ## 2026-10-10 패키지 회차 종료 동작
 
-- `tests/windows-package-startup.cjs`가 실제 `LilacAnime.exe`의 `app.asar` renderer에서 다음 회차가 있는 상태로 `handleEpisodeEnded()`를 호출하도록 확장했다. 종료 안내가 다음 화 직접 선택을 요구하고 자동 재생 함수는 호출되지 않는지 확인한다.
+- `tests/windows-package-startup.cjs`가 실제 `LilacAnime.exe`의 `app.asar` renderer에서 합성 시청 기록으로 `handleEpisodeEnded()`를 호출하도록 확장했다. 완료 진행률이 100%로 저장되고, 다음 회차가 있어도 안내만 보이며 자동 재생 함수는 호출되지 않는지 확인한다.
 - `npm run test:phase1-exe`와 `npm test` 243/243, `git diff --check`가 통과했다. 실제 영상·회차 공급원은 쓰지 않았으며 테스트 전용 프로필과 합성 다음 회차를 사용했다.
