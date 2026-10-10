@@ -135,9 +135,8 @@ function create() {
     }
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  window.webContents.on('will-navigate', (event, url) => {
-    if (url !== 'file://' + HTML.replace(/\\/g, '/')) event.preventDefault();
-  });
+  // Only app-owned loadFile(HTML) may navigate. No links or renderer redirects.
+  window.webContents.on('will-navigate', event => event.preventDefault());
   window.once('ready-to-show', () => window.show());
   window.on('closed', () => { stop(); window = null; });
   window.loadFile(HTML);
