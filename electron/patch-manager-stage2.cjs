@@ -84,8 +84,8 @@ function registerPatch02Handlers(deps) {
   registerManualTranslationSessionIpc({ ipcMain, app, shell: deps.shell || require('electron').shell, subtitleStore });
   // The embedded ChatGPT page is opened only by a user click. No web page
   // DOM, session credentials or chat output are read by this handler.
-  let embeddedChatGPT = null;
-  ipcMain.handle('patch:chatgpt-web:open', () => {
+  let embeddedChatGPT = null, webDriver = null;
+  function getWebService() {
     if (!embeddedChatGPT) {
       const native = deps.electron || require('electron');
       const { createEmbeddedChatGPTBrowser } = require('./embedded-chatgpt-web.cjs');
@@ -94,8 +94,25 @@ function registerPatch02Handlers(deps) {
         shell: deps.shell || native.shell
       });
     }
-    return embeddedChatGPT.open();
-  });
+    return embeddedChatGPT;
+  }
+  function getWebDriver() {
+    if (!webDriver) {
+      const { createWebAutoTranslation } = require('./chatgpt-web-ui-driver.cjs');
+      const service = getWebService();
+      webDriver = createWebAutoTranslation({
+        open: service.open,
+        getWindow: service.getWindow,
+        ...deps.webDriverOptions
+      });
+    }
+    return webDriver;
+  }
+  ipcMain.handle('patch:chatgpt-web:open', () => getWebService().open());
+  // Explicit clicks only. The website itself may refuse automation or change
+  // its DOM; never silently fall back to scraping account data.
+  ipcMain.handle('patch:chatgpt-web:translate', (_, input) => getWebDriver().run(input));
+  ipcMain.handle('patch:chatgpt-web:cancel', () => webDriver?.cancel() ?? true);
   ipcMain.handle('patch:translation-prompt', (_, language) => loadTranslationPrompt(String(language || '')));
   ipcMain.handle('patch:clipboard-copy', (_, value) => {
     const text = String(value ?? '');
@@ -137,7 +154,7 @@ function registerPatch02Handlers(deps) {
   });
   return [
     'patch:translation-prompt', 'patch:clipboard-copy', 'patch:clipboard-read', 'patch:manual-subtitle-save',
-    'patch:chatgpt-web:open',
+    'patch:chatgpt-web:open', 'patch:chatgpt-web:translate', 'patch:chatgpt-web:cancel',
     'manual-translation:settings:get', 'manual-translation:settings:save',
     'manual-translation:session:get', 'manual-translation:session:save', 'manual-translation:session:remove',
     'manual-translation:translated-exists', 'manual-translation:subtitle:reveal', 'manual-translation:source:get'
