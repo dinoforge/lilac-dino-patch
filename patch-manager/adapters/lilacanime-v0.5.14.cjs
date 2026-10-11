@@ -67,7 +67,7 @@ function makeLilacAnimeV0514Manifest(projectRoot = path.resolve(__dirname, '../.
       kind: 'insert-before',
       file: 'electron/main.cjs',
       anchor: "  ipcMain.handle('provider:season', (_, provider) => homeShows(provider,'season'));",
-      content: `  const { registerPatch0102Handlers } = require('./patch-manager-stage2.cjs');\n  registerPatch0102Handlers({\n    ipcMain, app, subtitleStore, clipboard: require('electron').clipboard, shell: require('electron').shell, safeStorage: require('electron').safeStorage,\n    providerFetch, REANIME_WEB, ANIMENOSUB_WEB, reanimeItems, miruroApi, miruroItem,\n    miruroHasEpisodes, animenosubList, cheerio\n  });\n`
+      content: `  const { registerPatch0102Handlers } = require('./patch-manager-stage2.cjs');\n  registerPatch0102Handlers({\n    ipcMain, app, subtitleStore, clipboard: require('electron').clipboard, shell: require('electron').shell,\n    providerFetch, REANIME_WEB, ANIMENOSUB_WEB, reanimeItems, miruroApi, miruroItem,\n    miruroHasEpisodes, animenosubList, cheerio\n  });\n`
     },
     {
       kind: 'insert-before',
