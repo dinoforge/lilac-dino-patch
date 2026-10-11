@@ -56,12 +56,7 @@ const PATCH02_PRELOAD = Object.freeze([
   "  patchTranslationPrompt: language => ipcRenderer.invoke('patch:translation-prompt', language),",
   "  patchCopyText: text => ipcRenderer.invoke('patch:clipboard-copy', text),",
   "  patchReadText: () => ipcRenderer.invoke('patch:clipboard-read'),",
-  "  patchSIWCStatus: () => ipcRenderer.invoke('siwc:status'),",
-  "  patchSIWCConnect: () => ipcRenderer.invoke('siwc:connect'),",
-  "  patchSIWCDisconnect: () => ipcRenderer.invoke('siwc:disconnect'),",
-  "  patchSIWCModels: () => ipcRenderer.invoke('siwc:models'),",
-  "  patchSIWCTranslate: input => ipcRenderer.invoke('siwc:translate', input),",
-  "  patchSIWCCancel: () => ipcRenderer.invoke('siwc:cancel'),",
+  "  patchOpenChatGPTEmbedded: () => ipcRenderer.invoke('patch:chatgpt-web:open'),",
   "  patchSaveManualSubtitle: input => ipcRenderer.invoke('patch:manual-subtitle-save', input),",
   "  patchManualTranslationSettings: () => ipcRenderer.invoke('manual-translation:settings:get'),",
   "  patchSaveManualTranslationSettings: value => ipcRenderer.invoke('manual-translation:settings:save', value),",
@@ -141,7 +136,7 @@ function mainBridgeSource(flags) {
     'providerFetch', 'REANIME_WEB', 'ANIMENOSUB_WEB', 'reanimeItems',
     'miruroApi', 'miruroItem', 'miruroHasEpisodes', 'animenosubList', 'cheerio'
   );
-  if (flags['patch-02']) deps.push('app', 'subtitleStore', 'clipboard: require("electron").clipboard', 'shell: require("electron").shell', 'safeStorage: require("electron").safeStorage');
+  if (flags['patch-02']) deps.push('app', 'subtitleStore', 'clipboard: require("electron").clipboard', 'shell: require("electron").shell');
   const dependencyObject = deps.map(value => `    ${value}`).join(',\n');
   return [
     "  const { registerPatch0102Handlers } = require('./patch-manager-stage2.cjs');",
@@ -164,7 +159,6 @@ function htmlBridgeSource(flags) {
   if (flags['patch-01']) scripts.push('patch-manager-stage2-core.js', 'weekday-schedule.js', 'integrated-search.js');
   if (flags['patch-02']) scripts.push('manual-subtitle-translation.js');
   scripts.push('patch-manager-stage2.js');
-  if (flags['patch-02']) scripts.push('siwc-subtitle-bridge.js');
   const config = `<script>window.DinoLilacPatchFeatures = Object.freeze(${JSON.stringify(flags)});</script>`;
   return `  ${config}\n${scripts.map(file => `  <script src="${file}"></script>`).join('\n')}\n`;
 }
