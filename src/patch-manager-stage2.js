@@ -429,6 +429,17 @@
     const box = document.createElement('div'); box.id = 'patch0102ChatGPTSettings'; box.className = 'setting-block patch0102-chatgpt-settings';
     box.innerHTML = '<b>ChatGPT 수동 번역</b><p id="patch0102ChatGPTAccountState" role="status">공식 ChatGPT 앱 연결 자격이 확인되지 않아 로그인 상태를 조회하지 않습니다. 브라우저의 로그인과 이 앱의 연결은 별개입니다.</p><div class="patch0102-manual-actions"><button id="patch0102ChatGPTConnect" type="button" disabled>ChatGPT 계정 연결</button><button id="patch0102ChatGPTCheck" type="button">로그인 상태 확인</button><button id="patch0102ChatGPTDisconnect" type="button" disabled>계정 연결 해제</button><button id="patch0102ChatGPTManual" type="button">수동 번역으로 전환</button></div><label class="setting-switch"><span><b>번역 완료 후 앱 내부 임시 데이터 정리</b><small>저장된 한국어 자막은 유지하고 실패·중단 작업은 이어하기 위해 보존합니다.</small></span><input id="patch0102ChatGPTCleanupEnabled" type="checkbox" checked></label><label>정리 시점 <select id="patch0102ChatGPTCleanupTiming"><option value="immediate">즉시</option><option value="five-minutes">5분 뒤</option><option value="on-close">앱을 닫을 때</option></select></label><p>ChatGPT 웹 대화는 앱에서 읽거나 삭제하지 않습니다. 임시 채팅과 대화 정리는 ChatGPT 웹사이트에서 직접 하세요.</p><div class="patch0102-manual-actions"><button id="patch0102ChatGPTOpen" type="button">ChatGPT 열기</button><button id="patch0102ChatGPTCleanupHelp" type="button">ChatGPT 대화 정리 안내</button></div>';
     pane.append(box);
+    // SIWC is an additional provider choice; it is not the legacy web-copy translation
+    // nor the existing local/cloud AI translator. Do not present an unverified OAuth
+    // or ChatGPT plan grant as working authentication.
+    if (!$('#patch0102SIWCOption')) {
+      const siwc = document.createElement('div');
+      siwc.id = 'patch0102SIWCOption';
+      siwc.className = 'setting-block patch0102-siwc-option';
+      siwc.innerHTML = '<b>추가 번역 방식 · ChatGPT 계정 연결 (SIWC)</b><p id="patch0102SIWCState" role="status">독립된 추가 옵션입니다. 현재 이 비공개 프로젝트의 SIWC 사용 자격·계정 인증·AI 요청 권한이 검증되지 않아 실제 계정 연결은 비활성화되어 있습니다.</p><div class="patch0102-manual-actions"><button id="patch0102SIWCConnect" type="button" disabled title="공식 인증 연동 및 실사용 검증 뒤 활성화">ChatGPT 계정으로 연결 (준비 중)</button><button id="patch0102SIWCHelp" type="button">공식 연결 안내</button></div><small>로컬 AI · Gemini/OpenAI API · ChatGPT 수동 번역은 그대로 사용할 수 있습니다. ChatGPT 계정 연결에 성공하더라도 웹 대화 삭제 권한은 제공되지 않습니다.</small>';
+      pane.append(siwc);
+      $('#patch0102SIWCHelp').addEventListener('click', () => api.openExternal('https://developers.openai.com/siwc/token-sharing-open-source/sign-in').catch(error => setText($('#patch0102SIWCState'), '안내 페이지를 열지 못했습니다: ' + error.message)));
+    }
     Promise.resolve(api.patchManualTranslationSettings?.() || { autoCleanup: true, cleanupTiming: 'immediate' }).then(value => {
       $('#patch0102ChatGPTCleanupEnabled').checked = value?.autoCleanup !== false;
       $('#patch0102ChatGPTCleanupTiming').value = ['immediate', 'five-minutes', 'on-close'].includes(value?.cleanupTiming) ? value.cleanupTiming : 'immediate';
