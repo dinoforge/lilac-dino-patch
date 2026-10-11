@@ -27,7 +27,10 @@ assert.ok(fs.existsSync(htmlPath));
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lilac-integrated-search-'));
 process.on('exit', () => { try { fs.rmSync(tempRoot, { recursive: true, force: true }); } catch {} });
 const userData = path.join(tempRoot, 'profile');
+const sessionData = path.join(tempRoot, 'session');
 const downloadsRoot = path.join(tempRoot, 'downloads');
+fs.mkdirSync(userData);
+fs.mkdirSync(sessionData);
 fs.mkdirSync(downloadsRoot);
 assert.equal(path.dirname(tempRoot), os.tmpdir(), 'Electron user data is isolated under the OS temp folder');
 
@@ -42,6 +45,7 @@ const videoUrl = pathToFileURL(videoPath).href;
 const subtitleUrl = pathToFileURL(subtitlePath).href;
 
 app.setPath('userData', userData);
+app.setPath('sessionData', sessionData);
 app.disableHardwareAcceleration();
 
 const blockedRequests = [];

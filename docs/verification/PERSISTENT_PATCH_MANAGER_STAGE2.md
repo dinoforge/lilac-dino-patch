@@ -64,8 +64,8 @@ fixture에서 다음을 검증했다.
 ## Windows unpacked 검증
 
 - 새 worktree에서 `node_modules`가 없어서 기존 프로젝트 의존성을 임시 junction으로 재사용했다. 의존성 설치나 package manifest 변경은 하지 않았다.
-- `electron-builder --win --dir --publish never`를 직접 실행해 `dist\win-unpacked`를 생성했다. `npm run pack`의 prepack 스크립트와 NSIS 설치기는 실행하지 않았다.
-- `npm run test:phase1-electron`: 통과. 검색 IPC 30회, 공급원 resolve 3회, renderer 오류 0회, 차단된 외부 요청 0회. 테스트 전용 임시 `userData`와 합성 미디어를 사용했다.
+- `electron-builder --win --dir --publish never`를 직접 실행해 `dist\win-unpacked`를 생성했다. 빌드에는 격리 ID `com.lilac.anime.desktop.stage2.test.20261011`, 제품명 `LilacAnime Stage2 Test`, 실행 파일명 `LilacAnimeStage2Test.exe`를 지정했다. `npm run pack`의 prepack 스크립트와 NSIS 설치기는 실행하지 않았다.
+- `npm run test:phase1-electron`: 통과. 검색 IPC 30회, 공급원 resolve 3회, renderer 오류 0회, 차단된 외부 요청 0회. 테스트 전용 임시 `userData`·`sessionData`와 합성 미디어를 사용한다.
 - `npm run test:phase1-main`: 통과. 검색→상세→회차→합성 재생, 한국어 자막, 이어보기, 자막 프롬프트 및 수동 번역 helper 흐름 등 기존 Phase 1 smoke를 통과했다. 합성 HTTP fixture 104회, 알 수 없는 fetch 0회, 차단 브라우저 요청 0회, 외부 네트워크 0회. 로그에 출력된 잘못된 clipboard/resolve IPC 오류는 거부 동작을 검증하는 harness 입력이며 프로세스 테스트 종료 코드는 0이었다.
 - 이것은 현재 프로젝트의 unpacked 패키지 테스트다. 공식 v0.5.14 원본 앱의 화면을 실행해 패치 UI를 확인한 결과는 아니다. 이번 작업은 Computer Use나 화면 캡처를 사용하지 않았다.
 
