@@ -92,25 +92,23 @@ test('embedded page load failure destroys the dedicated window', async () => {
   assert.equal(mock.windows[0].destroyed, true);
 });
 
-test('unsupported ChatGPT web automation is disabled and the manual route stays available', () => {
+test('experimental ChatGPT web entry is enabled without changing existing translation mode selection', () => {
   const settingsStart = rendererSource.indexOf('function addManualTranslationSettings()');
   const settingsEnd = rendererSource.indexOf('function addManualTranslationUi()', settingsStart);
-  assert.notEqual(settingsStart, -1);
-  assert.notEqual(settingsEnd, -1);
   const settings = rendererSource.slice(settingsStart, settingsEnd);
-  assert.match(settings, /autoChoices = \$\('#jimakuTranslateChoices'\)/);
-  assert.match(settings, /unavailable\.id = 'patch0102ChatGPTAutoUnavailable'[\s\S]{0,220}unavailable\.disabled = true[\s\S]{0,180}autoChoices\.append\(unavailable\)/);
-  assert.match(settings, /ChatGPT 웹 화면에 요청을 자동 입력하거나 응답을 읽지 않습니다/);
+  assert.match(settings, /id = 'patch0102ChatGPTAutoUnavailable'/);
+  assert.match(settings, /choice\.textContent = 'ChatGPT 웹 자동 번역 \(실험\)'/);
+  assert.match(settings, /choice\.addEventListener\('click',/);
+  assert.doesNotMatch(settings, /choice\.disabled = true/);
   assert.match(settings, /id="patch0102ChatGPTDeleteUnavailable" type="button" disabled/);
-  assert.match(settings, /ChatGPT 대화 목록을 읽거나 대화를 삭제할 수 없습니다/);
-  assert.match(settings, /id="patch0102ChatGPTManual" type="button">수동 번역 준비/);
-  assert.match(settings, /\$\('#patch0102ManualStart'\)\?\.click\(\)/);
-  assert.match(rendererSource, /id = 'patch0102ManualStart'[\s\S]{0,180}ChatGPT 수동 번역/);
-  assert.match(rendererSource, /요청을 복사하고 내장 ChatGPT 창을 열었습니다\. 직접 붙여넣고 전송한 뒤 결과를 가져오세요/);
-
-  const embeddedSource = fs.readFileSync(path.join(__dirname, '../../electron/embedded-chatgpt-web.cjs'), 'utf8');
-  assert.doesNotMatch(embeddedSource, /executeJavaScript|executeJavaScriptInIsolatedWorld|sendInputEvent|insertText/);
-  assert.doesNotMatch(embeddedSource, /conversation.{0,30}delete|delete.{0,30}conversation/i);
+  assert.match(settings, /수동 번역 준비/);
+  assert.match(rendererSource, /id = 'patch0102WebAutoStart'/);
+  assert.match(rendererSource, /const runAuto = async/);
+  assert.match(rendererSource, /await api\.patchChatGPTWebTranslate\(/);
+  assert.match(rendererSource, /manual\.parseResponse\(response\?\.text, batch\.map/);
+  assert.match(rendererSource, /if \(!value\.persisted\) throw new Error/);
+  assert.match(rendererSource, /value\.inflightBatch === value\.index/);
+  assert.match(rendererSource, /api\.patchChatGPTWebCancel\?\.\(\)/);
 });
 
 test('Patch 02 exposes embedded window IPC but only opens it when called', async () => {
@@ -127,6 +125,9 @@ test('Patch 02 exposes embedded window IPC but only opens it when called', async
       electron: mock
     });
     assert.ok(registered.includes('patch:chatgpt-web:open'));
+    assert.ok(registered.includes('patch:chatgpt-web:translate'));
+    assert.ok(registered.includes('patch:chatgpt-web:cancel'));
+    assert.equal(handlers.has('patch:chatgpt-web:translate'), true);
     assert.equal(handlers.has('siwc:connect'), false);
     assert.equal(mock.windows.length, 0);
     const result = await handlers.get('patch:chatgpt-web:open')();
@@ -141,11 +142,14 @@ test('official v0.5.14 patch manifest carries embedded bridge and no SIWC runtim
   const manifest = makeLilacAnimeV0514Manifest();
   const files = manifest.actions.filter(action => action.kind === 'add-file').map(action => action.file);
   assert.ok(files.includes('electron/embedded-chatgpt-web.cjs'));
+  assert.ok(files.includes('electron/chatgpt-web-ui-driver.cjs'));
   assert.ok(!files.includes('electron/siwc-client.cjs'));
   assert.ok(!files.includes('src/siwc-subtitle-bridge.js'));
   const preload = manifest.actions.find(action => action.file === 'electron/preload.cjs').content;
   const html = manifest.actions.find(action => action.file === 'src/index.html').content;
   assert.match(preload, /patchOpenChatGPTEmbedded/);
+  assert.match(preload, /patchChatGPTWebTranslate/);
+  assert.match(preload, /patchChatGPTWebCancel/);
   assert.doesNotMatch(preload, /SIWC|siwc/);
   assert.doesNotMatch(html, /siwc/i);
 });
