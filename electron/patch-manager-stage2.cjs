@@ -69,6 +69,14 @@ function registerPatch0102Handlers(deps) {
     throw new TypeError('Patch 01·02 IPC 의존성이 올바르지 않습니다.');
   }
   registerManualTranslationSessionIpc({ ipcMain, app, shell: deps.shell || require('electron').shell, subtitleStore });
+  // Registration is isolated to the patched Electron runtime; Node-only synthetic fixtures
+  // do not have a native OS browser or secure credential store.
+  const native = require('electron');
+  const siwcShell = deps.shell || native.shell;
+  if (typeof siwcShell?.openExternal === 'function') {
+    const { registerSIWCHandlers } = require('./siwc-client.cjs');
+    registerSIWCHandlers({ ipcMain, app, shell: siwcShell, safeStorage: deps.safeStorage || native.safeStorage, fetchImpl: deps.fetchImpl });
+  }
   const quarterDeps = {
     providerFetch: deps.providerFetch, REANIME_WEB: deps.REANIME_WEB, ANIMENOSUB_WEB: deps.ANIMENOSUB_WEB,
     reanimeItems: deps.reanimeItems, miruroApi: deps.miruroApi, miruroItem: deps.miruroItem,
