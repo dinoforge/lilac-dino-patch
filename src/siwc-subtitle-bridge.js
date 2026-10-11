@@ -48,11 +48,11 @@
 
   async function translate() {
     if (preparing || currentRun?.busy) return;
-    preparing = true;
     const source=currentSubtitle, playbackId=playbackRequestId;
     if (!source?.path || !source?.src) {
       notice('영어 또는 일본어 원본 자막을 먼저 선택해 주세요.'); return;
     }
+    preparing = true;
     let run;
     try {
       const account=await api.patchSIWCStatus();
