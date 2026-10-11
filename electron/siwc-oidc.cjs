@@ -63,7 +63,9 @@ async function readResponseStream(stream, {limit=2_000_000} = {}) {
     while(true) {
       const {value,done}=await reader.read();if(done) break;
       bytes+=value.byteLength;if(bytes>limit*2) throw new Error('SIWC response exceeded maximum size');
-      buffer+=decoder.decode(value,{stream:true}).replace(/\r\n/g,'\n');
+      // Normalize after concatenation so CRLF pairs split across network chunks work.
+      buffer+=decoder.decode(value,{stream:true});
+      buffer=buffer.replace(/\r\n/g,'\n');
       if(buffer.length>limit*2) throw new Error('SIWC event buffer exceeded maximum size');
       let split;
       while((split=buffer.indexOf('\n\n'))!==-1){
