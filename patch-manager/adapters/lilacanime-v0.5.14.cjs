@@ -30,6 +30,7 @@ const PAYLOAD_FILES = Object.freeze([
   ['src/integrated-search.js', 'src/integrated-search.js'],
   ['src/manual-subtitle-translation.js', 'src/manual-subtitle-translation.js'],
   ['src/patch-manager-stage2.js', 'src/patch-manager-stage2.js'],
+  ['src/siwc-subtitle-bridge.js', 'src/siwc-subtitle-bridge.js'],
   ['electron/quarter-catalog.cjs', 'electron/quarter-catalog.cjs'],
   ['electron/anilist-client.cjs', 'electron/anilist-client.cjs'],
   ['electron/weekday-episodes.cjs', 'electron/weekday-episodes.cjs'],
@@ -83,7 +84,7 @@ function makeLilacAnimeV0514Manifest(projectRoot = path.resolve(__dirname, '../.
       kind: 'insert-before',
       file: 'src/index.html',
       anchor: '</body>',
-      content: `  <script src="patch-manager-stage2-core.js"></script>\n  <script src="weekday-schedule.js"></script>\n  <script src="integrated-search.js"></script>\n  <script src="manual-subtitle-translation.js"></script>\n  <script src="patch-manager-stage2.js"></script>\n`
+      content: `  <script src="patch-manager-stage2-core.js"></script>\n  <script src="weekday-schedule.js"></script>\n  <script src="integrated-search.js"></script>\n  <script src="manual-subtitle-translation.js"></script>\n  <script src="patch-manager-stage2.js"></script>\n  <script src="siwc-subtitle-bridge.js"></script>\n`
     }
   ];
   for (const [source, target] of PAYLOAD_FILES) actions.push(readPayload(projectRoot, source, target));
