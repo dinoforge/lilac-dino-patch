@@ -101,7 +101,7 @@ function assertOnlyPatch(plan, id) {
     assert.ok(files.includes('electron/weekday-episodes.cjs'));
     assert.ok(files.includes('src/patch-manager-stage2.js'));
     assert.ok(!files.includes('src/manual-subtitle-translation.js'));
-    assert.ok(!files.includes('electron/siwc-client.cjs'));
+    assert.ok(!files.includes('electron/embedded-chatgpt-web.cjs'));
     assert.match(html, /"patch-01":true,"patch-02":false/);
     assert.match(html, /weekday-schedule\.js/);
     assert.doesNotMatch(html, /manual-subtitle-translation\.js|siwc-subtitle-bridge\.js/);
@@ -111,14 +111,18 @@ function assertOnlyPatch(plan, id) {
   } else {
     assert.ok(!files.includes('src/weekday-schedule.js'));
     assert.ok(files.includes('src/manual-subtitle-translation.js'));
-    assert.ok(files.includes('electron/siwc-client.cjs'));
+    assert.ok(files.includes('electron/embedded-chatgpt-web.cjs'));
+    assert.ok(!files.includes('electron/siwc-client.cjs'));
     assert.ok(files.includes('electron/prompts/영어 번역 프롬프트.txt'));
     assert.match(html, /"patch-01":false,"patch-02":true/);
     assert.doesNotMatch(html, /weekday-schedule\.js|patch-manager-stage2-core\.js/);
-    assert.match(html, /manual-subtitle-translation\.js[\s\S]*patch-manager-stage2\.js[\s\S]*siwc-subtitle-bridge\.js/);
+    assert.match(html, /manual-subtitle-translation\.js[\s\S]*patch-manager-stage2\.js/);
+    assert.doesNotMatch(html, /siwc-subtitle-bridge\.js/);
     assert.match(main, /"patch-01":false,"patch-02":true/);
     assert.doesNotMatch(main, /providerFetch|REANIME_WEB/);
     assert.match(preload, /patchTranslationPrompt/);
+    assert.match(preload, /patchOpenChatGPTEmbedded/);
+    assert.doesNotMatch(preload, /patchSIWC/);
     assert.doesNotMatch(preload, /patchQuarter|patchWeekdayEpisodes/);
   }
   assert.equal(files.filter(file => file === 'src/patch-manager-stage2.js').length, 1, 'shared renderer bridge is copied once');
