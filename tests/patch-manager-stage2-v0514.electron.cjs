@@ -36,10 +36,31 @@ const patchCalls = [];
 const savedTranslations = [];
 const savedSubtitleEntries = [];
 const copiedTexts = [];
+const embeddedWindows = [];
 const revealedFiles = [];
 let win = null;
 let finished = false;
 const rendererErrors = [];
+
+class MockEmbeddedChatGPTWindow {
+  constructor(options) {
+    this.options = options;
+    this.loaded = [];
+    this.destroyed = false;
+    this.webContents = {
+      session: { setPermissionRequestHandler() {} },
+      on() {},
+      setWindowOpenHandler() {}
+    };
+    embeddedWindows.push(this);
+  }
+  on() {}
+  async loadURL(url) { this.loaded.push(url); }
+  isDestroyed() { return this.destroyed; }
+  show() {}
+  focus() {}
+  destroy() { this.destroyed = true; }
+}
 
 function fail(error) {
   if (finished) return;
@@ -149,6 +170,7 @@ function writeHarness() {
     patchWeekdayEpisodes:(...args)=>ipcRenderer.invoke('fixture:weekday-episodes',...args),
     patchTranslationPrompt:(...args)=>ipcRenderer.invoke('patch:translation-prompt',...args),
     patchCopyText:(...args)=>ipcRenderer.invoke('patch:clipboard-copy',...args),
+    patchOpenChatGPTEmbedded:(...args)=>ipcRenderer.invoke('patch:chatgpt-web:open',...args),
     patchSaveManualSubtitle:(...args)=>ipcRenderer.invoke('patch:manual-subtitle-save',...args),
     patchManualTranslationSettings:(...args)=>ipcRenderer.invoke('manual-translation:settings:get',...args),
     patchSaveManualTranslationSettings:(...args)=>ipcRenderer.invoke('manual-translation:settings:save',...args),
@@ -207,6 +229,7 @@ async function run() {
 
   registerPatch0102Handlers({
     ipcMain, app,
+    electron: { BrowserWindow: MockEmbeddedChatGPTWindow },
     shell: { showItemInFolder: file => revealedFiles.push(file) },
     subtitleStore: {
       list: key => savedSubtitleEntries.filter(item => item.key === key),
@@ -270,13 +293,15 @@ async function run() {
   console.log('quarter and weekday fixture rendered');
   const accountStatus = await win.webContents.executeJavaScript("document.querySelector('#patch0102ChatGPTAccountState').textContent");
   assert.match(accountStatus, /브라우저 로그인은 사용자가 직접 합니다/);
-  const chatGPTModes = await win.webContents.executeJavaScript(`(()=>{const choice=document.querySelector('#patch0102ChatGPTAutoUnavailable');const manual=document.querySelector('#patch0102ChatGPTManual');const deletion=document.querySelector('#patch0102ChatGPTDeleteUnavailable');return {choiceDisabled:choice?.disabled===true,choiceInAutoModes:choice?.parentElement?.id==='jimakuTranslateChoices',choiceHasNoPersistedValue:!choice?.hasAttribute('data-value'),manualEnabled:manual?.disabled===false,deletionDisabled:deletion?.disabled===true,reason:document.querySelector('#patch0102ChatGPTAutoReason')?.textContent||''}})()`);
-  assert.equal(chatGPTModes.choiceDisabled, true);
+  const chatGPTModes = await win.webContents.executeJavaScript(`(()=>{const choice=document.querySelector('#patch0102ChatGPTAutoUnavailable');const manual=document.querySelector('#patch0102ChatGPTManual');const auto=document.querySelector('#patch0102ChatGPTAutoStart');const deletion=document.querySelector('#patch0102ChatGPTDeleteUnavailable');return {choiceDisabled:choice?.disabled===true,choiceInAutoModes:choice?.parentElement?.id==='jimakuTranslateChoices',choiceHasNoPersistedValue:!choice?.hasAttribute('data-value'),translationModes:[...document.querySelectorAll('#jimakuTranslateChoices button[data-value]')].map(button=>button.dataset.value),manualEnabled:manual?.disabled===false,autoEnabled:auto?.disabled===false,deletionDisabled:deletion?.disabled===true,reason:document.querySelector('#patch0102ChatGPTAutoReason')?.textContent||''}})()`);
+  assert.equal(chatGPTModes.choiceDisabled, false);
   assert.equal(chatGPTModes.choiceInAutoModes, true);
   assert.equal(chatGPTModes.choiceHasNoPersistedValue, true, 'unsupported choice cannot overwrite the existing off/cloud/local setting');
+  assert.deepEqual(chatGPTModes.translationModes, ['off', 'cloud', 'local']);
   assert.equal(chatGPTModes.manualEnabled, true);
+  assert.equal(chatGPTModes.autoEnabled, true);
   assert.equal(chatGPTModes.deletionDisabled, true);
-  assert.match(chatGPTModes.reason, /기존 수동 번역을 사용/);
+  assert.match(chatGPTModes.reason, /자동 전송하거나 응답을 자동 수집하는 기능은 지원하지 않습니다/);
 
   const overview = await win.webContents.executeJavaScript(`({
     quarterTitle:document.querySelector('#seasonTitle').textContent,
@@ -315,13 +340,24 @@ async function run() {
   assert.ok(patchCalls.some(call => call.provider === 'reanime') && patchCalls.some(call => call.provider === 'miruro'));
   assert.ok(providerCalls.some(call => call.kind === 'reanime') && providerCalls.some(call => call.kind === 'animenosub'));
 
-  await win.webContents.executeJavaScript(`document.querySelector('#patch0102ManualStart').click()`);
-  console.log('manual translation started');
-  await waitFor('manual Japanese translation panel', async () => win.webContents.executeJavaScript(
+  await win.webContents.executeJavaScript(`document.querySelector('#patch0102WebAutoStart').click()`);
+  console.log('experimental request preparation clicked');
+  await waitFor('experimental Japanese request prepared in the manual translation panel', async () => win.webContents.executeJavaScript(
     `Boolean(document.querySelector('#patch0102ManualPanel') && !document.querySelector('#patch0102ManualPanel').classList.contains('hidden'))`
   ));
-  await win.webContents.executeJavaScript(`document.querySelector('#patch0102ManualCopy').click()`);
-  await waitFor('ChatGPT request copied without opening external app', () => copiedTexts.length > 0);
+  await waitFor('experimental request copied and the isolated embedded window opened', () =>
+    copiedTexts.length === 1 && embeddedWindows.length === 1 && embeddedWindows[0].loaded.length === 1);
+  assert.match(copiedTexts[0], /일본어/);
+  assert.deepEqual(embeddedWindows[0].loaded, ['https://chatgpt.com/']);
+  assert.equal(embeddedWindows[0].options.webPreferences.partition, 'persist:dino-lilac-chatgpt-web');
+  assert.equal(embeddedWindows[0].options.webPreferences.nodeIntegration, false);
+  assert.equal(embeddedWindows[0].options.webPreferences.sandbox, true);
+  assert.equal(blockedRequests.length, 0, 'the mock embedded window made no ChatGPT network request');
+  await win.webContents.executeJavaScript(`document.querySelector('#patch0102WebAutoStart').click()`);
+  await waitFor('uncertain experimental batch is held without duplicate preparation', async () => win.webContents.executeJavaScript(
+    `document.querySelector('#patch0102ManualStatus').textContent.includes('중복 전송을 막기 위해 새 요청 준비를 보류했습니다')`
+  ));
+  assert.equal(copiedTexts.length, 1, 'an uncertain batch is not copied or sent again automatically');
   const expectedPrompt = realPromptHandler('japanese');
   assert.ok(copiedTexts[0].includes(expectedPrompt));
   assert.ok(copiedTexts[0].includes('앞 문맥') || copiedTexts[0].includes('작품·회차'));

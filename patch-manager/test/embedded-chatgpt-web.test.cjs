@@ -8,6 +8,7 @@ const path = require('node:path');
 const {
   HOME, SESSION_PARTITION, safeNavigation, createEmbeddedChatGPTBrowser
 } = require('../../electron/embedded-chatgpt-web.cjs');
+const { AUTOMATIC_OUTPUT_UNAVAILABLE, createWebAutoTranslation } = require('../../electron/chatgpt-web-ui-driver.cjs');
 const { registerPatch02Handlers } = require('../../electron/patch-manager-stage2.cjs');
 const { makeLilacAnimeV0514Manifest } = require('../adapters/lilacanime-v0.5.14.cjs');
 const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/patch-manager-stage2.js'), 'utf8');
@@ -92,6 +93,16 @@ test('embedded page load failure destroys the dedicated window', async () => {
   assert.equal(mock.windows[0].destroyed, true);
 });
 
+test('experimental web translation fails closed without opening or reading ChatGPT', async () => {
+  let opened = 0;
+  const driver = createWebAutoTranslation({ open: async () => { opened++; }, getWindow: () => { opened++; return null; } });
+  await assert.rejects(driver.run({ jobKey: 'test-job-key-1', prompt: 'Translate these subtitle cues.' }), error => error.message === AUTOMATIC_OUTPUT_UNAVAILABLE);
+  await assert.rejects(driver.run({ jobKey: 'bad', prompt: '' }), /비어 있거나 크기 제한/);
+  assert.equal(opened, 0);
+  assert.equal(driver.busy(), false);
+  assert.equal(driver.cancel(), true);
+});
+
 test('experimental ChatGPT web entry is enabled without changing existing translation mode selection', () => {
   const settingsStart = rendererSource.indexOf('function addManualTranslationSettings()');
   const settingsEnd = rendererSource.indexOf('function addManualTranslationUi()', settingsStart);
@@ -102,13 +113,13 @@ test('experimental ChatGPT web entry is enabled without changing existing transl
   assert.doesNotMatch(settings, /choice\.disabled = true/);
   assert.match(settings, /id="patch0102ChatGPTDeleteUnavailable" type="button" disabled/);
   assert.match(settings, /수동 번역 준비/);
+  assert.match(settings, /현재 묶음의 번역 요청을 복사하고 내장 창을 여는 준비만/);
   assert.match(rendererSource, /id = 'patch0102WebAutoStart'/);
   assert.match(rendererSource, /const runAuto = async/);
-  assert.match(rendererSource, /await api\.patchChatGPTWebTranslate\(/);
-  assert.match(rendererSource, /manual\.parseResponse\(response\?\.text, batch\.map/);
+  assert.doesNotMatch(rendererSource, /patchChatGPTWebTranslate|patchChatGPTWebCancel/);
+  assert.match(rendererSource, /자동 전송과 응답 수집은 지원하지 않습니다/);
   assert.match(rendererSource, /if \(!value\.persisted\) throw new Error/);
   assert.match(rendererSource, /value\.inflightBatch === value\.index/);
-  assert.match(rendererSource, /api\.patchChatGPTWebCancel\?\.\(\)/);
 });
 
 test('Patch 02 exposes embedded window IPC but only opens it when called', async () => {
@@ -130,6 +141,8 @@ test('Patch 02 exposes embedded window IPC but only opens it when called', async
     assert.equal(handlers.has('patch:chatgpt-web:translate'), true);
     assert.equal(handlers.has('siwc:connect'), false);
     assert.equal(mock.windows.length, 0);
+    await assert.rejects(handlers.get('patch:chatgpt-web:translate')(null, { jobKey: 'test-job-key-1', prompt: 'Translate this.' }), error => error.message === AUTOMATIC_OUTPUT_UNAVAILABLE);
+    assert.equal(mock.windows.length, 0, 'the unavailable handler does not open ChatGPT');
     const result = await handlers.get('patch:chatgpt-web:open')();
     assert.equal(result.embedded, true);
     assert.equal(mock.windows.length, 1);
@@ -148,8 +161,7 @@ test('official v0.5.14 patch manifest carries embedded bridge and no SIWC runtim
   const preload = manifest.actions.find(action => action.file === 'electron/preload.cjs').content;
   const html = manifest.actions.find(action => action.file === 'src/index.html').content;
   assert.match(preload, /patchOpenChatGPTEmbedded/);
-  assert.match(preload, /patchChatGPTWebTranslate/);
-  assert.match(preload, /patchChatGPTWebCancel/);
+  assert.doesNotMatch(preload, /patchChatGPTWebTranslate|patchChatGPTWebCancel/);
   assert.doesNotMatch(preload, /SIWC|siwc/);
   assert.doesNotMatch(html, /siwc/i);
 });

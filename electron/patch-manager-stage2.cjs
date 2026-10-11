@@ -82,8 +82,8 @@ function registerPatch02Handlers(deps) {
   const { loadTranslationPrompt } = require('./patch-manager-stage2-prompts.cjs');
   const { registerManualTranslationSessionIpc } = require('./manual-translation-session.cjs');
   registerManualTranslationSessionIpc({ ipcMain, app, shell: deps.shell || require('electron').shell, subtitleStore });
-  // The embedded page is opened by user action. Experimental translation
-  // may read only the newly created assistant response, not prior conversations.
+  // The embedded page is opened only by explicit user action. Automated
+  // response collection is deliberately unavailable; the IPC below fails closed.
   let embeddedChatGPT = null, webDriver = null;
   function getWebService() {
     if (!embeddedChatGPT) {
@@ -99,18 +99,13 @@ function registerPatch02Handlers(deps) {
   function getWebDriver() {
     if (!webDriver) {
       const { createWebAutoTranslation } = require('./chatgpt-web-ui-driver.cjs');
-      const service = getWebService();
-      webDriver = createWebAutoTranslation({
-        open: service.open,
-        getWindow: service.getWindow,
-        ...deps.webDriverOptions
-      });
+      webDriver = createWebAutoTranslation();
     }
     return webDriver;
   }
   ipcMain.handle('patch:chatgpt-web:open', () => getWebService().open());
-  // Explicit clicks only. The website itself may refuse automation or change
-  // its DOM; never silently fall back to scraping account data.
+  // Preserve a fail-closed handler for stale renderer payloads. It never opens
+  // a browser, submits a prompt, or reads ChatGPT output.
   ipcMain.handle('patch:chatgpt-web:translate', (_, input) => getWebDriver().run(input));
   ipcMain.handle('patch:chatgpt-web:cancel', () => webDriver?.cancel() ?? true);
   ipcMain.handle('patch:translation-prompt', (_, language) => loadTranslationPrompt(String(language || '')));

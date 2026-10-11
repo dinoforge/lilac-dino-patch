@@ -786,3 +786,11 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - `npm run pack`, `npm run test:phase1-main`, `npm run test:phase1-electron`, `npm run test:phase1-exe` 통과. 패키지 main smoke는 합성 HTTP fixture 91회, 외부 네트워크 요청 0회였고 renderer smoke 오류와 차단된 외부 요청도 0회였다.
 - 사용자 승인으로 고유 앱 ID의 per-user NSIS(124,485,145바이트)를 `%TEMP%` 임시 폴더에 설치하고 설치본 `LilacAnime.exe`를 임시 `APPDATA`/`LOCALAPPDATA`/Chromium 프로필로 실행했다. 홈·검색 UI, preload bridge, 앱 정보 IPC, 이어보기 경계와 회차 종료가 통과했다. 전용 HKCU 등록과 설치 폴더를 제거했으며 기존 `LilacAnime 0.5.9` HKLM 등록 경로는 유지됐다. 실제 공급원·영상·자막은 요청하지 않았다.
 - NSIS 산출물을 담은 임시 폴더 `%TEMP%\lilac-nsis-season-d90875ee6d49403aa4884d9b7b6158d9`와 옵션 충돌로 중단된 첫 빌드 폴더 `%TEMP%\lilac-nsis-season-28191216e1ea444f8ceadf6697007068`는 남아 있다. 임시 폴더 재귀 삭제 명령이 자동 검토에서 거부되어 제거하지 않았다. 앱 설치와 HKCU 등록은 이미 정상 제거했다.
+
+## 2026-10-12 ChatGPT 웹 번역 자동화 안전 경계
+
+- 지정 작업 브랜치 codex/dino-chatgpt-web-experimental-auto는 시작 커밋 7b838ae784573941d5ada77e2d8287727a8e5bf5에서 작업했다. 자동 응답 수집은 OpenAI 이용약관의 자동·프로그램 방식 데이터/출력 추출 제한 때문에 fail-closed 처리했다. 실험 버튼은 현재 묶음 요청을 준비해 클립보드에 복사하고 사용자가 요청한 내장 창을 여는 데까지만 동작한다. 실제 웹 자동 전송·응답 확인·다음 묶음 자동 실행은 미구현이며, 실계정 웹 번역은 검증하지 않았다.
+- 중단 또는 새 자막/회차 선택 뒤 이전 작업 결과가 적용되지 않도록 현재 작업 식별자를 확인한다. 프롬프트 준비 중복을 막고, 전송 여부가 불확실한 묶음은 자동으로 다시 복사하거나 보내지 않는다. 진행 상태를 저장하지 못하면 다음 묶음으로 넘어가지 않고 응답/완료 묶음을 보존한다. 완료한 묶음은 기존 수동 JSON 검증과 WebVTT 타임코드 보존 경로로 저장·적용한다.
+- 기존 끄기·번역 API·로컬 AI 선택과 ChatGPT 수동 복사/가져오기 경로를 보존했다. ChatGPT 웹 대화 삭제는 지원되지 않아 버튼을 비활성화했다. 새 패치 출력에 SIWC 코드를 추가하지 않았다.
+- npm test는 공식 v0.5.14 커밋 f095fc3d775451e144ed780e1fa081f739927652 및 v0.5.15 커밋 16c9a3d1631061a72831e0657434003940daf531의 OS 임시 격리 소스를 연결해 378/378 통과, 건너뜀 0이었다. 네 가지 패치 01/02 ON/OFF 조합과 공식 소스 차단·복원 검증이 통과했다. 격리 Electron renderer 테스트는 자동 버튼의 요청 복사, 모의 내장 창 열기, 불확실 묶음 중복 준비 차단, 수동 응답 검증, WebVTT 저장·적용·이어하기를 통과했다. 테스트에서 ChatGPT 네트워크 요청은 0회였다.
+- D:\LilacAnime 실설치본과 사용자 프로필을 접근하거나 수정하지 않았고 main은 변경하지 않았다. GitHub Actions는 원격에 Build만 표시됐고 이 브랜치용 수동 실행 가능 여부를 확인 중이다.
