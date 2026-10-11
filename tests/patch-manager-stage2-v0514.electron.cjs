@@ -34,7 +34,9 @@ const blockedRequests = [];
 const providerCalls = [];
 const patchCalls = [];
 const savedTranslations = [];
+const savedSubtitleEntries = [];
 const copiedTexts = [];
+const revealedFiles = [];
 let win = null;
 let finished = false;
 const rendererErrors = [];
@@ -123,15 +125,17 @@ function writeHarness() {
     <section id="seasonSection" class="content-section"><div class="section-title"><h2 id="seasonTitle">신작</h2></div><div id="seasonRail" class="poster-rail"><p>기존 시즌 카드</p></div></section>
     <section id="scheduleSection" class="content-section hidden"><div class="section-title"><h2>방영 일정</h2></div><div id="scheduleTabs" class="chip-row" role="tablist"></div><div id="scheduleRail" class="poster-rail"></div></section>
     <dialog id="detailDialog"><div id="detailContent"><div id="episodeBlock"></div></div></dialog>
+    <section data-settings-pane="translate"></section>
     <div id="subtitleTranslateRow"></div><p id="subtitleState"></p><input id="skipTitle" value="시범 방영작"><input id="skipEpisode" value="2"><p id="playerTitle">시범 방영작</p>
     <script>
       const knownAnime=new Map(); let currentSubtitle={path:${subtitlePathValue},src:${subtitleUrlValue},label:'Japanese'};
       let currentSubtitlePath='',playbackRequestId=1,currentPlaybackContext={subtitleTitle:'시범 방영작',episode:{number:2}};
       window.patchFixtureState={episodeSelected:false,errors:[]};
+      window.patchFixtureState.confirmMessages=[];window.confirm=message=>{window.patchFixtureState.confirmMessages.push(String(message));return false};
       window.addEventListener('error',event=>window.patchFixtureState.errors.push({stack:event.error?.stack||'',message:event.message||''}));
       window.addEventListener('unhandledrejection',event=>window.patchFixtureState.errors.push({stack:event.reason?.stack||'',message:String(event.reason)}));
       function subtitleStoreKey(){return 'synthetic-show|season-1|episode-2'}
-      function attachSubtitle(src,label,meta){currentSubtitle={src,path:meta.path,label,source:meta.source};currentSubtitlePath=meta.path}
+      function attachSubtitle(src,label,meta){currentSubtitle={src,path:meta.path,label,...meta};currentSubtitlePath=meta.path}
       function clearSubtitle(){currentSubtitle=null;currentSubtitlePath=''}
       function animeById(id){return knownAnime.get(String(id))||null}
       function renderCards(target,items){const rail=document.querySelector(target);if(!rail)return;rail.replaceChildren(...items.map(item=>{const card=document.createElement('article');card.className='anime-card';card.tabIndex=0;const title=document.createElement('h3');title.textContent=item.title||'제목 없음';const info=document.createElement('p');info.textContent=item.title_english||'';card.append(title,info);return card}))}
@@ -146,6 +150,14 @@ function writeHarness() {
     patchTranslationPrompt:(...args)=>ipcRenderer.invoke('patch:translation-prompt',...args),
     patchCopyText:(...args)=>ipcRenderer.invoke('patch:clipboard-copy',...args),
     patchSaveManualSubtitle:(...args)=>ipcRenderer.invoke('patch:manual-subtitle-save',...args),
+    patchManualTranslationSettings:(...args)=>ipcRenderer.invoke('manual-translation:settings:get',...args),
+    patchSaveManualTranslationSettings:(...args)=>ipcRenderer.invoke('manual-translation:settings:save',...args),
+    patchManualTranslationSession:(...args)=>ipcRenderer.invoke('manual-translation:session:get',...args),
+    patchSaveManualTranslationSession:(...args)=>ipcRenderer.invoke('manual-translation:session:save',...args),
+    patchRemoveManualTranslationSession:(...args)=>ipcRenderer.invoke('manual-translation:session:remove',...args),
+    patchHasManualTranslationForSource:(...args)=>ipcRenderer.invoke('manual-translation:translated-exists',...args),
+    patchRevealManualSubtitle:(...args)=>ipcRenderer.invoke('manual-translation:subtitle:reveal',...args),
+    patchManualTranslationSource:(...args)=>ipcRenderer.invoke('manual-translation:source:get',...args),
     openExternal:(...args)=>ipcRenderer.invoke('fixture:external',...args),
     linkkfSchedule:(...args)=>ipcRenderer.invoke('fixture:linkkf-schedule',...args),
     providerAiring:(...args)=>ipcRenderer.invoke('fixture:provider-airing',...args),
@@ -176,7 +188,10 @@ function waitFor(label, predicate, timeoutMs = 10000) {
 }
 
 async function run() {
-  fs.writeFileSync(path.join(userData, 'source-ja.vtt'), 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n日本語の台詞\n');
+  const sourcePath = path.join(userData, 'source-ja.vtt'), episodeKey = 'synthetic-show|season-1|episode-2';
+  const sourceVtt = `WEBVTT\n\n${Array.from({ length: 30 }, (_, index) => `00:00:${String(index + 1).padStart(2, '0')}.000 --> 00:00:${String(index + 1).padStart(2, '0')}.800\n日本語の台詞 ${index + 1}`).join('\n\n')}\n`;
+  fs.writeFileSync(sourcePath, sourceVtt);
+  savedSubtitleEntries.push({ key: episodeKey, source: 'reanime', label: 'Japanese', path: sourcePath, url: pathToFileURL(sourcePath).href });
   const { loadTranslationPrompt } = require(path.join(fixtureRoot, 'electron', 'patch-manager-stage2-prompts.cjs'));
   const { registerPatch0102Handlers } = require(path.join(fixtureRoot, 'electron', 'patch-manager-stage2.cjs'));
   const quarterShow = anime('reanime', 're-quarter');
@@ -192,7 +207,11 @@ async function run() {
 
   registerPatch0102Handlers({
     ipcMain, app,
-    subtitleStore: { save: (key, value) => { savedTranslations.push({ key, ...value }); return { key, path: value.path, url: pathToFileURL(value.path).href }; } },
+    shell: { showItemInFolder: file => revealedFiles.push(file) },
+    subtitleStore: {
+      list: key => savedSubtitleEntries.filter(item => item.key === key),
+      save: (key, value) => { const saved = { id: `synthetic-${savedTranslations.length + 1}`, key, ...value, url: pathToFileURL(value.path).href }; savedTranslations.push(saved); savedSubtitleEntries.unshift(saved); return saved; }
+    },
     clipboard: { writeText: text => { copiedTexts.push(String(text)); } },
     REANIME_WEB: 'https://reanime.invalid', ANIMENOSUB_WEB: 'https://animenosub.invalid',
     providerFetch: async (url, options = {}) => {
@@ -249,6 +268,10 @@ async function run() {
     `Boolean(document.querySelector('#patch0102QuarterControls') && document.querySelectorAll('#seasonRail .anime-card').length===2 && document.querySelectorAll('#scheduleRail .anime-card').length===1)`
   ));
   console.log('quarter and weekday fixture rendered');
+  assert.equal(await win.webContents.executeJavaScript("document.querySelector('#patch0102ChatGPTConnect')?.disabled === true"), true, 'unsupported official login is not presented as connected');
+  await win.webContents.executeJavaScript("document.querySelector('#patch0102ChatGPTCheck').click()");
+  const accountStatus = await win.webContents.executeJavaScript("document.querySelector('#patch0102ChatGPTAccountState').textContent");
+  assert.match(accountStatus, /자격과 등록이 확인되지 않았습니다/);
 
   const overview = await win.webContents.executeJavaScript(`({
     quarterTitle:document.querySelector('#seasonTitle').textContent,
@@ -297,13 +320,38 @@ async function run() {
   const expectedPrompt = realPromptHandler('japanese');
   assert.ok(copiedTexts[0].includes(expectedPrompt));
   assert.ok(copiedTexts[0].includes('앞 문맥') || copiedTexts[0].includes('작품·회차'));
-  await win.webContents.executeJavaScript(`document.querySelector('#patch0102ManualAnswer').value=JSON.stringify({translations:[{id:1,text:'한국어로 옮긴 대사'}]});document.querySelector('#patch0102ManualApply').click()`);
+  const firstResponse = JSON.stringify({ translations: Array.from({ length: 24 }, (_, index) => ({ id: index + 1, text: `한국어 번역 ${index + 1}` })) });
+  await win.webContents.executeJavaScript(`document.querySelector('#patch0102ManualAnswer').value=${JSON.stringify(firstResponse)};document.querySelector('#patch0102ManualAnswer').dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#patch0102ManualApply').click()`);
+  await waitFor('validated cue count and current batch progress', async () => win.webContents.executeJavaScript("document.querySelector('#patch0102ManualProgress').textContent.startsWith('24/30문장 (80%) · 묶음 2/2 · 일본어')"));
+  const lastResponse = JSON.stringify({ translations: Array.from({ length: 6 }, (_, index) => ({ id: index + 25, text: `한국어 번역 ${index + 25}` })) });
+  await win.webContents.executeJavaScript(`document.querySelector('#patch0102ManualCopy').click()`);
+  await waitFor('second ChatGPT request copied', () => copiedTexts.length === 2);
+  await win.webContents.executeJavaScript(`document.querySelector('#patch0102ManualAnswer').value=${JSON.stringify(lastResponse)};document.querySelector('#patch0102ManualAnswer').dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#patch0102ManualStop').click()`);
+  await waitFor('stop preserved an answer and completed batch', () => fs.existsSync(path.join(userData, 'subtitles', 'manual-translation-sessions')) && fs.readdirSync(path.join(userData, 'subtitles', 'manual-translation-sessions')).some(file => file.endsWith('.json')));
+  await win.webContents.reload();
+  await waitFor('unpacked app reloaded with translation UI', async () => win.webContents.executeJavaScript("Boolean(document.querySelector('#patch0102ManualStart'))"));
+  await win.webContents.executeJavaScript("document.querySelector('#patch0102ManualStart').click()");
+  await waitFor('saved translation work resumed after renderer reload', async () => win.webContents.executeJavaScript("document.querySelector('#patch0102ManualProgress')?.textContent.startsWith('24/30문장 (80%) · 묶음 2/2') && document.querySelector('#patch0102ManualAnswer')?.value.length > 0"));
+  assert.equal(await win.webContents.executeJavaScript("document.querySelector('#patch0102ManualAnswer').value"), lastResponse);
+  await win.webContents.executeJavaScript("document.querySelector('#patch0102ManualApply').click()");
   await waitFor('translated VTT stored to isolated profile', () => savedTranslations.length === 1);
   const saved = savedTranslations[0];
   const translatedVtt = fs.readFileSync(saved.path, 'utf8');
   assert.equal(saved.source, 'chatgpt');
-  assert.match(translatedVtt, /00:00:01\.000 --> 00:00:02\.000/);
-  assert.match(translatedVtt, /한국어로 옮긴 대사/);
+  assert.match(translatedVtt, /00:00:30\.000 --> 00:00:30\.800/);
+  assert.match(translatedVtt, /한국어 번역 1/); assert.match(translatedVtt, /한국어 번역 30/);
+  assert.equal((translatedVtt.match(/--> /g) || []).length, 30, 'all original cue timecodes remain present');
+  await waitFor('immediate cleanup removed only the temporary job', () => fs.readdirSync(path.join(userData, 'subtitles', 'manual-translation-sessions')).length === 0);
+  await win.webContents.executeJavaScript("document.querySelector('#patch0102ManualReveal').click()");
+  assert.equal(revealedFiles[0], fs.realpathSync(saved.path));
+  await win.webContents.executeJavaScript("document.querySelector('#patch0102ManualRestore').click()");
+  await waitFor('original subtitle can be restored', async () => win.webContents.executeJavaScript(`currentSubtitle?.path === ${JSON.stringify(sourcePath)} && currentSubtitle?.source === 'reanime'`));
+  await win.webContents.executeJavaScript("document.querySelector('#patch0102ManualStart').click()");
+  await waitFor('retranslation confirmation detects a saved subtitle after immediate cleanup', async () => win.webContents.executeJavaScript("window.patchFixtureState.confirmMessages.some(message=>message.includes('이미 번역되어 저장됐습니다'))"));
+  assert.equal(await win.webContents.executeJavaScript("window.patchFixtureState.confirmMessages.length"), 1);
+  assert.equal(savedTranslations.length, 1, 'declining retranslation keeps the saved Korean subtitle');
+  assert.equal(savedTranslations[0].from, sourcePath, 'the saved translation remains linked to its original subtitle');
+  assert.equal(await win.webContents.executeJavaScript("document.querySelector('#patch0102ManualPanel').classList.contains('hidden')"), true, 'declining does not open another translation session');
   assert.equal(blockedRequests.length, 0, 'the UI test made no external HTTP requests');
   assert.equal(rendererErrors.length, 0, rendererErrors.join('\n'));
   console.log(`v0.5.14 isolated renderer: quarter ${overview.quarterTitle}; today tab ${overview.days.find(day => day.today).label}; 5 source states checked; manual subtitle saved under isolated profile; HTTP requests blocked=${blockedRequests.length}.`);

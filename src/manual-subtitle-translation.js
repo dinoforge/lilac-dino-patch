@@ -42,6 +42,22 @@
     return japanese > 0 && japanese >= latin * 0.35 ? 'japanese' : 'english';
   }
 
+  async function fingerprintWebVtt(value) {
+    const bytes = new TextEncoder().encode(normalize(value));
+    if (bytes.length > 12_000_000) throw new Error('자막 파일이 번역 준비 한도를 넘었습니다.');
+    let digest;
+    if (globalThis.crypto?.subtle) digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+    else if (typeof require === 'function') digest = require('node:crypto').createHash('sha256').update(bytes).digest();
+    else throw new Error('이 환경에서는 자막 원본을 확인할 수 없습니다.');
+    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  function progress(cues = [], translations = {}) {
+    const total = cues.filter(cue => String(cue.text || '').trim()).length;
+    const completed = cues.reduce((count, cue) => count + (Object.hasOwn(translations, cue.id) ? 1 : 0), 0);
+    return { completed, total, percent: total ? Math.floor(completed / total * 100) : 0 };
+  }
+
   function makePrompt({ title = '', episode = '', items = [], contextBefore = [], contextAfter = [], translationInstructions = '', sourceLanguage = 'japanese' } = {}) {
     const context = [String(title).trim(), episode ? `${episode}화` : ''].filter(Boolean).join(' · ');
     return [
@@ -95,5 +111,5 @@
     return `${output.trimEnd()}\n`;
   }
 
-  return { parseWebVtt, makeBatches, detectSourceLanguage, makePrompt, parseResponse, renderWebVtt };
+  return { parseWebVtt, makeBatches, detectSourceLanguage, fingerprintWebVtt, progress, makePrompt, parseResponse, renderWebVtt };
 });

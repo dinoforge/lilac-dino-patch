@@ -1,7 +1,7 @@
 // Packaged Electron main/preload Phase 1 smoke test with fail-closed network fixtures.
 // Build the app first, then run: npm run test:phase1-main
-process.on('uncaughtException', fail);
-process.on('unhandledRejection', fail);
+process.on('uncaughtException', error => { console.error('Phase 1 main test uncaught exception:', error?.stack || error); fail(error); });
+process.on('unhandledRejection', error => { console.error('Phase 1 main test unhandled rejection:', error?.stack || error); fail(error); });
 
 const electron = require('electron');
 const { app, BrowserWindow, net, session } = electron;
@@ -34,6 +34,7 @@ const syntheticJapaneseSubtitle = `WEBVTT\n\n${Array.from({ length: 26 }, (_, in
   const start = 1_000 + index * 250;
   return `${index + 1}\n${formatVttTime(start)} --> ${formatVttTime(start + 200)}\n日本語の合成台詞 ${index + 1}`;
 }).join('\n\n')}\n`;
+const syntheticEnglishSubtitle = ['WEBVTT', '', '1', '00:00:01.000 --> 00:00:01.800', 'Synthetic English line one', '', '2', '00:00:02.000 --> 00:00:02.800', 'Synthetic English line two', ''].join('\n');
 const restartMode = process.env.LILAC_PHASE1_RESTART_MODE || '';
 const sharedTempRoot = process.env.LILAC_PHASE1_SHARED_ROOT ? path.resolve(process.env.LILAC_PHASE1_SHARED_ROOT) : '';
 const parentTempRoot = process.env.LILAC_PHASE1_TEMP_ROOT ? path.resolve(process.env.LILAC_PHASE1_TEMP_ROOT) : '';
@@ -89,8 +90,10 @@ for (const file of [
 const tempRoot = sharedTempRoot || parentTempRoot || fs.mkdtempSync(path.join(os.tmpdir(), 'lilac-phase1-main-'));
 const userData = path.join(tempRoot, 'profile');
 const sessionData = path.join(tempRoot, 'session');
+const cacheData = path.join(tempRoot, 'cache');
 fs.mkdirSync(userData, { recursive: true });
 fs.mkdirSync(sessionData, { recursive: true });
+fs.mkdirSync(cacheData, { recursive: true });
 const hlsManifestPath = path.join(tempRoot, 'synthetic.m3u8');
 const hlsSegmentPath = path.join(tempRoot, 'segment000.ts');
 execFileSync(require('ffmpeg-static'), [
@@ -106,6 +109,15 @@ assert.ok(syntheticSegment.length >= 376, 'the synthetic HLS segment is long eno
 assert.ok([0, 188, 376].every(offset => syntheticSegment[offset] === 0x47), 'the synthetic HLS segment has MPEG-TS sync bytes');
 app.setPath('userData', userData);
 app.setPath('sessionData', sessionData);
+app.setPath('cache', cacheData);
+const TEST_APP_USER_MODEL_ID = 'org.codex.lilacanime.patch02.integration';
+const originalSetAppUserModelId = app.setAppUserModelId.bind(app);
+let testAppUserModelIdApplied = false;
+app.setAppUserModelId = () => {
+  originalSetAppUserModelId(TEST_APP_USER_MODEL_ID);
+  testAppUserModelIdApplied = true;
+};
+app.setName('LilacAnime Patch 02 Integration Test');
 app.commandLine.appendSwitch('disable-background-networking');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.disableHardwareAcceleration();
@@ -139,7 +151,7 @@ const localPlayerServer = http.createServer((request, response) => {
       window.__pk = 'fixture-key';
       const media = ${JSON.stringify(mediaUrl)};
       const player = { setup: () => {} };
-      player.setup({subtitles:[{url:"https://subtitles.invalid/phase1-ko.vtt",language:"ko",label:"한국어",format:"vtt"},{url:"https://subtitles.invalid/phase1-ja.vtt",language:"ja",label:"日本語",format:"vtt"}]});
+      player.setup({subtitles:[{url:"https://subtitles.invalid/phase1-ko.vtt",language:"ko",label:"한국어",format:"vtt"},{url:"https://subtitles.invalid/phase1-ja.vtt",language:"ja",label:"日本語",format:"vtt"},{url:"https://subtitles.invalid/phase1-en.vtt",language:"en",label:"English",format:"vtt"}]});
       window.jwplayer = () => ({ getPlaylistItem: () => ({ file: media, sources: [{ file: media }] }), play: () => Promise.resolve() });
       fetch(media).catch(() => {});
     </script></body></html>`);
@@ -385,7 +397,7 @@ function fixtureResponse(rawUrl, requestInit = {}) {
   }
   if (url.hostname === 'flixcloud.cc' && url.pathname === `/e/${SLUG}`) {
     fixtureRequests.push(url.href);
-    return response('<script>player.setup({subtitles:[{url:"https://subtitles.invalid/phase1-ko.vtt",language:"ko",label:"한국어",format:"vtt"},{url:"https://subtitles.invalid/phase1-ja.vtt",language:"ja",label:"日本語",format:"vtt"}]});</script>', 200, 'text/html');
+    return response('<script>player.setup({subtitles:[{url:"https://subtitles.invalid/phase1-ko.vtt",language:"ko",label:"한국어",format:"vtt"},{url:"https://subtitles.invalid/phase1-ja.vtt",language:"ja",label:"日本語",format:"vtt"},{url:"https://subtitles.invalid/phase1-en.vtt",language:"en",label:"English",format:"vtt"}]});</script>', 200, 'text/html');
   }
   if (url.hostname === 'subtitles.invalid' && url.pathname === '/phase1-ko.vtt') {
     fixtureRequests.push(url.href);
@@ -394,6 +406,10 @@ function fixtureResponse(rawUrl, requestInit = {}) {
   if (url.hostname === 'subtitles.invalid' && url.pathname === '/phase1-ja.vtt') {
     fixtureRequests.push(url.href);
     return response(syntheticJapaneseSubtitle, 200, 'text/vtt');
+  }
+  if (url.hostname === 'subtitles.invalid' && url.pathname === '/phase1-en.vtt') {
+    fixtureRequests.push(url.href);
+    return response(syntheticEnglishSubtitle, 200, 'text/vtt');
   }
   if (url.hostname === 'subtitles.invalid' && /^\/phase1-community-(?:kairan|csora|anissia)\.vtt$/.test(url.pathname)) {
     fixtureRequests.push(url.href);
@@ -824,12 +840,21 @@ require(path.join(appAsar, 'electron', 'main.cjs'));
 
 app.whenReady().then(async () => {
   try {
+    assert.equal(testAppUserModelIdApplied, true, 'the packaged main ran under a test-only AppUserModelId');
+    assert.equal(app.getPath('userData'), userData);
+    assert.equal(app.getPath('sessionData'), sessionData);
+    assert.equal(app.getPath('cache'), cacheData);
     await new Promise((resolve, reject) => {
       if (localPlayerServer.listening) { localBase = `http://127.0.0.1:${localPlayerServer.address().port}`; allowedBrowserOrigins.add(localBase); resolve(); return; }
       localPlayerServer.once('listening', () => { localBase = `http://127.0.0.1:${localPlayerServer.address().port}`; allowedBrowserOrigins.add(localBase); resolve(); });
       localPlayerServer.once('error', reject);
     });
     const win = await waitFor('packaged app window', () => BrowserWindow.getAllWindows().find(item => !item.isDestroyed()));
+    const rendererEvents = [];
+    win.webContents.on('render-process-gone', (_event, details) => { rendererEvents.push({ type: 'gone', details }); console.error('Packaged renderer process exited:', JSON.stringify(details)); });
+    win.webContents.on('console-message', event => { if (event.level >= 2) { rendererEvents.push({ type: 'console', message: event.message }); console.error('Packaged renderer error:', event.message); } });
+    win.webContents.on('did-start-navigation', (_event, url, inPlace, mainFrame) => { if (mainFrame) rendererEvents.push({ type: 'navigation-start', url, inPlace }); });
+    win.webContents.on('did-finish-load', () => rendererEvents.push({ type: 'load-finished', url: win.webContents.getURL() }));
     await waitFor('packaged preload API', () => win.webContents.executeJavaScript('Boolean(window.lilac && window.lilac.providerCatalog)'));
 
     if (restartMode) {
@@ -1203,12 +1228,14 @@ app.whenReady().then(async () => {
     const trackResult = await win.webContents.executeJavaScript(
       `window.lilac.providerSubtitleTracks(${JSON.stringify(detail.episodes[0])})`
     );
-    assert.equal(trackResult.tracks.length, 2);
+    assert.equal(trackResult.tracks.length, 3);
     assert.equal(trackResult.tracks[0].language, 'ko');
     assert.equal(trackResult.tracks[0].label, '한국어');
     assert.equal(trackResult.tracks[0].url, 'https://subtitles.invalid/phase1-ko.vtt');
     const japaneseTrack = trackResult.tracks.find(track => track.language === 'ja');
     assert.equal(japaneseTrack?.url, 'https://subtitles.invalid/phase1-ja.vtt');
+    const englishTrack = trackResult.tracks.find(track => track.language === 'en');
+    assert.equal(englishTrack?.url, 'https://subtitles.invalid/phase1-en.vtt');
 
     const noServerEpisode = {
       ...detail.episodes[0],
@@ -1231,8 +1258,9 @@ app.whenReady().then(async () => {
     assert.ok(resolvedStream.subtitlePath && fs.existsSync(resolvedStream.subtitlePath), `the synthetic Korean VTT is saved under isolated userData: ${JSON.stringify({ resolvedStream, fixtureRequests, redirectedFlixRequests, localBrowserRequests, deniedBrowserRequests })}`);
     assert.match(resolvedStream.subtitlePath, new RegExp(`^${userData.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
     assert.match(resolvedStream.subtitleUrl, /^file:\/\//i);
-    assert.equal(resolvedStream.subtitleTracks.length, 2, 'the packaged resolver preserves Korean and Japanese track choices for the episode');
+    assert.equal(resolvedStream.subtitleTracks.length, 3, 'the packaged resolver preserves Korean, Japanese and English track choices for the episode');
     assert.equal(resolvedStream.subtitleTracks[0].language, 'ko');
+    assert.ok(resolvedStream.subtitleTracks.some(track => track.language === 'en'));
     const proxiedManifest = await requestLoopback(resolvedStream.url);
     assert.equal(proxiedManifest.status, 200);
     assert.match(proxiedManifest.text, /^#EXTM3U/);
@@ -1286,37 +1314,28 @@ app.whenReady().then(async () => {
       'clicking the search result reached the packaged Re:Anime detail handler');
     const resolveCallsBeforeUiPlay = fixtureRequests.filter(url => url.includes(`/api/watch/${SLUG}/1`)).length;
     await win.webContents.executeJavaScript("document.querySelector('#episodeBlock .episode-btn').click()");
-    await waitFor('episode button playback through packaged provider:resolve IPC and Korean subtitle', async () =>
-      win.webContents.executeJavaScript(`(() => {
+    const playbackState = await waitFor('episode button playback through packaged provider:resolve IPC and Korean subtitle', async () => {
+      try { return await win.webContents.executeJavaScript(`(() => {
         const video = document.querySelector('#video');
         const cueText = [...(video?.textTracks?.[0]?.activeCues || [])].map(cue => cue.text).join(' ');
         const ready = video?.readyState >= 2 && video.videoWidth === 320 && video.videoHeight === 180
           && video.currentTime >= 1 && cueText.includes('합성 한국어 자막');
-        if (ready) video.pause();
-        return ready;
-      })()`), 25000);
+        if (!ready) return null;
+        video.pause();
+        return {readyState:video.readyState,currentTime:video.currentTime,duration:video.duration,width:video.videoWidth,height:video.videoHeight,
+          subtitleMode:video.textTracks[0]?.mode||'',activeCueText:[...(video.textTracks[0]?.activeCues||[])].map(cue=>cue.text).join(' ')};
+      })()`); } catch (error) { console.error('Phase 1 playback poll JavaScript rejected:', error?.stack || error); throw error; }
+    }, 25000).catch(async error => {
+        const diagnostic = await win.webContents.executeJavaScript(`(() => { const video=document.querySelector('#video'); return {
+          videoExists:Boolean(video), readyState:video?.readyState, networkState:video?.networkState, error:video?.error?.code||null,
+          currentTime:video?.currentTime, duration:video?.duration, width:video?.videoWidth, height:video?.videoHeight,
+          source:video?.currentSrc||'', player:document.querySelector('#immersivePlayer')?.className||'',
+          subtitle:document.querySelector('#subtitleState')?.textContent||'', activeCue:[...(video?.textTracks?.[0]?.activeCues||[])].map(cue=>cue.text).join(' ')
+        }})()`).catch(evalError => ({ evalError: evalError.message }));
+        throw new Error(`${error.message}; playback diagnostic=${JSON.stringify(diagnostic)}; renderer events=${JSON.stringify(rendererEvents)}; resolver fixture requests=${JSON.stringify(fixtureRequests.filter(url=>url.includes('/api/watch/')))}; local resolver=${JSON.stringify(localBrowserRequests)}; denied browser=${JSON.stringify(deniedBrowserRequests)}`);
+      });
     const resolveCallsAfterUiPlay = fixtureRequests.filter(url => url.includes(`/api/watch/${SLUG}/1`)).length;
     assert.ok(resolveCallsAfterUiPlay > resolveCallsBeforeUiPlay, 'clicking the actual episode button reached the packaged main process resolver');
-    await waitFor('packaged HLS video decode and Korean cue', async () => win.webContents.executeJavaScript(`(() => {
-      const video = document.querySelector('#video');
-      const cueText = [...(video?.textTracks?.[0]?.activeCues || [])].map(cue => cue.text).join(' ');
-      const ready = video?.readyState >= 2 && video.videoWidth === 320 && video.videoHeight === 180
-        && video.currentTime >= 1 && cueText.includes('합성 한국어 자막');
-      if (ready) video.pause();
-      return ready;
-    })()`), 25000);
-    const playbackState = await win.webContents.executeJavaScript(`(() => {
-      const video = document.querySelector('#video');
-      return {
-        readyState: video.readyState,
-        currentTime: video.currentTime,
-        duration: video.duration,
-        width: video.videoWidth,
-        height: video.videoHeight,
-        subtitleMode: video.textTracks[0]?.mode || '',
-        activeCueText: [...(video.textTracks[0]?.activeCues || [])].map(cue => cue.text).join(' ')
-      };
-    })()`);
     assert.equal(playbackState.width, 320);
     assert.equal(playbackState.height, 180);
     assert.ok(playbackState.currentTime >= 1 && playbackState.currentTime < 3, JSON.stringify(playbackState));
@@ -1327,10 +1346,11 @@ app.whenReady().then(async () => {
     await new Promise(resolve => setTimeout(resolve, 5200));
     const progressCardText = await win.webContents.executeJavaScript(`(() => {
       const video = document.querySelector('#video');
+      if (!video) throw new Error('player video element disappeared before resume capture');
       video.currentTime = 2;
       video.dispatchEvent(new Event('timeupdate'));
       return document.querySelector('#continueRail .continue-card')?.innerText || '';
-    })()`);
+    })()`).catch(error => { throw new Error(`resume progress capture failed: ${error.message}`); });
     assert.match(progressCardText, /EP\.1\s*·\s*50%/, `the actual player stored the two-second HLS position: ${progressCardText}`);
     await new Promise(resolve => setTimeout(resolve, 200));
     const reloadFinished = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
@@ -1341,32 +1361,54 @@ app.whenReady().then(async () => {
       "document.querySelector('#continueRail .continue-card')?.innerText || ''"
     ), 8000);
     assert.match(persistedProgressText, /EP\.1\s*·\s*50%/, `the updated HLS progress survives reload: ${persistedProgressText}`);
-    const resumed = await win.webContents.executeJavaScript(`(async () => {
-      const episode = ${fixtureEpisode};
-      await window.resolveIntoPlayer(
-        () => window.lilac.providerResolve(episode),
-        ${JSON.stringify(playbackTitle)},
-        { episode, serverOverride: 'HD-2', resumeProgress: 50 },
-        ${JSON.stringify(animeFixture.title.english)},
-        1
-      );
-      return true;
-    })()`);
-    assert.equal(resumed, true, 'the packaged player accepted the persisted HLS resume position');
-    await waitFor('packaged HLS playback resumed from its saved position', async () => win.webContents.executeJavaScript(`(() => {
-      const video = document.querySelector('#video');
-      const cueText = [...(video?.textTracks?.[0]?.activeCues || [])].map(cue => cue.text).join(' ');
-      const ready = video?.readyState >= 2 && video.videoWidth === 320 && video.currentTime >= 1.8
-        && video.currentTime < 2.8 && cueText.includes('합성 한국어 자막');
-      if (ready) video.pause();
-      return ready;
-    })()`), 25000);
-    const resumeState = await win.webContents.executeJavaScript(`(() => {
-      const video = document.querySelector('#video');
-      return { currentTime: video.currentTime, width: video.videoWidth, height: video.videoHeight,
-        subtitleMode: video.textTracks[0]?.mode || '',
-        activeCueText: [...(video.textTracks[0]?.activeCues || [])].map(cue => cue.text).join(' ') };
-    })()`);
+    const resumeScript = `(async () => {
+      try {
+        window.__phase1ResumeDebug = ['started'];
+        if (typeof window.resolveIntoPlayer !== 'function') return { ok: false, error: 'resolveIntoPlayer is not loaded' };
+        const episode = ${fixtureEpisode};
+        window.__phase1ResumeDebug.push('episode-ready');
+        await window.resolveIntoPlayer(
+          () => window.lilac.providerResolve(episode),
+          ${JSON.stringify(playbackTitle)},
+          { episode, serverOverride: 'HD-2', resumeProgress: 50 },
+          ${JSON.stringify(animeFixture.title.english)},
+          1
+        );
+        window.__phase1ResumeDebug.push('resolved');
+        return { ok: true };
+      } catch (error) { return { ok: false, error: error?.stack || String(error) }; }
+    })()`;
+    console.log(`Phase 1 UI probe: resume script prepared (${resumeScript.length} chars)`);
+    try { new Function(resumeScript); } catch (error) { throw new Error(`resume script syntax failed: ${error.message}; ${resumeScript}`); }
+    let resumed;
+    try { resumed = await win.webContents.executeJavaScript(resumeScript); }
+    catch (error) {
+      const state = await win.webContents.executeJavaScript(`({debug:window.__phase1ResumeDebug||null,ready:Boolean(window.lilac),player:document.querySelector('#immersivePlayer')?.className||''})`).catch(evalError => ({ evalError: evalError.message }));
+      throw new Error(`resume script evaluation failed: ${error.message}; state=${JSON.stringify(state)}`);
+    }
+    console.log(`Phase 1 UI probe: resume script returned ${JSON.stringify(resumed)}`);
+    assert.equal(resumed.ok, true, `the packaged player accepted the persisted HLS resume position: ${JSON.stringify(resumed)}`);
+    const resumeState = await waitFor('packaged HLS playback resumed from its saved position', async () => {
+      const sample = await win.webContents.executeJavaScript(`(() => { try {
+        const video = document.querySelector('#video');
+        if (!video) return null;
+        const cueText = [...(video.textTracks?.[0]?.activeCues || [])].map(cue => cue.text).join(' ');
+        const ready = video.readyState >= 2 && video.videoWidth === 320 && video.currentTime >= 1.8
+          && video.currentTime < 2.8 && cueText.includes('합성 한국어 자막');
+        if (!ready) return null;
+        video.pause();
+        return {currentTime:video.currentTime,width:video.videoWidth,height:video.videoHeight,
+          subtitleMode:video.textTracks?.[0]?.mode||'',activeCueText:[...(video.textTracks?.[0]?.activeCues||[])].map(cue=>cue.text).join(' ')};
+      } catch (error) { return {probeError:String(error?.stack||error)}; } })()`).catch(error => {
+        console.error('Fallback playback evaluation temporarily unavailable:', error.message);
+        return null;
+      });
+      if (sample?.probeError) { console.error('Resume playback poll error:', sample.probeError); return null; }
+      return sample;
+    }, 25000).catch(error => {
+      console.error('Resume playback wait failed:', JSON.stringify({ error: error?.stack || String(error), url: win.webContents.getURL(), destroyed: win.webContents.isDestroyed(), loading: win.webContents.isLoading(), events: rendererEvents }));
+      throw error;
+    });
     assert.ok(resumeState.currentTime >= 1.8 && resumeState.currentTime < 2.8, JSON.stringify(resumeState));
     assert.equal(resumeState.width, 320);
     assert.equal(resumeState.height, 180);
@@ -1374,38 +1416,38 @@ app.whenReady().then(async () => {
     assert.match(resumeState.activeCueText, /합성 한국어 자막/);
 
     const fallbackStarted = await win.webContents.executeJavaScript(`(() => {
-      if (typeof hlsPlayer === 'undefined' || !hlsPlayer || typeof hlsPlayer.trigger !== 'function'
-        || currentPlaybackContext.videoServer !== 'HD-2') return false;
-      hlsPlayer.trigger(window.Hls.Events.ERROR, {
-        type: window.Hls.ErrorTypes.OTHER_ERROR,
-        details: 'synthetic-fatal-playback-error',
-        fatal: true
+      try {
+        if (typeof hlsPlayer === 'undefined' || !hlsPlayer || typeof hlsPlayer.trigger !== 'function'
+          || currentPlaybackContext.videoServer !== 'HD-2') return { ok: false, error: 'Hls.js player is not ready for fallback' };
+        hlsPlayer.trigger(window.Hls.Events.ERROR, {
+          type: window.Hls.ErrorTypes.OTHER_ERROR,
+          details: 'synthetic-fatal-playback-error',
+          fatal: true
+        });
+        return { ok: true };
+      } catch (error) { return { ok: false, error: error?.stack || String(error) }; }
+    })()`).catch(error => ({ ok: false, error: `renderer evaluation rejected: ${error.message}` }));
+    assert.equal(fallbackStarted.ok, true, `the packaged Hls.js instance accepted a fatal synthetic playback error: ${JSON.stringify(fallbackStarted)}`);
+    const fallbackState = await waitFor('automatic fallback server playback with subtitle and resume position', async () => {
+      const sample = await win.webContents.executeJavaScript(`(() => { try {
+        const video = document.querySelector('#video');
+        if (!video) return null;
+        const cueText = [...(video.textTracks?.[0]?.activeCues || [])].map(cue => cue.text).join(' ');
+        const ready = currentPlaybackContext.videoServer === 'HD-1' && video.readyState >= 2
+          && video.videoWidth === 320 && video.currentTime >= 1.8 && video.currentTime < 2.8
+          && cueText.includes('합성 한국어 자막');
+        if (!ready) return null;
+        video.pause();
+        return {server:currentPlaybackContext.videoServer,resumeSeconds:currentPlaybackContext.resumeSeconds,
+          selectedSubtitleTrack:currentPlaybackContext.selectedSubtitleTrack,currentTime:video.currentTime,width:video.videoWidth,
+          height:video.videoHeight,subtitleMode:video.textTracks?.[0]?.mode||'',activeCueText:[...(video.textTracks?.[0]?.activeCues||[])].map(cue=>cue.text).join(' ')};
+      } catch (error) { return {probeError:String(error?.stack||error)}; } })()`).catch(error => {
+        console.error('Fallback playback evaluation temporarily unavailable:', error.message);
+        return null;
       });
-      return true;
-    })()`);
-    assert.equal(fallbackStarted, true, 'the packaged Hls.js instance accepted a fatal synthetic playback error');
-    await waitFor('automatic fallback server playback with subtitle and resume position', async () => win.webContents.executeJavaScript(`(() => {
-      const video = document.querySelector('#video');
-      const cueText = [...(video?.textTracks?.[0]?.activeCues || [])].map(cue => cue.text).join(' ');
-      const ready = currentPlaybackContext.videoServer === 'HD-1' && video?.readyState >= 2
-        && video.videoWidth === 320 && video.currentTime >= 1.8 && video.currentTime < 2.8
-        && cueText.includes('합성 한국어 자막');
-      if (ready) video.pause();
-      return ready;
-    })()`), 25000);
-    const fallbackState = await win.webContents.executeJavaScript(`(() => {
-      const video = document.querySelector('#video');
-      return {
-        server: currentPlaybackContext.videoServer,
-        resumeSeconds: currentPlaybackContext.resumeSeconds,
-        selectedSubtitleTrack: currentPlaybackContext.selectedSubtitleTrack,
-        currentTime: video.currentTime,
-        width: video.videoWidth,
-        height: video.videoHeight,
-        subtitleMode: video.textTracks[0]?.mode || '',
-        activeCueText: [...(video.textTracks[0]?.activeCues || [])].map(cue => cue.text).join(' ')
-      };
-    })()`);
+      if (sample?.probeError) { console.error('Fallback playback poll error:', sample.probeError); return null; }
+      return sample;
+    }, 25000);
     assert.equal(fallbackState.server, 'HD-1');
     assert.ok(fallbackState.resumeSeconds >= 1.8 && fallbackState.resumeSeconds < 2.8, JSON.stringify(fallbackState));
     assert.ok(fallbackState.currentTime >= 1.8 && fallbackState.currentTime < 2.8, JSON.stringify(fallbackState));
@@ -1415,16 +1457,31 @@ app.whenReady().then(async () => {
     assert.equal(fallbackState.subtitleMode, 'showing');
     assert.match(fallbackState.activeCueText, /합성 한국어 자막/);
 
+    await waitFor('manual ChatGPT account settings', () => win.webContents.executeJavaScript("Boolean(document.querySelector('#manualChatgptSettings') && document.querySelector('#manualChatgptCheckLogin'))"), 8000)
+      .catch(async error => { const state = await win.webContents.executeJavaScript("({url:location.href,settings:Boolean(document.querySelector('#manualChatgptSettings')),pane:document.querySelector('[data-settings-pane=translate]')?.innerText||'',view:document.querySelector('#settingsView')?.className||''})").catch(evalError => ({ evalError: evalError.message })); throw new Error(`manual translation settings UI wait failed: ${error.message}; ${JSON.stringify(state)}`); });
+    const translationPrefs = await win.webContents.executeJavaScript('window.lilac.manualTranslationSettings()')
+      .catch(error => ({ ipcError: error.message }));
+    assert.deepEqual(translationPrefs, { autoCleanup: true, cleanupTiming: 'immediate' });
+    const accountControls = await win.webContents.executeJavaScript("(() => ({connectDisabled:document.querySelector('#manualChatgptConnect')?.disabled??null,disconnectDisabled:document.querySelector('#manualChatgptDisconnect')?.disabled??null,cleanupChecked:document.querySelector('#manualChatgptAutoCleanup')?.checked??null,timing:document.querySelector('#manualChatgptCleanupTiming')?.value??null}))()")
+      .catch(error => ({ evalError: error.message }));
+    assert.deepEqual(accountControls, { connectDisabled: true, disconnectDisabled: true, cleanupChecked: true, timing: 'immediate' });
+    await win.webContents.executeJavaScript("document.querySelector('#manualChatgptCheckLogin').click()").catch(error => { throw new Error(`login status button click failed: ${error.message}`); });
+    const accountState = await win.webContents.executeJavaScript("document.querySelector('#manualChatgptAccountState').textContent")
+      .catch(error => ({ evalError: error.message }));
+    assert.match(accountState, /자격과 클라이언트 등록이 확인되지 않았습니다/);
+
     const promptBefore = clipboardWrites.length;
     const externalBefore = externalOpenRequests.length;
     const manualTranslationStarted = await win.webContents.executeJavaScript(`(async () => {
-      const selected = await selectSubtitleTrack(${JSON.stringify(japaneseTrack)});
-      if (!selected) return false;
-      openPlayerSettings(true, document.querySelector('#manualChatgptRow'));
-      document.querySelector('#translateChatgpt').click();
-      return true;
-    })()`);
-    assert.equal(manualTranslationStarted, true, 'the packaged player selected the synthetic Japanese episode track');
+      try {
+        const selected = await selectSubtitleTrack(${JSON.stringify(japaneseTrack)});
+        if (!selected) return { ok: false, error: 'synthetic Japanese subtitle track was not selected' };
+        openPlayerSettings(true, document.querySelector('#manualChatgptRow'));
+        document.querySelector('#translateChatgpt').click();
+        return { ok: true };
+      } catch (error) { return { ok: false, error: error?.stack || String(error) }; }
+    })()`).catch(error => ({ ok: false, error: `renderer evaluation rejected: ${error.message}` }));
+    assert.equal(manualTranslationStarted.ok, true, `the packaged player selected the synthetic Japanese episode track: ${JSON.stringify(manualTranslationStarted)}`);
     await waitFor('manual translation panel for the selected episode track', () => win.webContents.executeJavaScript(`Boolean(
       manualChatgptTranslation?.batches.length === 2 && !document.querySelector('#manualChatgptPanel').classList.contains('hidden')
     )`)).catch(async error => {
@@ -1442,7 +1499,11 @@ app.whenReady().then(async () => {
       console.error(`Manual translation integration diagnostic: ${JSON.stringify(diagnostic)}`);
       throw error;
     });
-    await win.webContents.executeJavaScript("document.querySelector('#manualChatgptCopyOpen').click()");
+    const initialProgress = await win.webContents.executeJavaScript("document.querySelector('#manualChatgptProgress')?.textContent||''")
+      .catch(error => ({ evalError: error.message }));
+    assert.equal(initialProgress, '0/26문장 (0%) · 묶음 1/2 · 일본어 · 준비 중');
+    await win.webContents.executeJavaScript("(() => { const button=document.querySelector('#manualChatgptCopyOpen');if(!button)throw new Error('copy/open control missing');button.click();return true;})()")
+      .catch(error => { throw new Error(`copy/open action failed: ${error.message}`); });
     const firstTranslationPrompt = await waitFor('packaged Japanese prompt copied through the intercepted clipboard IPC', () =>
       clipboardWrites.length > promptBefore ? clipboardWrites.at(-1) : null);
     const originalJapanesePrompt = fs.readFileSync(path.join(repo, 'docs', 'prompts', '일본어 번역 프롬프트.txt'), 'utf8');
@@ -1452,28 +1513,67 @@ app.whenReady().then(async () => {
     assert.deepEqual(externalOpenRequests.slice(externalBefore), ['https://chatgpt.com/'], 'opening ChatGPT is intercepted and no real browser is launched');
 
     const firstBatchResponse = JSON.stringify({ translations: Array.from({ length: 24 }, (_, index) => ({ id: index + 1, text: `한국어 번역 ${index + 1}` })) });
-    await win.webContents.executeJavaScript(`(() => {
-      document.querySelector('#manualChatgptAnswer').value = ${JSON.stringify(firstBatchResponse)};
-      document.querySelector('#manualChatgptApply').click();
-    })()`);
-    await waitFor('first translated batch accepted with remaining cues pending', () => win.webContents.executeJavaScript('manualChatgptTranslation?.index === 1'));
+    const firstBatchSubmit = await win.webContents.executeJavaScript(`(() => { try {
+      const answer=document.querySelector('#manualChatgptAnswer'),apply=document.querySelector('#manualChatgptApply');
+      if(!answer||!apply)throw new Error('manual translation response controls are missing');
+      answer.value=${JSON.stringify(firstBatchResponse)};apply.click();return {ok:true};
+    } catch(error) { return {ok:false,error:error?.stack||String(error)}; } })()`).catch(error => ({ok:false,error:`renderer evaluation rejected: ${error.message}`}));
+    assert.equal(firstBatchSubmit.ok,true,`first response could be submitted: ${JSON.stringify(firstBatchSubmit)}`);
+    const translationSubmitDeadline = Date.now() + 8000;
+    await waitFor('first translated batch accepted with remaining cues pending', async () => {
+      const snapshot = await win.webContents.executeJavaScript(`(() => ({
+        progress: document.querySelector('#manualChatgptProgress')?.textContent || '',
+        status: document.querySelector('#manualChatgptStatus')?.textContent || '',
+        ready: document.readyState
+      }))()`).catch(error => ({ evalError: error.message }));
+      if (snapshot.evalError) {
+        if (Date.now() > translationSubmitDeadline) throw new Error(`renderer evaluation failed after first response: ${snapshot.evalError}; renderer events: ${JSON.stringify(rendererEvents)}`);
+        return false;
+      }
+      return snapshot.progress.includes('24/26문장 (92%)') && snapshot.progress.includes('묶음 2/2');
+    }).catch(async error => {
+      const snapshot = await win.webContents.executeJavaScript(`(() => ({
+        progress: document.querySelector('#manualChatgptProgress')?.textContent || '',
+        status: document.querySelector('#manualChatgptStatus')?.textContent || '',
+        answerLength: document.querySelector('#manualChatgptAnswer')?.value.length || 0,
+        ready: document.readyState
+      }))()`).catch(evalError => ({ evalError: evalError.message }));
+      throw new Error(`first batch progress failed: ${error?.stack || error}; snapshot=${JSON.stringify(snapshot)}; renderer=${JSON.stringify(rendererEvents)}`);
+    });
+    const partialProgress = await win.webContents.executeJavaScript("document.querySelector('#manualChatgptProgress')?.textContent || ''");
+    assert.equal(partialProgress, '24/26문장 (92%) · 묶음 2/2 · 일본어 · 준비 중');
     const secondPromptBefore = clipboardWrites.length;
-    await win.webContents.executeJavaScript("document.querySelector('#manualChatgptCopyOpen').click()");
+    const secondCopyClick = await win.webContents.executeJavaScript("(() => { const button=document.querySelector('#manualChatgptCopyOpen');if(!button)throw new Error('second copy/open control missing');button.click();return true;})()")
+      .catch(error => { throw new Error(`second batch copy/open click failed: ${error.message}; renderer=${JSON.stringify(rendererEvents)}`); });
+    assert.equal(secondCopyClick, true);
     const secondTranslationPrompt = await waitFor('second Japanese request includes preceding dialogue context', () =>
-      clipboardWrites.length > secondPromptBefore ? clipboardWrites.at(-1) : null);
+      clipboardWrites.length > secondPromptBefore ? clipboardWrites.at(-1) : null).catch(error => {
+        throw new Error(`second batch prompt was not copied: ${error.message}; renderer=${JSON.stringify(rendererEvents)}`);
+      });
     assert.match(secondTranslationPrompt, /앞 문맥 \(번역 대상 아님\):\s*\[\{"id":23,"text":"日本語の合成台詞 23"\},\{"id":24,"text":"日本語の合成台詞 24"\}\]/);
     const lastBatchResponse = JSON.stringify({ translations: [25, 26].map(id => ({ id, text: `한국어 번역 ${id}` })) });
-    await win.webContents.executeJavaScript(`(() => {
-      document.querySelector('#manualChatgptAnswer').value = ${JSON.stringify(lastBatchResponse)};
-      document.querySelector('#manualChatgptApply').click();
-    })()`);
+    const lastBatchSubmit = await win.webContents.executeJavaScript(`(() => { try {
+      const answer=document.querySelector('#manualChatgptAnswer'),apply=document.querySelector('#manualChatgptApply');
+      if(!answer||!apply)throw new Error('final response controls are missing');
+      answer.value=${JSON.stringify(lastBatchResponse)};apply.click();return {ok:true};
+    } catch(error) { return {ok:false,error:error?.stack||String(error)}; } })()`).catch(error => ({ok:false,error:`renderer evaluation rejected: ${error.message}`}));
+    assert.equal(lastBatchSubmit.ok,true,`final response could be submitted: ${JSON.stringify(lastBatchSubmit)}`);
     const savedManualTranslation = await waitFor('manual translation saved and applied to the same episode', () => win.webContents.executeJavaScript(`(async () => {
       if (currentSubtitle?.source !== 'chatgpt' || !currentSubtitle.path) return null;
       const key = subtitleStoreKey();
       const entries = await window.lilac.savedSubtitles(key);
       const entry = entries.find(item => item.source === 'chatgpt' && item.path === currentSubtitle.path);
-      return entry ? { key, path: currentSubtitle.path, source: currentSubtitle.source, episodeNumber: currentPlaybackContext.episode?.number } : null;
-    })()`));
+      return entry ? { key, path: currentSubtitle.path, from: currentSubtitle.from, source: currentSubtitle.source, episodeNumber: currentPlaybackContext.episode?.number } : null;
+    })()`).catch(error => ({evalError:error.message}))).catch(async error => {
+      const snapshot = await win.webContents.executeJavaScript(`(() => ({
+        status: document.querySelector('#manualChatgptStatus')?.textContent || '',
+        progress: document.querySelector('#manualChatgptProgress')?.textContent || '',
+        subtitleState: document.querySelector('#subtitleState')?.textContent || '',
+        source: currentSubtitle?.source || null,
+        path: currentSubtitle?.path || null
+      }))()`).catch(evalError => ({evalError:evalError.message}));
+      throw new Error(`final translated subtitle was not saved/applied: ${error?.stack||error}; snapshot=${JSON.stringify(snapshot)}; renderer=${JSON.stringify(rendererEvents)}`);
+    });
     assert.equal(savedManualTranslation.source, 'chatgpt');
     assert.equal(savedManualTranslation.episodeNumber, 1);
     assert.ok(path.resolve(savedManualTranslation.path).startsWith(`${path.resolve(userData)}${path.sep}`), 'the translated subtitle is stored inside this test-only userData profile');
@@ -1484,7 +1584,87 @@ app.whenReady().then(async () => {
     assert.deepEqual(translatedTimecodes, sourceTimecodes, 'all translated cues keep the source order and original timestamps');
     assert.match(translatedSubtitleText, /00:00:01\.000 --> 00:00:01\.200\n한국어 번역 1/);
     assert.match(translatedSubtitleText, /00:00:07\.250 --> 00:00:07\.450\n한국어 번역 26/);
+    const japaneseFingerprint = await win.webContents.executeJavaScript("window.LilacManualSubtitle.fingerprintWebVtt(" + JSON.stringify(syntheticJapaneseSubtitle) + ")");
+    const japanesePendingSession = await win.webContents.executeJavaScript("window.lilac.manualTranslationSession(" + JSON.stringify(savedManualTranslation.key) + ", " + JSON.stringify(japaneseFingerprint) + ")")
+      .catch(error => { throw new Error(`completed session lookup failed: ${error.message}`); });
+    assert.equal(japanesePendingSession, null, 'immediate cleanup removes the completed temporary session');
+    assert.ok(fs.existsSync(savedManualTranslation.path), 'cleanup preserves the applied Korean subtitle');
 
+    const englishTranslationStarted = await win.webContents.executeJavaScript("(async () => { try { const selected = await selectSubtitleTrack(" + JSON.stringify(englishTrack) + "); if (!selected) return {ok:false,error:'English track selection returned false'}; openPlayerSettings(true, document.querySelector('#manualChatgptRow')); const button=document.querySelector('#translateChatgpt');if(!button)throw new Error('translation start control missing');button.click(); return {ok:true}; } catch(error) { return {ok:false,error:error?.stack||String(error)}; } })()")
+      .catch(error => ({ok:false,error:`renderer evaluation rejected: ${error.message}; renderer=${JSON.stringify(rendererEvents)}`}));
+    assert.equal(englishTranslationStarted.ok,true,`English track translation can start: ${JSON.stringify(englishTranslationStarted)}`);
+    const englishPanelDeadline = Date.now() + 8000;
+    await waitFor('English manual translation panel', async () => {
+      const snapshot = await win.webContents.executeJavaScript(`(() => ({
+        progress: document.querySelector('#manualChatgptProgress')?.textContent || '',
+        status: document.querySelector('#manualChatgptStatus')?.textContent || '',
+        panelHidden: document.querySelector('#manualChatgptPanel')?.classList.contains('hidden') ?? true,
+        ready: document.readyState
+      }))()`).catch(error => ({ evalError: error.message }));
+      if (snapshot.evalError) {
+        if (Date.now() > englishPanelDeadline) throw new Error(`renderer evaluation failed while opening English translation: ${snapshot.evalError}; renderer=${JSON.stringify(rendererEvents)}`);
+        return false;
+      }
+      return snapshot.progress.includes('영어') && !snapshot.panelHidden;
+    }).catch(async error => {
+      const snapshot = await win.webContents.executeJavaScript(`(() => ({ progress:document.querySelector('#manualChatgptProgress')?.textContent||'', status:document.querySelector('#manualChatgptStatus')?.textContent||'', rowHidden:document.querySelector('#manualChatgptRow')?.classList.contains('hidden') }))()`).catch(evalError => ({evalError:evalError.message}));
+      throw new Error(`English translation panel failed: ${error?.stack||error}; snapshot=${JSON.stringify(snapshot)}; renderer=${JSON.stringify(rendererEvents)}`);
+    });
+    const englishProgress = await win.webContents.executeJavaScript("document.querySelector('#manualChatgptProgress')?.textContent || ''")
+      .catch(error => { throw new Error(`English progress read failed: ${error.message}`); });
+    assert.equal(englishProgress, '0/2문장 (0%) · 묶음 1/1 · 영어 · 준비 중');
+    const englishPromptStart = clipboardWrites.length;
+    await win.webContents.executeJavaScript("(() => { const button=document.querySelector('#manualChatgptCopyOpen');if(!button)throw new Error('English copy/open control missing');button.click();return true;})()")
+      .catch(error => { throw new Error(`English copy/open click failed: ${error.message}`); });
+    const englishPrompt = await waitFor('English translation prompt copied through packaged IPC', () => clipboardWrites.length > englishPromptStart ? clipboardWrites.at(-1) : null);
+    const originalEnglishPrompt = fs.readFileSync(path.join(repo, 'docs', 'prompts', '영어 번역 프롬프트.txt'), 'utf8');
+    assert.ok(englishPrompt.includes(originalEnglishPrompt), 'the UI selects the unchanged English prompt');
+    assert.match(englishPrompt, /번역 원문 언어 판정: 영어/);
+    await win.webContents.executeJavaScript("(() => { const input = document.querySelector('#manualChatgptAnswer'),button=document.querySelector('#manualChatgptApply');if(!input||!button)throw new Error('English result controls are missing');input.value = JSON.stringify({translations:[{id:1,text:'첫 영어 번역'},{id:2,text:'둘째 영어 번역'}]}); input.dispatchEvent(new Event('input',{bubbles:true})); button.click();return true; })()")
+      .catch(error => { throw new Error(`English result submit failed: ${error.message}`); });
+    const englishSaveDeadline = Date.now() + 8000;
+    const savedEnglishTranslation = await waitFor('English translation saved and applied', async () => {
+      const result = await win.webContents.executeJavaScript("(async () => { if (currentSubtitle?.source !== 'chatgpt' || !currentSubtitle.path || currentSubtitle.path === " + JSON.stringify(savedManualTranslation.path) + ") return null; const entries = await window.lilac.savedSubtitles(subtitleStoreKey()); const entry = entries.find(item => item.source === 'chatgpt' && item.path === currentSubtitle.path); return entry ? {path:entry.path,from:currentSubtitle.from,key:subtitleStoreKey()} : null; })()")
+        .catch(error => ({evalError:error.message}));
+      if (result?.evalError) {
+        if (Date.now() > englishSaveDeadline) throw new Error(`English save evaluation failed: ${result.evalError}; renderer=${JSON.stringify(rendererEvents)}`);
+        return false;
+      }
+      return result;
+    }).catch(async error => {
+      const snapshot = await win.webContents.executeJavaScript(`(() => ({ status:document.querySelector('#manualChatgptStatus')?.textContent||'', subtitleState:document.querySelector('#subtitleState')?.textContent||'', source:currentSubtitle?.source||null, path:currentSubtitle?.path||null }))()`).catch(evalError => ({evalError:evalError.message}));
+      throw new Error(`English translation save failed: ${error?.stack||error}; snapshot=${JSON.stringify(snapshot)}; renderer=${JSON.stringify(rendererEvents)}`);
+    });
+    const translatedEnglishText = fs.readFileSync(savedEnglishTranslation.path, 'utf8');
+    assert.match(translatedEnglishText, /00:00:01\.000 --> 00:00:01\.800\n첫 영어 번역/);
+    assert.match(translatedEnglishText, /00:00:02\.000 --> 00:00:02\.800\n둘째 영어 번역/);
+    const englishFingerprint = await win.webContents.executeJavaScript("window.LilacManualSubtitle.fingerprintWebVtt(" + JSON.stringify(syntheticEnglishSubtitle) + ")")
+      .catch(error => { throw new Error(`English source fingerprint failed: ${error.message}`); });
+    const englishPendingSession = await win.webContents.executeJavaScript("window.lilac.manualTranslationSession(" + JSON.stringify(savedEnglishTranslation.key) + ", " + JSON.stringify(englishFingerprint) + ")")
+      .catch(error => { throw new Error(`English completed session lookup failed: ${error.message}`); });
+    assert.equal(englishPendingSession, null);
+    await waitFor('original subtitle action is available after translation', () => win.webContents.executeJavaScript("Boolean(document.querySelector('#manualChatgptRestoreOriginal') && !document.querySelector('#manualChatgptRestoreOriginal').classList.contains('hidden'))"));
+    await win.webContents.executeJavaScript("(() => { const button=document.querySelector('#manualChatgptRestoreOriginal');if(!button)throw new Error('restore-original control missing');button.click();return true;})()")
+      .catch(error => { throw new Error(`restore-original click failed: ${error.message}`); });
+    await waitFor('original English subtitle restored from the saved subtitle store', () => win.webContents.executeJavaScript("currentSubtitle?.path === " + JSON.stringify(savedEnglishTranslation.from) + " && currentSubtitle?.source !== 'chatgpt'"));
+    const retranslationPromptStart = await win.webContents.executeJavaScript(`(() => { try {
+      window.__manualExistingTranslationConfirm=[];
+      window.confirm=message=>{window.__manualExistingTranslationConfirm.push(String(message));return false};
+      const button=document.querySelector('#translateChatgpt');if(!button)throw new Error('retranslation control missing');button.click();return {ok:true};
+    } catch(error) { return {ok:false,error:error?.stack||String(error)}; } })()`)
+      .catch(error => ({ok:false,error:`renderer evaluation rejected: ${error.message}`}));
+    assert.equal(retranslationPromptStart.ok,true,`retranslation confirmation can be requested: ${JSON.stringify(retranslationPromptStart)}`);
+    await waitFor('existing English translation prompts before retranslation', () => win.webContents.executeJavaScript("Boolean(window.__manualExistingTranslationConfirm?.some(message=>message.includes('이미 번역되어 저장됐습니다')))"));
+    const retranslationConfirmCount = await win.webContents.executeJavaScript("window.__manualExistingTranslationConfirm?.length ?? 0")
+      .catch(error => { throw new Error(`retranslation confirmation count failed: ${error.message}`); });
+    assert.equal(retranslationConfirmCount, 1);
+    const retranslationDeclined = await win.webContents.executeJavaScript("manualChatgptTranslation===null")
+      .catch(error => { throw new Error(`retranslation state check failed: ${error.message}`); });
+    assert.equal(retranslationDeclined, true, 'declining retranslation does not create another translation job');
+    const savedEnglishCount = await win.webContents.executeJavaScript("(async () => (await window.lilac.savedSubtitles(subtitleStoreKey())).filter(item=>item.source==='chatgpt'&&item.from===" + JSON.stringify(savedEnglishTranslation.from) + ").length)()")
+      .catch(error => { throw new Error(`saved English subtitle lookup failed: ${error.message}`); });
+    assert.equal(savedEnglishCount, 1, 'the existing Korean translation remains saved');
+    assert.ok(fixtureRequests.includes('https://subtitles.invalid/phase1-en.vtt'), 'the selected English subtitle was fetched through the packaged main process');
     const sourcePicker = await win.webContents.executeJavaScript(`(() => {
       switchView('settings');
       window.showSettingsPane?.('playback');
@@ -1575,11 +1755,11 @@ app.whenReady().then(async () => {
     assert.equal(deniedUnknownFetches.length, 0, `no unregistered main-process URL was requested: ${deniedUnknownFetches.join(', ')}`);
     assert.equal(deniedBrowserRequests.length, 0, `no external browser request was allowed or attempted: ${deniedBrowserRequests.join(', ')}`);
 
-    console.log('Packaged Phase 1 smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs and Re:Anime quarter selection UI, Re:Anime latest-airing UI, Linkkf current-day/weekday schedule UI, Animenosub/Ani24 update feeds and synthetic Ohli24 9.5 episode plus local caption resolution, Animenosub recent-updates home card, settings source selection and reload into the Animenosub home, renderer search button → result card → detail → episode button → packaged resolver playback, Korean subtitle parsing and save, loopback HLS decode, persisted resume, automatic same-kind server fallback, and an in-app Japanese prompt → manual translation → episode-scoped save with original cue timings and order. ChatGPT browser opening and clipboard writes use test-only interceptors; no real ChatGPT request is sent.');
+    console.log('Packaged Phase 1 smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs and Re:Anime quarter selection UI, Re:Anime latest-airing UI, Linkkf current-day/weekday schedule UI, Animenosub/Ani24 update feeds and synthetic Ohli24 9.5 episode plus local caption resolution, Animenosub recent-updates home card, settings source selection and reload into the Animenosub home, renderer search button → result card → detail → episode button → packaged resolver playback, Korean subtitle parsing and save, loopback HLS decode, persisted resume, automatic same-kind server fallback, and actual Electron English/Japanese prompt selection, truthful progress, cue-preserving translation, auto cleanup, original subtitle restore, and episode-scoped save. ChatGPT account eligibility remains unverified; browser opening and clipboard writes use test-only interceptors, with no real ChatGPT request sent.');
     console.log(`Playback: ${playbackState.width}x${playbackState.height} at ${playbackState.currentTime.toFixed(2)}s; resume: ${resumeState.currentTime.toFixed(2)}s from saved 50%; fallback: ${fallbackState.server} at ${fallbackState.currentTime.toFixed(2)}s with selected subtitle; synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; renderer proxy requests: ${rendererProxyRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: 0; blocked browser requests: 0; external network calls: 0.`);
     await new Promise(resolve => localPlayerServer.close(resolve));
     app.quit();
-  } catch (error) { fail(error); }
+  } catch (error) { console.error('Phase 1 app integration body failed:', error?.stack || error); fail(error); }
 }).catch(fail);
 
 process.on('exit', () => {

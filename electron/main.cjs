@@ -18,6 +18,7 @@ const { DownloadManager } = require('./download-manager.cjs');
 const { Updater } = require('./updater.cjs');
 const { DAY_MS, TITLE_CANDIDATE_TTL_MS, DISPLAY_TITLE_TTL_MS, CATALOG_TITLE_TTL_MS, isFreshTimestamp, pruneTimestampedRecords, pruneKoreanTitleRecords } = require('./metadata-cache.cjs');
 const { SubtitleStore } = require('./subtitle-store.cjs');
+const { registerManualTranslationSessionIpc } = require('./manual-translation-session.cjs');
 const { loadTranslationPrompt } = require('./translation-prompts.cjs');
 const { createTranslator } = require('./subtitle-translator.cjs');
 const { QUARTER_PROVIDERS, quarterForDate, quarterPeriod, quarterQuery } = require('./quarter-catalog.cjs');
@@ -2306,6 +2307,7 @@ app.whenReady().then(async () => {
       return saved||{source:'chatgpt',label:'ChatGPT 수동 번역',path:file,url:pathToFileURL(file).href};
     }catch(error){try{fs.unlinkSync(file)}catch{}throw error}
   });
+  registerManualTranslationSessionIpc({ ipcMain, app, shell, subtitleStore });
   // 설정 > 자막 캐시: the subtitle files no saved subtitle uses (translations, downloads, partial results), removed by
   // hand, and by themselves a minute after start once a month old.
   ipcMain.handle('subtitle-cache:usage',()=>subtitleStore.usage());

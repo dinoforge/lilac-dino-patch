@@ -822,7 +822,7 @@ function attachSubtitle(src,label='자막',options={}){
   track.addEventListener('error',()=>{if(currentSubtitle===subtitle)$('#subtitleState').textContent='자막 파일을 불러오지 못했습니다.'});
   renderAssSubtitle();
   if(options.source==='user')fetch(src).then(response=>response.text()).then(text=>{const body=text.replace(/^WEBVTT.*$/m,'').replace(/\d{2}:\d{2}[:.,\d]* --> [^\n]*/g,''),count=pattern=>(body.match(pattern)||[]).length,hangul=count(/[가-힣]/g);subtitle.korean=hangul>count(/[぀-ヿ一-龯a-zA-Z]/g);if(currentSubtitle===subtitle)renderSubtitleSheet()}).catch(()=>{});
-  if(options.source&&options.path&&!options.saved)rememberSubtitle(subtitle);else renderSubtitleSheet();if(typeof renderDiscoveredFonts==='function')renderDiscoveredFonts();
+  if(options.source&&options.path&&!options.saved)rememberSubtitle(subtitle);else renderSubtitleSheet();if(typeof renderDiscoveredFonts==='function')renderDiscoveredFonts();if(typeof renderManualChatgptSavedTools==='function')renderManualChatgptSavedTools();
 }
 
 // A series whose Korean subtitle (a fansub, the site's Korean track) the user set aside for a machine translation,
@@ -1214,16 +1214,68 @@ function translateJimaku(provider='cloud',manual=false){const subtitle=currentPl
 // The one 번역 row translates the subtitle on screen: the picked Jimaku file, or the picked track.
 const translateShown=provider=>{beginSubtitleSelection();const kind=translatableSubtitle(),button=provider==='local'?$('#translateNowLocal'):$('#translateNow'),again=retranslatable();if(again)return runTranslation({file:async()=>({path:again.from}),name:again.fromName||'자막',button,provider,manual:true,fresh:true});if(kind==='jimaku')return translateJimaku(provider,true);if(kind==='user'){const path=currentSubtitle.path;return runTranslation({file:async()=>({path}),name:'내 자막',button,provider,manual:true})}return translateSubtitleTrack(provider,true)};
 function manualChatgptIsCurrent(state=manualChatgptTranslation){return Boolean(state&&state.requestId===playbackRequestId&&state.selectionRequestId===subtitleSelectionRequestId&&state.sourcePath===currentSubtitle?.path&&state.episodeKey===subtitleStoreKey())}
+let manualChatgptPrefs={autoCleanup:true,cleanupTiming:'immediate'},manualChatgptCleanupTimer=null;
+const manualChatgptStatusText={ready:'준비 중', 'awaiting-response':'ChatGPT 응답 대기',validating:'결과 검사 중',error:'오류 · 작업 보존',cancelled:'중단됨 · 이어하기 가능',saving:'저장 중',completed:'완료'};
+function ensureManualChatgptControls(){
+  const panel=$('#manualChatgptPanel'),actions=panel?.querySelector('.manual-translation-actions');if(!panel||!actions)return;
+  const add=(id,label,handler,where='append')=>{if(document.getElementById(id))return;const button=document.createElement('button');button.id=id;button.type='button';button.className='sheet-button';button.textContent=label;button.addEventListener('click',handler);if(where==='prepend')actions.prepend(button);else actions.append(button)};
+  const retry=$('#manualChatgptRetry');if(!retry)add('manualChatgptRetry','현재 묶음 다시 복사',copyManualChatgptPrompt,'prepend');
+  const stop=$('#manualChatgptCancel');if(stop)stop.textContent='중단 · 저장';
+  add('manualChatgptDiscard','작업 삭제',discardManualChatgptSession);
+  let tools=$('#manualChatgptSavedTools');if(!tools){tools=document.createElement('div');tools.id='manualChatgptSavedTools';tools.className='manual-translation-actions';panel.after(tools)}
+  if(!$('#manualChatgptRestoreOriginal')){const button=document.createElement('button');button.id='manualChatgptRestoreOriginal';button.type='button';button.className='sheet-button';button.textContent='원본 자막으로 되돌리기';button.addEventListener('click',restoreManualChatgptSource);tools.append(button)}
+  if(!$('#manualChatgptOpenSaved')){const button=document.createElement('button');button.id='manualChatgptOpenSaved';button.type='button';button.className='sheet-button';button.textContent='저장 위치 열기';button.addEventListener('click',openManualChatgptSavedFolder);tools.append(button)}
+  renderManualChatgptSavedTools();
+}
+function renderManualChatgptSavedTools(){
+  const restore=$('#manualChatgptRestoreOriginal'),open=$('#manualChatgptOpenSaved'),entries=currentPlaybackContext.savedSubtitleEntries||[],source=currentSubtitle?.source==='chatgpt'?entries.find(entry=>entry.path===currentSubtitle.from):null;
+  if(restore)restore.classList.toggle('hidden',!source);if(open)open.classList.toggle('hidden',!(currentSubtitle?.source==='chatgpt'&&currentSubtitle.path));
+}
+async function restoreManualChatgptSource(){
+  const translated=currentSubtitle,key=subtitleStoreKey();if(translated?.source!=='chatgpt'||!translated.from)return;
+  const entries=await window.lilac.savedSubtitles(key).catch(()=>[]),source=entries.find(entry=>entry.path===translated.from);if(!source){toast('원본 자막 파일을 찾지 못했습니다.');return}
+  if(translated!==currentSubtitle||key!==subtitleStoreKey())return;
+  currentPlaybackContext.savedSubtitleEntries=entries;attachSubtitle(source.url,source.label||source.source,{path:source.path,assPath:source.assPath,assUrl:source.assUrl,fonts:source.fonts,source:source.source,saved:true});toast('원본 자막으로 돌아왔습니다.');
+}
+async function openManualChatgptSavedFolder(){if(currentSubtitle?.source!=='chatgpt'||!currentSubtitle.path)return;try{await window.lilac.revealManualSubtitle(currentSubtitle.path)}catch(error){toast(`저장 위치를 열지 못했습니다: ${ipcMessage(error)}`)}}
+async function readManualChatgptPrefs(){
+  try{const value=await window.lilac.manualTranslationSettings?.();if(value)manualChatgptPrefs={autoCleanup:value.autoCleanup!==false,cleanupTiming:['immediate','five-minutes','on-close'].includes(value.cleanupTiming)?value.cleanupTiming:'immediate'}}catch{}
+  return manualChatgptPrefs;
+}
+async function persistManualChatgptSession(state,status=state?.status){
+  if(!state||!state.sourceFingerprint||typeof window.lilac.saveManualTranslationSession!=='function')return false;
+  state.answer=$('#manualChatgptAnswer')?.value||state.answer||'';state.status=status||'ready';
+  const payload={sourcePath:state.sourcePath,sourceLabel:state.sourceLabel,title:state.title,episode:state.episode,language:state.sourceLanguage,index:state.index,batchCount:state.batches.length,totalCueCount:state.batches.reduce((sum,batch)=>sum+batch.length,0),translations:state.translations,answer:state.answer,status:state.status,message:state.message,cleanupAt:state.cleanupAt||null};
+  try{await window.lilac.saveManualTranslationSession(state.episodeKey,state.sourceFingerprint,payload);state.persisted=true;return true}
+  catch(error){state.persisted=false;state.message=`임시 작업을 저장하지 못했습니다: ${ipcMessage(error)}`;return false}
+}
+function renderManualChatgptSettings(){
+  const pane=document.querySelector('[data-settings-pane="translate"]');if(!pane)return;
+  if(!$('#manualChatgptUxStyles')){const style=document.createElement('style');style.id='manualChatgptUxStyles';style.textContent='.manual-chatgpt-settings{display:grid;gap:10px}.manual-chatgpt-settings>p{margin:0;color:var(--muted);font-size:12px;line-height:1.55}.manual-chatgpt-settings .setting-switch{margin:4px 0}.manual-chatgpt-settings .tmdb-row{display:flex;align-items:center;gap:10px}.manual-chatgpt-settings select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:6px}.manual-chatgpt-settings-actions,.manual-translation-actions{display:flex;gap:7px;flex-wrap:wrap}.manual-chatgpt-settings-actions button,.manual-translation-actions button{min-height:34px;padding:7px 11px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--text);font:inherit;font-size:12px;cursor:pointer}.manual-chatgpt-settings-actions button:disabled,.manual-translation-actions button:disabled{opacity:.5;cursor:not-allowed}.manual-translation-panel{display:grid;gap:9px;padding:12px 0}.manual-translation-head{display:flex;justify-content:space-between;align-items:center;gap:8px}.manual-translation-head span{color:var(--muted);font-size:11px;text-align:right}.manual-translation-panel>p{margin:0;color:var(--muted);font-size:12px;line-height:1.5}.manual-translation-panel textarea{width:100%;min-height:120px;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--text);font:inherit;resize:vertical}.manual-translation-panel label{font-size:12px;font-weight:600}';document.head.append(style)}
+  let box=$('#manualChatgptSettings');
+  if(!box){box=document.createElement('div');box.id='manualChatgptSettings';box.className='setting-block manual-chatgpt-settings';box.innerHTML='<b>ChatGPT 수동 번역</b><p id="manualChatgptAccountState" role="status">공식 ChatGPT 계정 연결 권한을 확인할 수 없어 앱에서 로그인 상태를 조회하지 않습니다. 브라우저의 ChatGPT 로그인은 앱 연결 상태와 별개입니다.</p><div class="manual-chatgpt-settings-actions"><button id="manualChatgptConnect" type="button" disabled>ChatGPT 계정 연결</button><button id="manualChatgptCheckLogin" type="button">로그인 상태 확인</button><button id="manualChatgptDisconnect" type="button" disabled>계정 연결 해제</button><button id="manualChatgptUseManual" type="button">수동 번역으로 전환</button></div><label class="setting-switch"><span><b>번역 완료 후 앱 내부 임시 데이터 정리</b><small>저장된 한국어 자막은 항상 유지합니다. 실패하거나 중단한 작업은 이어할 수 있도록 보존합니다.</small></span><input id="manualChatgptAutoCleanup" type="checkbox" checked></label><div class="tmdb-row"><label for="manualChatgptCleanupTiming">정리 시점</label><select id="manualChatgptCleanupTiming"><option value="immediate">즉시</option><option value="five-minutes">5분 뒤</option><option value="on-close">앱을 닫을 때</option></select></div><p>ChatGPT 웹 대화는 앱에서 읽거나 삭제하지 않습니다. 임시 대화를 원하면 ChatGPT에서 임시 채팅을 직접 선택하고, 대화 정리도 ChatGPT 웹사이트에서 직접 하세요.</p><div class="manual-chatgpt-settings-actions"><button id="manualChatgptOpenChat" type="button">ChatGPT 열기</button><button id="manualChatgptChatCleanupHelp" type="button">ChatGPT에서 대화 정리하기</button></div>';
+    pane.append(box);
+    $('#manualChatgptCheckLogin').addEventListener('click',()=>{$('#manualChatgptAccountState').textContent='앱의 공식 SIWC 연결 자격과 클라이언트 등록이 확인되지 않았습니다. 로그인 여부를 확인할 수 없으며 수동 번역을 사용하세요.'});
+    $('#manualChatgptUseManual').addEventListener('click',()=>{const button=$('#translateChatgpt');if(button&&!button.classList.contains('hidden'))button.click();else toast('먼저 영상에서 영어 또는 일본어 자막을 선택해 주세요.')});
+    const openChat=async()=>{try{await window.lilac.openExternal('https://chatgpt.com/')}catch{toast('ChatGPT를 열지 못했습니다. 브라우저에서 chatgpt.com을 여세요.')}};
+    $('#manualChatgptOpenChat').addEventListener('click',openChat);$('#manualChatgptChatCleanupHelp').addEventListener('click',openChat);
+    const save=async()=>{manualChatgptPrefs={autoCleanup:$('#manualChatgptAutoCleanup').checked,cleanupTiming:$('#manualChatgptCleanupTiming').value};try{manualChatgptPrefs=await window.lilac.saveManualTranslationSettings(manualChatgptPrefs)||manualChatgptPrefs;toast('번역 임시 데이터 설정을 저장했습니다.')}catch(error){toast(`설정을 저장하지 못했습니다: ${ipcMessage(error)}`)}};
+    $('#manualChatgptAutoCleanup').addEventListener('change',save);$('#manualChatgptCleanupTiming').addEventListener('change',save);
+  }
+  if(!box.dataset.loaded){box.dataset.loaded='true';void readManualChatgptPrefs().then(value=>{if($('#manualChatgptAutoCleanup'))$('#manualChatgptAutoCleanup').checked=value.autoCleanup;if($('#manualChatgptCleanupTiming'))$('#manualChatgptCleanupTiming').value=value.cleanupTiming})}
+}
 function renderManualChatgptPanel(){
   let state=manualChatgptTranslation;
   if(state&&!manualChatgptIsCurrent(state)){manualChatgptTranslation=null;manualChatgptPanelOpen=false;state=null}
+  ensureManualChatgptControls();
   const row=$('#manualChatgptRow'),panel=$('#manualChatgptPanel'),available=Boolean(translatableSubtitle());
   row.classList.toggle('hidden',!available&&!state);
   panel.classList.toggle('hidden',!state||!manualChatgptPanelOpen);
   $('#translateChatgpt').textContent=state?'ChatGPT 번역 계속':'ChatGPT 수동 번역';
   if(!state)return;
-  const saving=state.index>=state.batches.length;
-  $('#manualChatgptProgress').textContent=saving?'번역 완료 · 저장 대기':`묶음 ${state.index+1}/${state.batches.length}`;
+  const saving=state.status==='saving'||state.index>=state.batches.length,progress=window.LilacManualSubtitle.progress(state.parsed.cues,state.translations),batch=Math.min(state.index+1,state.batches.length);
+  $('#manualChatgptProgress').textContent=`${progress.completed}/${progress.total}문장 (${progress.percent}%) · 묶음 ${batch}/${state.batches.length} · ${state.sourceLanguage==='english'?'영어':'일본어'} · ${manualChatgptStatusText[state.status]||'준비 중'}`;
+  $('#manualChatgptRetry').disabled=state.busy||saving;$('#manualChatgptDiscard').disabled=state.busy;
   $('#manualChatgptCopyOpen').disabled=state.busy||saving;
   $('#manualChatgptApply').disabled=state.busy;
   $('#manualChatgptApply').textContent=saving?'번역 자막 저장 재시도':'결과 확인';
@@ -1236,17 +1288,34 @@ async function startManualChatgptTranslation(){
   const requestId=playbackRequestId,selectionRequestId=beginSubtitleSelection(),button=$('#translateChatgpt');button.disabled=true;button.textContent='자막을 준비하는 중…';
   try{
     const response=await fetch(subtitle.src);if(!response.ok)throw new Error(`자막 파일을 읽지 못했습니다 (HTTP ${response.status}).`);
-    const parsed=window.LilacManualSubtitle.parseWebVtt(await response.text()),batches=window.LilacManualSubtitle.makeBatches(parsed.cues);
+    const sourceText=await response.text(),parsed=window.LilacManualSubtitle.parseWebVtt(sourceText),batches=window.LilacManualSubtitle.makeBatches(parsed.cues),sourceFingerprint=await window.LilacManualSubtitle.fingerprintWebVtt(sourceText),sourceLanguage=window.LilacManualSubtitle.detectSourceLanguage(parsed.cues);
     if(!batches.length)throw new Error('번역할 문장을 찾지 못했습니다.');
     if(requestId!==playbackRequestId||selectionRequestId!==subtitleSelectionRequestId||currentSubtitle!==subtitle)return;
-    manualChatgptTranslation={parsed,batches,index:0,translations:{},requestId,selectionRequestId,sourcePath:subtitle.path,sourceLabel:subtitle.label||'원본 자막',episodeKey:subtitleStoreKey(),title:currentPlaybackContext.subtitleTitle||$('#skipTitle').value.trim()||$('#playerTitle').textContent,episode:Number($('#skipEpisode').value)||episodeNumberOf(currentPlaybackContext.episode)||1,busy:false};
-    manualChatgptPanelOpen=true;$('#manualChatgptAnswer').value='';$('#manualChatgptStatus').textContent='첫 요청을 복사해 ChatGPT에 붙여넣으세요.';renderManualChatgptPanel();
+    const episodeKey=subtitleStoreKey();if(!episodeKey)throw new Error('회차 정보를 확인할 수 없어 안전한 번역 작업을 시작할 수 없습니다.');let saved=null;await readManualChatgptPrefs();
+    if(typeof window.lilac.manualTranslationSession==='function')saved=await window.lilac.manualTranslationSession(episodeKey,sourceFingerprint);
+    if(requestId!==playbackRequestId||selectionRequestId!==subtitleSelectionRequestId||currentSubtitle!==subtitle)return;
+    const savedEntries=await window.lilac.savedSubtitles(episodeKey);
+    if(requestId!==playbackRequestId||selectionRequestId!==subtitleSelectionRequestId||currentSubtitle!==subtitle)return;
+    const hasSavedTranslation=savedEntries.some(entry=>entry.source==='chatgpt'&&entry.from===subtitle.path);
+    if(saved?.status==='completed'||hasSavedTranslation){
+      if(!confirm('이 자막은 이미 번역되어 저장됐습니다. 새 번역 작업을 시작할까요? 저장된 한국어 자막은 유지됩니다.')){$('#manualChatgptStatus').textContent='저장된 번역은 유지했습니다. 새 작업을 시작하지 않았습니다.';return}
+      if(saved?.status==='completed')await window.lilac.removeManualTranslationSession?.(episodeKey,sourceFingerprint);saved=null;
+    }
+    const translations=Object.create(null),knownIds=new Set(parsed.cues.map(cue=>cue.id));
+    if(saved){
+      if(saved.batchCount!==batches.length||saved.totalCueCount!==batches.reduce((sum,batch)=>sum+batch.length,0)||saved.language!==sourceLanguage||saved.sourcePath!==subtitle.path)throw new Error('저장된 작업의 회차·원본 자막·묶음 구성이 달라 이어하기를 중단했습니다. 기존 작업 데이터는 보존했습니다.');
+      for(const [id,text] of Object.entries(saved.translations||{})){if(!knownIds.has(Number(id))||typeof text!=='string')throw new Error('저장된 번역 문장 ID를 확인하지 못했습니다. 기존 작업 데이터는 보존했습니다.');translations[id]=text}
+      for(const batch of batches.slice(0,saved.index||0))for(const item of batch)if(!Object.hasOwn(translations,item.id))throw new Error('완료된 묶음의 번역 문장이 없어 이어하기를 중단했습니다. 기존 작업 데이터는 보존했습니다.');
+    }
+    manualChatgptTranslation={parsed,batches,index:saved?.index||0,translations,requestId,selectionRequestId,sourcePath:subtitle.path,sourceFingerprint,sourceLabel:subtitle.label||'원본 자막',episodeKey,title:currentPlaybackContext.subtitleTitle||$('#skipTitle').value.trim()||$('#playerTitle').textContent,episode:Number($('#skipEpisode').value)||episodeNumberOf(currentPlaybackContext.episode)||1,busy:false,answer:saved?.answer||'',sourceLanguage,status:saved?.status==='cancelled'?'cancelled':'ready',message:saved?.message||(saved?'저장된 작업을 이어갑니다.':'첫 요청을 복사해 ChatGPT에 붙여넣으세요.')};
+    manualChatgptPanelOpen=true;$('#manualChatgptAnswer').value=manualChatgptTranslation.answer;$('#manualChatgptStatus').textContent=manualChatgptTranslation.message;renderManualChatgptPanel();
   }catch(error){if(requestId===playbackRequestId&&selectionRequestId===subtitleSelectionRequestId){$('#manualChatgptStatus').textContent=error.message;toast(error.message)}}
   finally{button.disabled=false;if(!manualChatgptTranslation)button.textContent='ChatGPT 수동 번역'}
 }
 async function copyManualChatgptPrompt(){
   const state=manualChatgptTranslation;if(!manualChatgptIsCurrent(state))return;
   const batch=state.batches[state.index];if(!batch)return;
+  state.status='ready';state.message='현재 묶음 번역 요청을 준비하고 있습니다.';renderManualChatgptPanel();
   const sourceLanguage=window.LilacManualSubtitle.detectSourceLanguage(state.parsed.cues);
   const cueIndexes=batch.map(item=>state.parsed.cues.findIndex(cue=>cue.id===item.id)).filter(index=>index>=0);
   const first=Math.min(...cueIndexes),last=Math.max(...cueIndexes);
@@ -1259,13 +1328,17 @@ async function copyManualChatgptPrompt(){
   const prompt=window.LilacManualSubtitle.makePrompt({title:state.title,episode:state.episode,items:batch,contextBefore,contextAfter,translationInstructions,sourceLanguage});
   try{
     await window.lilac.copyText(prompt);
-    try{await window.lilac.openExternal('https://chatgpt.com/');$('#manualChatgptStatus').textContent='요청을 복사하고 ChatGPT를 열었습니다. 브라우저에서 붙여넣어 직접 보내세요.'}
-    catch{$('#manualChatgptStatus').textContent='요청을 복사했습니다. ChatGPT를 열어 직접 붙여넣으세요.'}
-  }catch(error){$('#manualChatgptStatus').textContent=`복사하지 못했습니다: ${error.message}`}
+    state.status='awaiting-response';state.message='요청을 복사했습니다. ChatGPT에 직접 붙여넣고 응답을 기다리세요.';
+    try{await window.lilac.openExternal('https://chatgpt.com/');state.message='요청을 복사하고 ChatGPT를 열었습니다. 브라우저에서 붙여넣어 직접 보내세요.'}
+    catch{state.message='요청을 복사했습니다. 브라우저에서 ChatGPT를 열어 직접 붙여넣으세요.'}
+    $('#manualChatgptStatus').textContent=state.message;await persistManualChatgptSession(state,'awaiting-response');
+  }catch(error){state.status='error';state.message=`요청 복사 실패: ${ipcMessage(error)}`;$('#manualChatgptStatus').textContent=state.message;await persistManualChatgptSession(state,'error')}
+  renderManualChatgptPanel();
 }
 async function saveManualChatgptResult(state){
   if(!manualChatgptIsCurrent(state)||state.busy)return;
-  state.busy=true;$('#manualChatgptStatus').textContent='번역 자막을 저장하고 적용하는 중…';renderManualChatgptPanel();
+  clearTimeout(state.answerSaveTimer);
+  state.busy=true;state.status='saving';state.message='번역 자막을 저장하고 적용하는 중…';$('#manualChatgptStatus').textContent=state.message;renderManualChatgptPanel();await persistManualChatgptSession(state,'saving');
   try{
     const text=window.LilacManualSubtitle.renderWebVtt(state.parsed,state.translations);
     const result=await window.lilac.saveManualSubtitle({key:state.episodeKey,text,from:state.sourcePath,fromName:state.sourceLabel});
@@ -1273,27 +1346,35 @@ async function saveManualChatgptResult(state){
     const saved=typeof window.lilac.savedSubtitles==='function'?await window.lilac.savedSubtitles(state.episodeKey).catch(()=>null):null;
     if(manualChatgptTranslation!==state||!manualChatgptIsCurrent(state))return;
     if(saved&&state.episodeKey===subtitleStoreKey())currentPlaybackContext.savedSubtitleEntries=saved;
+    state.status='completed';state.answer='';state.message='한국어 자막을 저장하고 영상에 적용했습니다.';await readManualChatgptPrefs();
+    if(manualChatgptPrefs.autoCleanup){if(manualChatgptPrefs.cleanupTiming==='five-minutes')state.cleanupAt=Date.now()+5*60*1000;else state.cleanupAt=null;await persistManualChatgptSession(state,'completed');if(manualChatgptPrefs.cleanupTiming==='immediate'){await window.lilac.removeManualTranslationSession?.(state.episodeKey,state.sourceFingerprint)}else if(manualChatgptPrefs.cleanupTiming==='five-minutes'){clearTimeout(manualChatgptCleanupTimer);manualChatgptCleanupTimer=setTimeout(()=>window.lilac.removeManualTranslationSession?.(state.episodeKey,state.sourceFingerprint).catch(()=>{}),5*60*1000)}}else await persistManualChatgptSession(state,'completed');
     manualChatgptTranslation=null;manualChatgptPanelOpen=false;currentSubtitlePath=result.path;
     attachSubtitle(result.url,'ChatGPT 수동 번역',{path:result.path,source:'chatgpt',from:state.sourcePath,fromName:state.sourceLabel,saved:true});
-    $('#subtitleState').textContent='ChatGPT 수동 번역을 적용했습니다.';
-  }catch(error){state.busy=false;$('#manualChatgptStatus').textContent=`저장하지 못했습니다: ${error.message} 번역 결과는 보관되어 있어 다시 시도할 수 있습니다.`;renderManualChatgptPanel()}
+    $('#subtitleState').textContent='ChatGPT 수동 번역을 적용했습니다.';renderManualChatgptSavedTools();toast('한국어 번역 자막을 저장하고 적용했습니다.');
+  }catch(error){state.busy=false;state.status='error';state.message=`저장하지 못했습니다: ${ipcMessage(error)} 번역 결과는 보관되어 있어 다시 시도할 수 있습니다.`;$('#manualChatgptStatus').textContent=state.message;await persistManualChatgptSession(state,'error');renderManualChatgptPanel()}
 }
 async function applyManualChatgptBatch(){
   const state=manualChatgptTranslation;if(!manualChatgptIsCurrent(state)||state.busy)return;
+  clearTimeout(state.answerSaveTimer);
   if(state.index>=state.batches.length)return saveManualChatgptResult(state);
   const batch=state.batches[state.index];if(!batch)return;
+  state.status='validating';state.message='붙여넣은 응답의 문장 ID를 확인하고 있습니다.';renderManualChatgptPanel();
   let translated;
   try{translated=window.LilacManualSubtitle.parseResponse($('#manualChatgptAnswer').value,batch.map(item=>item.id))}
-  catch(error){$('#manualChatgptStatus').textContent=error.message;return}
-  Object.assign(state.translations,translated);state.index++;$('#manualChatgptAnswer').value='';
-  if(state.index<state.batches.length){$('#manualChatgptStatus').textContent=`확인 완료. 다음 묶음 ${state.index+1}/${state.batches.length} 요청을 복사해 주세요.`;renderManualChatgptPanel();return}
+  catch(error){state.status='error';state.message=error.message;$('#manualChatgptStatus').textContent=error.message;await persistManualChatgptSession(state,'error');renderManualChatgptPanel();return}
+  Object.assign(state.translations,translated);state.index++;state.answer='';$('#manualChatgptAnswer').value='';state.status=state.index<state.batches.length?'ready':'saving';state.message=state.index<state.batches.length?`확인 완료. 다음 묶음 ${state.index+1}/${state.batches.length} 요청을 복사해 주세요.`:'모든 문장을 확인했습니다. 번역 자막을 저장하고 적용합니다.';await persistManualChatgptSession(state,state.status);
+  if(state.index<state.batches.length){$('#manualChatgptStatus').textContent=state.message;renderManualChatgptPanel();return}
   return saveManualChatgptResult(state);
 }
 $('#translateChatgpt').onclick=startManualChatgptTranslation;
 $('#manualChatgptCopyOpen').onclick=copyManualChatgptPrompt;
 $('#manualChatgptApply').onclick=applyManualChatgptBatch;
 $('#manualChatgptClose').onclick=()=>{manualChatgptPanelOpen=false;renderManualChatgptPanel()};
-$('#manualChatgptCancel').onclick=()=>{manualChatgptTranslation=null;manualChatgptPanelOpen=false;$('#manualChatgptAnswer').value='';renderManualChatgptPanel()};
+$('#manualChatgptCancel').onclick=async()=>{const state=manualChatgptTranslation;if(state){clearTimeout(state.answerSaveTimer);state.answer=$('#manualChatgptAnswer').value;state.status='cancelled';state.message='작업을 중단했습니다. 번역한 문장과 응답은 저장되어 다시 이어할 수 있습니다.';await persistManualChatgptSession(state,'cancelled')}manualChatgptTranslation=null;manualChatgptPanelOpen=false;$('#manualChatgptStatus').textContent=state?.message||'작업을 중단했습니다.';renderManualChatgptPanel()};
+async function discardManualChatgptSession(){const state=manualChatgptTranslation;if(!state||state.busy||!confirm('이 회차의 미완료 번역 작업과 임시 응답을 삭제할까요? 저장된 한국어 자막은 삭제되지 않습니다.'))return;clearTimeout(state.answerSaveTimer);try{await window.lilac.removeManualTranslationSession?.(state.episodeKey,state.sourceFingerprint);manualChatgptTranslation=null;manualChatgptPanelOpen=false;$('#manualChatgptAnswer').value='';$('#manualChatgptStatus').textContent='미완료 작업을 삭제했습니다. 저장된 자막은 유지했습니다.';renderManualChatgptPanel()}catch(error){state.message=`임시 작업을 삭제하지 못했습니다: ${ipcMessage(error)}`;state.status='error';renderManualChatgptPanel()}}
+$('#manualChatgptAnswer').addEventListener('input',()=>{const state=manualChatgptTranslation;if(!manualChatgptIsCurrent(state))return;state.answer=$('#manualChatgptAnswer').value;clearTimeout(state.answerSaveTimer);state.answerSaveTimer=setTimeout(()=>{void persistManualChatgptSession(state,state.status)},250)});
+$('#manualChatgptAnswer').addEventListener('blur',()=>{const state=manualChatgptTranslation;if(manualChatgptIsCurrent(state))void persistManualChatgptSession(state,state.status)});
+window.addEventListener('beforeunload',()=>{const state=manualChatgptTranslation;if(state){clearTimeout(state.answerSaveTimer);void persistManualChatgptSession(state,state.status)}});
 $('#translateNow').onclick=event=>cancelButtonRun(event.currentTarget)||translateShown('cloud');$('#translateNowLocal').onclick=event=>cancelButtonRun(event.currentTarget)||translateShown('local');
 // A jump while the subtitle on screen is translated: its run translates from there next.
 $('#video').addEventListener('seeked',()=>{if(translating?.path&&translatingNow())window.lilac.jumpTranslation(translating.run,$('#video').currentTime||0).catch(()=>{})});
@@ -1768,7 +1849,7 @@ const CLOUD_FIELDS={
   qwen:{name:'Qwen',key:'qwenKey',model:'qwenModel',models:'qwenModels',id:'qwen',empty:'Alibaba Cloud Model Studio에서 발급한 API 키를 넣어 주세요.'}
 };
 function renderTranslationSettings(value,message,messageFor){
-  translationSettings=value||translationSettings;renderLocalAi(value);if(!value)return;
+  translationSettings=value||translationSettings;renderLocalAi(value);renderManualChatgptSettings();if(!value)return;
   $('#geminiDownloads').checked=value.translateDownloads===true;$('#prepareNextCloud').checked=value.prepareNextCloud===true;$$('#jimakuTranslateChoices button').forEach(button=>button.classList.toggle('selected',button.dataset.value===(value.jimakuTranslate||'off')));
   $$('#cloudChoices button').forEach(button=>button.classList.toggle('selected',button.dataset.value===value.cloud));$$('.cloud-block').forEach(block=>block.classList.toggle('hidden',block.dataset.cloud!==value.cloud));
   $$('#qwenRegionChoices button').forEach(button=>button.classList.toggle('selected',button.dataset.value===value.qwenRegion));

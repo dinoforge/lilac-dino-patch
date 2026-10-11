@@ -34,6 +34,7 @@ const PAYLOAD_FILES = Object.freeze([
   ['electron/anilist-client.cjs', 'electron/anilist-client.cjs'],
   ['electron/weekday-episodes.cjs', 'electron/weekday-episodes.cjs'],
   ['electron/patch-manager-stage2.cjs', 'electron/patch-manager-stage2.cjs'],
+  ['electron/manual-translation-session.cjs', 'electron/manual-translation-session.cjs'],
   ['electron/patch-manager-stage2-prompts.cjs', 'electron/patch-manager-stage2-prompts.cjs'],
   ['docs/prompts/영어 번역 프롬프트.txt', 'electron/prompts/영어 번역 프롬프트.txt'],
   ['docs/prompts/일본어 번역 프롬프트.txt', 'electron/prompts/일본어 번역 프롬프트.txt'],
@@ -60,7 +61,7 @@ function makeLilacAnimeV0514Manifest(projectRoot = path.resolve(__dirname, '../.
       kind: 'insert-before',
       file: 'electron/preload.cjs',
       anchor: "  providerSeason: provider => ipcRenderer.invoke('provider:season', provider),",
-      content: `  patchQuarter: (provider, year, quarter) => ipcRenderer.invoke('patch:quarter', provider, year, quarter),\n  patchWeekdayEpisodes: (provider, candidates, refresh = false) => ipcRenderer.invoke('patch:weekday-episodes', provider, candidates, refresh),\n  patchTranslationPrompt: language => ipcRenderer.invoke('patch:translation-prompt', language),\n  patchCopyText: text => ipcRenderer.invoke('patch:clipboard-copy', text),\n  patchSaveManualSubtitle: input => ipcRenderer.invoke('patch:manual-subtitle-save', input),\n`
+      content: `  patchQuarter: (provider, year, quarter) => ipcRenderer.invoke('patch:quarter', provider, year, quarter),\n  patchWeekdayEpisodes: (provider, candidates, refresh = false) => ipcRenderer.invoke('patch:weekday-episodes', provider, candidates, refresh),\n  patchTranslationPrompt: language => ipcRenderer.invoke('patch:translation-prompt', language),\n  patchCopyText: text => ipcRenderer.invoke('patch:clipboard-copy', text),\n  patchSaveManualSubtitle: input => ipcRenderer.invoke('patch:manual-subtitle-save', input),\n  patchManualTranslationSettings: () => ipcRenderer.invoke('manual-translation:settings:get'),\n  patchSaveManualTranslationSettings: value => ipcRenderer.invoke('manual-translation:settings:save', value),\n  patchManualTranslationSession: (key, fingerprint) => ipcRenderer.invoke('manual-translation:session:get', key, fingerprint),\n  patchSaveManualTranslationSession: (key, fingerprint, value) => ipcRenderer.invoke('manual-translation:session:save', key, fingerprint, value),\n  patchRemoveManualTranslationSession: (key, fingerprint) => ipcRenderer.invoke('manual-translation:session:remove', key, fingerprint),\n  patchHasManualTranslationForSource: (key, sourcePath) => ipcRenderer.invoke('manual-translation:translated-exists', key, sourcePath),\n  patchRevealManualSubtitle: file => ipcRenderer.invoke('manual-translation:subtitle:reveal', file),\n  patchManualTranslationSource: (key, file) => ipcRenderer.invoke('manual-translation:source:get', key, file),\n`
     },
     {
       kind: 'insert-before',

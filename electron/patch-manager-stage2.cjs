@@ -6,6 +6,7 @@ const { pathToFileURL } = require('node:url');
 const { QUARTER_PROVIDERS, quarterPeriod, quarterQuery } = require('./quarter-catalog.cjs');
 const { fetchWeekdayEpisodes } = require('./weekday-episodes.cjs');
 const { loadTranslationPrompt } = require('./patch-manager-stage2-prompts.cjs');
+const { registerManualTranslationSessionIpc } = require('./manual-translation-session.cjs');
 
 const MAX_TRANSLATED_VTT_CHARS = 12_000_000;
 const MAX_EPISODE_KEY_CHARS = 1200;
@@ -67,6 +68,7 @@ function registerPatch0102Handlers(deps) {
   if (!ipcMain?.handle || !app?.getPath || !subtitleStore?.save || !clipboard?.writeText) {
     throw new TypeError('Patch 01·02 IPC 의존성이 올바르지 않습니다.');
   }
+  registerManualTranslationSessionIpc({ ipcMain, app, shell: deps.shell || require('electron').shell, subtitleStore });
   const quarterDeps = {
     providerFetch: deps.providerFetch, REANIME_WEB: deps.REANIME_WEB, ANIMENOSUB_WEB: deps.ANIMENOSUB_WEB,
     reanimeItems: deps.reanimeItems, miruroApi: deps.miruroApi, miruroItem: deps.miruroItem,
