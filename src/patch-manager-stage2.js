@@ -436,9 +436,65 @@
       const siwc = document.createElement('div');
       siwc.id = 'patch0102SIWCOption';
       siwc.className = 'setting-block patch0102-siwc-option';
-      siwc.innerHTML = '<b>추가 번역 방식 · ChatGPT 계정 연결 (SIWC)</b><p id="patch0102SIWCState" role="status">독립된 추가 옵션입니다. 현재 이 비공개 프로젝트의 SIWC 사용 자격·계정 인증·AI 요청 권한이 검증되지 않아 실제 계정 연결은 비활성화되어 있습니다.</p><div class="patch0102-manual-actions"><button id="patch0102SIWCConnect" type="button" disabled title="공식 인증 연동 및 실사용 검증 뒤 활성화">ChatGPT 계정으로 연결 (준비 중)</button><button id="patch0102SIWCHelp" type="button">공식 연결 안내</button></div><small>로컬 AI · Gemini/OpenAI API · ChatGPT 수동 번역은 그대로 사용할 수 있습니다. ChatGPT 계정 연결에 성공하더라도 웹 대화 삭제 권한은 제공되지 않습니다.</small>';
+      siwc.innerHTML = '<b>추가 번역 방식 · ChatGPT 계정 연결 (SIWC)</b><p id="patch0102SIWCState" role="status">ChatGPT 계정 연결 상태를 확인하는 중…</p><div class="patch0102-manual-actions"><button id="patch0102SIWCConnect" type="button" disabled>ChatGPT 계정 연결</button><button id="patch0102SIWCDisconnect" type="button" disabled>연결 해제</button><button id="patch0102SIWCRefresh" type="button" disabled>사용 가능한 모델 확인</button><button id="patch0102SIWCHelp" type="button">공식 연결 안내</button></div><label>ChatGPT 모델 <select id="patch0102SIWCModel" aria-label="계정에서 허용된 ChatGPT 모델" disabled></select></label><small>연결 버튼은 시스템 브라우저에서 본인이 직접 승인합니다. 이 기능을 지원하지 않는 계정·프로젝트에서는 인증이 거절될 수 있습니다. 기존 로컬 AI·번역 API·수동 번역은 계속 사용할 수 있습니다. ChatGPT 웹 대화를 열거나 삭제하지 않습니다.</small>';
       pane.append(siwc);
       $('#patch0102SIWCHelp').addEventListener('click', () => api.openExternal('https://developers.openai.com/siwc/token-sharing-open-source/sign-in').catch(error => setText($('#patch0102SIWCState'), '안내 페이지를 열지 못했습니다: ' + error.message)));
+
+      const siwcStatus = $('#patch0102SIWCState'), siwcModel = $('#patch0102SIWCModel');
+      let polling = null, siwcBusy = false;
+      const refresh = async () => {
+        if (!api.patchSIWCStatus) {
+          setText(siwcStatus, '이 앱 버전에는 SIWC 연결 기능이 없습니다.');
+          return;
+        }
+        try {
+          const value = await api.patchSIWCStatus();
+          state.siwcReady = value.authorized === true && value.available === true;
+          $('#patch0102SIWCConnect').disabled = !value.available || value.pending || siwcBusy;
+          $('#patch0102SIWCDisconnect').disabled = !value.connected || siwcBusy;
+          $('#patch0102SIWCRefresh').disabled = !state.siwcReady || siwcBusy;
+          setText(siwcStatus, (value.email ? value.email + ' · ' : '') + value.message + (value.authorized ? ' AI 번역 권한 확인됨.' : ''));
+          if (value.pending && !polling) {
+            polling = setTimeout(() => { polling = null; void refresh(); }, 1500);
+          }
+          if (!value.pending && polling) { clearTimeout(polling); polling = null; }
+          if (!value.connected) { state.siwcModel = ''; siwcModel.disabled = true; siwcModel.replaceChildren(); }
+          if (value.connected && state.siwcReady && !siwcModel.options.length) void loadModels();
+        } catch (error) { state.siwcReady = false; setText(siwcStatus, 'ChatGPT 연결 상태를 확인할 수 없습니다: ' + error.message); }
+      };
+      const loadModels = async () => {
+        if (!api.patchSIWCModels) return;
+        try {
+          const models = await api.patchSIWCModels();
+          siwcModel.replaceChildren(...models.map(model => {
+            const option = document.createElement('option');
+            option.value = model.id;
+            option.textContent = model.name;
+            return option;
+          }));
+          siwcModel.disabled = !models.length;
+          if (!models.length) { state.siwcModel = ''; setText(siwcStatus, '이 계정에서 사용 가능한 ChatGPT 모델이 없습니다.'); return; }
+          const selected = models.some(model => model.id === state.siwcModel) ? state.siwcModel : models[0].id;
+          siwcModel.value = selected; state.siwcModel = selected;
+        } catch (error) { siwcModel.disabled = true; setText(siwcStatus, 'ChatGPT 모델 조회 실패: ' + error.message); }
+      };
+      $('#patch0102SIWCConnect').addEventListener('click', async () => {
+        siwcBusy = true; $('#patch0102SIWCConnect').disabled = true;
+        try { await api.patchSIWCConnect(); }
+        catch (error) { setText(siwcStatus, 'ChatGPT 로그인 시작 실패: ' + error.message); }
+        finally { siwcBusy = false; void refresh(); }
+      });
+      $('#patch0102SIWCDisconnect').addEventListener('click', async () => {
+        if (!confirm('이 앱에 저장된 ChatGPT 계정 연결만 해제할까요? 원본 자막과 번역본은 유지됩니다.')) return;
+        siwcBusy = true;
+        try { await api.patchSIWCDisconnect(); state.siwcModel = ''; }
+        catch (error) { setText(siwcStatus, '연결 해제 실패: ' + error.message); }
+        finally { siwcBusy = false; void refresh(); }
+      });
+      $('#patch0102SIWCRefresh').addEventListener('click', loadModels);
+      siwcModel.addEventListener('change', () => { state.siwcModel = siwcModel.value; });
+      void refresh();
+
     }
     Promise.resolve(api.patchManualTranslationSettings?.() || { autoCleanup: true, cleanupTiming: 'immediate' }).then(value => {
       $('#patch0102ChatGPTCleanupEnabled').checked = value?.autoCleanup !== false;
