@@ -58,6 +58,8 @@ function sanitizeSession(key, fingerprint, value, now) {
     title: String(value.title ?? '').slice(0, 1000),
     episode: Math.max(1, Math.min(99999, Number(value.episode) || 1)),
     language,
+    mode: value.mode === 'web-auto' ? 'web-auto' : 'manual',
+    inflightBatch: Number.isInteger(value.inflightBatch) && value.inflightBatch === index ? index : null,
     index,
     batchCount,
     totalCueCount,
