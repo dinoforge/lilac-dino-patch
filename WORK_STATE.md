@@ -1,5 +1,14 @@
 # 작업 상태
 
+
+## 2026-10-11 패치 02 — ChatGPT 웹 클립보드 보조 UX
+
+- `codex/patch-02-translation-ux-login` (`bf0cb840`)에서 `codex/patch-02-clipboard-companion` 분기. 설치본·기존 userData·원본·`main`은 변경하지 않았다.
+- ChatGPT 응답을 사용자가 복사한 뒤 앱에서 `복사한 번역 가져와 바로 적용`을 누르면 현재 묶음 ID 검증 후 기존 자동 VTT 저장·즉시 적용 경로를 사용한다. 클립보드 읽기는 명시적 클릭에서만 수행하며 잘못된 응답·다른 회차 ID는 반영하지 않는다. 입력 중인 응답은 덮어쓰기 전에 확인한다.
+- v0.5.14 어댑터의 preload IPC에 `patchReadText`를 연결하고 `patch-manager/test/clipboard-companion.test.cjs` 회귀 검증을 추가했다.
+- GitHub에서 읽은 실제 소스 3개를 V8으로 구문 확인하고, 동작 코드를 모의 Electron IPC와 연결해 클립보드 조회 경계·잘못된 입력 거부·원본 자막 시간 보존을 점검했다. **전체 npm 테스트·Windows Electron GUI/패키지·실제 ChatGPT 요청은 이번 실행에서 미실시**. 기존 브랜치의 315/315를 신규 테스트 결과로 재사용하지 않는다.
+- ChatGPT 웹 대화 자동 추출·자동 삭제, 비공식 로그인, API 키 없는 무허가 자동 번역은 추가하지 않았다. 공식 SIWC 등록과 권한 여부를 확인한 후 별도 개발해야 한다. 상세: `docs/verification/PATCH_02_CLIPBOARD_COMPANION.md`.
+
 ## 2026-10-11 패치 02 번역 UX 및 ChatGPT 연결 검토
 
 - codex/patch-02-translation-ux-login 브랜치는 기준 커밋 3e50ce381191f865dd3f6de2a5f47e1625fc6e21에서 분기했다. 수동 영어·일본어 자막 번역에 정확한 진행률, 오류·재시도·중단·이어하기, cue ID 검증, 자동 저장·즉시 적용, 원본 자막 복구와 저장 위치 열기를 연결했다.
