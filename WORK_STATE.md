@@ -1,6 +1,18 @@
 # 작업 상태
 
 
+## 2026-10-11 패치 02 추가 SIWC 계정 번역 런타임
+
+- 분기: `codex/patch-02-siwc-runtime` (출발 `codex/patch-02-siwc-additive`). **기존 로컬 AI/Cloud API/수동 ChatGPT 번역, 패치 01 보존**.
+- 시스템 브라우저 승인과 loopback HTTP 콜백, PKCE/state/nonce, ID token JWKS 서명·issuer/audience/expiration 검증, Windows Electron safeStorage 암호화 자격증명 저장, OAuth refresh, 허용된 모델 조회, 공식 Responses SSE 완료 확인, 중단/연결 해제를 담당하는 SIWC 런타임 추가.
+- SIWC 계정 전용 자동 자막 번역 UI를 별도 JS 모듈로 구현했다. 영어·일본어 프롬프트와 작품·회차 문맥, cue ID 검증, 묶음별 실제 진행률, 세션 이어하기, 별도 VTT 저장·적용을 사용한다. ChatGPT 웹사이트 자동 조작·쿠키 접근·웹 대화 삭제는 구현하지 않는다.
+- v0.5.14 격리 source adapter payload와 IPC preload에 새 모듈 및 버튼 연결. 사용자 설치본, 원본 v0.5.14, `main`, 기존 사용자 데이터는 수정하지 않음.
+- Windows GitHub Actions SIWC 테스트 **10/10 통과**: https://github.com/dinoforge/anime-player/actions/runs/38130205203
+- Windows 전체 `npm test` **329개: 325 통과, 4 SKIP, 실패 0**: https://github.com/dinoforge/anime-player/actions/runs/38130373580. 4개 SKIP은 격리 공식 upstream 소스 디렉터리 지정 누락에 따른 어댑터 경로 테스트이며 통과로 간주하지 않는다.
+- **실제 ChatGPT 계정 SIWC 인증, 모델 사용, 사용자 동의, 실제 자막 공급원/영상, Electron 원본 전체 GUI 조작 시험은 미검증**. 특히 개인 비공개 프로젝트 SIWC 권한은 확인되지 않았다. 사용자 허가 없는 계정 연결/유료 요청 없음.
+- 주요 보고서: `docs/verification/PATCH_02_SIWC_RUNTIME.md`. 사용자는 터미널 명령 없이 클릭 UI를 통해 이용하도록 설계했지만 현재 설치용 최종 배포물은 아직 없다.
+
+
 ## 2026-10-11 패치 02 SIWC는 기존 번역에 추가하는 별도 옵션
 
 - `codex/patch-02-clipboard-companion` 기준의 `codex/patch-02-siwc-additive` 브랜치에서 ChatGPT 계정 연결(SIWC) 옵션을 수동 ChatGPT·기존 로컬 AI·기존 클라우드 API 번역과 별도로 표시했다. 기존 공급원 동작은 수정하지 않았다.
