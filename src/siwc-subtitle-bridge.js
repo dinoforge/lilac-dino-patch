@@ -3,7 +3,7 @@
   const api = root?.lilac, manual = root?.LilacManualSubtitle;
   if (!api?.patchSIWCStatus || !api?.patchSIWCTranslate || !manual) return;
   const $ = selector => document.querySelector(selector);
-  let currentRun = null, serial = 0;
+  let currentRun = null, serial = 0, preparing = false;
   const text = (node, value) => { if (node) node.textContent = String(value || ''); };
 
   function active(run) {
@@ -22,7 +22,7 @@
     text(progress, amount.completed + '/' + amount.total + '문장 (' + amount.percent + '%) · 묶음 ' +
       Math.min(currentRun.index+1,currentRun.batches.length) + '/' + currentRun.batches.length);
     text($('#patch02SIWCStatus'), currentRun.message);
-    $('#patch02SIWCStart').disabled = currentRun.busy;
+    $('#patch02SIWCStart').disabled = preparing || currentRun.busy;
     $('#patch02SIWCCancel').disabled = !currentRun.busy;
   }
   function notice(message) {
@@ -47,7 +47,8 @@
   }
 
   async function translate() {
-    if (currentRun?.busy) return;
+    if (preparing || currentRun?.busy) return;
+    preparing = true;
     const source=currentSubtitle, playbackId=playbackRequestId;
     if (!source?.path || !source?.src) {
       notice('영어 또는 일본어 원본 자막을 먼저 선택해 주세요.'); return;
@@ -66,6 +67,8 @@
       const fetched=await fetch(source.src);
       if (!fetched.ok) throw new Error('원본 자막 파일을 읽지 못했습니다.');
       const original=await fetched.text(),parsed=manual.parseWebVtt(original);
+      const rawDialogue=parsed.cues.map(cue=>cue.text).join('\n');
+      if (/[가-힣]/.test(rawDialogue) && !/[ぁ-ヿA-Za-z]/.test(rawDialogue)) throw new Error('이미 한국어인 자막은 번역하지 않습니다.');
       const fingerprint=await manual.fingerprintWebVtt(original);
       const language=manual.detectSourceLanguage(parsed.cues),batches=manual.makeBatches(parsed.cues);
       const episodeKey=subtitleStoreKey();
@@ -145,6 +148,7 @@
       }
       notice(run?.message||('ChatGPT 계정 번역 실패: '+error.message));
     }finally {
+      preparing = false;
       if(run){run.busy=false;if(active(run))render();}
     }
   }
@@ -169,6 +173,9 @@
     $('#patch02SIWCStart').addEventListener('click',()=>{void translate()});
     $('#patch02SIWCCancel').addEventListener('click',()=>{void cancel()});
     root.addEventListener('lilac-subtitle-changed',render);
+    // v0.5.14 upstream does not emit subtitle-changed; also track selections
+    // without modifying any upstream player function or existing patch behavior.
+    root.setInterval(render,1000);
     render();
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});
