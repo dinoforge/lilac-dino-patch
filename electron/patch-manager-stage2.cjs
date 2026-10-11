@@ -82,8 +82,8 @@ function registerPatch02Handlers(deps) {
   const { loadTranslationPrompt } = require('./patch-manager-stage2-prompts.cjs');
   const { registerManualTranslationSessionIpc } = require('./manual-translation-session.cjs');
   registerManualTranslationSessionIpc({ ipcMain, app, shell: deps.shell || require('electron').shell, subtitleStore });
-  // The embedded ChatGPT page is opened only by a user click. No web page
-  // DOM, session credentials or chat output are read by this handler.
+  // The embedded page is opened by user action. Experimental translation
+  // may read only the newly created assistant response, not prior conversations.
   let embeddedChatGPT = null, webDriver = null;
   function getWebService() {
     if (!embeddedChatGPT) {
@@ -142,7 +142,7 @@ function registerPatch02Handlers(deps) {
     try { fs.writeFileSync(descriptor, text, 'utf8'); } finally { fs.closeSync(descriptor); }
     try {
       const saved = subtitleStore.save(key, {
-        source: 'chatgpt', label: 'ChatGPT 수동 번역', path: file,
+        source: 'chatgpt', label: input.mode === 'web-auto' ? 'ChatGPT 웹 자동 번역 (실험)' : 'ChatGPT 수동 번역', path: file,
         from: String(input.from || ''), fromName: String(input.fromName || '원본 자막')
       });
       if (!saved) throw new Error('번역 자막을 회차에 저장하지 못했습니다.');
