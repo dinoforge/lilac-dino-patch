@@ -1,5 +1,12 @@
 # 작업 상태
 
+## 2026-10-11 업데이트 지속 패치 매니저 2단계
+
+- `codex/persistent-patch-manager-stage2`를 `codex/persistent-patch-manager`의 `ace1f4b446a4efe0c632ecd91b253eace4cb8144`에서 분기했다. 격리 표식 fixture에 한정된 적용·백업·재적용·롤백 엔진과 실제 패치 01·02 helper/prompt payload 테스트를 추가했다.
+- 공식 v0.5.14 기준 파일은 기존 통합 기준과 모두 다르고 Patch 01·02 diff dry run도 실패했다. 공식 소스는 읽기 전용 비교만 했으며 무수정 상태를 확인했다. 따라서 공식 v0.5.14 adapter, 자동 재적용 제품 연결 및 그 UI는 미구현이다.
+- 패치 매니저 테스트 16/16(중간 쓰기 오류 복구 포함), 공식 호환성 테스트 1/1(호환 불가 판단), 전체 `npm test` 299 통과·1 skip·0 실패. Windows `--dir` unpacked 패키지의 Phase 1 main/Electron smoke가 통과했고, 외부 서비스 요청은 0건이다. NSIS·실제 설치·공식 앱 UI·ChatGPT 왕복은 미실시다.
+- 시험용 `node_modules` junction이 새 worktree에 남았으며 자동 안전 검토가 정확한 link 삭제 명령을 거부했다. 대상은 기존 프로젝트의 `node_modules`; 실제 앱 설치·프로필과 무관하다. 상세 판정과 잔여 항목은 `docs/verification/PERSISTENT_PATCH_MANAGER_STAGE2.md`에 기록했다.
+
 ## 2026-10-10 패치 01·02 통합 검증
 
 - `codex/patch-01-auto-quarter` (`b79a69a`)에서 `codex/integration-01-02`를 만들고 `codex/patch-02-chatgpt-translation` (`2715f81`)를 통합했다. `main`, 패치 01·02 원본 브랜치 및 LilacAnime upstream은 수정하지 않았다. 충돌은 `WORK_STATE.md` 한 파일이었고, 두 패치의 기록을 모두 보존했다. 공통 소스·테스트 변경은 병합 결과에서 함께 확인했다.

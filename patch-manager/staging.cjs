@@ -11,6 +11,10 @@ const { inspect, readVerifiedFile, renderPatchedSource, hashBytes } = require('.
 
 const FIXTURE_MARKER = '.lilac-patch-manager-synthetic-fixture.json';
 
+function markerPath(base) {
+  return `${path.resolve(base)}${FIXTURE_MARKER}`;
+}
+
 function assertSyntheticFixture(root) {
   const full = fs.realpathSync(root);
   const temp = fs.realpathSync(os.tmpdir());
@@ -18,10 +22,10 @@ function assertSyntheticFixture(root) {
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
     throw new Error('Only synthetic fixtures under the OS temp folder are permitted');
   }
-  const marker = path.join(full, FIXTURE_MARKER);
+  const marker = markerPath(full);
   if (!fs.existsSync(marker) || !fs.lstatSync(marker).isFile()) throw new Error('Missing synthetic fixture marker');
   const info = JSON.parse(fs.readFileSync(marker, 'utf8'));
-  if (info.kind !== 'synthetic' || info.safety !== 'no-real-installation' ||
+  if (info.root !== path.basename(full) || info.kind !== 'synthetic' || info.safety !== 'no-real-installation' ||
       !/^[a-f0-9]{32}$/.test(info.nonce)) throw new Error('Invalid synthetic fixture marker');
   return full;
 }
@@ -37,21 +41,51 @@ function noLinksRecursive(base, depth = 0) {
   }
 }
 
+function copyTree(source, destination) {
+  const stat = fs.lstatSync(source);
+  if (stat.isSymbolicLink()) throw new Error('Fixture contains symlink');
+  if (stat.isDirectory()) {
+    fs.mkdirSync(destination, { recursive: false, mode: stat.mode & 0o777 });
+    for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) throw new Error('Fixture contains symlink');
+      copyTree(path.join(source, entry.name), path.join(destination, entry.name));
+    }
+    return;
+  }
+  if (!stat.isFile() || stat.size > 8 * 1024 * 1024) throw new Error('Fixture contains unsupported content');
+  fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
+  try { fs.chmodSync(destination, stat.mode & 0o777); } catch {}
+}
+
 function makeSyntheticFixture(version='0.5.14') {
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Invalid synthetic version');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lilac-patch-manager-fixture-'));
   fs.mkdirSync(path.join(root, 'src'));
-  fs.writeFileSync(path.join(root, FIXTURE_MARKER), JSON.stringify({
-    kind:'synthetic', safety:'no-real-installation', nonce:crypto.randomBytes(16).toString('hex')
-  }));
+  const marker = { root:path.basename(root), kind:'synthetic', safety:'no-real-installation', nonce:crypto.randomBytes(16).toString('hex') };
+  fs.writeFileSync(markerPath(root), JSON.stringify(marker), { flag:'wx' });
+  fs.writeFileSync(path.join(root, FIXTURE_MARKER), JSON.stringify(marker));
   fs.writeFileSync(path.join(root,'package.json'), JSON.stringify({ name:'synthetic-lilac',version })+'\n');
-  fs.writeFileSync(path.join(root,'src','index.html'), '<!doctype html>\n<div id="homeView">\n<!--FIXTURE_SCHEDULE_SLOT-->\n</div>\n');
+  fs.writeFileSync(path.join(root,'src','index.html'), '<!doctype html>\n<div id="homeView">\n<!--FIXTURE_SCHEDULE_SLOT-->\n<!--PATCH_FEATURE_SCRIPTS-->\n</div>\n');
   return root;
 }
 
+function cleanupSyntheticFixture(root) {
+  const full = assertSyntheticFixture(root);
+  const temp = fs.realpathSync(os.tmpdir());
+  const rel = path.relative(temp, full);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('Refusing to clean a non-fixture path');
+  fs.rmSync(full, { recursive:true, force:true });
+  fs.rmSync(`${full}.patch-manager`, { recursive:true, force:true });
+  fs.rmSync(markerPath(full), { force:true });
+}
+
 function makeFixtureManifest(root) {
+  return makeFixtureManifestForVersion(root, '0.5.14');
+}
+
+function makeFixtureManifestForVersion(root, version) {
   return {
-    schema:1, purpose:'isolated-preview',version:'0.5.14',
+    schema:1, purpose:'isolated-preview',version,
     expectedFiles:{
       'package.json':hashBytes(readVerifiedFile(root,'package.json')),
       'src/index.html':hashBytes(readVerifiedFile(root,'src/index.html'))
@@ -66,20 +100,26 @@ function stageSynthetic(root, manifest) {
   noLinksRecursive(base);
   const eligibility = inspect(base, manifest);
   if (eligibility.status !== 'eligible-for-isolated-preview') return { ...eligibility, stagedRoot:null };
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), 'lilac-patch-manager-stage-'));
+  const container = fs.mkdtempSync(path.join(os.tmpdir(), 'lilac-patch-manager-stage-'));
+  const dest = path.join(container, 'app');
   try {
-    fs.cpSync(base, dest, { recursive: true, force:false, errorOnExist:true, dereference:false });
+    copyTree(base, dest);
     for (const action of manifest.actions) {
       const file = path.join(dest, ...action.file.split('/'));
-      const source = fs.readFileSync(file, 'utf8');
-      fs.writeFileSync(file, renderPatchedSource(source, action), 'utf8');
+      if (action.kind === 'add-file') {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, Buffer.from(action.contentBase64, 'base64'), { flag: 'wx' });
+      } else {
+        const source = fs.readFileSync(file, 'utf8');
+        fs.writeFileSync(file, renderPatchedSource(source, action), 'utf8');
+      }
     }
-    return { status:'staged-synthetic-preview', stagedRoot:dest, originalRootUnchanged:true };
+    return { status:'staged-synthetic-preview', stagedRoot:dest, stageContainer:container, originalRootUnchanged:true };
   } catch (error) {
     // Only this function's fresh, unique temp folder is eligible for cleanup.
-    fs.rmSync(dest,{recursive:true,force:true});
+    fs.rmSync(container,{recursive:true,force:true});
     throw error;
   }
 }
 
-module.exports={ FIXTURE_MARKER, assertSyntheticFixture, makeSyntheticFixture, makeFixtureManifest, stageSynthetic };
+module.exports={ FIXTURE_MARKER, assertSyntheticFixture, noLinksRecursive, copyTree, makeSyntheticFixture, cleanupSyntheticFixture, makeFixtureManifest, makeFixtureManifestForVersion, stageSynthetic };
