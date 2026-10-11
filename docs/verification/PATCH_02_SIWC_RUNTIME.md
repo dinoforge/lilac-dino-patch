@@ -37,7 +37,8 @@ SIWC 렌더러에는 OAuth 토큰이나 refresh token을 전달하지 않는다.
 - 새로운 SIWC 파일, adapter 및 테스트 파일의 V8 JavaScript 구문 검사 통과.
 - Windows GitHub Actions run `38130205203`: **SIWC 전용 Node 테스트 10개 통과, 0실패**. 합성 RSA 서명 ID token, 실제 로컬 loopback HTTP 서버(가짜 OpenAI 서버 응답), 클립보드/번역 시스템과의 격리, 계정별 모델 조회, SSE 결과 확인, 암호화 미지원 시 거부, 다른 사용자 파일 보존을 검사.
 - 이 테스트는 사용자 ChatGPT 계정, 공개 OpenAI 인증 서버, 외부 자막 공급원, 실제 실물 영상에 접속하지 않는다.
-- 같은 브랜치에 Windows full `npm test` 수행용 CI 단계를 추가했다. **완료 여부는 GitHub Actions 결과로 별도 확인**하며 실행 전에는 통과했다고 주장하지 않는다.
+- Windows 전체 프로젝트 회귀: **329개 테스트 중 325개 통과, 4개 SKIP, 실패 0개**. GitHub Actions https://github.com/dinoforge/anime-player/actions/runs/38130373580
+- 4개 SKIP은 격리된 공식 upstream v0.5.14 소스 체크아웃 경로(`LILAC_UPSTREAM_SOURCE`)가 Windows Actions 러너에 제공되지 않아 실행하지 않은 원본 어댑터 검증 항목이다. 기존 설치본이나 본 사용자 프로필의 안전성에 대한 실물 증명이 아니므로 미실시로 기록한다.
 
 ## 작업 안전 조건
 
