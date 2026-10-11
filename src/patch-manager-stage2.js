@@ -434,83 +434,16 @@
     const pane = $('[data-settings-pane="translate"]');
     if (!pane || $('#patch0102ChatGPTSettings')) return;
     const box = document.createElement('div'); box.id = 'patch0102ChatGPTSettings'; box.className = 'setting-block patch0102-chatgpt-settings';
-    box.innerHTML = '<b>ChatGPT 수동 번역</b><p id="patch0102ChatGPTAccountState" role="status">공식 ChatGPT 앱 연결 자격이 확인되지 않아 로그인 상태를 조회하지 않습니다. 브라우저의 로그인과 이 앱의 연결은 별개입니다.</p><div class="patch0102-manual-actions"><button id="patch0102ChatGPTConnect" type="button" disabled>ChatGPT 계정 연결</button><button id="patch0102ChatGPTCheck" type="button">로그인 상태 확인</button><button id="patch0102ChatGPTDisconnect" type="button" disabled>계정 연결 해제</button><button id="patch0102ChatGPTManual" type="button">수동 번역으로 전환</button></div><label class="setting-switch"><span><b>번역 완료 후 앱 내부 임시 데이터 정리</b><small>저장된 한국어 자막은 유지하고 실패·중단 작업은 이어하기 위해 보존합니다.</small></span><input id="patch0102ChatGPTCleanupEnabled" type="checkbox" checked></label><label>정리 시점 <select id="patch0102ChatGPTCleanupTiming"><option value="immediate">즉시</option><option value="five-minutes">5분 뒤</option><option value="on-close">앱을 닫을 때</option></select></label><p>ChatGPT 웹 대화는 앱에서 읽거나 삭제하지 않습니다. 임시 채팅과 대화 정리는 ChatGPT 웹사이트에서 직접 하세요.</p><div class="patch0102-manual-actions"><button id="patch0102ChatGPTOpen" type="button">ChatGPT 열기</button><button id="patch0102ChatGPTCleanupHelp" type="button">ChatGPT 대화 정리 안내</button></div>';
+    box.innerHTML = '<b>ChatGPT 웹 번역</b><p id="patch0102ChatGPTAccountState" role="status">디노 라일락 전용 내장 창에서 ChatGPT를 엽니다. 브라우저 로그인은 사용자가 직접 합니다.</p><div class="patch0102-manual-actions"><button id="patch0102ChatGPTOpen" type="button">내장 ChatGPT 열기</button><button id="patch0102ChatGPTManual" type="button">웹 번역 준비</button></div><label class="setting-switch"><span><b>번역 완료 후 앱 내부 임시 데이터 정리</b><small>저장된 한국어 자막은 유지하고 실패·중단 작업은 이어하기 위해 보존합니다.</small></span><input id="patch0102ChatGPTCleanupEnabled" type="checkbox" checked></label><label>정리 시점 <select id="patch0102ChatGPTCleanupTiming"><option value="immediate">즉시</option><option value="five-minutes">5분 뒤</option><option value="on-close">앱을 닫을 때</option></select></label><p>내장 ChatGPT 화면은 별도 브라우저 프로필을 사용합니다. 웹사이트 내부 화면은 고정할 수 없습니다. 자동 전송·응답 추출·웹 대화 삭제는 지원하지 않습니다. 번역 완료 후 대화 삭제는 ChatGPT에서 직접 하세요.</p>';
     pane.append(box);
-    // SIWC is an additional provider choice; it is not the legacy web-copy translation
-    // nor the existing local/cloud AI translator. Do not present an unverified OAuth
-    // or ChatGPT plan grant as working authentication.
-    if (!$('#patch0102SIWCOption')) {
-      const siwc = document.createElement('div');
-      siwc.id = 'patch0102SIWCOption';
-      siwc.className = 'setting-block patch0102-siwc-option';
-      siwc.innerHTML = '<b>추가 번역 방식 · ChatGPT 계정 연결 (SIWC)</b><p id="patch0102SIWCState" role="status">ChatGPT 계정 연결 상태를 확인하는 중…</p><div class="patch0102-manual-actions"><button id="patch0102SIWCConnect" type="button" disabled>ChatGPT 계정 연결</button><button id="patch0102SIWCDisconnect" type="button" disabled>연결 해제</button><button id="patch0102SIWCRefresh" type="button" disabled>사용 가능한 모델 확인</button><button id="patch0102SIWCHelp" type="button">공식 연결 안내</button></div><label>ChatGPT 모델 <select id="patch0102SIWCModel" aria-label="계정에서 허용된 ChatGPT 모델" disabled></select></label><small>연결 버튼은 시스템 브라우저에서 본인이 직접 승인합니다. 이 기능을 지원하지 않는 계정·프로젝트에서는 인증이 거절될 수 있습니다. 기존 로컬 AI·번역 API·수동 번역은 계속 사용할 수 있습니다. ChatGPT 웹 대화를 열거나 삭제하지 않습니다.</small>';
-      pane.append(siwc);
-      $('#patch0102SIWCHelp').addEventListener('click', () => api.openExternal('https://developers.openai.com/siwc/token-sharing-open-source/sign-in').catch(error => setText($('#patch0102SIWCState'), '안내 페이지를 열지 못했습니다: ' + error.message)));
-
-      const siwcStatus = $('#patch0102SIWCState'), siwcModel = $('#patch0102SIWCModel');
-      let polling = null, siwcBusy = false;
-      const refresh = async () => {
-        if (!api.patchSIWCStatus) {
-          setText(siwcStatus, '이 앱 버전에는 SIWC 연결 기능이 없습니다.');
-          return;
-        }
-        try {
-          const value = await api.patchSIWCStatus();
-          state.siwcReady = value.authorized === true && value.available === true;
-          $('#patch0102SIWCConnect').disabled = !value.available || value.pending || siwcBusy;
-          $('#patch0102SIWCDisconnect').disabled = !value.connected || siwcBusy;
-          $('#patch0102SIWCRefresh').disabled = !state.siwcReady || siwcBusy;
-          setText(siwcStatus, (value.email ? value.email + ' · ' : '') + value.message + (value.authorized ? ' AI 번역 권한 확인됨.' : ''));
-          if (value.pending && !polling) {
-            polling = setTimeout(() => { polling = null; void refresh(); }, 1500);
-          }
-          if (!value.pending && polling) { clearTimeout(polling); polling = null; }
-          if (!value.connected) { state.siwcModel = ''; siwcModel.disabled = true; siwcModel.replaceChildren(); }
-          if (value.connected && state.siwcReady && !siwcModel.options.length) void loadModels();
-        } catch (error) { state.siwcReady = false; setText(siwcStatus, 'ChatGPT 연결 상태를 확인할 수 없습니다: ' + error.message); }
-      };
-      const loadModels = async () => {
-        if (!api.patchSIWCModels) return;
-        try {
-          const models = await api.patchSIWCModels();
-          siwcModel.replaceChildren(...models.map(model => {
-            const option = document.createElement('option');
-            option.value = model.id;
-            option.textContent = model.name;
-            return option;
-          }));
-          siwcModel.disabled = !models.length;
-          if (!models.length) { state.siwcModel = ''; setText(siwcStatus, '이 계정에서 사용 가능한 ChatGPT 모델이 없습니다.'); return; }
-          const selected = models.some(model => model.id === state.siwcModel) ? state.siwcModel : models[0].id;
-          siwcModel.value = selected; state.siwcModel = selected;
-        } catch (error) { siwcModel.disabled = true; setText(siwcStatus, 'ChatGPT 모델 조회 실패: ' + error.message); }
-      };
-      $('#patch0102SIWCConnect').addEventListener('click', async () => {
-        siwcBusy = true; $('#patch0102SIWCConnect').disabled = true;
-        try { await api.patchSIWCConnect(); }
-        catch (error) { setText(siwcStatus, 'ChatGPT 로그인 시작 실패: ' + error.message); }
-        finally { siwcBusy = false; void refresh(); }
-      });
-      $('#patch0102SIWCDisconnect').addEventListener('click', async () => {
-        if (!confirm('이 앱에 저장된 ChatGPT 계정 연결만 해제할까요? 원본 자막과 번역본은 유지됩니다.')) return;
-        siwcBusy = true;
-        try { await api.patchSIWCDisconnect(); state.siwcModel = ''; }
-        catch (error) { setText(siwcStatus, '연결 해제 실패: ' + error.message); }
-        finally { siwcBusy = false; void refresh(); }
-      });
-      $('#patch0102SIWCRefresh').addEventListener('click', loadModels);
-      siwcModel.addEventListener('change', () => { state.siwcModel = siwcModel.value; });
-      void refresh();
-
-    }
     Promise.resolve(api.patchManualTranslationSettings?.() || { autoCleanup: true, cleanupTiming: 'immediate' }).then(value => {
       $('#patch0102ChatGPTCleanupEnabled').checked = value?.autoCleanup !== false;
       $('#patch0102ChatGPTCleanupTiming').value = ['immediate', 'five-minutes', 'on-close'].includes(value?.cleanupTiming) ? value.cleanupTiming : 'immediate';
     }).catch(() => {});
-    $('#patch0102ChatGPTCheck').addEventListener('click', () => setText($('#patch0102ChatGPTAccountState'), '공식 SIWC 클라이언트 자격과 등록이 확인되지 않았습니다. 로그인 여부를 확인할 수 없으므로 수동 번역을 사용하세요.'));
     $('#patch0102ChatGPTManual').addEventListener('click', () => $('#patch0102ManualStart')?.click());
-    const open = () => api.openExternal('https://chatgpt.com/').catch(() => {});
-    $('#patch0102ChatGPTOpen').addEventListener('click', open); $('#patch0102ChatGPTCleanupHelp').addEventListener('click', open);
+    $('#patch0102ChatGPTOpen').addEventListener('click', () =>
+      api.patchOpenChatGPTEmbedded().catch(error =>
+        setText($('#patch0102ChatGPTAccountState'), '내장 화면을 열지 못했습니다: ' + error.message)));
     const save = () => api.patchSaveManualTranslationSettings?.({ autoCleanup: $('#patch0102ChatGPTCleanupEnabled').checked, cleanupTiming: $('#patch0102ChatGPTCleanupTiming').value }).catch(() => {});
     $('#patch0102ChatGPTCleanupEnabled').addEventListener('change', save); $('#patch0102ChatGPTCleanupTiming').addEventListener('change', save);
   }
@@ -518,7 +451,7 @@
     const target = $('#subtitleTranslateRow');
     if (!target || $('#patch0102ManualRow')) return;
     const row = document.createElement('div'); row.id = 'patch0102ManualRow'; row.className = 'sheet-button-row';
-    const button = document.createElement('button'); button.id = 'patch0102ManualStart'; button.type = 'button'; button.className = 'sheet-button'; button.textContent = 'ChatGPT 수동 번역';
+    const button = document.createElement('button'); button.id = 'patch0102ManualStart'; button.type = 'button'; button.className = 'sheet-button'; button.textContent = 'ChatGPT 웹 번역';
     row.append(button);
     const panel = document.createElement('div'); panel.id = 'patch0102ManualPanel'; panel.className = 'patch0102-manual-panel hidden';
     panel.innerHTML = '<div class="patch0102-manual-head"><b>ChatGPT 한국어 자막 번역</b><span id="patch0102ManualProgress"></span></div><p id="patch0102ManualStatus" role="status">선택한 자막의 번역을 준비합니다.</p><div class="patch0102-manual-actions"><button id="patch0102ManualCopy" type="button">요청 복사 · ChatGPT 열기</button><button id="patch0102ManualRetry" type="button">현재 묶음 다시 복사</button><button id="patch0102ManualImport" type="button">복사한 번역 가져와 바로 적용</button><button id="patch0102ManualApply" type="button">입력한 결과 확인</button><button id="patch0102ManualStop" type="button">중단 · 저장</button><button id="patch0102ManualDiscard" type="button">작업 삭제</button></div><textarea id="patch0102ManualAnswer" rows="6" spellcheck="false" placeholder="ChatGPT의 JSON 번역 결과를 붙여넣으세요"></textarea><div class="patch0102-manual-actions patch0102-manual-saved-tools"><button id="patch0102ManualRestore" type="button" class="hidden">원본 자막으로 되돌리기</button><button id="patch0102ManualReveal" type="button" class="hidden">저장 위치 열기</button></div>';
@@ -544,7 +477,7 @@
     const render = () => {
       row.classList.toggle('hidden', !manualAvailable() && !translation);
       panel.classList.toggle('hidden', !open || !translation);
-      $('#patch0102ManualStart').textContent = translation || canResume ? 'ChatGPT 번역 계속' : 'ChatGPT 수동 번역'; sourceTools();
+      $('#patch0102ManualStart').textContent = translation || canResume ? 'ChatGPT 번역 계속' : 'ChatGPT 웹 번역'; sourceTools();
       if (!translation) return;
       const saving = translation.status === 'saving' || translation.index >= translation.batches.length, progress = manual.progress(translation.parsed.cues, translation.translations);
       $('#patch0102ManualProgress').textContent = `${progress.completed}/${progress.total}문장 (${progress.percent}%) · 묶음 ${Math.min(translation.index + 1, translation.batches.length)}/${translation.batches.length} · ${translation.language === 'english' ? '영어' : '일본어'} · ${({ ready: '준비', 'awaiting-response': 'ChatGPT 응답 대기', validating: '결과 검사', error: '오류 · 보존', cancelled: '중단 · 이어하기 가능', saving: '저장 중', completed: '완료' })[translation.status] || '준비 중'}`;
@@ -591,7 +524,7 @@
         open = true; $('#patch0102ManualAnswer').value = translation.answer; render();
       } catch (error) {
         open = true; row.classList.remove('hidden'); panel.classList.remove('hidden'); setStatus(error.message);
-      } finally { button.disabled = false; if (!translation) button.textContent = 'ChatGPT 수동 번역'; }
+      } finally { button.disabled = false; if (!translation) button.textContent = 'ChatGPT 웹 번역'; }
     };
     const copyPrompt = async () => {
       const value = translation; if (!current(value) || value.importing) return;
@@ -612,7 +545,8 @@
       try {
         await api.patchCopyText(prompt);
         value.status = 'awaiting-response'; value.message = '요청을 복사했습니다. ChatGPT에 붙여넣어 직접 보내세요.';
-        try { await api.openExternal('https://chatgpt.com/'); value.message = '요청을 복사하고 ChatGPT를 열었습니다. 브라우저에서 붙여넣어 직접 보내세요.'; } catch {}
+        try { await api.patchOpenChatGPTEmbedded(); value.message = '요청을 복사하고 내장 ChatGPT 창을 열었습니다. 붙여넣어 직접 보내세요.'; }
+        catch (error) { value.message = '요청은 복사됐지만 내장 ChatGPT 창을 열지 못했습니다: ' + error.message; }
         await saveSession(value, 'awaiting-response');
       } catch (error) { value.status = 'error'; value.message = `복사하지 못했습니다: ${error.message}`; await saveSession(value, 'error'); }
       render();
@@ -628,7 +562,7 @@
         value.status = 'completed'; value.answer = ''; if (prefs.autoCleanup) { if (prefs.cleanupTiming === 'five-minutes') value.cleanupAt = Date.now() + 300000; await saveSession(value, 'completed'); if (prefs.cleanupTiming === 'immediate') await api.patchRemoveManualTranslationSession(value.episodeKey, value.sourceFingerprint); else if (prefs.cleanupTiming === 'five-minutes') { clearTimeout(cleanupTimer); cleanupTimer = setTimeout(() => api.patchRemoveManualTranslationSession(value.episodeKey, value.sourceFingerprint).catch(() => {}), 300000); } } else await saveSession(value, 'completed');
         sourceBeforeTranslation = { path: value.sourcePath, url: value.sourceUrl, label: value.sourceLabel, source: value.sourceKind }; translation = null; open = false; currentSubtitlePath = result.path;
         attachSubtitle(result.url, 'ChatGPT 수동 번역', { path: result.path, source: 'chatgpt', from: value.sourcePath, fromName: value.sourceLabel, saved: true });
-        $('#subtitleState').textContent = 'ChatGPT 수동 번역을 적용했습니다.'; render();
+        $('#subtitleState').textContent = 'ChatGPT 웹 번역 자막을 적용했습니다.'; render();
       } catch (error) { value.busy = false; value.status = 'error'; value.message = `저장하지 못했습니다: ${error.message} 작업을 보존했습니다.`; await saveSession(value, 'error'); render(); }
     };
     const apply = async () => {
