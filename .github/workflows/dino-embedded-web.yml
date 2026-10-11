@@ -1,0 +1,46 @@
+name: Dino embedded ChatGPT patch checks
+on:
+  push:
+    branches:
+      - codex/dino-chatgpt-web-translation
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  node-and-upstream:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Prepare isolated official upstream source copies
+        shell: pwsh
+        run: |
+          $base = node -p "require('node:os').tmpdir()"
+          $v14 = Join-Path $base 'dino-web-upstream-v0514'
+          $v15 = Join-Path $base 'dino-web-upstream-v0515'
+          git clone --depth 1 --branch v0.5.14 https://github.com/whispelyn-byte/LilacAnime-desktop.git $v14
+          if ($LASTEXITCODE -ne 0) { throw 'v0.5.14 clone failed' }
+          git clone --depth 1 --branch v0.5.15 https://github.com/whispelyn-byte/LilacAnime-desktop.git $v15
+          if ($LASTEXITCODE -ne 0) { throw 'v0.5.15 clone failed' }
+          "LILAC_UPSTREAM_SOURCE=$v14" >> $env:GITHUB_ENV
+          "LILAC_UPSTREAM_V0514_SOURCE=$v14" >> $env:GITHUB_ENV
+          "LILAC_UPSTREAM_V0515_SOURCE=$v15" >> $env:GITHUB_ENV
+      - name: Install dev dependencies
+        run: npm ci
+      - name: Check patched source syntax
+        run: |
+          node --check electron/embedded-chatgpt-web.cjs
+          node --check electron/patch-manager-stage2.cjs
+          node --check src/patch-manager-stage2.js
+          node --check patch-manager/adapters/lilacanime-v0.5.14.cjs
+          node --check patch-manager/adapters/lilacanime-independent.cjs
+      - name: Test embedded UI bridge and independent patch variants
+        run: |
+          node --test patch-manager/test/embedded-chatgpt-web.test.cjs
+          node --test patch-manager/test/lilacanime-independent.test.cjs
+      - name: Full Node regression suite
+        run: npm test
