@@ -13,7 +13,7 @@ function createSIWCService({app,shell,safeStorage,fetchImpl=globalThis.fetch,now
   const home=path.join(app.getPath('userData'),'siwc-account');
   const metaFile=path.join(home,'host.json'),tokenFile=path.join(home,'credential.enc');
   let account=null,loaded=false,pending=null,authError='',models=[];
-  let authSerial=0;
+  let authSerial=0,activeTranslation=null;
   const available=()=>Boolean(safeStorage?.isEncryptionAvailable?.() && safeStorage?.encryptString && safeStorage?.decryptString);
   function ensureHome(){fs.mkdirSync(home,{recursive:true,mode:0o700});if(fs.lstatSync(home).isSymbolicLink())throw new Error('SIWC 폴더 링크는 지원하지 않습니다.');}
   function atomicFile(file,data){
@@ -158,6 +158,9 @@ function createSIWCService({app,shell,safeStorage,fetchImpl=globalThis.fetch,now
     return models.slice();
   }
   async function translate({model,prompt}={}){
+    if(activeTranslation)throw new Error('이미 ChatGPT 자막 번역을 진행하고 있습니다.');
+    const controller=new AbortController();activeTranslation=controller;
+    try {
     const current=await refreshIfNeeded();
     if(!canInvoke({access_token:current.access_token,scope:current.scope}))
       throw new Error('ChatGPT AI 요청 권한이 승인되지 않았습니다.');
@@ -165,22 +168,25 @@ function createSIWCService({app,shell,safeStorage,fetchImpl=globalThis.fetch,now
     const input=translationRequest(model,prompt,models.map(m=>m.id));
     const response=await fetchImpl(SIWC.responses,{
       method:'POST',headers:{Authorization:'Bearer '+account.access_token,'Content-Type':'application/json'},
-      body:JSON.stringify(input),signal:AbortSignal.timeout(180_000)
+      body:JSON.stringify(input),signal:AbortSignal.any([controller.signal,AbortSignal.timeout(180_000)])
     });
     if(!response.ok)throw new Error('ChatGPT 번역 서버 오류 (HTTP '+response.status+'). 계정 사용량을 확인해 주세요.');
     const translated=await readResponseStream(response.body);
     if(account!==current)throw new Error('계정이 변경돼 번역 결과를 폐기했습니다.');
     return translated;
+    } finally { if(activeTranslation===controller)activeTranslation=null; }
   }
+  function cancelTranslation(){if(activeTranslation){activeTranslation.abort();activeTranslation=null;}return true;}
   function disconnect(){
+    cancelTranslation();
     if(pending){clearTimeout(pending.timer);pending.server?.close();pending=null;}
     load();account=null;models=[];authError='';
     // Only explicitly delete the credential file owned by this SIWC option.
     try{fs.unlinkSync(tokenFile)}catch(error){if(error.code!=='ENOENT')throw error;}
     return status();
   }
-  function close(){if(pending){clearTimeout(pending.timer);pending.server?.close();pending=null;}}
-  return {status,connect,disconnect,listModels,translate,close};
+  function close(){cancelTranslation();if(pending){clearTimeout(pending.timer);pending.server?.close();pending=null;}}
+  return {status,connect,disconnect,listModels,translate,cancelTranslation,close};
 }
 function registerSIWCHandlers({ipcMain,app,shell,safeStorage,fetchImpl}){
   const service=createSIWCService({app,shell,safeStorage,fetchImpl});
@@ -189,6 +195,7 @@ function registerSIWCHandlers({ipcMain,app,shell,safeStorage,fetchImpl}){
   ipcMain.handle('siwc:disconnect',()=>service.disconnect());
   ipcMain.handle('siwc:models',()=>service.listModels());
   ipcMain.handle('siwc:translate',(_,value)=>service.translate(value));
+  ipcMain.handle('siwc:cancel',()=>service.cancelTranslation());
   if(typeof app.once==='function')app.once('before-quit',()=>service.close());
   return service;
 }
