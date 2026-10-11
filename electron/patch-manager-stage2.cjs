@@ -84,6 +84,15 @@ function registerPatch0102Handlers(deps) {
     clipboard.writeText(text);
     return true;
   });
+  // Clipboard access is opt-in: the renderer invokes this only after a user clicks Import.
+  // Never observe the clipboard in the background or access any ChatGPT browser session.
+  ipcMain.handle('patch:clipboard-read', () => {
+    if (typeof clipboard.readText !== 'function') throw new Error('이 환경에서는 클립보드를 읽을 수 없습니다.');
+    const text = clipboard.readText();
+    if (!text.trim()) throw new Error('클립보드가 비어 있습니다. ChatGPT 번역 결과를 먼저 복사해 주세요.');
+    if (text.length > 2_000_000) throw new Error('클립보드 내용이 너무 큽니다. 번역 결과 JSON만 복사해 주세요.');
+    return text;
+  });
   ipcMain.handle('patch:manual-subtitle-save', (_, input = {}) => {
     const key = String(input.key || '').trim(), text = String(input.text || '');
     if (!key || key.length > MAX_EPISODE_KEY_CHARS) throw new Error('회차 식별 정보를 확인할 수 없습니다.');
