@@ -793,4 +793,4 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 중단 또는 새 자막/회차 선택 뒤 이전 작업 결과가 적용되지 않도록 현재 작업 식별자를 확인한다. 프롬프트 준비 중복을 막고, 전송 여부가 불확실한 묶음은 자동으로 다시 복사하거나 보내지 않는다. 진행 상태를 저장하지 못하면 다음 묶음으로 넘어가지 않고 응답/완료 묶음을 보존한다. 완료한 묶음은 기존 수동 JSON 검증과 WebVTT 타임코드 보존 경로로 저장·적용한다.
 - 기존 끄기·번역 API·로컬 AI 선택과 ChatGPT 수동 복사/가져오기 경로를 보존했다. ChatGPT 웹 대화 삭제는 지원되지 않아 버튼을 비활성화했다. 새 패치 출력에 SIWC 코드를 추가하지 않았다.
 - npm test는 공식 v0.5.14 커밋 f095fc3d775451e144ed780e1fa081f739927652 및 v0.5.15 커밋 16c9a3d1631061a72831e0657434003940daf531의 OS 임시 격리 소스를 연결해 378/378 통과, 건너뜀 0이었다. 네 가지 패치 01/02 ON/OFF 조합과 공식 소스 차단·복원 검증이 통과했다. 격리 Electron renderer 테스트는 자동 버튼의 요청 복사, 모의 내장 창 열기, 불확실 묶음 중복 준비 차단, 수동 응답 검증, WebVTT 저장·적용·이어하기를 통과했다. 테스트에서 ChatGPT 네트워크 요청은 0회였다.
-- D:\LilacAnime 실설치본과 사용자 프로필을 접근하거나 수정하지 않았고 main은 변경하지 않았다. GitHub Actions는 원격에 Build만 표시됐고 이 브랜치용 수동 실행 가능 여부를 확인 중이다.
+- D:\LilacAnime 실설치본과 사용자 프로필을 접근하거나 수정하지 않았고 main은 변경하지 않았다. GitHub Actions run https://github.com/dinoforge/anime-player/actions/runs/38156241022는 workflow_dispatch로 커밋 b1ab8d93를 검증해 성공했다. checkout/setup-node가 Node.js 20에서 24로 강제 전환된다는 비차단 deprecation annotation이 남았다.
