@@ -82,14 +82,20 @@ function registerPatch02Handlers(deps) {
   const { loadTranslationPrompt } = require('./patch-manager-stage2-prompts.cjs');
   const { registerManualTranslationSessionIpc } = require('./manual-translation-session.cjs');
   registerManualTranslationSessionIpc({ ipcMain, app, shell: deps.shell || require('electron').shell, subtitleStore });
-  // Registration is isolated to the patched Electron runtime; Node-only synthetic fixtures
-  // do not have a native OS browser or secure credential store.
-  const native = require('electron');
-  const siwcShell = deps.shell || native.shell;
-  if (typeof siwcShell?.openExternal === 'function') {
-    const { registerSIWCHandlers } = require('./siwc-client.cjs');
-    registerSIWCHandlers({ ipcMain, app, shell: siwcShell, safeStorage: deps.safeStorage || native.safeStorage, fetchImpl: deps.fetchImpl });
-  }
+  // The embedded ChatGPT page is opened only by a user click. No web page
+  // DOM, session credentials or chat output are read by this handler.
+  let embeddedChatGPT = null;
+  ipcMain.handle('patch:chatgpt-web:open', () => {
+    if (!embeddedChatGPT) {
+      const native = deps.electron || require('electron');
+      const { createEmbeddedChatGPTBrowser } = require('./embedded-chatgpt-web.cjs');
+      embeddedChatGPT = createEmbeddedChatGPTBrowser({
+        BrowserWindow: deps.BrowserWindow || native.BrowserWindow,
+        shell: deps.shell || native.shell
+      });
+    }
+    return embeddedChatGPT.open();
+  });
   ipcMain.handle('patch:translation-prompt', (_, language) => loadTranslationPrompt(String(language || '')));
   ipcMain.handle('patch:clipboard-copy', (_, value) => {
     const text = String(value ?? '');
@@ -131,7 +137,7 @@ function registerPatch02Handlers(deps) {
   });
   return [
     'patch:translation-prompt', 'patch:clipboard-copy', 'patch:clipboard-read', 'patch:manual-subtitle-save',
-    'siwc:status', 'siwc:connect', 'siwc:disconnect', 'siwc:models', 'siwc:translate', 'siwc:cancel',
+    'patch:chatgpt-web:open',
     'manual-translation:settings:get', 'manual-translation:settings:save',
     'manual-translation:session:get', 'manual-translation:session:save', 'manual-translation:session:remove',
     'manual-translation:translated-exists', 'manual-translation:subtitle:reveal', 'manual-translation:source:get'
