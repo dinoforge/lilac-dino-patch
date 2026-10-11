@@ -1,0 +1,8 @@
+{
+  "name": "lilacanime-companion-window-overlay",
+  "productName": "LilacAnime Companion Overlay (Test)",
+  "version": "0.1.0",
+  "private": true,
+  "main": "main.cjs",
+  "description": "Opt-in non-invasive Windows LilacAnime window-follow overlay prototype"
+}

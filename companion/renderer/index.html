@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>LilacAnime Companion Prototype</title>
+  <link rel="stylesheet" href="app.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#" aria-label="LilacAnime Companion 홈">
+        <span class="brand-mark">L</span>
+        <span class="brand-name">LilacAnime<span>Companion</span></span>
+      </a>
+      <nav class="primary-nav" aria-label="주요 화면">
+        <button class="nav-item is-active" data-view="schedule" type="button"><span class="nav-line"></span>방영표</button>
+        <button class="nav-item" data-view="subtitles" type="button"><span class="nav-line"></span>자막 번역</button>
+        <button class="nav-item" data-view="connection" type="button"><span class="nav-line"></span>연동 안내</button>
+      </nav>
+      <div class="sidebar-foot">
+        <p>별도 실행 Companion</p>
+        <span>원본 앱 데이터에 접근하지 않음</span>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <div class="topbar-title">
+          <p id="breadcrumb">방영표</p>
+          <h1 id="page-title">이번 주 방영</h1>
+        </div>
+        <div class="topbar-actions">
+          <span class="demo-mark"><span class="demo-dot"></span>합성 데이터</span>
+          <button id="theme-toggle" class="quiet-button" type="button" aria-label="테마 전환">라이트 테마</button>
+        </div>
+      </header>
+
+      <section id="schedule-view" class="view-panel">
+        <div class="calendar-heading">
+          <div>
+            <p id="calendar-date" class="section-caption">현재 분기 기준</p>
+            <h2 id="quarter-label">불러오는 중</h2>
+          </div>
+          <div class="quarter-controls" aria-label="분기 선택">
+            <label for="quarter-year">연도</label>
+            <input id="quarter-year" type="number" min="1960" inputmode="numeric" aria-label="연도">
+            <label for="quarter-number">분기</label>
+            <select id="quarter-number" aria-label="분기">
+              <option value="1">1분기</option>
+              <option value="2">2분기</option>
+              <option value="3">3분기</option>
+              <option value="4">4분기</option>
+            </select>
+            <button id="current-quarter" class="text-button" type="button">현재 분기</button>
+          </div>
+        </div>
+
+        <div id="weekday-tabs" class="weekday-tabs" role="tablist" aria-label="요일 선택"></div>
+
+        <div class="schedule-layout">
+          <section class="schedule-column" aria-labelledby="schedule-day-title">
+            <div class="column-heading">
+              <div>
+                <h3 id="schedule-day-title">월요일</h3>
+                <p id="schedule-count">작품 목록</p>
+              </div>
+              <button id="refresh-schedule" class="quiet-button" type="button">새로 확인</button>
+            </div>
+            <div id="schedule-list" class="schedule-list"></div>
+            <p class="data-note">표시된 작품·시간·출처 상태는 UI 검증용 합성 예시입니다. 실제 방영 정보와 서비스 조회 결과가 아닙니다.</p>
+          </section>
+
+          <section class="detail-column" aria-labelledby="detail-title">
+            <div id="work-detail" class="work-detail">
+              <div class="detail-empty">
+                <p class="section-caption">작품 선택</p>
+                <h3 id="detail-title">작품을 선택해 주세요</h3>
+                <p>회차와 출처 상태를 합성 데이터로 확인합니다.</p>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="subtitles-view" class="view-panel is-hidden">
+        <div class="subtitle-intro">
+          <div>
+            <p class="section-caption">수동 번역 보조</p>
+            <h2>자막을 직접 확인하고 번역하기</h2>
+            <p>Companion은 자막을 ChatGPT로 보내지 않습니다. 프롬프트를 복사해 사용자가 직접 붙여넣고, 응답을 가져옵니다.</p>
+          </div>
+          <div class="subtitle-actions">
+            <button id="demo-ja" class="secondary-button" type="button">일본어 예시</button>
+            <button id="demo-en" class="secondary-button" type="button">영어 예시</button>
+            <button id="choose-vtt" class="primary-button" type="button">내 VTT 선택</button>
+          </div>
+        </div>
+
+        <div class="subtitle-layout">
+          <section class="subtitle-source pane">
+            <div class="pane-heading">
+              <div>
+                <h3>원본 자막</h3>
+                <p id="subtitle-file-name">파일을 선택하거나 합성 예시를 불러오세요.</p>
+              </div>
+              <span id="subtitle-language-detected" class="quiet-status">대기 중</span>
+            </div>
+            <div class="context-fields">
+              <label>작품 제목<input id="work-title-input" type="text" maxlength="100" placeholder="예: 작품 제목"></label>
+              <label>회차<input id="episode-input" type="text" maxlength="20" placeholder="예: 3"></label>
+              <label>원문 언어<select id="source-language"><option value="japanese">일본어</option><option value="english">영어</option></select></label>
+              <label>번역 묶음<select id="batch-select" disabled><option value="0">자막을 먼저 불러오세요</option></select></label>
+            </div>
+            <pre id="cue-preview" class="cue-preview" aria-live="polite">선택된 자막의 문장이 여기에 표시됩니다.</pre>
+          </section>
+
+          <section class="subtitle-prompt pane">
+            <div class="pane-heading">
+              <div>
+                <h3>프롬프트</h3>
+                <p id="prompt-source-note">언어에 맞는 원문 프롬프트를 사용합니다.</p>
+              </div>
+            </div>
+            <textarea id="prompt-preview" readonly aria-label="복사할 프롬프트" placeholder="자막을 불러오면 프롬프트가 만들어집니다."></textarea>
+            <div class="button-row">
+              <button id="copy-prompt" class="primary-button" type="button" disabled>프롬프트 복사</button>
+              <button id="open-chatgpt" class="secondary-button" type="button">ChatGPT 열기</button>
+            </div>
+          </section>
+
+          <section class="subtitle-response pane">
+            <div class="pane-heading">
+              <div>
+                <h3>번역 결과</h3>
+                <p id="translation-progress">번역 결과를 붙여넣고 구조를 확인하세요.</p>
+              </div>
+            </div>
+            <textarea id="response-input" spellcheck="false" aria-label="ChatGPT가 반환한 JSON 붙여넣기" placeholder='{"translations":[{"id":1,"text":"한국어 번역"}]}'></textarea>
+            <div class="button-row">
+              <button id="apply-response" class="secondary-button" type="button" disabled>이 묶음 검증·적용</button>
+              <button id="export-vtt" class="primary-button" type="button" disabled>새 .ko.vtt로 내보내기</button>
+            </div>
+            <p class="safe-note">검증된 cue 문장만 바꿉니다. 원본 시간 코드와 순서는 유지하며, 내보내기는 새 파일로만 저장합니다.</p>
+          </section>
+        </div>
+      </section>
+
+      <section id="connection-view" class="view-panel is-hidden">
+        <div class="connection-copy">
+          <p class="section-caption">통합 상태</p>
+          <h2>원본 LilacAnime는 그대로 둡니다</h2>
+          <p>현재 확인한 LilacAnime v0.5.14 소스에는 별도 애드온 API, 외부 앱용 IPC 또는 재생 딥링크가 없습니다. 그래서 이 프로토타입은 원본 창이나 실행 중인 프로세스에 연결하지 않습니다.</p>
+          <dl class="connection-list">
+            <div><dt>원본 안에 Companion UI 표시</dt><dd>공식 확장점 없음 · 미지원</dd></div>
+            <div><dt>현재 재생 회차 자동 전달</dt><dd>공식 통신 경로 없음 · 미지원</dd></div>
+            <div><dt>자막 수동 변환</dt><dd>VTT 선택 → 프롬프트 복사 → 결과 검증 → 새 파일 내보내기</dd></div>
+            <div><dt>실제 공급원·영상 재생</dt><dd>연결하지 않음 · 이 화면은 합성 예시</dd></div>
+          </dl>
+          <p class="safe-note">원본 앱에서 자막 파일을 적용하려면 내보낸 파일을 사용자가 직접 고르세요. 원본 설치 폴더, 설정, 시청 기록, 쿠키와 세션에는 접근하지 않습니다.</p>
+        </div>
+      </section>
+
+      <footer class="app-footer">
+        <span id="app-status" role="status" aria-live="polite">실제 공급원과 연결되지 않았습니다.</span>
+        <span>프로토타입 0.1.0</span>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

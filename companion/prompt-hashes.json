@@ -1,0 +1,19 @@
+{
+  "files": {
+    "영어 번역 프롬프트.txt": {
+      "bytes": 11593,
+      "sha256": "582EAF421CABBCF89279579E5723AA07B070E5B1DF2E28EE044994B2E951E37E",
+      "role": "Used unchanged for English-source manual translation."
+    },
+    "일본어 번역 프롬프트.txt": {
+      "bytes": 9500,
+      "sha256": "9FF7E860CF0C79396621C2EF65B364596EBB884AA5B3CE68E60AB0D4B42EC584",
+      "role": "Used unchanged for Japanese-source manual translation."
+    },
+    "Reazon_작품용_단어사전_예시.txt": {
+      "bytes": 1056,
+      "sha256": "2DCB15B42D31BD6413D74E9A91303F0055574E030F875720CB1A1C07B814CCF8",
+      "role": "Preserved reference only; not used as a translation prompt or glossary."
+    }
+  }
+}

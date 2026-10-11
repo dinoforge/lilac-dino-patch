@@ -1,0 +1,9 @@
+{
+  "name": "lilacanime-companion-prototype",
+  "productName": "LilacAnime Companion Prototype",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An isolated, non-invasive companion prototype for schedule and subtitle workflows",
+  "main": "electron/main.cjs",
+  "appId": "com.dinoforge.animeplayer.companion.prototype"
+}
