@@ -1,0 +1,27 @@
+name: Dino Lilac Patch structure checks
+on:
+  push:
+    branches:
+      - codex/dino-lilac-patch-structure
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  structure:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Prepare read-only official upstream fixture
+        shell: pwsh
+        run: |
+          $nodeTemp = node -p "require('node:os').tmpdir()"
+          $fixture = Join-Path $nodeTemp 'dino-lilac-structure-official-v0514'
+          git clone --depth 1 --branch v0.5.14 https://github.com/whispelyn-byte/LilacAnime-desktop.git $fixture
+          if ($LASTEXITCODE -ne 0) { throw 'Official source fixture unavailable' }
+          "LILAC_UPSTREAM_SOURCE=$fixture" >> $env:GITHUB_ENV
+      - name: Validate all ON OFF states and structure rules
+        run: node --test dino-lilac-patch/test/structure.test.cjs
