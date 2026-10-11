@@ -31,10 +31,10 @@
 
 ## 이번에 실제 구현한 내용
 
-- settings.cjs: 패치별 ON/OFF의 엄격한 검증과 JSON 직렬화. 파일 쓰기 없음.
+- settings.cjs: 패치별 ON/OFF의 엄격한 검증과 `DinoLilacPatch/settings.json` 한 파일 저장. 앱 설치 폴더를 명시적으로 전달받고, 설정이 없으면 OFF/OFF로 시작한다. 손상되거나 예상 형식이 아닌 기존 설정은 덮어쓰지 않고 실패 처리한다. 저장은 임시 파일을 같은 폴더에 쓴 뒤 `settings.json`으로 바꾸며, 관리자 GUI나 패치 적용 엔진에는 아직 연결되지 않았다.
 - settings.json: 두 스위치만 포함하는 간단한 설정 예시.
 - compatibility.cjs: 각 패치의 필요 코드 지점을 독립 검증하는 **읽기 전용** 구조 분석기. 입력은 분리된 소스 스냅샷이며 설치 파일에 접근하지 않는다.
-- test/structure.test.cjs: 네 조합, 업데이트된 다른 버전이 구조적으로 호환되는 경우, 같은 버전인데 필수 코드가 깨진 경우, 한쪽 패치만 막히는 경우, 중복 삽입 감지와 원본 불변성 테스트.
+- test/structure.test.cjs: 네 조합 저장·복원, 손상된 설정 보존, 업데이트된 실제 소스의 구조 판정, 다른 버전의 동일 구조 후보, 같은 버전에서 필수 코드가 깨진 경우, 한쪽 패치만 막히는 경우, 중복 삽입 감지와 원본 불변성 테스트.
 
 구조 판정은 disabled(사용자 OFF), blocked(필수 연결 지점 부족·중복·충돌), structural-candidate(시험 적용 후보)의 세 가지다. **structural-candidate는 실제 작동 보증이나 자동 적용 허가가 아니다.** 모든 분석에서 automaticApplyAuthorized는 false로 유지한다.
 

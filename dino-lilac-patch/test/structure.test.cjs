@@ -4,7 +4,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
-const {DEFAULT_SETTINGS,loadSettings,setPatchEnabled,toSettingsJson}=require('../settings.cjs');
+const {DEFAULT_SETTINGS,loadSettings,setPatchEnabled,toSettingsJson,settingsFilePath,readSettingsFile,writeSettingsFile,setPatchEnabledAndSave}=require('../settings.cjs');
 const {evaluateStructure}=require('../compatibility.cjs');
 
 function fixture(version='0.5.14'){
@@ -34,6 +34,42 @@ test('only one local settings file is needed for two independent switches',()=>{
   ])assert.throws(()=>toSettingsJson(broken));
   assert.throws(()=>setPatchEnabled(original,'unknown',true));
   assert.throws(()=>loadSettings('{bad json'));
+});
+
+test('settings persist all four combinations in the single DinoLilacPatch/settings.json file',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'dino-lilac-settings-'));
+  const install=path.join(root,'LilacAnime');
+  fs.mkdirSync(install);
+  try{
+    const file=settingsFilePath(install),directory=path.dirname(file);
+    assert.equal(file,path.join(install,'DinoLilacPatch','settings.json'));
+    const missingInstall=path.join(root,'MissingLilacAnime');
+    assert.throws(()=>writeSettingsFile(missingInstall,enabled(true,false)));
+    assert.equal(fs.existsSync(missingInstall),false,'a mistyped app path is never created implicitly');
+    assert.deepEqual(readSettingsFile(install),enabled(false,false));
+    assert.equal(fs.existsSync(directory),false,'reading a missing settings file does not create extra folders');
+    for(const patch01 of [false,true])for(const patch02 of [false,true]){
+      const selected=enabled(patch01,patch02);
+      writeSettingsFile(install,selected);
+      assert.deepEqual(readSettingsFile(install),selected);
+    }
+    assert.deepEqual(setPatchEnabledAndSave(install,'patch-01',false),enabled(false,true));
+    assert.deepEqual(readSettingsFile(install),enabled(false,true));
+    assert.deepEqual(fs.readdirSync(directory),['settings.json'],'the two switches share one settings file and no temp file remains');
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('malformed persisted settings fail closed and are not overwritten by a toggle',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'dino-lilac-settings-invalid-'));
+  const install=path.join(root,'LilacAnime');
+  fs.mkdirSync(path.join(install,'DinoLilacPatch'),{recursive:true});
+  const file=settingsFilePath(install),invalid='{"patches":{"patch-01":true}}';
+  fs.writeFileSync(file,invalid,'utf8');
+  try{
+    assert.throws(()=>readSettingsFile(install),/could not be read/);
+    assert.throws(()=>setPatchEnabledAndSave(install,'patch-02',true),/could not be read/);
+    assert.equal(fs.readFileSync(file,'utf8'),invalid);
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
 
 test('all four ON/OFF combinations produce independent read-only compatibility reports',()=>{

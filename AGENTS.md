@@ -36,6 +36,6 @@
 ## 작업 방식 및 완료 보고
 
 - 변경 전 기존 코드·관련 문서·테스트를 확인한다. 범위 밖 리팩터링과 기능 추가를 하지 않는다.
-- `dino-lilac-patch/settings.cjs`와 `compatibility.cjs`는 현재 **읽기 전용 설정/구조 분석의 초기 구현**이다. 기존 `patch-manager/adapters/lilacanime-v0.5.14.cjs`는 아직 01·02가 묶인 manifest이다. **실제 앱 개별 ON/OFF가 작동한다고 보고하지 않는다.**
+- `dino-lilac-patch/settings.cjs`는 명시적으로 전달된 앱 설치 폴더 아래 `DinoLilacPatch/settings.json` 한 파일만 읽고 쓴다. 파일이 없으면 OFF/OFF를 기본값으로 반환하고, 잘못된 파일은 덮어쓰지 않고 실패 처리한다. 이 저장 모듈은 아직 관리자 GUI나 패치 적용 엔진에 연결되지 않았다. `compatibility.cjs`는 전달받은 분리 소스 스냅샷만 읽는 구조 분석기다. 기존 `patch-manager/adapters/lilacanime-v0.5.14.cjs`는 아직 01·02가 묶인 manifest이므로 **실제 앱 개별 ON/OFF가 작동한다고 보고하지 않는다.**
 - 가능하면 네 조합, 한쪽 패치만 차단되는 업데이트, 서로 다른 버전이나 동일 버전의 코드 변경, 중복 주입, 원본 불변성에 대한 테스트를 포함한다.
 - 완료 시 변경 브랜치·파일·실제 실행한 테스트의 성공/실패/건너뜀과 **아직 미구현 또는 실사용 미검증인 사항**을 명시한다. CI 통과를 실제 Windows 설치/GUI/SIWC 로그인 성공으로 표현하지 않는다.

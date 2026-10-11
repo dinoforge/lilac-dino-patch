@@ -1,5 +1,12 @@
 # 작업 상태
 
+## 2026-10-11 디노 라일락 패치 구조와 ON/OFF 설정
+
+- 브랜치 `codex/dino-lilac-patch-structure`에서 기본 설정 저장을 보강했다. 명시적으로 전달한 앱 경로 아래 `DinoLilacPatch/settings.json` 한 파일에 두 스위치를 저장하고, 기본 OFF/OFF, 잘못된 JSON의 fail-closed 처리, 잘못된 앱 경로에서 폴더를 새로 만들지 않는 동작을 검증한다.
+- 호환성 분석은 버전 허용 목록 대신 main/preload/renderer의 실제 삽입점과 패치별 필수 코드·중복 표식을 읽는다. 공식 v0.5.15 소스 커밋 `16c9a3d1631061a72831e0657434003940daf531`에서 두 패치 모두 구조 후보로 분류됐으며, 격리 런타임 검증 전 적용 허가를 내리지 않는다.
+- `node --test dino-lilac-patch/test/structure.test.cjs` 공식 v0.5.15 fixture 실행: 10/10 통과. 전체 `npm test`를 공식 v0.5.14 fixture와 기존 동일 package-lock 의존성으로 실행: 362/362 통과, 0 skip.
+- 관리자 GUI/`DinoLilacPatch.exe`, payload별 실제 적용·해제, app.asar 백업·복구, 업데이트 감시·재적용은 미구현이다. 실제 `D:\LilacAnime`, 사용자 프로필, 업데이트 캐시는 접근하지 않았다. 상세: `docs/verification/DINO_LILAC_PATCH_STRUCTURE.md`.
+
 
 ## 2026-10-11 패치 02 추가 SIWC 계정 번역 런타임
 
