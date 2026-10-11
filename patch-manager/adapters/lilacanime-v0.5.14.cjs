@@ -24,25 +24,36 @@ const EXPECTED_FILES = Object.freeze({
   'electron/subtitle-store.cjs': 'bfec7a17e735d63336e62b36fea3ed90412f821ec299591ffb71fcae7b3877be'
 });
 
-const PAYLOAD_FILES = Object.freeze([
-  ['src/patch-manager-stage2-core.js', 'src/patch-manager-stage2-core.js'],
-  ['src/weekday-schedule.js', 'src/weekday-schedule.js'],
-  ['src/integrated-search.js', 'src/integrated-search.js'],
-  ['src/manual-subtitle-translation.js', 'src/manual-subtitle-translation.js'],
+const SHARED_PAYLOAD_FILES = Object.freeze([
   ['src/patch-manager-stage2.js', 'src/patch-manager-stage2.js'],
-  ['src/siwc-subtitle-bridge.js', 'src/siwc-subtitle-bridge.js'],
-  ['electron/quarter-catalog.cjs', 'electron/quarter-catalog.cjs'],
-  ['electron/anilist-client.cjs', 'electron/anilist-client.cjs'],
-  ['electron/weekday-episodes.cjs', 'electron/weekday-episodes.cjs'],
-  ['electron/patch-manager-stage2.cjs', 'electron/patch-manager-stage2.cjs'],
-  ['electron/siwc-contract.cjs', 'electron/siwc-contract.cjs'],
-  ['electron/siwc-oidc.cjs', 'electron/siwc-oidc.cjs'],
-  ['electron/siwc-client.cjs', 'electron/siwc-client.cjs'],
-  ['electron/manual-translation-session.cjs', 'electron/manual-translation-session.cjs'],
-  ['electron/patch-manager-stage2-prompts.cjs', 'electron/patch-manager-stage2-prompts.cjs'],
-  ['docs/prompts/영어 번역 프롬프트.txt', 'electron/prompts/영어 번역 프롬프트.txt'],
-  ['docs/prompts/일본어 번역 프롬프트.txt', 'electron/prompts/일본어 번역 프롬프트.txt'],
-  ['docs/prompts/Reazon_작품용_단어사전_예시.txt', 'electron/prompts/Reazon_작품용_단어사전_예시.txt']
+  ['electron/patch-manager-stage2.cjs', 'electron/patch-manager-stage2.cjs']
+]);
+const PATCH_PAYLOAD_FILES = Object.freeze({
+  'patch-01': Object.freeze([
+    ['src/patch-manager-stage2-core.js', 'src/patch-manager-stage2-core.js'],
+    ['src/weekday-schedule.js', 'src/weekday-schedule.js'],
+    ['src/integrated-search.js', 'src/integrated-search.js'],
+    ['electron/quarter-catalog.cjs', 'electron/quarter-catalog.cjs'],
+    ['electron/anilist-client.cjs', 'electron/anilist-client.cjs'],
+    ['electron/weekday-episodes.cjs', 'electron/weekday-episodes.cjs']
+  ]),
+  'patch-02': Object.freeze([
+    ['src/manual-subtitle-translation.js', 'src/manual-subtitle-translation.js'],
+    ['src/siwc-subtitle-bridge.js', 'src/siwc-subtitle-bridge.js'],
+    ['electron/siwc-contract.cjs', 'electron/siwc-contract.cjs'],
+    ['electron/siwc-oidc.cjs', 'electron/siwc-oidc.cjs'],
+    ['electron/siwc-client.cjs', 'electron/siwc-client.cjs'],
+    ['electron/manual-translation-session.cjs', 'electron/manual-translation-session.cjs'],
+    ['electron/patch-manager-stage2-prompts.cjs', 'electron/patch-manager-stage2-prompts.cjs'],
+    ['docs/prompts/영어 번역 프롬프트.txt', 'electron/prompts/영어 번역 프롬프트.txt'],
+    ['docs/prompts/일본어 번역 프롬프트.txt', 'electron/prompts/일본어 번역 프롬프트.txt'],
+    ['docs/prompts/Reazon_작품용_단어사전_예시.txt', 'electron/prompts/Reazon_작품용_단어사전_예시.txt']
+  ])
+});
+const PAYLOAD_FILES = Object.freeze([
+  ...SHARED_PAYLOAD_FILES,
+  ...PATCH_PAYLOAD_FILES['patch-01'],
+  ...PATCH_PAYLOAD_FILES['patch-02']
 ]);
 
 function readPayload(projectRoot, source, target) {
@@ -93,4 +104,14 @@ function makeLilacAnimeV0514Manifest(projectRoot = path.resolve(__dirname, '../.
   return manifest;
 }
 
-module.exports = { VERSION, PATCH_SET, PROMPT_HASHES, EXPECTED_FILES, makeLilacAnimeV0514Manifest };
+module.exports = {
+  VERSION,
+  PATCH_SET,
+  PROMPT_HASHES,
+  EXPECTED_FILES,
+  SHARED_PAYLOAD_FILES,
+  PATCH_PAYLOAD_FILES,
+  PAYLOAD_FILES,
+  readPayload,
+  makeLilacAnimeV0514Manifest
+};

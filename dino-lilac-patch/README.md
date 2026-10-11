@@ -1,5 +1,11 @@
 # 디노 라일락 패치 — 구조 1차 확정 (2026-10-11)
 
+## 후속 단계 — 독립 적용 엔진
+
+`codex/dino-lilac-patch-engine`에서는 Patch 01/02 payload와 삽입 지점을 분리했다. `patch-manager/adapters/lilacanime-independent.cjs`는 검토된 공식 v0.5.14·v0.5.15에는 정확한 파일 지문을 확인하고, 미검토 버전은 패치별 구조 검사를 통과한 경우 현재 파일 지문을 고정한 격리 적용 후보만 만든다. 새 후보는 임시 소스 복사본 테스트를 거쳐야 하며 설치본 적용을 허용하지 않는다. 네 가지 ON/OFF 조합을 지원하며 공유 브리지 파일은 한 번만 추가한다. main-process IPC와 renderer 초기화는 다른 패치 모듈을 요구하지 않도록 분리했다.
+
+공식 소스 clone을 임시 테스트 복사본으로 만들어 각 조합을 적용·재적용 확인·롤백하는 테스트를 추가했다. **현재 적용 함수는 고유 표식이 있는 OS 임시 fixture만 허용한다.** 이는 실사용 설치 엔진이 아니다. `D:\LilacAnime`, 사용자 데이터, `app.asar`, 공식 업데이트는 이 코드의 적용 대상으로 사용할 수 없으며 GUI·EXE·실제 Electron UI 검증도 아직 없다. 자세한 결과: `docs/verification/DINO_LILAC_INDEPENDENT_PATCH_ENGINE.md`.
+
 ## 이번 작업 범위
 
 제품명: **디노 라일락 패치 (Dino Lilac Patch)**.
@@ -41,7 +47,7 @@
 ## 이 단계에서는 하지 않는 작업
 
 1. 패치 관리자 GUI와 DinoLilacPatch.exe 패키징.
-2. 기존 v0.5.14 어댑터를 패치 01/02 독립 payload로 나누는 작업. 현재 실제 adapter는 두 패치를 하나의 manifest로 주입한다. 설정/분석 코드가 생겼다고 설치 앱에서 독립 ON/OFF를 제공하는 것은 아니다.
+2. 실제 설치본에 패치 payload를 적용하는 작업. 후속 단계에서 두 패치별 manifest와 격리된 소스 복사본 적용은 검증했지만, 설치 앱에 독립 ON/OFF를 연결하지는 않았다.
 3. app.asar 읽기·압축 해제·교체, 설치본 백업과 원상 복구, 공식 업데이터 후킹.
 4. 새 버전의 실제 시험 적용·GUI 통합 검증, 실계정 SIWC 인증.
 

@@ -1,8 +1,15 @@
 (function installLilacPatch0102(root) {
   'use strict';
+  const configured = root?.DinoLilacPatchFeatures;
+  const patch01Enabled = configured ? configured['patch-01'] === true : true;
+  const patch02Enabled = configured ? configured['patch-02'] === true : true;
+  if (!patch01Enabled && !patch02Enabled) return;
   const api = root?.lilac, core = root?.LilacPatchStage2Core, schedule = root?.LilacWeekdaySchedule;
   const integrated = root?.LilacIntegratedSearch, manual = root?.LilacManualSubtitle;
-  if (!api || !core || !schedule || !integrated || !manual || typeof renderCards !== 'function') return;
+  if (!api ||
+      (patch01Enabled && (!core || !schedule || !integrated || typeof root.renderCards !== 'function' ||
+        typeof root.openDetail !== 'function' || typeof root.animeById !== 'function')) ||
+      (patch02Enabled && !manual)) return;
 
   const $ = selector => document.querySelector(selector);
   const LABELS = Object.freeze({ reanime: 'Re:Anime', miruro: 'Miruro', animenosub: 'Animenosub', ohli24: '애니24', linkkf: 'Linkkf' });
@@ -13,16 +20,16 @@
   const WEEK_CACHE_PREFIX = 'lilacPatch0102.week.v1:';
   const WEEKDAY_NAMES = Object.freeze({ checking: '확인 중', playable: '재생 가능', provided: '제공 확인', missing: '미제공', failed: '확인 실패' });
   const state = {
-    selection: core.readQuarterSelection(localStorage.getItem(QUARTER_KEY)),
+    selection: patch01Enabled ? core.readQuarterSelection(localStorage.getItem(QUARTER_KEY)) : null,
     quarterLists: Object.create(null), quarterItems: [], catalogReady: false, days: Array.from({ length: 7 }, () => []),
     selectedDay: (new Date().getDay() + 6) % 7, catalogRequest: 0, scheduleRequest: 0,
     detailRequest: 0, selectedAnime: null, activePicker: null, renderOwned: false,
     cardItems: new WeakMap(), sourceCache: new Map(), sourceFlight: new Map(), linkkfFlight: null,
     sourceFailures: [], lastCalendar: '', lastLocalDate: ''
   };
-  const nativeRenderCards = renderCards;
-  const nativeOpenDetail = openDetail;
-  const nativeAnimeById = animeById;
+  const nativeRenderCards = root.renderCards;
+  const nativeOpenDetail = root.openDetail;
+  const nativeAnimeById = root.animeById;
 
   function quarterLabel(year, quarter) { return `${year}년 ${quarter}분기`; }
   function localDateKey(date = new Date()) {
@@ -690,7 +697,7 @@
   function addStyles() {
     if ($('#patch0102Styles')) return;
     const style = document.createElement('style'); style.id = 'patch0102Styles';
-    style.textContent = `
+    const scheduleStyles = `
       #patch0102QuarterControls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 14px;color:var(--muted);font-size:13px}
       #patch0102QuarterControls label{display:flex;align-items:center;gap:6px}
       #patch0102QuarterYear,#patch0102QuarterNumber{min-height:34px;max-width:110px;padding:5px 9px;border:1px solid var(--line);border-radius:var(--ott-radius,10px);background:var(--panel);color:var(--text);font:inherit}
@@ -705,6 +712,9 @@
       .patch0102-source-rows button,.patch0102-source-row{display:flex;justify-content:space-between;align-items:center;gap:6px;min-width:0;padding:8px;border:1px solid var(--line);border-radius:var(--ott-radius,10px);background:var(--panel);color:var(--text);font:inherit;text-align:left}
       .patch0102-source-rows button{cursor:pointer}.patch0102-source-rows button[aria-pressed="true"]{border-color:var(--lilac)}
       .patch0102-source-rows small{color:var(--muted);font-size:11px;white-space:nowrap}
+      @media(max-width:560px){#patch0102QuarterControls{gap:6px}.patch0102-source-rows{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    `;
+    const subtitleStyles = `
       #patch0102ManualRow{margin-top:6px}
       #patch0102ManualPanel{display:grid;gap:8px;padding:10px 0;color:var(--text)}
       #patch0102ManualPanel p{margin:0;color:var(--muted);font-size:12px;line-height:1.45}
@@ -712,8 +722,8 @@
       .patch0102-manual-actions{display:flex;gap:6px;flex-wrap:wrap}.patch0102-manual-actions button{min-height:32px;padding:6px 9px;border:1px solid var(--line);border-radius:var(--ott-radius,10px);background:var(--panel);color:var(--text);font:inherit;cursor:pointer}
       .patch0102-manual-head{display:flex;justify-content:space-between;gap:8px;align-items:center}.patch0102-manual-head span{color:var(--muted);font-size:11px;text-align:right}
       .patch0102-chatgpt-settings{display:grid;gap:10px}.patch0102-chatgpt-settings p{margin:0;color:var(--muted);font-size:12px;line-height:1.5}.patch0102-chatgpt-settings select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:6px}
-      @media(max-width:560px){#patch0102QuarterControls{gap:6px}.patch0102-source-rows{grid-template-columns:repeat(2,minmax(0,1fr))}}
     `;
+    style.textContent = [patch01Enabled ? scheduleStyles : '', patch02Enabled ? subtitleStyles : ''].filter(Boolean).join('\n');
     document.head.append(style);
   }
 
@@ -730,30 +740,44 @@
   }
 
   function install() {
-    if ($('#patch0102QuarterControls')) return;
-    // v0.5.14 defaults next-episode autoplay to on. Keep an explicit user choice,
-    // while making a fresh patched profile follow the established off-by-default rule.
-    try { if (localStorage.getItem('playerAutoPlay') === null) localStorage.setItem('playerAutoPlay', 'false'); } catch {}
-    mountQuarterControls(); mountScheduleTabs(); addStyles(); addManualTranslationSettings(); addManualTranslationUi();
-    installCardHandlers($('#seasonRail')); installCardHandlers($('#scheduleRail'));
-    window.renderCards = function (target, items) {
-      const result = nativeRenderCards(target, items);
-      if (state.renderOwned) return result;
-      if (target === '#seasonRail' && state.catalogReady) renderQuarterCards();
-      return result;
-    };
-    window.animeById = function (id) {
-      if (state.selectedAnime && String(state.selectedAnime.mal_id) === String(id)) return state.selectedAnime;
-      return nativeAnimeById(id);
-    };
-    state.lastCalendar = selectionCalendarKey(); state.lastLocalDate = localDateKey();
-    saveSelection();
-    void loadQuarterCatalog(false); void loadWeekdaySchedule(false);
-    window.addEventListener('focus', watchCalendar);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) watchCalendar(); });
-    window.setInterval(watchCalendar, 5 * 60 * 1000);
+    addStyles();
+    if (patch01Enabled && !state.patch01Installed) {
+      // v0.5.14 defaults next-episode autoplay to on. Keep an explicit user choice,
+      // while making a fresh patched profile follow the established off-by-default rule.
+      try { if (localStorage.getItem('playerAutoPlay') === null) localStorage.setItem('playerAutoPlay', 'false'); } catch {}
+      mountQuarterControls(); mountScheduleTabs();
+      installCardHandlers($('#seasonRail')); installCardHandlers($('#scheduleRail'));
+      root.renderCards = function (target, items) {
+        const result = nativeRenderCards(target, items);
+        if (state.renderOwned) return result;
+        if (target === '#seasonRail' && state.catalogReady) renderQuarterCards();
+        return result;
+      };
+      root.animeById = function (id) {
+        if (state.selectedAnime && String(state.selectedAnime.mal_id) === String(id)) return state.selectedAnime;
+        return nativeAnimeById(id);
+      };
+      state.lastCalendar = selectionCalendarKey(); state.lastLocalDate = localDateKey();
+      saveSelection();
+      void loadQuarterCatalog(false); void loadWeekdaySchedule(false);
+      root.addEventListener('focus', watchCalendar);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) watchCalendar(); });
+      root.setInterval(watchCalendar, 5 * 60 * 1000);
+      state.patch01Installed = true;
+    }
+    if (patch02Enabled && !state.patch02Installed) {
+      addManualTranslationSettings();
+      addManualTranslationUi();
+      state.patch02Installed = true;
+    }
   }
 
-  root.LilacPersistentPatch0102 = Object.freeze({ version: '0.5.14', install, refreshQuarter: () => loadQuarterCatalog(true), refreshWeekday: () => loadWeekdaySchedule(true) });
+  root.LilacPersistentPatch0102 = Object.freeze({
+    version: '0.5.14',
+    enabled: Object.freeze({ 'patch-01': patch01Enabled, 'patch-02': patch02Enabled }),
+    install,
+    refreshQuarter: () => patch01Enabled ? loadQuarterCatalog(true) : Promise.resolve(null),
+    refreshWeekday: () => patch01Enabled ? loadWeekdaySchedule(true) : Promise.resolve(null)
+  });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true }); else install();
 })(window);

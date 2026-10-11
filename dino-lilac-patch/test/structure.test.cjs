@@ -10,7 +10,7 @@ const {evaluateStructure}=require('../compatibility.cjs');
 function fixture(version='0.5.14'){
   return {
     'package.json':JSON.stringify({name:'lilac',version}),
-    'electron/main.cjs':"  ipcMain.handle('provider:season', (_, provider) => homeShows(provider,'season'));",
+    'electron/main.cjs':"app.whenReady().then(async () => { const subtitleStore=new SubtitleStore({app,reconvert:reconvertSubtitle}); };\nconst providerFetch,REANIME_WEB,ANIMENOSUB_WEB,reanimeItems,miruroApi,miruroItem,miruroHasEpisodes,animenosubList,cheerio;\n  ipcMain.handle('provider:season', (_, provider) => homeShows(provider,'season'));",
     'electron/preload.cjs':"  providerSeason: provider => ipcRenderer.invoke('provider:season', provider),",
     'electron/subtitle-store.cjs':"const sources=['gemini'];",
     'src/index.html':'<div id="seasonRail"></div><div id="scheduleRail"></div><div id="subtitleTranslateRow"></div><section data-settings-pane="translate"></section></body>',

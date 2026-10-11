@@ -2,16 +2,12 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
-const { QUARTER_PROVIDERS, quarterPeriod, quarterQuery } = require('./quarter-catalog.cjs');
-const { fetchWeekdayEpisodes } = require('./weekday-episodes.cjs');
-const { loadTranslationPrompt } = require('./patch-manager-stage2-prompts.cjs');
-const { registerManualTranslationSessionIpc } = require('./manual-translation-session.cjs');
 
 const MAX_TRANSLATED_VTT_CHARS = 12_000_000;
 const MAX_EPISODE_KEY_CHARS = 1200;
 
 async function loadQuarter(provider, year, quarter, deps) {
+  const { QUARTER_PROVIDERS, quarterPeriod, quarterQuery } = require('./quarter-catalog.cjs');
   const period = quarterPeriod(year, quarter);
   if (!QUARTER_PROVIDERS.includes(provider)) throw new Error('이 콘텐츠 소스는 분기별 목록을 제공하지 않습니다.');
   const data = [];
@@ -63,11 +59,28 @@ async function loadQuarter(provider, year, quarter, deps) {
   return { data, label: period.label, year: period.year, quarter: period.quarter };
 }
 
-function registerPatch0102Handlers(deps) {
-  const { ipcMain, app, subtitleStore, clipboard } = deps;
+function registerPatch01Handlers(deps) {
+  const { ipcMain } = deps || {};
+  if (!ipcMain?.handle) throw new TypeError('Patch 01 IPC 의존성이 올바르지 않습니다.');
+  const { fetchWeekdayEpisodes } = require('./weekday-episodes.cjs');
+  const quarterDeps = {
+    providerFetch: deps.providerFetch, REANIME_WEB: deps.REANIME_WEB, ANIMENOSUB_WEB: deps.ANIMENOSUB_WEB,
+    reanimeItems: deps.reanimeItems, miruroApi: deps.miruroApi, miruroItem: deps.miruroItem,
+    miruroHasEpisodes: deps.miruroHasEpisodes, animenosubList: deps.animenosubList, cheerio: deps.cheerio
+  };
+  ipcMain.handle('patch:quarter', (_, provider, year, quarter) => loadQuarter(String(provider || ''), year, quarter, quarterDeps));
+  ipcMain.handle('patch:weekday-episodes', (_, provider, candidates, refresh) =>
+    fetchWeekdayEpisodes(String(provider || ''), candidates, { refresh: refresh === true }));
+  return ['patch:quarter', 'patch:weekday-episodes'];
+}
+
+function registerPatch02Handlers(deps) {
+  const { ipcMain, app, subtitleStore, clipboard } = deps || {};
   if (!ipcMain?.handle || !app?.getPath || !subtitleStore?.save || !clipboard?.writeText) {
-    throw new TypeError('Patch 01·02 IPC 의존성이 올바르지 않습니다.');
+    throw new TypeError('Patch 02 IPC 의존성이 올바르지 않습니다.');
   }
+  const { loadTranslationPrompt } = require('./patch-manager-stage2-prompts.cjs');
+  const { registerManualTranslationSessionIpc } = require('./manual-translation-session.cjs');
   registerManualTranslationSessionIpc({ ipcMain, app, shell: deps.shell || require('electron').shell, subtitleStore });
   // Registration is isolated to the patched Electron runtime; Node-only synthetic fixtures
   // do not have a native OS browser or secure credential store.
@@ -77,14 +90,6 @@ function registerPatch0102Handlers(deps) {
     const { registerSIWCHandlers } = require('./siwc-client.cjs');
     registerSIWCHandlers({ ipcMain, app, shell: siwcShell, safeStorage: deps.safeStorage || native.safeStorage, fetchImpl: deps.fetchImpl });
   }
-  const quarterDeps = {
-    providerFetch: deps.providerFetch, REANIME_WEB: deps.REANIME_WEB, ANIMENOSUB_WEB: deps.ANIMENOSUB_WEB,
-    reanimeItems: deps.reanimeItems, miruroApi: deps.miruroApi, miruroItem: deps.miruroItem,
-    miruroHasEpisodes: deps.miruroHasEpisodes, animenosubList: deps.animenosubList, cheerio: deps.cheerio
-  };
-  ipcMain.handle('patch:quarter', (_, provider, year, quarter) => loadQuarter(String(provider || ''), year, quarter, quarterDeps));
-  ipcMain.handle('patch:weekday-episodes', (_, provider, candidates, refresh) =>
-    fetchWeekdayEpisodes(String(provider || ''), candidates, { refresh: refresh === true }));
   ipcMain.handle('patch:translation-prompt', (_, language) => loadTranslationPrompt(String(language || '')));
   ipcMain.handle('patch:clipboard-copy', (_, value) => {
     const text = String(value ?? '');
@@ -124,6 +129,31 @@ function registerPatch0102Handlers(deps) {
       throw error;
     }
   });
+  return [
+    'patch:translation-prompt', 'patch:clipboard-copy', 'patch:clipboard-read', 'patch:manual-subtitle-save',
+    'siwc:status', 'siwc:connect', 'siwc:disconnect', 'siwc:models', 'siwc:translate', 'siwc:cancel',
+    'manual-translation:settings:get', 'manual-translation:settings:save',
+    'manual-translation:session:get', 'manual-translation:session:save', 'manual-translation:session:remove',
+    'manual-translation:translated-exists', 'manual-translation:subtitle:reveal', 'manual-translation:source:get'
+  ];
 }
 
-module.exports = { MAX_EPISODE_KEY_CHARS, MAX_TRANSLATED_VTT_CHARS, loadQuarter, registerPatch0102Handlers };
+function registerPatch0102Handlers(deps, patches = { 'patch-01': true, 'patch-02': true }) {
+  if (!patches || typeof patches !== 'object' || Array.isArray(patches) ||
+      Object.keys(patches).length !== 2 || typeof patches['patch-01'] !== 'boolean' || typeof patches['patch-02'] !== 'boolean') {
+    throw new TypeError('Patch 01·02 선택 설정이 올바르지 않습니다.');
+  }
+  const registered = [];
+  if (patches['patch-01']) registered.push(...registerPatch01Handlers(deps));
+  if (patches['patch-02']) registered.push(...registerPatch02Handlers(deps));
+  return { registered };
+}
+
+module.exports = {
+  MAX_EPISODE_KEY_CHARS,
+  MAX_TRANSLATED_VTT_CHARS,
+  loadQuarter,
+  registerPatch01Handlers,
+  registerPatch02Handlers,
+  registerPatch0102Handlers
+};

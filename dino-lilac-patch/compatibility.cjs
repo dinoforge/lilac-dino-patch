@@ -16,14 +16,25 @@ const CONTRACTS=Object.freeze({
     {file:'src/index.html',needle:'id="seasonRail"',one:true},
     {file:'src/index.html',needle:'id="scheduleRail"',one:true},
     {file:'src/app.js',needle:'function animeById(',one:true},
-    {file:'src/app.js',needle:'function renderCards(',one:true}
+    {file:'src/app.js',needle:'function renderCards(',one:true},
+    {file:'electron/main.cjs',needle:'providerFetch'},
+    {file:'electron/main.cjs',needle:'REANIME_WEB'},
+    {file:'electron/main.cjs',needle:'ANIMENOSUB_WEB'},
+    {file:'electron/main.cjs',needle:'reanimeItems'},
+    {file:'electron/main.cjs',needle:'miruroApi'},
+    {file:'electron/main.cjs',needle:'miruroItem'},
+    {file:'electron/main.cjs',needle:'miruroHasEpisodes'},
+    {file:'electron/main.cjs',needle:'animenosubList'},
+    {file:'electron/main.cjs',needle:'cheerio'}
   ]),
   'patch-02':Object.freeze([
     {file:'src/index.html',needle:'id="subtitleTranslateRow"',one:true},
     {file:'src/index.html',needle:'data-settings-pane="translate"',one:true},
     {file:'src/app.js',needle:'function attachSubtitle(',one:true},
     {file:'src/app.js',needle:'function subtitleStoreKey(',one:true},
-    {file:'electron/subtitle-store.cjs',needle:"'gemini'];",one:true}
+    {file:'electron/subtitle-store.cjs',needle:"'gemini'];",one:true},
+    {file:'electron/main.cjs',needle:'app.whenReady().then(async () => {',one:true},
+    {file:'electron/main.cjs',needle:'const subtitleStore=new SubtitleStore({app,reconvert:reconvertSubtitle});',one:true}
   ])
 });
 const ALREADY_PATCHED=Object.freeze({

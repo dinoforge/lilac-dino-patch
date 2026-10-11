@@ -1,5 +1,14 @@
 # 작업 상태
 
+## 2026-10-11 디노 라일락 패치 독립 적용 엔진
+
+- `codex/dino-lilac-patch-structure`의 기준 커밋 `28793984b4dbb7d30a57d722789ff67ffc5f60ec`에서 `codex/dino-lilac-patch-engine`을 분기했다. 어댑터가 Patch 01·02 선택에 맞춰 독립 manifest를 생성하며, 공유 main/renderer 브리지는 한 번만 포함한다. IPC 등록과 renderer 시작 조건도 각 패치 의존성에 맞춰 분리했다.
+- 공식 LilacAnime v0.5.14 (`f095fc3d775451e144ed780e1fa081f739927652`)와 v0.5.15 (`16c9a3d1631061a72831e0657434003940daf531`)의 읽기 전용 소스 clone을 임시 테스트 복사본으로 만들어 네 조합을 적용·중복 적용 확인·롤백했다. 두 버전 모두 OFF/OFF는 파일을 바꾸지 않았고, ON/OFF·OFF/ON·ON/ON은 선택 payload만 반영했다. 한 패치가 구조 검사에서 차단되면 호환된 다른 패치는 독립 적용됐다. 적용된 JS/CJS 구문 검사와 쓰기 실패 후 복구도 확인했다.
+- 검토된 해시 프로필이 없는 새 버전도 실제 구조 검사에 통과하면 현재 파일 지문을 고정한 격리 적용 후보가 된다. 같은 v0.5.14 소스의 패키지 바이트 변경 및 구조가 같은 가상 v0.5.16 버전 복사본으로 이 경로를 확인했다. 후보 판정은 설치본 적용 승인이 아니다.
+- 이번 변경의 자동 테스트: 전체 `npm test` 371/371 통과, `node --test patch-manager/test/manager.test.cjs` 16/16, 적용 엔진 집중 테스트 9/9, 변경 파일 `node --check`, `git diff --check` 통과.
+- 검증 범위는 격리된 공식 소스 복사본에서의 파일 적용 및 복구다. Electron 앱 실행·실제 UI·공급원·영상·ChatGPT는 검증하지 않았다. `applyPersistent`는 표식이 있는 OS 임시 fixture만 허용하므로 사용자 설치본, `app.asar`, 공식 업데이터에는 적용할 수 없다. GUI/EXE와 제품 설치 기능도 미구현이다.
+- 실제 `D:\LilacAnime`, 기존 사용자 프로필 및 updater cache에는 접근하지 않았다. 상세: `docs/verification/DINO_LILAC_INDEPENDENT_PATCH_ENGINE.md`.
+
 ## 2026-10-11 디노 라일락 패치 구조와 ON/OFF 설정
 
 - 브랜치 `codex/dino-lilac-patch-structure`에서 기본 설정 저장을 보강했다. 명시적으로 전달한 앱 경로 아래 `DinoLilacPatch/settings.json` 한 파일에 두 스위치를 저장하고, 기본 OFF/OFF, 잘못된 JSON의 fail-closed 처리, 잘못된 앱 경로에서 폴더를 새로 만들지 않는 동작을 검증한다.
