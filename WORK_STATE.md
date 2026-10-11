@@ -1,6 +1,14 @@
 # 작업 상태
 
 
+## 2026-10-11 패치 02 SIWC는 기존 번역에 추가하는 별도 옵션
+
+- `codex/patch-02-clipboard-companion` 기준의 `codex/patch-02-siwc-additive` 브랜치에서 ChatGPT 계정 연결(SIWC) 옵션을 수동 ChatGPT·기존 로컬 AI·기존 클라우드 API 번역과 별도로 표시했다. 기존 공급원 동작은 수정하지 않았다.
+- 공식 오픈소스 OAuth 문서의 동적 클라이언트 등록, loopback redirect, PKCE, state/nonce, 클라이언트 ID, 토큰 권한 및 `store:false, stream:true` 요청 제약을 검증하는 독립 `electron/siwc-contract.cjs` 모듈과 새 테스트 `patch-manager/test/siwc-contract.test.cjs`를 추가했다.
+- **실제 OAuth 실행·보안 토큰 저장·OpenAI ID 토큰 검증·스트리밍 번역 연동은 미구현이며 SIWC 로그인 버튼은 비활성화 상태**다. 현재 비공개 프로젝트의 자격은 확인되지 않았다.
+- 변경 JavaScript 구문 분석은 확인했지만 새 테스트의 Node 실행/전체 npm test/Windows UI·실제 인증은 미실시다. 자세한 근거: `docs/verification/PATCH_02_SIWC_ADDITIVE.md`. `main`·기존 설치본·개인 데이터는 변경하지 않았다.
+
+
 ## 2026-10-11 패치 02 — ChatGPT 웹 클립보드 보조 UX
 
 - `codex/patch-02-translation-ux-login` (`bf0cb840`)에서 `codex/patch-02-clipboard-companion` 분기. 설치본·기존 userData·원본·`main`은 변경하지 않았다.
