@@ -12,6 +12,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -22,7 +24,8 @@ jobs:
       - name: Prepare isolated official LilacAnime v0.5.14 source fixture
         shell: pwsh
         run: |
-          $fixture = Join-Path $env:RUNNER_TEMP 'lilac-upstream-v0514'
+          $nodeTemp = node -p "require('node:os').tmpdir()"
+          $fixture = Join-Path $nodeTemp 'lilac-upstream-v0514'
           git clone --depth 1 --branch v0.5.14 https://github.com/whispelyn-byte/LilacAnime-desktop.git $fixture
           if ($LASTEXITCODE -ne 0) { throw 'Cannot load official v0.5.14 test fixture' }
           "LILAC_UPSTREAM_SOURCE=$fixture" >> $env:GITHUB_ENV
