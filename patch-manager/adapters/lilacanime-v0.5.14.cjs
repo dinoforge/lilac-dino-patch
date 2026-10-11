@@ -34,6 +34,9 @@ const PAYLOAD_FILES = Object.freeze([
   ['electron/anilist-client.cjs', 'electron/anilist-client.cjs'],
   ['electron/weekday-episodes.cjs', 'electron/weekday-episodes.cjs'],
   ['electron/patch-manager-stage2.cjs', 'electron/patch-manager-stage2.cjs'],
+  ['electron/siwc-contract.cjs', 'electron/siwc-contract.cjs'],
+  ['electron/siwc-oidc.cjs', 'electron/siwc-oidc.cjs'],
+  ['electron/siwc-client.cjs', 'electron/siwc-client.cjs'],
   ['electron/manual-translation-session.cjs', 'electron/manual-translation-session.cjs'],
   ['electron/patch-manager-stage2-prompts.cjs', 'electron/patch-manager-stage2-prompts.cjs'],
   ['docs/prompts/영어 번역 프롬프트.txt', 'electron/prompts/영어 번역 프롬프트.txt'],
@@ -55,14 +58,19 @@ function makeLilacAnimeV0514Manifest(projectRoot = path.resolve(__dirname, '../.
       kind: 'insert-before',
       file: 'electron/main.cjs',
       anchor: "  ipcMain.handle('provider:season', (_, provider) => homeShows(provider,'season'));",
-      content: `  const { registerPatch0102Handlers } = require('./patch-manager-stage2.cjs');\n  registerPatch0102Handlers({\n    ipcMain, app, subtitleStore, clipboard: require('electron').clipboard,\n    providerFetch, REANIME_WEB, ANIMENOSUB_WEB, reanimeItems, miruroApi, miruroItem,\n    miruroHasEpisodes, animenosubList, cheerio\n  });\n`
+      content: `  const { registerPatch0102Handlers } = require('./patch-manager-stage2.cjs');\n  registerPatch0102Handlers({\n    ipcMain, app, subtitleStore, clipboard: require('electron').clipboard, shell: require('electron').shell, safeStorage: require('electron').safeStorage,\n    providerFetch, REANIME_WEB, ANIMENOSUB_WEB, reanimeItems, miruroApi, miruroItem,\n    miruroHasEpisodes, animenosubList, cheerio\n  });\n`
     },
     {
       kind: 'insert-before',
       file: 'electron/preload.cjs',
       anchor: "  providerSeason: provider => ipcRenderer.invoke('provider:season', provider),",
       content: `  patchQuarter: (provider, year, quarter) => ipcRenderer.invoke('patch:quarter', provider, year, quarter),\n  patchWeekdayEpisodes: (provider, candidates, refresh = false) => ipcRenderer.invoke('patch:weekday-episodes', provider, candidates, refresh),\n  patchTranslationPrompt: language => ipcRenderer.invoke('patch:translation-prompt', language),\n  patchCopyText: text => ipcRenderer.invoke('patch:clipboard-copy', text),
-  patchReadText: () => ipcRenderer.invoke('patch:clipboard-read'),\n  patchSaveManualSubtitle: input => ipcRenderer.invoke('patch:manual-subtitle-save', input),\n  patchManualTranslationSettings: () => ipcRenderer.invoke('manual-translation:settings:get'),\n  patchSaveManualTranslationSettings: value => ipcRenderer.invoke('manual-translation:settings:save', value),\n  patchManualTranslationSession: (key, fingerprint) => ipcRenderer.invoke('manual-translation:session:get', key, fingerprint),\n  patchSaveManualTranslationSession: (key, fingerprint, value) => ipcRenderer.invoke('manual-translation:session:save', key, fingerprint, value),\n  patchRemoveManualTranslationSession: (key, fingerprint) => ipcRenderer.invoke('manual-translation:session:remove', key, fingerprint),\n  patchHasManualTranslationForSource: (key, sourcePath) => ipcRenderer.invoke('manual-translation:translated-exists', key, sourcePath),\n  patchRevealManualSubtitle: file => ipcRenderer.invoke('manual-translation:subtitle:reveal', file),\n  patchManualTranslationSource: (key, file) => ipcRenderer.invoke('manual-translation:source:get', key, file),\n`
+  patchReadText: () => ipcRenderer.invoke('patch:clipboard-read'),
+  patchSIWCStatus: () => ipcRenderer.invoke('siwc:status'),
+  patchSIWCConnect: () => ipcRenderer.invoke('siwc:connect'),
+  patchSIWCDisconnect: () => ipcRenderer.invoke('siwc:disconnect'),
+  patchSIWCModels: () => ipcRenderer.invoke('siwc:models'),
+  patchSIWCTranslate: input => ipcRenderer.invoke('siwc:translate', input),\n  patchSaveManualSubtitle: input => ipcRenderer.invoke('patch:manual-subtitle-save', input),\n  patchManualTranslationSettings: () => ipcRenderer.invoke('manual-translation:settings:get'),\n  patchSaveManualTranslationSettings: value => ipcRenderer.invoke('manual-translation:settings:save', value),\n  patchManualTranslationSession: (key, fingerprint) => ipcRenderer.invoke('manual-translation:session:get', key, fingerprint),\n  patchSaveManualTranslationSession: (key, fingerprint, value) => ipcRenderer.invoke('manual-translation:session:save', key, fingerprint, value),\n  patchRemoveManualTranslationSession: (key, fingerprint) => ipcRenderer.invoke('manual-translation:session:remove', key, fingerprint),\n  patchHasManualTranslationForSource: (key, sourcePath) => ipcRenderer.invoke('manual-translation:translated-exists', key, sourcePath),\n  patchRevealManualSubtitle: file => ipcRenderer.invoke('manual-translation:subtitle:reveal', file),\n  patchManualTranslationSource: (key, file) => ipcRenderer.invoke('manual-translation:source:get', key, file),\n`
     },
     {
       kind: 'insert-before',
