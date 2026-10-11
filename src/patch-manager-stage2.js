@@ -454,7 +454,7 @@
     const button = document.createElement('button'); button.id = 'patch0102ManualStart'; button.type = 'button'; button.className = 'sheet-button'; button.textContent = 'ChatGPT 웹 번역';
     row.append(button);
     const panel = document.createElement('div'); panel.id = 'patch0102ManualPanel'; panel.className = 'patch0102-manual-panel hidden';
-    panel.innerHTML = '<div class="patch0102-manual-head"><b>ChatGPT 한국어 자막 번역</b><span id="patch0102ManualProgress"></span></div><p id="patch0102ManualStatus" role="status">선택한 자막의 번역을 준비합니다.</p><div class="patch0102-manual-actions"><button id="patch0102ManualCopy" type="button">요청 복사 · ChatGPT 열기</button><button id="patch0102ManualRetry" type="button">현재 묶음 다시 복사</button><button id="patch0102ManualImport" type="button">복사한 번역 가져와 바로 적용</button><button id="patch0102ManualApply" type="button">입력한 결과 확인</button><button id="patch0102ManualStop" type="button">중단 · 저장</button><button id="patch0102ManualDiscard" type="button">작업 삭제</button></div><textarea id="patch0102ManualAnswer" rows="6" spellcheck="false" placeholder="ChatGPT의 JSON 번역 결과를 붙여넣으세요"></textarea><div class="patch0102-manual-actions patch0102-manual-saved-tools"><button id="patch0102ManualRestore" type="button" class="hidden">원본 자막으로 되돌리기</button><button id="patch0102ManualReveal" type="button" class="hidden">저장 위치 열기</button></div>';
+    panel.innerHTML = '<div class="patch0102-manual-head"><b>ChatGPT 한국어 자막 번역</b><span id="patch0102ManualProgress"></span></div><p id="patch0102ManualStatus" role="status">선택한 자막의 번역을 준비합니다.</p><div class="patch0102-manual-actions"><button id="patch0102ManualCopy" type="button">요청 복사 · 내장 ChatGPT 열기</button><button id="patch0102ManualRetry" type="button">현재 묶음 다시 복사</button><button id="patch0102ManualImport" type="button">복사한 번역 가져와 바로 적용</button><button id="patch0102ManualApply" type="button">입력한 결과 확인</button><button id="patch0102ManualStop" type="button">중단 · 저장</button><button id="patch0102ManualDiscard" type="button">작업 삭제</button></div><textarea id="patch0102ManualAnswer" rows="6" spellcheck="false" placeholder="ChatGPT의 JSON 번역 결과를 붙여넣으세요"></textarea><div class="patch0102-manual-actions patch0102-manual-saved-tools"><button id="patch0102ManualRestore" type="button" class="hidden">원본 자막으로 되돌리기</button><button id="patch0102ManualReveal" type="button" class="hidden">저장 위치 열기</button></div>';
     target.after(row, panel);
     const setStatus = text => setText($('#patch0102ManualStatus'), text);
     let translation = null, open = false, sequence = 0, prefs = { autoCleanup: true, cleanupTiming: 'immediate' }, cleanupTimer = null, sourceBeforeTranslation = null, canResume = false;
@@ -544,7 +544,7 @@
       });
       try {
         await api.patchCopyText(prompt);
-        value.status = 'awaiting-response'; value.message = '요청을 복사했습니다. ChatGPT에 붙여넣어 직접 보내세요.';
+        value.status = 'awaiting-response'; value.message = '요청을 복사했습니다. 내장 ChatGPT 창에서 붙여넣어 직접 보내세요.';
         try { await api.patchOpenChatGPTEmbedded(); value.message = '요청을 복사하고 내장 ChatGPT 창을 열었습니다. 붙여넣어 직접 보내세요.'; }
         catch (error) { value.message = '요청은 복사됐지만 내장 ChatGPT 창을 열지 못했습니다: ' + error.message; }
         await saveSession(value, 'awaiting-response');
@@ -561,8 +561,8 @@
         if (!current(value)) return;
         value.status = 'completed'; value.answer = ''; if (prefs.autoCleanup) { if (prefs.cleanupTiming === 'five-minutes') value.cleanupAt = Date.now() + 300000; await saveSession(value, 'completed'); if (prefs.cleanupTiming === 'immediate') await api.patchRemoveManualTranslationSession(value.episodeKey, value.sourceFingerprint); else if (prefs.cleanupTiming === 'five-minutes') { clearTimeout(cleanupTimer); cleanupTimer = setTimeout(() => api.patchRemoveManualTranslationSession(value.episodeKey, value.sourceFingerprint).catch(() => {}), 300000); } } else await saveSession(value, 'completed');
         sourceBeforeTranslation = { path: value.sourcePath, url: value.sourceUrl, label: value.sourceLabel, source: value.sourceKind }; translation = null; open = false; currentSubtitlePath = result.path;
-        attachSubtitle(result.url, 'ChatGPT 수동 번역', { path: result.path, source: 'chatgpt', from: value.sourcePath, fromName: value.sourceLabel, saved: true });
-        $('#subtitleState').textContent = 'ChatGPT 웹 번역 자막을 적용했습니다.'; render();
+        attachSubtitle(result.url, 'ChatGPT 웹 번역', { path: result.path, source: 'chatgpt', from: value.sourcePath, fromName: value.sourceLabel, saved: true });
+        $('#subtitleState').textContent = 'ChatGPT 웹 번역 자막을 적용했습니다. 내장 ChatGPT에서 해당 번역 대화를 직접 삭제할 수 있습니다.'; render();
       } catch (error) { value.busy = false; value.status = 'error'; value.message = `저장하지 못했습니다: ${error.message} 작업을 보존했습니다.`; await saveSession(value, 'error'); render(); }
     };
     const apply = async () => {
