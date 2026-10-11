@@ -170,6 +170,11 @@
     const panel=document.createElement('div');panel.id='patch02SIWCPanel';panel.className='patch0102-manual-panel hidden';
     panel.innerHTML='<b>ChatGPT 계정 번역</b><p id="patch02SIWCProgress" role="status"></p><p id="patch02SIWCStatus" role="status">기존 자막을 보존하고 한국어 번역본을 따로 저장합니다.</p><div class="patch0102-manual-actions"><button id="patch02SIWCCancel" type="button" disabled>중단 · 작업 보존</button></div>';
     target.after(row,panel);
+    // Old placeholder account buttons belonged to the manual workflow and cannot
+    // connect anything. Keep manual translation, but remove misleading controls.
+    for (const id of ['patch0102ChatGPTConnect','patch0102ChatGPTCheck','patch0102ChatGPTDisconnect'])
+      $('#'+id)?.classList.add('hidden');
+    text($('#patch0102ChatGPTAccountState'), '수동 번역은 ChatGPT 웹사이트를 직접 사용합니다. 계정 직접 연결은 아래 SIWC 옵션을 선택하세요.');
     $('#patch02SIWCStart').addEventListener('click',()=>{void translate()});
     $('#patch02SIWCCancel').addEventListener('click',()=>{void cancel()});
     root.addEventListener('lilac-subtitle-changed',render);
