@@ -13,7 +13,7 @@ function safeNavigation(url) {
   } catch { return false; }
 }
 
-function createEmbeddedChatGPTBrowser({ BrowserWindow, shell, partition = SESSION_PARTITION }) {
+function createEmbeddedChatGPTBrowser({ BrowserWindow, partition = SESSION_PARTITION }) {
   if (typeof BrowserWindow !== 'function') throw new TypeError('BrowserWindow is required');
   if (typeof partition !== 'string' || !/^persist:dino-lilac-[a-z0-9-]+$/.test(partition))
     throw new Error('Unrecognized ChatGPT browser partition');
@@ -42,11 +42,19 @@ function createEmbeddedChatGPTBrowser({ BrowserWindow, shell, partition = SESSIO
       if (!safeNavigation(url)) event.preventDefault();
     });
     current.webContents.setWindowOpenHandler(({ url }) => {
-      // Any popup remains user-controlled and uses the system browser.
-      // Never automatically transfer cookies between browser profiles.
-      if (safeNavigation(url) && /^https:\/\//i.test(url) && shell?.openExternal)
-        Promise.resolve(shell.openExternal(url)).catch(() => {});
-      return { action: 'deny' };
+      // Keep HTTPS sign-in popups in the same isolated Electron session.
+      // Never leak sign-in into an unrelated system-browser profile.
+      if (!safeNavigation(url) || !/^https:\/\//i.test(url)) return { action: 'deny' };
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          parent: current, width: 760, height: 750,
+          webPreferences: {
+            partition, nodeIntegration: false, contextIsolation: true,
+            sandbox: true, webSecurity: true, webviewTag: false
+          }
+        }
+      };
     });
     const isolatedSession = current.webContents.session;
     if (typeof isolatedSession?.setPermissionRequestHandler === 'function')
