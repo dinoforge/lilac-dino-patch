@@ -3,6 +3,8 @@ on:
   push:
     branches:
       - codex/patch-02-siwc-runtime
+      - codex/integration-all-branches-20261011
+      - main
   workflow_dispatch:
 permissions:
   contents: read
