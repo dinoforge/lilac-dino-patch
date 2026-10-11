@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
+const { findUnexpectedWorkingTreePaths } = require('./runtime-attach-working-tree.cjs');
 
 const REPO = path.resolve(__dirname, '..');
 const BASE_BRANCH = 'codex/runtime-companion-prototype';
@@ -169,16 +170,9 @@ function validateExpectedCheckout() {
     throw new Error('The official v0.5.14 source reference did not match the expected package contract.');
   }
   const gitStatus = git(['status', '--porcelain', '--untracked-files=all']);
-  const expectedAddedFiles = new Set([
-    'tests/runtime-attach-feasibility.cjs',
-    'tests/runtime-attach-fixture/agent.cjs',
-    'tests/runtime-attach-fixture/host-hook.cjs',
-    'docs/verification/RUNTIME_ATTACH_FEASIBILITY.md',
-    'WORK_STATE.md'
-  ]);
   const isExperimentEvidence = file => /^docs\/verification\/runtime-attach-evidence-\d{8}T\d{6}Z(?:-\d+)?\.jsonl$/.test(file)
     || /^docs\/verification\/assets\/runtime-attach-v0\.5\.14-\d{8}T\d{6}Z(?:-\d+)?\.png$/.test(file);
-  const unexpected = gitStatus.split(/\r?\n/).filter(Boolean).map(line => line.slice(3)).filter(file => !expectedAddedFiles.has(file) && !isExperimentEvidence(file));
+  const unexpected = findUnexpectedWorkingTreePaths(gitStatus, isExperimentEvidence);
   if (unexpected.length) throw new Error('Unexpected user changes are present; refusing to include or rely on them: ' + unexpected.join(', '));
 }
 

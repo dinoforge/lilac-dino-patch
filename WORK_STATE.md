@@ -1,5 +1,10 @@
 # 작업 상태
 
+## 2026-10-11 런타임 실증 하네스 상태 검사 보강
+
+- 사후 코드 리뷰에서 `git status --porcelain`의 상태 코드를 버리고 경로만 허용하던 문제를 수정했다. 이제 새로 생성된 미추적 시각 증거만 허용하고, 추적 파일 수정·삭제, 기존 증거 변경, staged 파일과 무관한 미추적 파일은 거부한다.
+- 상태 판별 회귀 테스트 4개를 추가했다. `npm test` 300/300, 관련 JS/CJS `node --check`, `git diff --check`가 통과했다. Electron 런타임 실험은 다시 실행하지 않았다.
+
 ## 2026-10-11 v0.5.14 런타임 Companion 연결 실증
 
 - 요청 기준 `codex/runtime-companion-prototype` / `dcd6b9818c0f13fd9970cc3c94e4539fd33aeb64`에서 `codex/runtime-attach-feasibility`를 만들었다. upstream v0.5.14 (`f095fc3d775451e144ed780e1fa081f739927652`) 소스 아카이브를 시스템 임시 폴더에 풀어 실제 Electron renderer를 시험했다.
