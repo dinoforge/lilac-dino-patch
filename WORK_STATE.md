@@ -1,5 +1,11 @@
 # 작업 상태
 
+## 2026-10-11 패치 02 — 내장 ChatGPT 웹 번역 창으로 변경
+
+- `codex/dino-lilac-patch-engine`의 `9fec311`에서 `codex/dino-chatgpt-web-translation`을 생성. 새 패치 02 payload의 SIWC/렌더러/IPC를 제거하고 전용 분리 세션의 sandboxed ChatGPT BrowserWindow를 추가. 기존 ChatGPT 웹 수동 프롬프트·복사·검증·WebVTT 저장, 기존 로컬 AI/클라우드 번역, 패치 01 독립 ON/OFF를 보존했다.
+- Windows 격리 테스트: 내장 창 집중 5/5, v0.5.14/v0.5.15 공식 소스 복사본 독립 패치 9/9, 전체 Node 376/376 통과. [CI](https://github.com/dinoforge/anime-player/actions/runs/38149182789). 처음 발견된 과거 SIWC 포함 기대 테스트와 CI 얕은 이력 문제는 수정 후 재검증했다.
+- **웹사이트 완전 자동 제출·응답 수집·채팅방 자동 삭제, 실계정 로그인/실제 Electron GUI는 미구현/미검증**. 실제 설치본/프로필/`main` 무수정. 보고서: `docs/verification/DINO_CHATGPT_EMBEDDED_WEB.md`.
+
 ## 2026-10-11 디노 라일락 패치 독립 적용 엔진
 
 - `codex/dino-lilac-patch-structure`의 기준 커밋 `28793984b4dbb7d30a57d722789ff67ffc5f60ec`에서 `codex/dino-lilac-patch-engine`을 분기했다. 어댑터가 Patch 01·02 선택에 맞춰 독립 manifest를 생성하며, 공유 main/renderer 브리지는 한 번만 포함한다. IPC 등록과 renderer 시작 조건도 각 패치 의존성에 맞춰 분리했다.
