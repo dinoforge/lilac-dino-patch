@@ -1,5 +1,17 @@
 # 작업 상태
 
+## 2026-10-12 ChatGPT 웹 자동 번역 요청 판정
+
+- 요청 기준은 `codex/dino-chatgpt-web-translation`의 `508c94b`이며, 변경은 신규 `codex/dino-chatgpt-web-auto-translation`에서만 진행한다.
+- 기존 `src/patch-manager-stage2.js`의 ChatGPT 수동 복사·붙여넣기·cue ID 검증·WebVTT 저장/적용은 보존한다. 설정 화면에서 웹 자동 입력/응답 읽기와 ChatGPT 대화 자동 삭제를 지원하지 않는다고 별도로 표시하고, 해당 두 항목은 비활성화한다. 수동 번역 준비 버튼은 계속 동작한다.
+- ChatGPT 수동 번역 버튼과 상태 문구를 자동 기능으로 오해하지 않도록 이름을 명확히 한다. 앱 내부 임시 작업 정리 설정이 ChatGPT 웹 대화 삭제와 다르다는 점도 표시한다.
+- 공식 ChatGPT Computer Use 문서는 ChatGPT 자체 자동화를 제한하며, 작업 지침은 SIWC/API를 제외한다. 따라서 웹페이지에 프롬프트 자동 입력, 응답 DOM/화면 수집, 대화 삭제는 구현하지 않는다. 실사용 자동 번역 목표는 **미구현**으로 남긴다.
+- `node --test patch-manager/test/embedded-chatgpt-web.test.cjs patch-manager/test/lilacanime-independent.test.cjs patch-manager/test/lilacanime-v0514-adapter.test.cjs`는 18/18 통과했다. 공식 v0.5.14 (`f095fc3d775451e144ed780e1fa081f739927652`)·v0.5.15 (`16c9a3d1631061a72831e0657434003940daf531`) 임시 clone의 4개 ON/OFF 조합, 독립 차단, staging 실패 보존, rollback 경로를 검증했다.
+- 격리된 v0.5.14 소스 복사본의 Electron renderer harness가 통과했다. 1280×720 테스트 화면에서 ChatGPT 웹 자동 모드와 웹 대화 삭제는 비활성, 기존 `끄기/번역 API/로컬 AI` 값은 보존, 수동 번역은 활성임을 확인했다. 합성 일본어 자막 30 cue를 2개 묶음으로 나누어 renderer 재로드 후 이어서 WebVTT로 저장·적용했고, 원래 타임코드 30개를 유지했다. 5개 출처 UI도 합성 상태로 표시했다. 외부 HTTP 요청 0건.
+- 전체 `npm test`는 기존 로컬 `node_modules` 경로와 위 공식 소스 경로를 지정해 377 통과·0 실패·0 건너뜀이다. `node --check`(수정 JavaScript 3개)와 `git diff --check`도 통과했다. worktree에는 의존성 디렉터리를 남기지 않았다.
+- 첫 직접 Electron harness 실행은 기준 테스트의 오래된 SIWC 화면 기대값에서 실패했고 임시 Chromium 세션 파일 잠금으로 정리도 지연됐다. 테스트를 현재 내장 창 UI 기준으로 갱신하고 wrapper로 재실행해 통과했으며, 프로세스 종료를 확인한 뒤 그 실행에서만 만든 임시 폴더를 정리했다.
+- 실제 ChatGPT 계정·웹 번역 왕복·웹 대화 삭제는 실행하지 않았다. 실제 `D:\LilacAnime`, 사용자 프로필, 설치본/업데이트 캐시 및 `main`은 접근하거나 수정하지 않았다.
+
 ## 2026-10-11 패치 02 — 내장 ChatGPT 웹 번역 창으로 변경
 
 - `codex/dino-lilac-patch-engine`의 `9fec311`에서 `codex/dino-chatgpt-web-translation`을 생성. 새 패치 02 payload의 SIWC/렌더러/IPC를 제거하고 전용 분리 세션의 sandboxed ChatGPT BrowserWindow를 추가. 기존 ChatGPT 웹 수동 프롬프트·복사·검증·WebVTT 저장, 기존 로컬 AI/클라우드 번역, 패치 01 독립 ON/OFF를 보존했다.

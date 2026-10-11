@@ -10,6 +10,7 @@ const {
 } = require('../../electron/embedded-chatgpt-web.cjs');
 const { registerPatch02Handlers } = require('../../electron/patch-manager-stage2.cjs');
 const { makeLilacAnimeV0514Manifest } = require('../adapters/lilacanime-v0.5.14.cjs');
+const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/patch-manager-stage2.js'), 'utf8');
 
 function makeBrowserMock({ failLoad = false } = {}) {
   const windows = [];
@@ -89,6 +90,27 @@ test('embedded page load failure destroys the dedicated window', async () => {
   const mock = makeBrowserMock({ failLoad: true });
   await assert.rejects(createEmbeddedChatGPTBrowser(mock).open(), /열지 못했습니다/);
   assert.equal(mock.windows[0].destroyed, true);
+});
+
+test('unsupported ChatGPT web automation is disabled and the manual route stays available', () => {
+  const settingsStart = rendererSource.indexOf('function addManualTranslationSettings()');
+  const settingsEnd = rendererSource.indexOf('function addManualTranslationUi()', settingsStart);
+  assert.notEqual(settingsStart, -1);
+  assert.notEqual(settingsEnd, -1);
+  const settings = rendererSource.slice(settingsStart, settingsEnd);
+  assert.match(settings, /autoChoices = \$\('#jimakuTranslateChoices'\)/);
+  assert.match(settings, /unavailable\.id = 'patch0102ChatGPTAutoUnavailable'[\s\S]{0,220}unavailable\.disabled = true[\s\S]{0,180}autoChoices\.append\(unavailable\)/);
+  assert.match(settings, /ChatGPT 웹 화면에 요청을 자동 입력하거나 응답을 읽지 않습니다/);
+  assert.match(settings, /id="patch0102ChatGPTDeleteUnavailable" type="button" disabled/);
+  assert.match(settings, /ChatGPT 대화 목록을 읽거나 대화를 삭제할 수 없습니다/);
+  assert.match(settings, /id="patch0102ChatGPTManual" type="button">수동 번역 준비/);
+  assert.match(settings, /\$\('#patch0102ManualStart'\)\?\.click\(\)/);
+  assert.match(rendererSource, /id = 'patch0102ManualStart'[\s\S]{0,180}ChatGPT 수동 번역/);
+  assert.match(rendererSource, /요청을 복사하고 내장 ChatGPT 창을 열었습니다\. 직접 붙여넣고 전송한 뒤 결과를 가져오세요/);
+
+  const embeddedSource = fs.readFileSync(path.join(__dirname, '../../electron/embedded-chatgpt-web.cjs'), 'utf8');
+  assert.doesNotMatch(embeddedSource, /executeJavaScript|executeJavaScriptInIsolatedWorld|sendInputEvent|insertText/);
+  assert.doesNotMatch(embeddedSource, /conversation.{0,30}delete|delete.{0,30}conversation/i);
 });
 
 test('Patch 02 exposes embedded window IPC but only opens it when called', async () => {

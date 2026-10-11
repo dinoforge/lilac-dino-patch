@@ -125,7 +125,7 @@ function writeHarness() {
     <section id="seasonSection" class="content-section"><div class="section-title"><h2 id="seasonTitle">신작</h2></div><div id="seasonRail" class="poster-rail"><p>기존 시즌 카드</p></div></section>
     <section id="scheduleSection" class="content-section hidden"><div class="section-title"><h2>방영 일정</h2></div><div id="scheduleTabs" class="chip-row" role="tablist"></div><div id="scheduleRail" class="poster-rail"></div></section>
     <dialog id="detailDialog"><div id="detailContent"><div id="episodeBlock"></div></div></dialog>
-    <section data-settings-pane="translate"></section>
+    <section data-settings-pane="translate"><div id="jimakuTranslateChoices" class="choice-row"><button type="button" data-value="off">끄기</button><button type="button" data-value="cloud">번역 API</button><button type="button" data-value="local">로컬 AI</button></div></section>
     <div id="subtitleTranslateRow"></div><p id="subtitleState"></p><input id="skipTitle" value="시범 방영작"><input id="skipEpisode" value="2"><p id="playerTitle">시범 방영작</p>
     <script>
       const knownAnime=new Map(); let currentSubtitle={path:${subtitlePathValue},src:${subtitleUrlValue},label:'Japanese'};
@@ -268,10 +268,15 @@ async function run() {
     `Boolean(document.querySelector('#patch0102QuarterControls') && document.querySelectorAll('#seasonRail .anime-card').length===2 && document.querySelectorAll('#scheduleRail .anime-card').length===1)`
   ));
   console.log('quarter and weekday fixture rendered');
-  assert.equal(await win.webContents.executeJavaScript("document.querySelector('#patch0102ChatGPTConnect')?.disabled === true"), true, 'unsupported official login is not presented as connected');
-  await win.webContents.executeJavaScript("document.querySelector('#patch0102ChatGPTCheck').click()");
   const accountStatus = await win.webContents.executeJavaScript("document.querySelector('#patch0102ChatGPTAccountState').textContent");
-  assert.match(accountStatus, /자격과 등록이 확인되지 않았습니다/);
+  assert.match(accountStatus, /브라우저 로그인은 사용자가 직접 합니다/);
+  const chatGPTModes = await win.webContents.executeJavaScript(`(()=>{const choice=document.querySelector('#patch0102ChatGPTAutoUnavailable');const manual=document.querySelector('#patch0102ChatGPTManual');const deletion=document.querySelector('#patch0102ChatGPTDeleteUnavailable');return {choiceDisabled:choice?.disabled===true,choiceInAutoModes:choice?.parentElement?.id==='jimakuTranslateChoices',choiceHasNoPersistedValue:!choice?.hasAttribute('data-value'),manualEnabled:manual?.disabled===false,deletionDisabled:deletion?.disabled===true,reason:document.querySelector('#patch0102ChatGPTAutoReason')?.textContent||''}})()`);
+  assert.equal(chatGPTModes.choiceDisabled, true);
+  assert.equal(chatGPTModes.choiceInAutoModes, true);
+  assert.equal(chatGPTModes.choiceHasNoPersistedValue, true, 'unsupported choice cannot overwrite the existing off/cloud/local setting');
+  assert.equal(chatGPTModes.manualEnabled, true);
+  assert.equal(chatGPTModes.deletionDisabled, true);
+  assert.match(chatGPTModes.reason, /기존 수동 번역을 사용/);
 
   const overview = await win.webContents.executeJavaScript(`({
     quarterTitle:document.querySelector('#seasonTitle').textContent,

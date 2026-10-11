@@ -1,5 +1,22 @@
 # 디노 라일락 패치 — ChatGPT 내장 웹 창 검증
 
+## 2026-10-12 자동 번역 요청 처리
+
+새 작업 브랜치 `codex/dino-chatgpt-web-auto-translation`에서는 기존 수동 번역 경로를 유지하면서 자동 기능의 지원 여부를 UI에 명시한다.
+
+- `ChatGPT 웹 자동 번역`과 `번역 완료 후 ChatGPT 대화 삭제`는 비활성화된 상태로 표시한다. 현재 구현이 웹사이트에 입력을 보내거나 결과/대화 목록을 읽을 수 있다고 오인하지 않도록 이유와 수동 대안을 함께 안내한다.
+- 자막 패널 동작은 `ChatGPT 수동 번역`으로 부른다. 사용자는 요청 복사 후 내장 창에 직접 붙여넣고 전송하고, 결과를 직접 가져와 검증한다.
+- 앱 내부 번역 임시 데이터 정리는 별도 기능이다. 완료된 한국어 자막은 보존하며 ChatGPT 웹 대화를 삭제했다고 표시하거나 시도하지 않는다.
+- 자동 제출·응답 수집은 공식 ChatGPT 컴퓨터 사용 문서상 지원 대상이 아니다: https://learn.chatgpt.com/docs/computer-use?site_variant=chatgpt&translationFallback=ko-KR. SIWC와 API 경로는 이번 요청에서 제외됐으며, SIWC 사용자 인증 자체도 대화 접근 권한을 제공하지 않는다: https://developers.openai.com/siwc/quickstart.
+- 따라서 자동 번역 시작, 자동 응답 수신, ChatGPT 대화 자동 삭제는 **미구현**이다. 아래의 기존 격리 테스트는 실제 ChatGPT 왕복을 증명하지 않는다.
+
+### 검증 결과
+
+- 집중 테스트 18/18, 전체 `npm test` 377/377 통과(실패 0, skip 0). 전체 테스트는 기존 로컬 `node_modules` 경로와 v0.5.14·v0.5.15 격리 소스 clone 경로를 지정해 실행했다.
+- `tests/run-patch-manager-stage2-v0514-electron.cjs`가 1280×720 격리 Electron renderer를 실행했다. 자동 번역 옵션·대화 삭제 옵션 비활성, 기존 자동 번역 선택값 미변경, 수동 번역 활성 상태를 확인했다. 이어서 합성 일본어 자막 30 cue의 2개 묶음 번역 결과를 검사하고, renderer 재실행 뒤 이어받아 저장·적용했다. 시간 코드 30개 보존과 앱 임시 작업 정리를 확인했고 외부 HTTP 요청은 0건이었다.
+- v0.5.14/v0.5.15 공식 source clone에 대한 독립 적용 테스트는 각각 네 ON/OFF 조합, 독립 호환성 차단 및 실패 복구를 포함해 통과했다. 패치 테스트는 복사본만 수정하고 원본 clone은 읽기 전용으로 사용한다.
+- 이 검증은 합성 번역 데이터 기반이다. 실제 ChatGPT 계정 로그인·웹페이지 번역 요청·응답 추출·대화 삭제는 실행하지 않았으며 구현되지 않았다. 실제 설치본·사용자 프로필도 시험하지 않았다.
+
 2026-10-11 · 작업 브랜치 `codex/dino-chatgpt-web-translation`
 기준 브랜치 `codex/dino-lilac-patch-engine` (`9fec31108cc58a374794eb808a5887fb87aae389`)
 

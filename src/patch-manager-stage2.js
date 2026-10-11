@@ -434,8 +434,28 @@
     const pane = $('[data-settings-pane="translate"]');
     if (!pane || $('#patch0102ChatGPTSettings')) return;
     const box = document.createElement('div'); box.id = 'patch0102ChatGPTSettings'; box.className = 'setting-block patch0102-chatgpt-settings';
-    box.innerHTML = '<b>ChatGPT 웹 번역</b><p id="patch0102ChatGPTAccountState" role="status">디노 라일락 전용 내장 창에서 ChatGPT를 엽니다. 브라우저 로그인은 사용자가 직접 합니다.</p><div class="patch0102-manual-actions"><button id="patch0102ChatGPTOpen" type="button">내장 ChatGPT 열기</button><button id="patch0102ChatGPTManual" type="button">웹 번역 준비</button></div><label class="setting-switch"><span><b>번역 완료 후 앱 내부 임시 데이터 정리</b><small>저장된 한국어 자막은 유지하고 실패·중단 작업은 이어하기 위해 보존합니다.</small></span><input id="patch0102ChatGPTCleanupEnabled" type="checkbox" checked></label><label>정리 시점 <select id="patch0102ChatGPTCleanupTiming"><option value="immediate">즉시</option><option value="five-minutes">5분 뒤</option><option value="on-close">앱을 닫을 때</option></select></label><p>내장 ChatGPT 화면은 별도 브라우저 프로필을 사용합니다. 웹사이트 내부 화면은 고정할 수 없습니다. 자동 전송·응답 추출·웹 대화 삭제는 지원하지 않습니다. 번역 완료 후 대화 삭제는 ChatGPT에서 직접 하세요.</p>';
+    box.innerHTML = `<b>ChatGPT 웹 번역</b>
+      <p id="patch0102ChatGPTAccountState" role="status">디노 라일락 전용 내장 창에서 ChatGPT를 엽니다. 브라우저 로그인은 사용자가 직접 합니다.</p>
+      <div class="setting-block">
+        <b>ChatGPT 웹 자동 번역</b>
+        <p id="patch0102ChatGPTAutoReason" role="status">현재 지원되지 않습니다. ChatGPT 웹 화면에 요청을 자동 입력하거나 응답을 읽지 않습니다. 기존 수동 번역을 사용해 주세요.</p>
+      </div>
+      <div class="setting-block">
+        <b>번역 완료 후 ChatGPT 대화 삭제</b>
+        <p id="patch0102ChatGPTDeleteReason" role="status">이 앱은 ChatGPT 대화 목록을 읽거나 대화를 삭제할 수 없습니다. 번역 자막 저장 후 해당 대화는 ChatGPT에서 직접 정리해 주세요.</p>
+        <button id="patch0102ChatGPTDeleteUnavailable" type="button" disabled aria-describedby="patch0102ChatGPTDeleteReason">대화 자동 삭제 · 사용할 수 없음</button>
+      </div>
+      <div class="patch0102-manual-actions"><button id="patch0102ChatGPTOpen" type="button">내장 ChatGPT 열기</button><button id="patch0102ChatGPTManual" type="button">수동 번역 준비</button></div>
+      <label class="setting-switch"><span><b>번역 완료 후 앱 내부 임시 데이터 정리</b><small>이 설정은 번역 작업 임시 데이터만 정리합니다. 저장된 한국어 자막과 ChatGPT 웹 대화에는 영향을 주지 않습니다.</small></span><input id="patch0102ChatGPTCleanupEnabled" type="checkbox" checked></label>
+      <label>정리 시점 <select id="patch0102ChatGPTCleanupTiming"><option value="immediate">즉시</option><option value="five-minutes">5분 뒤</option><option value="on-close">앱을 닫을 때</option></select></label>`;
     pane.append(box);
+    const autoChoices = $('#jimakuTranslateChoices');
+    if (autoChoices && !$('#patch0102ChatGPTAutoUnavailable')) {
+      const unavailable = document.createElement('button'); unavailable.id = 'patch0102ChatGPTAutoUnavailable'; unavailable.type = 'button';
+      unavailable.textContent = 'ChatGPT 웹 (지원 안 함)'; unavailable.disabled = true;
+      unavailable.setAttribute('aria-describedby', 'patch0102ChatGPTAutoReason');
+      autoChoices.append(unavailable);
+    }
     Promise.resolve(api.patchManualTranslationSettings?.() || { autoCleanup: true, cleanupTiming: 'immediate' }).then(value => {
       $('#patch0102ChatGPTCleanupEnabled').checked = value?.autoCleanup !== false;
       $('#patch0102ChatGPTCleanupTiming').value = ['immediate', 'five-minutes', 'on-close'].includes(value?.cleanupTiming) ? value.cleanupTiming : 'immediate';
@@ -451,7 +471,7 @@
     const target = $('#subtitleTranslateRow');
     if (!target || $('#patch0102ManualRow')) return;
     const row = document.createElement('div'); row.id = 'patch0102ManualRow'; row.className = 'sheet-button-row';
-    const button = document.createElement('button'); button.id = 'patch0102ManualStart'; button.type = 'button'; button.className = 'sheet-button'; button.textContent = 'ChatGPT 웹 번역';
+    const button = document.createElement('button'); button.id = 'patch0102ManualStart'; button.type = 'button'; button.className = 'sheet-button'; button.textContent = 'ChatGPT 수동 번역';
     row.append(button);
     const panel = document.createElement('div'); panel.id = 'patch0102ManualPanel'; panel.className = 'patch0102-manual-panel hidden';
     panel.innerHTML = '<div class="patch0102-manual-head"><b>ChatGPT 한국어 자막 번역</b><span id="patch0102ManualProgress"></span></div><p id="patch0102ManualStatus" role="status">선택한 자막의 번역을 준비합니다.</p><div class="patch0102-manual-actions"><button id="patch0102ManualCopy" type="button">요청 복사 · 내장 ChatGPT 열기</button><button id="patch0102ManualRetry" type="button">현재 묶음 다시 복사</button><button id="patch0102ManualImport" type="button">복사한 번역 가져와 바로 적용</button><button id="patch0102ManualApply" type="button">입력한 결과 확인</button><button id="patch0102ManualStop" type="button">중단 · 저장</button><button id="patch0102ManualDiscard" type="button">작업 삭제</button></div><textarea id="patch0102ManualAnswer" rows="6" spellcheck="false" placeholder="ChatGPT의 JSON 번역 결과를 붙여넣으세요"></textarea><div class="patch0102-manual-actions patch0102-manual-saved-tools"><button id="patch0102ManualRestore" type="button" class="hidden">원본 자막으로 되돌리기</button><button id="patch0102ManualReveal" type="button" class="hidden">저장 위치 열기</button></div>';
@@ -477,7 +497,7 @@
     const render = () => {
       row.classList.toggle('hidden', !manualAvailable() && !translation);
       panel.classList.toggle('hidden', !open || !translation);
-      $('#patch0102ManualStart').textContent = translation || canResume ? 'ChatGPT 번역 계속' : 'ChatGPT 웹 번역'; sourceTools();
+      $('#patch0102ManualStart').textContent = translation || canResume ? 'ChatGPT 번역 계속' : 'ChatGPT 수동 번역'; sourceTools();
       if (!translation) return;
       const saving = translation.status === 'saving' || translation.index >= translation.batches.length, progress = manual.progress(translation.parsed.cues, translation.translations);
       $('#patch0102ManualProgress').textContent = `${progress.completed}/${progress.total}문장 (${progress.percent}%) · 묶음 ${Math.min(translation.index + 1, translation.batches.length)}/${translation.batches.length} · ${translation.language === 'english' ? '영어' : '일본어'} · ${({ ready: '준비', 'awaiting-response': 'ChatGPT 응답 대기', validating: '결과 검사', error: '오류 · 보존', cancelled: '중단 · 이어하기 가능', saving: '저장 중', completed: '완료' })[translation.status] || '준비 중'}`;
@@ -524,7 +544,7 @@
         open = true; $('#patch0102ManualAnswer').value = translation.answer; render();
       } catch (error) {
         open = true; row.classList.remove('hidden'); panel.classList.remove('hidden'); setStatus(error.message);
-      } finally { button.disabled = false; if (!translation) button.textContent = 'ChatGPT 웹 번역'; }
+      } finally { button.disabled = false; if (!translation) button.textContent = 'ChatGPT 수동 번역'; }
     };
     const copyPrompt = async () => {
       const value = translation; if (!current(value) || value.importing) return;
@@ -544,8 +564,8 @@
       });
       try {
         await api.patchCopyText(prompt);
-        value.status = 'awaiting-response'; value.message = '요청을 복사했습니다. 내장 ChatGPT 창에서 붙여넣어 직접 보내세요.';
-        try { await api.patchOpenChatGPTEmbedded(); value.message = '요청을 복사하고 내장 ChatGPT 창을 열었습니다. 붙여넣어 직접 보내세요.'; }
+        value.status = 'awaiting-response'; value.message = '요청을 복사했습니다. 내장 ChatGPT 창에 직접 붙여넣고 전송한 뒤 결과를 가져오세요.';
+        try { await api.patchOpenChatGPTEmbedded(); value.message = '요청을 복사하고 내장 ChatGPT 창을 열었습니다. 직접 붙여넣고 전송한 뒤 결과를 가져오세요.'; }
         catch (error) { value.message = '요청은 복사됐지만 내장 ChatGPT 창을 열지 못했습니다: ' + error.message; }
         await saveSession(value, 'awaiting-response');
       } catch (error) { value.status = 'error'; value.message = `복사하지 못했습니다: ${error.message}`; await saveSession(value, 'error'); }
@@ -561,8 +581,8 @@
         if (!current(value)) return;
         value.status = 'completed'; value.answer = ''; if (prefs.autoCleanup) { if (prefs.cleanupTiming === 'five-minutes') value.cleanupAt = Date.now() + 300000; await saveSession(value, 'completed'); if (prefs.cleanupTiming === 'immediate') await api.patchRemoveManualTranslationSession(value.episodeKey, value.sourceFingerprint); else if (prefs.cleanupTiming === 'five-minutes') { clearTimeout(cleanupTimer); cleanupTimer = setTimeout(() => api.patchRemoveManualTranslationSession(value.episodeKey, value.sourceFingerprint).catch(() => {}), 300000); } } else await saveSession(value, 'completed');
         sourceBeforeTranslation = { path: value.sourcePath, url: value.sourceUrl, label: value.sourceLabel, source: value.sourceKind }; translation = null; open = false; currentSubtitlePath = result.path;
-        attachSubtitle(result.url, 'ChatGPT 웹 번역', { path: result.path, source: 'chatgpt', from: value.sourcePath, fromName: value.sourceLabel, saved: true });
-        $('#subtitleState').textContent = 'ChatGPT 웹 번역 자막을 적용했습니다. 내장 ChatGPT에서 해당 번역 대화를 직접 삭제할 수 있습니다.'; render();
+        attachSubtitle(result.url, 'ChatGPT 수동 번역', { path: result.path, source: 'chatgpt', from: value.sourcePath, fromName: value.sourceLabel, saved: true });
+        $('#subtitleState').textContent = 'ChatGPT 수동 번역 자막을 적용했습니다. ChatGPT 대화는 앱에서 삭제하지 않았습니다.'; render();
       } catch (error) { value.busy = false; value.status = 'error'; value.message = `저장하지 못했습니다: ${error.message} 작업을 보존했습니다.`; await saveSession(value, 'error'); render(); }
     };
     const apply = async () => {
