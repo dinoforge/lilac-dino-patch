@@ -9,7 +9,7 @@ permissions:
 jobs:
   windows-siwc:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -17,3 +17,7 @@ jobs:
           node-version: '22'
       - name: Verify SIWC OAuth, signed ID tokens and streaming translation
         run: node --test patch-manager/test/siwc-contract.test.cjs patch-manager/test/siwc-oidc.test.cjs patch-manager/test/siwc-client.test.cjs
+      - name: Install project dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Full isolated project test suite
+        run: npm test
