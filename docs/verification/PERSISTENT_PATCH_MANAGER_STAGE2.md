@@ -2,7 +2,65 @@
 
 2026-10-11 · 브랜치 `codex/persistent-patch-manager-stage2` · 시작 기준 `ace1f4b446a4efe0c632ecd91b253eace4cb8144`
 
-## 결론
+## 2026-10-11 실행 추가분 — v0.5.14 어댑터와 지속 적용 한계
+
+### 판정
+
+**격리된 공식 v0.5.14 소스 복사본에는 패치 01·02를 적용하고 원상 복구할 수 있었다. 실제 LilacAnime 설치본에 지속 적용하거나 공식 업데이트 뒤 자동 재적용하는 기능은 아직 완료되지 않았다.** 이번 브랜치의 호환성 범위는 정확히 v0.5.14 파일 지문에 고정되어 있으며, 미지원 버전은 변경하지 않고 중단한다.
+
+2026-10-11에 확인한 [공식 Releases](https://github.com/whispelyn-byte/LilacAnime-desktop/releases)의 최신 공개 항목은 v0.5.14 (`f095fc3d775451e144ed780e1fa081f739927652`)였다.
+
+| 범위 | 결과 |
+| --- | --- |
+| v0.5.14 실제 소스 payload 적용·백업·롤백 | 격리된 원본 복사본에서 통과 |
+| v0.5.15 모의 업데이트 | 미지원 판정, 업데이트 파일 바이트 보존 통과 |
+| 패치 01·02 renderer/IPC 보조 테스트 | 합성 DOM과 IPC를 둔 Electron harness에서 통과 |
+| 공식 v0.5.14 전체 앱 UI와 실제 NSIS 업데이트 | 미검증·미실시 |
+| 실제 LilacAnime 설치본 및 사용자 데이터 변경 | 미실시 |
+
+### 실제 적용한 범위
+
+- 새 어댑터 `patch-manager/adapters/lilacanime-v0.5.14.cjs`는 `package.json`, `src/index.html`, `src/app.js`, `src/player.js`, `src/ott.css`, `electron/main.cjs`, `electron/preload.cjs`, `electron/subtitle-store.cjs`의 해시를 고정한다. 예상 바이트가 하나라도 달라지면 검사에서 거부한다.
+- 격리된 v0.5.14 소스 사본에 main/preload IPC, renderer 스크립트, 패치 01·02 helper payload와 사용자 번역 프롬프트를 추가했다. 매니저가 백업과 적용 영수증을 만들고 `rollbackPersistent()`로 되돌릴 때 원본 추적 파일들의 해시와 추가 파일 부재를 확인했다.
+- 업데이트 모의 테스트는 적용 후 복사본의 버전을 `0.5.15`로 바꾸고 새 파일 내용을 넣었다. `reconcileAfterUpdate()`가 `unsupported-update` / `version-unverified`로 멈췄고 모의 업데이터가 쓴 바이트를 그대로 보존했다. 실제 v0.5.15 호환성은 입증하지 않는다.
+- 영어/일본어 프롬프트 2개의 SHA-256과 Reazon 예시 파일의 SHA-256은 이전에 기록한 원본 해시와 일치한다. 영어·일본어 프롬프트 선택, 앞뒤 최대 두 cue 문맥, cue ID 검증, 원래 VTT 시간 코드 보존 및 테스트 프로필로의 저장을 합성 데이터로 확인했다.
+- Patch 01은 분기 자동 인식, 월~일 일정 병합, 같은 시즌/회차 후보에 대한 RE:Anime·Miruro·Animenosub·애니24·Linkkf 상태 확인 흐름을 연결한다. 현재 코드가 실제 재생 URL을 확인하지 않은 경우 `재생 가능`이라고 표시하지 않는다. 외부 사이트 호출은 차단하거나 mock 처리했다.
+
+### 공식 updater 조사와 자동 재적용 판단
+
+공식 v0.5.14 소스에서 `electron/updater.cjs`, `electron/main.cjs`, `package.json`을 읽기 전용으로 조사했다. 패치 적용 전후 원본 clone의 추적 파일은 바뀌지 않았다.
+
+- updater는 `releases/latest`를 조회하고 버전이 다르면 설치기를 백그라운드에서 내려받는다 (`electron/updater.cjs:8-56`). 다운로드 검사는 응답 코드와 자산 크기 일치이며, 로컬에서 확인한 경로에는 자산 서명 또는 SHA-256 manifest 검증이 없다.
+- Windows 설치는 updater가 NSIS 설치기를 분리 실행하고 `['/S', '--updated', '--force-run']`를 전달한 다음 300ms 후 LilacAnime 프로세스를 종료한다 (`electron/updater.cjs:108-119`). `ready` 상태의 설치기는 앱 종료 처리에서도 설치될 수 있다 (`electron/updater.cjs:121-123`, `electron/main.cjs:2565`). 설치 완료를 외부 매니저에 알리는 IPC/callback은 확인되지 않았다.
+- NSIS 설정은 설치 위치 변경을 허용한다 (`package.json:46-52`). 외부 프로그램이 업데이트 완료 뒤 정확한 설치 폴더를 신뢰성 있게 찾고, 재실행 경쟁을 피하며, 업데이트된 바이너리의 신뢰성을 검증할 공식 계약은 없다.
+- 따라서 폴더 감시만 추가하는 것으로 “업데이트 직후 새 앱이 열리기 전에 자동 패치”를 보장할 수 없다. 설치기가 앱을 다시 시작한 뒤 파일을 바꾸면 실행 중 파일 교체/앱 중단 위험이 있고, 앱 실행 전에 패치하려고 하면 런처·설치기 또는 공식 updater를 바꿔야 한다. 이번 단계에서 어느 방식도 설치본에 적용하지 않았다.
+
+권장되는 장기 연결 순서는 다음과 같다.
+
+1. **우선 권장: 공식 확장 브리지.** 원본 앱이 안정된 버전별 API, 앱 내 플러그인 로딩, 일정·회차·자막 UI extension point를 제공한다. 앱 업데이트는 브리지 계약을 유지하고 Companion 모듈은 격리된 데이터 디렉터리에서 읽는다.
+2. **대안: 공식 post-update hook.** 원본 updater/NSIS가 설치 성공과 설치 폴더 경로를 명시적으로 전달하고, 서명·해시가 검증된 패치 매니저를 앱 재실행 전에 한 번 호출한다. 매니저는 정확한 버전·전체 지문·앱 종료를 확인하고, 실패 시 백업 복원 후 원본 앱을 시작한다.
+3. **현재 무승인 상태에서 가능한 것: 별도 수동/일회성 격리 적용.** 정확한 v0.5.14 소스 복사본을 검증하고 미지원 업데이트는 보류한다. 실사용 설치본 수정, 감시 등록, 바로가기 변경, 재시작 유도는 사용자의 별도 승인과 공식 연동 계약 전에는 하지 않는다.
+
+### 검증 로그 요약
+
+- `node --test patch-manager/test/lilacanime-v0514-adapter.test.cjs`: 3/3 통과. 실제 v0.5.14 복사본에 적용·롤백했고 upstream clone은 해시 동일, v0.5.15 모의 업데이트는 거부했다.
+- `node --test patch-manager/test/patch-manager-stage2.test.cjs`: 3/3 통과. 분기 선택, 모의 provider adapter, 수동 VTT 저장을 확인했다.
+- `tests/run-patch-manager-stage2-v0514-electron.cjs`: 통과. 격리 Electron 창에서 합성 DOM, 오늘 요일, 5개 mock 출처 상태, 일본어 수동 번역 결과 저장을 확인했다. HTTP 요청 수는 0이다. 이것은 공식 `src/index.html` 전체 UI를 로드한 시험이 아니다.
+- 전체 `npm test`: 306 통과, 0 실패, 0 건너뜀. 새 파일 `node --check` 및 기존 `npm run test:phase1-electron`, `npm run test:phase1-main`도 통과했다. Phase 1 두 smoke는 기존 `dist\\win-unpacked` 산출물을 사용했으며 새 v0.5.14 adapter 패키지를 검증한 결과는 아니다.
+- 라이브 공급원, 실제 영상, ChatGPT 웹 요청, NSIS 설치/업데이트, 전체 upstream 앱 UI는 실행하지 않았다.
+
+### 남은 작업과 실사용 판정
+
+- 실사용 설치본에 자동 재적용 가능한 패치 매니저라고 부를 수 없다. 현재 `patch-manager/persistent.cjs`는 안전을 위해 `%TEMP%` 아래의 명시적 합성 표식 대상만 허용한다. 업데이트 완료 신호도 호출자가 주입하는 테스트 인자이며 실제 updater와 연결되지 않았다.
+- v0.5.14의 실제 앱 창에 주입된 전체 화면·원본 검색/설정/상세 회귀, 재생과 자막 선택까지는 미검증이다. 현재 Electron harness는 스크립트 동작을 점검하는 합성 DOM이다.
+- 다음 기술 단계는 원본 제작자에게 안정된 플러그인/브리지 API 또는 NSIS 종료 후 재실행 전 호출되는 공식 hook을 요청하는 것이다. 해당 계약이 없으면 설치 위치 변경을 감지하는 외부 polling만으로는 안전한 무인 자동 재적용을 완성할 수 없다.
+- 앞선 직접 Electron 시험 중 생성된 임시 프로필 디렉터리 7개는 정책이 재귀 삭제를 거부해 그대로 보존했다. 경로는 `%TEMP%\lilac-patch-stage2-electron-1csgSj`, `1HTibj`, `dxJKZz`, `K3kgfQ`, `lXmEFg`, `ViRxcz`, `XJSDd4`이며 테스트용 `sessionData`/`userData`만 포함한다. 실제 LilacAnime 프로필과 무관하고, 이번 변경에서는 다시 삭제를 시도하지 않았다.
+
+---
+
+아래는 이번 어댑터 실행 전의 Stage 1 조사 기록이다. 이후 구현·검증 범위는 위의 추가 결과가 우선한다.
+
+## 초기 Stage 1 결론 (이번 어댑터 실행 이전 기록)
 
 **실제 LilacAnime v0.5.14 파일을 전혀 바꾸지 않은 채 현재 패치 01·02를 내부 화면에 적용하고, 공식 업데이트 뒤 자동으로 유지하는 것은 이번 결과로 입증되지 않았다.** 공식 v0.5.14는 기존 통합 패치의 코드 기준과 맞지 않아 패치 매니저가 적용을 거부해야 한다. 실제 설치본에는 어떤 변경도 하지 않았다.
 

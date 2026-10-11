@@ -1,0 +1,332 @@
+// Isolated renderer worker. Run the parent cleanup wrapper:
+// $env:LILAC_UPSTREAM_SOURCE='<temporary official v0.5.14 clone>'; node tests/run-patch-manager-stage2-v0514-electron.cjs
+'use strict';
+
+process.on('uncaughtException', fail);
+process.on('unhandledRejection', fail);
+
+const { app, BrowserWindow, ipcMain, session } = require('electron');
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+const upstreamRoot = process.env.LILAC_UPSTREAM_SOURCE || '';
+if (!upstreamRoot || !fs.existsSync(path.join(upstreamRoot, '.git'))) {
+  throw new Error('Set LILAC_UPSTREAM_SOURCE to the isolated official v0.5.14 clone.');
+}
+
+const repo = path.resolve(__dirname, '..');
+const { makeLilacAnimeV0514Manifest } = require(path.join(repo, 'patch-manager', 'adapters', 'lilacanime-v0.5.14.cjs'));
+const { applyPersistent } = require(path.join(repo, 'patch-manager', 'persistent.cjs'));
+const { cleanupSyntheticFixture } = require(path.join(repo, 'patch-manager', 'staging.cjs'));
+const orchestratedTempRoot = process.env.LILAC_STAGE2_ELECTRON_TEMP_ROOT || '';
+const tempRoot = orchestratedTempRoot ? path.resolve(orchestratedTempRoot) : fs.mkdtempSync(path.join(os.tmpdir(), 'lilac-patch-stage2-electron-'));
+if (path.dirname(tempRoot) !== fs.realpathSync(os.tmpdir()) || !path.basename(tempRoot).startsWith('lilac-patch-stage2-electron-')) {
+  throw new Error('Refusing unexpected UI test temp root: ' + tempRoot);
+}
+const fixtureRoot = path.join(tempRoot, 'app');
+const userData = path.join(tempRoot, 'userData');
+const sessionData = path.join(tempRoot, 'sessionData');
+const cachePath = path.join(tempRoot, 'cache');
+const blockedRequests = [];
+const providerCalls = [];
+const patchCalls = [];
+const savedTranslations = [];
+const copiedTexts = [];
+let win = null;
+let finished = false;
+const rendererErrors = [];
+
+function fail(error) {
+  if (finished) return;
+  finished = true;
+  process.exitCode = 1;
+  console.error(error?.stack || error);
+  if (rendererErrors.length) console.error(`Renderer errors:\n${rendererErrors.join('\n')}`);
+  try { win?.destroy(); } catch {}
+  app.exit(1);
+}
+
+function listTrackedFiles(root) {
+  const result = require('node:child_process').spawnSync('git', ['-C', root, 'ls-files', '-z'], { encoding: 'buffer' });
+  if (result.status !== 0) throw new Error(`Cannot enumerate source fixture: ${result.stderr.toString('utf8')}`);
+  return result.stdout.toString('utf8').split('\0').filter(Boolean);
+}
+
+function makeFixture() {
+  const temp = fs.realpathSync(os.tmpdir()), source = fs.realpathSync(upstreamRoot);
+  const relative = path.relative(temp, source);
+  assert.ok(relative && !relative.startsWith('..') && !path.isAbsolute(relative), 'source clone must stay under OS temp');
+  fs.mkdirSync(fixtureRoot);
+  const files = listTrackedFiles(source);
+  for (const file of files) {
+    const from = path.join(source, ...file.split('/'));
+    const stat = fs.lstatSync(from);
+    assert.ok(stat.isFile() && !stat.isSymbolicLink(), `unsupported source entry: ${file}`);
+    const to = path.join(fixtureRoot, ...file.split('/'));
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.copyFileSync(from, to, fs.constants.COPYFILE_EXCL);
+  }
+  const marker = { root: path.basename(fixtureRoot), kind: 'synthetic', safety: 'no-real-installation', nonce: crypto.randomBytes(16).toString('hex') };
+  fs.writeFileSync(`${fixtureRoot}.lilac-patch-manager-synthetic-fixture.json`, JSON.stringify(marker), { flag: 'wx' });
+  fs.writeFileSync(path.join(fixtureRoot, '.lilac-patch-manager-synthetic-fixture.json'), JSON.stringify(marker), { flag: 'wx' });
+  const applied = applyPersistent(fixtureRoot, makeLilacAnimeV0514Manifest());
+  assert.equal(applied.status, 'applied');
+}
+
+function anime(provider, id, extra = {}) {
+  return {
+    provider, id, mal_id: `${provider}:${id}`, title: '시범 방영작', title_english: 'Synthetic Airing Work',
+    anilistId: 777, malId: 9001, year: 2026, type: 'TV', subbed: 3, availableEpisodeCount: 3,
+    ...extra
+  };
+}
+
+function fakeCheerio() {
+  return {
+    load(source) {
+      const nodes = String(source).includes('page=2') ? [] : [{
+        status: 'Ongoing', html: '<article-fixture>Current</article-fixture>'
+      }, { status: 'Upcoming', html: '<article-upcoming>Upcoming</article-upcoming>' }];
+      const collection = values => ({
+        length: values.length,
+        filter(callback) { return collection(values.filter((node, index) => callback(index, node))); },
+        map(callback) { return { get: () => values.map((node, index) => callback(index, node)) }; }
+      });
+      const $ = value => typeof value === 'string'
+        ? collection(value === 'article.bs' ? nodes : [])
+        : { find: () => ({ text: () => value.status }) };
+      $.html = node => node.html;
+      return $;
+    }
+  };
+}
+
+function writeHarness() {
+  const htmlPath = path.join(fixtureRoot, 'src', 'patch-manager-stage2-harness.html');
+  const preloadPath = path.join(fixtureRoot, 'patch-manager-stage2-harness-preload.cjs');
+  const subtitlePathValue = JSON.stringify(path.join(userData, 'source-ja.vtt'));
+  const subtitleUrlValue = JSON.stringify(pathToFileURL(path.join(userData, 'source-ja.vtt')).href);
+  const scripts = [
+    'patch-manager-stage2-core.js', 'weekday-schedule.js', 'integrated-search.js',
+    'manual-subtitle-translation.js', 'patch-manager-stage2.js'
+  ];
+  const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+    :root{--bg:#101016;--panel:#1a1a24;--text:#f4f2fa;--muted:#aaa5b8;--line:#383342;--lilac:#b48cff;--ott-radius:10px}
+    body{background:var(--bg);color:var(--text);font:14px Arial,sans-serif;margin:20px}.hidden{display:none!important}
+    .content-section{margin:20px 0}.section-title{display:flex;gap:10px}.chip-row{display:flex;gap:6px}.chip-row button{padding:7px 12px}
+    .poster-rail{display:flex;gap:10px;min-height:56px}.anime-card{border:1px solid var(--line);padding:10px;min-width:150px;cursor:pointer}
+    #detailDialog{background:var(--panel);color:var(--text);border:1px solid var(--line);min-width:420px}
+  </style></head><body>
+    <section id="seasonSection" class="content-section"><div class="section-title"><h2 id="seasonTitle">신작</h2></div><div id="seasonRail" class="poster-rail"><p>기존 시즌 카드</p></div></section>
+    <section id="scheduleSection" class="content-section hidden"><div class="section-title"><h2>방영 일정</h2></div><div id="scheduleTabs" class="chip-row" role="tablist"></div><div id="scheduleRail" class="poster-rail"></div></section>
+    <dialog id="detailDialog"><div id="detailContent"><div id="episodeBlock"></div></div></dialog>
+    <div id="subtitleTranslateRow"></div><p id="subtitleState"></p><input id="skipTitle" value="시범 방영작"><input id="skipEpisode" value="2"><p id="playerTitle">시범 방영작</p>
+    <script>
+      const knownAnime=new Map(); let currentSubtitle={path:${subtitlePathValue},src:${subtitleUrlValue},label:'Japanese'};
+      let currentSubtitlePath='',playbackRequestId=1,currentPlaybackContext={subtitleTitle:'시범 방영작',episode:{number:2}};
+      window.patchFixtureState={episodeSelected:false,errors:[]};
+      window.addEventListener('error',event=>window.patchFixtureState.errors.push({stack:event.error?.stack||'',message:event.message||''}));
+      window.addEventListener('unhandledrejection',event=>window.patchFixtureState.errors.push({stack:event.reason?.stack||'',message:String(event.reason)}));
+      function subtitleStoreKey(){return 'synthetic-show|season-1|episode-2'}
+      function attachSubtitle(src,label,meta){currentSubtitle={src,path:meta.path,label,source:meta.source};currentSubtitlePath=meta.path}
+      function clearSubtitle(){currentSubtitle=null;currentSubtitlePath=''}
+      function animeById(id){return knownAnime.get(String(id))||null}
+      function renderCards(target,items){const rail=document.querySelector(target);if(!rail)return;rail.replaceChildren(...items.map(item=>{const card=document.createElement('article');card.className='anime-card';card.tabIndex=0;const title=document.createElement('h3');title.textContent=item.title||'제목 없음';const info=document.createElement('p');info.textContent=item.title_english||'';card.append(title,info);return card}))}
+      async function openDetail(id){const item=animeById(id);const dialog=document.querySelector('#detailDialog'),content=document.querySelector('#detailContent');content.replaceChildren();const title=document.createElement('h2');title.textContent=item?.title||'상세';const block=document.createElement('div');block.id='episodeBlock';const episode=document.createElement('button');episode.className='fixture-episode';episode.textContent='2화';episode.addEventListener('click',()=>window.patchFixtureState.episodeSelected=true);block.append(episode);content.append(title,block);dialog.setAttribute('open','');return true}
+    </script>
+    ${scripts.map(file => `<script src="${file}"></script>`).join('\n')}
+  </body></html>`;
+  fs.writeFileSync(htmlPath, html, 'utf8');
+  const preload = `'use strict';\nconst {contextBridge,ipcRenderer}=require('electron');\ncontextBridge.exposeInMainWorld('lilac',{
+    patchQuarter:(...args)=>ipcRenderer.invoke('patch:quarter',...args),
+    patchWeekdayEpisodes:(...args)=>ipcRenderer.invoke('fixture:weekday-episodes',...args),
+    patchTranslationPrompt:(...args)=>ipcRenderer.invoke('patch:translation-prompt',...args),
+    patchCopyText:(...args)=>ipcRenderer.invoke('patch:clipboard-copy',...args),
+    patchSaveManualSubtitle:(...args)=>ipcRenderer.invoke('patch:manual-subtitle-save',...args),
+    openExternal:(...args)=>ipcRenderer.invoke('fixture:external',...args),
+    linkkfSchedule:(...args)=>ipcRenderer.invoke('fixture:linkkf-schedule',...args),
+    providerAiring:(...args)=>ipcRenderer.invoke('fixture:provider-airing',...args),
+    providerCatalog:(...args)=>ipcRenderer.invoke('fixture:provider-catalog',...args),
+    catalogKoreanSearch:(...args)=>ipcRenderer.invoke('fixture:korean-search',...args),
+    linkkfSearch:(...args)=>ipcRenderer.invoke('fixture:linkkf-search',...args),
+    linkkfEpisodes:(...args)=>ipcRenderer.invoke('fixture:linkkf-episodes',...args),
+    providerDetail:(...args)=>ipcRenderer.invoke('fixture:provider-detail',...args)
+});\n`;
+  fs.writeFileSync(preloadPath, preload, 'utf8');
+  return { htmlPath, preloadPath };
+}
+
+function waitFor(label, predicate, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve, reject) => {
+    const poll = async () => {
+      if (Date.now() > deadline) return reject(new Error(`Timed out waiting for ${label}`));
+      try { if (await predicate()) return resolve(); }
+      catch (error) {
+        win?.webContents.executeJavaScript('window.patchFixtureState?.errors || null').then(value => console.error('renderer debug state:', JSON.stringify(value))).catch(() => {});
+        return reject(new Error(`${label}: ${error?.stack || error}`));
+      }
+      setTimeout(poll, 50);
+    };
+    poll();
+  });
+}
+
+async function run() {
+  fs.writeFileSync(path.join(userData, 'source-ja.vtt'), 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n日本語の台詞\n');
+  const { loadTranslationPrompt } = require(path.join(fixtureRoot, 'electron', 'patch-manager-stage2-prompts.cjs'));
+  const { registerPatch0102Handlers } = require(path.join(fixtureRoot, 'electron', 'patch-manager-stage2.cjs'));
+  const quarterShow = anime('reanime', 're-quarter');
+  const quarterMiruro = anime('miruro', 'mi-quarter');
+  const quarterAnimenosub = anime('animenosub', 'as-quarter');
+  const quarterMovie = anime('miruro', 'mi-film', { title: '시범 방영작', title_english: 'Synthetic Airing Work', anilistId: 778, type: 'MOVIE', season: 'MOVIE' });
+  const sourceItems = Object.fromEntries([
+    anime('reanime', 're-source'), anime('miruro', 'mi-source'),
+    anime('animenosub', 'as-source'), anime('linkkf', 'lk-source')
+  ].map(item => [item.provider, item]));
+  const linkkfAnime = anime('linkkf', 'lk-schedule');
+  const today = new Date(); today.setHours(20, 0, 0, 0);
+
+  registerPatch0102Handlers({
+    ipcMain, app,
+    subtitleStore: { save: (key, value) => { savedTranslations.push({ key, ...value }); return { key, path: value.path, url: pathToFileURL(value.path).href }; } },
+    clipboard: { writeText: text => { copiedTexts.push(String(text)); } },
+    REANIME_WEB: 'https://reanime.invalid', ANIMENOSUB_WEB: 'https://animenosub.invalid',
+    providerFetch: async (url, options = {}) => {
+      providerCalls.push({ url, kind: options.json ? 'reanime' : 'animenosub' });
+      return options.json ? { rows: [quarterShow] } : url;
+    },
+    reanimeItems: root => root.rows,
+    miruroApi: async () => ({ data: [
+      { id: 'mi-quarter', status: 'RELEASING', episode_counts: { sub: 12 } },
+      { id: 'mi-film', status: 'RELEASING', episode_counts: { sub: 1 } }
+    ], has_more: false }),
+    miruroHasEpisodes: async () => true,
+    miruroItem: raw => raw.id === 'mi-film' ? quarterMovie : quarterMiruro,
+    animenosubList: html => html.includes('article-fixture') ? [quarterAnimenosub] : [],
+    cheerio: fakeCheerio()
+  });
+
+  ipcMain.handle('fixture:weekday-episodes', (_event, provider, candidates) => {
+    patchCalls.push({ provider, candidates: candidates.length });
+    const target = candidates.find(item => item.provider === provider);
+    return { supported: true, data: target ? [{ provider, anime: target, episode: 2, airingAt: Math.floor(today.getTime() / 1000) }] : [] };
+  });
+  ipcMain.handle('fixture:linkkf-schedule', () => Array.from({ length: 7 }, (_, day) => day === (new Date().getDay() + 6) % 7 ? [linkkfAnime] : []));
+  ipcMain.handle('fixture:provider-airing', () => ({ data: [] }));
+  ipcMain.handle('fixture:provider-catalog', (_event, provider) => {
+    if (provider === 'ohli24') return [];
+    return sourceItems[provider] ? [{ ...sourceItems[provider] }] : [];
+  });
+  ipcMain.handle('fixture:korean-search', (_event, provider) => sourceItems[provider] ? [{ ...sourceItems[provider] }] : []);
+  ipcMain.handle('fixture:linkkf-search', () => [{ ...sourceItems.linkkf }]);
+  ipcMain.handle('fixture:linkkf-episodes', () => [{ episodes: [{ id: 'lk-ep-2', number: 2, title: '2화' }] }]);
+  ipcMain.handle('fixture:provider-detail', (_event, item) => ({ data: item, episodes: [{ id: `${item.provider}-ep-2`, number: 2, title: '2화', playable: false }] }));
+  ipcMain.handle('fixture:external', () => true);
+
+  const realPromptHandler = loadTranslationPrompt;
+  assert.equal(typeof realPromptHandler('japanese'), 'string');
+
+  session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
+    if (/^https?:/i.test(details.url)) { blockedRequests.push(details.url); callback({ cancel: true }); }
+    else callback({});
+  });
+  session.defaultSession.setSpellCheckerEnabled(false);
+  const { htmlPath, preloadPath } = writeHarness();
+  win = new BrowserWindow({
+    show: false, width: 1280, height: 720,
+    webPreferences: { preload: preloadPath, contextIsolation: true, nodeIntegration: false, sandbox: true }
+  });
+  win.webContents.on('render-process-gone', (_event, details) => rendererErrors.push(`render-process-gone:${details.reason}`));
+  win.webContents.on('console-message', event => { if (event.level >= 2) rendererErrors.push(event.message); });
+  win.webContents.on('did-fail-load', (_event, code, description, url) => rendererErrors.push(`did-fail-load:${code}:${description}:${url}`));
+  await win.loadFile(htmlPath);
+  console.log('fixture renderer loaded');
+  await waitFor('quarter catalog and weekday cards', async () => win.webContents.executeJavaScript(
+    `Boolean(document.querySelector('#patch0102QuarterControls') && document.querySelectorAll('#seasonRail .anime-card').length===2 && document.querySelectorAll('#scheduleRail .anime-card').length===1)`
+  ));
+  console.log('quarter and weekday fixture rendered');
+
+  const overview = await win.webContents.executeJavaScript(`({
+    quarterTitle:document.querySelector('#seasonTitle').textContent,
+    quarterCards:[...document.querySelectorAll('#seasonRail .anime-card')].map(x=>x.innerText),
+    days:[...document.querySelectorAll('#scheduleTabs button')].map((x,i)=>({label:x.textContent,selected:x.getAttribute('aria-selected'),today:x.dataset.today==='true',i})),
+    scheduleCards:[...document.querySelectorAll('#scheduleRail .anime-card')].map(x=>x.innerText),
+    autoPlay:localStorage.getItem('playerAutoPlay')
+  })`);
+  assert.match(overview.quarterTitle, /년 [1-4]분기 신작/);
+  assert.equal(overview.quarterCards.length, 2, 'the sequel and movie stay separate');
+  assert.ok(overview.quarterCards.some(text => text.includes('3개 출처')));
+  assert.equal(overview.days.filter(day => day.selected === 'true').length, 1);
+  assert.ok(overview.days.find(day => day.i === (new Date().getDay() + 6) % 7)?.today);
+  assert.equal(overview.scheduleCards.length, 1);
+  assert.equal(overview.autoPlay, 'false', 'fresh profiles keep next-episode autoplay off');
+
+  await win.webContents.executeJavaScript(`document.querySelector('#scheduleRail .anime-card').click()`);
+  console.log('weekday card clicked; checking five providers');
+  await waitFor('all five automatic provider rows', async () => win.webContents.executeJavaScript(
+    `document.querySelectorAll('#patch0102SourcePicker .patch0102-source-rows>*').length===5 && ![...document.querySelectorAll('#patch0102SourcePicker small')].some(x=>x.textContent==='확인 중')`
+  ));
+  const sourceStatus = await win.webContents.executeJavaScript(`({
+    rows:[...document.querySelectorAll('#patch0102SourcePicker .patch0102-source-rows>*')].map(x=>({provider:x.dataset.provider||x.textContent.split(' ')[0],text:x.innerText})),
+    note:document.querySelector('#patch0102SourcePicker>small')?.textContent||''
+  })`);
+  console.log('provider rows:', JSON.stringify(sourceStatus));
+  assert.equal(sourceStatus.rows.length, 5);
+  assert.ok(sourceStatus.rows.some(row => row.text.includes('애니24') && row.text.includes('미제공')));
+  assert.ok(sourceStatus.rows.filter(row => row.text.includes('제공 확인')).length >= 3);
+  assert.match(sourceStatus.note, /실제 영상 주소 검증은 아직 하지 않았습니다/);
+  const sourceClick = await win.webContents.executeJavaScript(`(()=>{const button=document.querySelector('#patch0102SourcePicker button[data-provider="reanime"]');if(!button)throw new Error('Re:Anime source button missing');button.click();return {clicked:true,title:document.querySelector('#detailContent h2')?.textContent}})()`);
+  console.log('source selection click:', JSON.stringify(sourceClick));
+  await waitFor('selected source remains visible in updated detail', async () => win.webContents.executeJavaScript(
+    `Array.from(document.querySelectorAll('#patch0102SourcePicker button')).some(button=>button.dataset.provider==='reanime'&&button.getAttribute('aria-pressed')==='true')`
+  ));
+  assert.ok(patchCalls.some(call => call.provider === 'reanime') && patchCalls.some(call => call.provider === 'miruro'));
+  assert.ok(providerCalls.some(call => call.kind === 'reanime') && providerCalls.some(call => call.kind === 'animenosub'));
+
+  await win.webContents.executeJavaScript(`document.querySelector('#patch0102ManualStart').click()`);
+  console.log('manual translation started');
+  await waitFor('manual Japanese translation panel', async () => win.webContents.executeJavaScript(
+    `Boolean(document.querySelector('#patch0102ManualPanel') && !document.querySelector('#patch0102ManualPanel').classList.contains('hidden'))`
+  ));
+  await win.webContents.executeJavaScript(`document.querySelector('#patch0102ManualCopy').click()`);
+  await waitFor('ChatGPT request copied without opening external app', () => copiedTexts.length > 0);
+  const expectedPrompt = realPromptHandler('japanese');
+  assert.ok(copiedTexts[0].includes(expectedPrompt));
+  assert.ok(copiedTexts[0].includes('앞 문맥') || copiedTexts[0].includes('작품·회차'));
+  await win.webContents.executeJavaScript(`document.querySelector('#patch0102ManualAnswer').value=JSON.stringify({translations:[{id:1,text:'한국어로 옮긴 대사'}]});document.querySelector('#patch0102ManualApply').click()`);
+  await waitFor('translated VTT stored to isolated profile', () => savedTranslations.length === 1);
+  const saved = savedTranslations[0];
+  const translatedVtt = fs.readFileSync(saved.path, 'utf8');
+  assert.equal(saved.source, 'chatgpt');
+  assert.match(translatedVtt, /00:00:01\.000 --> 00:00:02\.000/);
+  assert.match(translatedVtt, /한국어로 옮긴 대사/);
+  assert.equal(blockedRequests.length, 0, 'the UI test made no external HTTP requests');
+  assert.equal(rendererErrors.length, 0, rendererErrors.join('\n'));
+  console.log(`v0.5.14 isolated renderer: quarter ${overview.quarterTitle}; today tab ${overview.days.find(day => day.today).label}; 5 source states checked; manual subtitle saved under isolated profile; HTTP requests blocked=${blockedRequests.length}.`);
+  finished = true;
+  win.destroy();
+  app.quit();
+}
+
+process.on('exit', () => {
+  if (orchestratedTempRoot) return;
+  try { if (fs.existsSync(`${fixtureRoot}.lilac-patch-manager-synthetic-fixture.json`)) cleanupSyntheticFixture(fixtureRoot); } catch (error) { console.error(error.message); process.exitCode = 1; }
+  try { fs.rmSync(tempRoot, { recursive: true, force: true }); } catch (error) { console.error(error.message); process.exitCode = 1; }
+});
+
+try {
+  makeFixture();
+  fs.mkdirSync(userData); fs.mkdirSync(sessionData); fs.mkdirSync(cachePath);
+  app.setName('LilacAnime Patch Stage 2 Fixture');
+  app.setAppUserModelId('org.codex.synthetic.lilac');
+  app.setPath('userData', userData);
+  app.setPath('sessionData', sessionData);
+  app.setPath('cache', cachePath);
+  app.commandLine.appendSwitch('disable-background-networking');
+  app.disableHardwareAcceleration();
+  app.whenReady().then(run).catch(fail);
+} catch (error) { fail(error); }
