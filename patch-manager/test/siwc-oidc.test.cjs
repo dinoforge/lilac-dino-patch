@@ -45,6 +45,9 @@ test('SSE translates only after response.completed and combines fragmented chunk
     'data: '+JSON.stringify({type:'response.completed'})+'\n\n';
   const result=await readResponseStream(sse(input,15));
   assert.deepEqual(JSON.parse(result),{translations:[{id:1,text:'안녕'}]});
+  // CRLF event separators arriving byte by byte must still be recognized.
+  const crlf=input.replace(/\n/g,'\r\n');
+  assert.equal(await readResponseStream(sse(crlf,new TextEncoder().encode(crlf).length)),result);
   await assert.rejects(readResponseStream(sse('data: '+JSON.stringify({type:'response.output_text.delta',delta:'Hello'})+'\n\n')),/정상 완료/);
   await assert.rejects(readResponseStream(sse('data: '+JSON.stringify({type:'response.failed'})+'\n\n')),/완료되지/);
 });
