@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "runAt": "2026-10-12T16:44:46.750Z",
+  "app": {
+    "sourceProfile": "official-source-16c9a3d1-v0515",
+    "version": "0.5.15",
+    "sourceCommit": "16c9a3d1631061a72831e0657434003940daf531"
+  },
+  "isolation": {
+    "managerCreatedIsolatedCopy": true,
+    "freshUserDataSessionCacheDownloadsVideos": true,
+    "accountLogin": false
+  },
+  "scope": {
+    "streamResolution": false,
+    "providerCalls": 0
+  },
+  "providers": [],
+  "result": "harness-only-no-provider-calls",
+  "networkDiagnostics": {
+    "runtime": {
+      "node": "22.22.0",
+      "electron": "38.8.6",
+      "chromium": "140.0.7339.249",
+      "nodeFetch": true,
+      "electronNetFetch": true,
+      "proxyEnvironmentPresent": {
+        "http": false,
+        "https": false,
+        "all": false,
+        "noProxy": false,
+        "nodeUseEnvProxy": false,
+        "extraCa": false
+      }
+    },
+    "requests": []
+  }
+}

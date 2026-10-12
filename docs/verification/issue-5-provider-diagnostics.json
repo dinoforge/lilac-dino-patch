@@ -1,0 +1,114 @@
+{
+  "schema": 1,
+  "app": {
+    "sourceProfile": "official-source-16c9a3d1-v0515",
+    "version": "0.5.15",
+    "sourceCommit": "16c9a3d1631061a72831e0657434003940daf531"
+  },
+  "isolation": {
+    "managerCreatedTempCopies": true,
+    "freshUserDataSessionCacheDownloadsVideos": true,
+    "accountLogin": false,
+    "sourceModified": false
+  },
+  "rootCause": {
+    "classification": "preload-isolated-world-probe-mismatch",
+    "observedTypeErrorCount": 5,
+    "beforeProviderIpc": true,
+    "description": "The probe appended to preload.cjs read window.lilac from Electron's isolated preload world. contextBridge exposes lilac in the page main world, so all five calls failed before reaching provider IPC or network.",
+    "fix": "The probe now invokes the same provider IPC channels exposed by the preload bridge, directly from its isolated world."
+  },
+  "scope": {
+    "initialPassOneSearchPerProvider": true,
+    "targetedFollowups": ["ohli24", "linkkf"],
+    "detailAndEpisodesOnlyAfterSearchResult": true,
+    "streamResolution": false,
+    "videoPlayback": false,
+    "userQueriesStored": false,
+    "linkkfRequestsPerDiagnosticPass": 4
+  },
+  "providers": [
+    {
+      "provider": "reanime",
+      "search": "ok",
+      "searchLanguage": "English",
+      "resultCount": 30,
+      "detail": "ok",
+      "episodes": "ok",
+      "episodeCount": 220
+    },
+    {
+      "provider": "miruro",
+      "search": "ok",
+      "searchLanguage": "English",
+      "resultCount": 15,
+      "detail": "ok",
+      "episodes": "ok",
+      "episodeCount": 220
+    },
+    {
+      "provider": "animenosub",
+      "search": "ok",
+      "searchLanguage": "English",
+      "resultCount": 2,
+      "detail": "ok",
+      "episodes": "ok",
+      "episodeCount": 500
+    },
+    {
+      "provider": "ohli24",
+      "search": "ok",
+      "initialSearch": "empty",
+      "initialSearchLanguage": "English",
+      "searchPasses": 2,
+      "searchLanguage": "Korean after the initial empty result",
+      "resultCount": 19,
+      "detail": "ok",
+      "episodes": "ok",
+      "episodeCount": 287,
+      "transport": "electron-net-fetch",
+      "httpStatus": 200
+    },
+    {
+      "provider": "linkkf",
+      "search": "blocked-dns",
+      "searchPasses": 2,
+      "detail": "not-run-search-failed",
+      "episodes": "not-run-search-failed",
+      "transport": "node-fetch",
+      "phase": "dns",
+      "causeCode": "ENOTFOUND",
+      "httpStatus": null
+    }
+  ],
+  "runtime": {
+    "node": "22.22.0",
+    "electron": "38.8.6",
+    "chromium": "140.0.7339.249",
+    "nodeFetch": true,
+    "electronNetFetch": true,
+    "proxyEnvironmentPresent": false
+  },
+  "portableExe": {
+    "target": "windows-x64-portable",
+    "electronBuilder": "26.15.3",
+    "electron": "38.8.6",
+    "bytes": 136267778,
+    "sha256": "ebcbb6132deef35b0133d39fabaab753b22ff8c261038b833f51dd0903c0a2b6",
+    "archiveFiles": 42,
+    "managerEntryPoint": "dino-lilac-patch/manager/main.cjs",
+    "containsLilacAnimeMain": false,
+    "launchFromOutsideCheckout": true
+  },
+  "portableUiVerification": {
+    "result": "passed",
+    "patch01OnAlone": "applied-and-restored",
+    "patch02OnAlone": "applied-and-restored",
+    "patch03OnAlone": "applied-and-restored",
+    "patch03OffKeepsAPath": true,
+    "independentRestoreCycles": 3,
+    "originalAnchorHashesVerifiedPerCycle": 4,
+    "target": "manager-created OS temporary official-source copy"
+  },
+  "result": "four-suppliers-verified-linkkf-dns-blocked"
+}
