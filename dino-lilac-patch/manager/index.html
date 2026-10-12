@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dino Lilac Patch 관리자 MVP</title>
+  <link rel="stylesheet" href="manager.css">
+  <script defer src="renderer.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">격리 소스 관리자 · MVP</p>
+        <h1>Dino Lilac Patch</h1>
+      </div>
+      <span class="version-tag">Windows · v0.5.15 소스</span>
+    </header>
+
+    <section class="safety card">
+      <div class="safety-mark" aria-hidden="true">!</div>
+      <div>
+        <h2>임시 격리 사본에만 적용됩니다</h2>
+        <p>공식 Git 소스 v0.5.15를 OS 임시 폴더에 복사해 사용합니다. 설치본, 사용자 프로필, 다운로드, 기록, <code>app.asar</code>에는 접근하지 않습니다.</p>
+      </div>
+    </section>
+
+    <section class="card source-card">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">01 · 대상 준비</p>
+          <h2>공식 소스 복사 또는 기존 격리 사본 열기</h2>
+        </div>
+        <span id="versionBadge" class="status-chip neutral">대상 없음</span>
+      </div>
+      <div class="button-row">
+        <button id="chooseSource" class="button primary">공식 소스 선택 및 복사</button>
+        <button id="openIsolated" class="button secondary">격리 사본 열기</button>
+      </div>
+      <dl class="target-details">
+        <div><dt>적용 대상</dt><dd id="targetPath">선택된 격리 사본이 없습니다.</dd></div>
+        <div><dt>설정 파일</dt><dd id="settingsPath">DinoLilacPatch/settings.json</dd></div>
+      </dl>
+    </section>
+
+    <section class="card patches-card">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">02 · 독립 기능 선택</p>
+          <h2>패치 설정</h2>
+        </div>
+        <span class="hint">새 사본 기본값: Patch 03 ON</span>
+      </div>
+      <div class="patch-list">
+        <label class="patch-row" for="patch01">
+          <span class="patch-copy"><strong>Patch 01</strong><small>요일표와 회차 데이터 보강</small></span>
+          <span class="patch-state"><input id="patch01" type="checkbox"><span id="status01" class="status-chip neutral">대기</span></span>
+        </label>
+        <label class="patch-row" for="patch02">
+          <span class="patch-copy"><strong>Patch 02</strong><small>한국어 자막 수동 번역 흐름</small></span>
+          <span class="patch-state"><input id="patch02" type="checkbox"><span id="status02" class="status-chip neutral">대기</span></span>
+        </label>
+        <label class="patch-row" for="patch03">
+          <span class="patch-copy"><strong>Patch 03</strong><small>통합 작품 검색과 공급원별 회차 · OFF면 원본 A 화면</small></span>
+          <span class="patch-state"><input id="patch03" type="checkbox" checked><span id="status03" class="status-chip neutral">대기</span></span>
+        </label>
+      </div>
+      <div class="button-row action-row">
+        <button id="apply" class="button primary" disabled>선택한 패치 적용</button>
+        <button id="restore" class="button danger" disabled>백업에서 원본 복구</button>
+      </div>
+      <p class="footnote">적용 전에 복구용 백업의 SHA-256을 기록합니다. 실패하면 자동 복구하며, 앱이 실행 중이거나 상태를 확인할 수 없으면 변경을 중단합니다.</p>
+    </section>
+
+    <section class="card result-card" aria-live="polite">
+      <p class="eyebrow">상태</p>
+      <p id="message" class="message">공식 v0.5.15 소스를 선택하면 독립 패치 상태를 확인할 수 있습니다.</p>
+      <p id="detail" class="detail">웹 자동 입력·응답 수집·대화 삭제는 포함하지 않습니다. 자동 패키징 EXE도 생성하지 않은 개발용 GUI입니다.</p>
+    </section>
+    <footer>대상: 공식 v0.5.15 소스 체크아웃만 지원 · 패키징된 앱과 일반 설치본은 거부</footer>
+  </main>
+</body>
+</html>

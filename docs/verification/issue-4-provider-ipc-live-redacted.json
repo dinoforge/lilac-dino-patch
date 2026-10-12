@@ -1,0 +1,90 @@
+{
+  "schema": 1,
+  "runAt": "2026-10-12T15:14:03.138Z",
+  "app": {
+    "sourceProfile": "official-source-16c9a3d1-v0515",
+    "version": "0.5.15",
+    "sourceCommit": "16c9a3d1631061a72831e0657434003940daf531"
+  },
+  "isolation": {
+    "managerCreatedTempCopy": true,
+    "freshUserDataSessionCacheDownloadsVideos": true,
+    "accountLogin": false
+  },
+  "scope": {
+    "query": "Naruto",
+    "callsPerProvider": "one search IPC; one detail IPC when search returns a result; first four providers return episodes inside detail, Linkkf has one separate episode-list IPC",
+    "streamResolution": false,
+    "retriesAddedByProbe": false
+  },
+  "providers": [
+    {
+      "provider": "reanime",
+      "searchCalls": 1,
+      "detailCalls": 0,
+      "episodesIpcCalls": 0,
+      "episodeListRoute": "provider:detail.episodes",
+      "search": "error",
+      "error": {
+        "status": "error",
+        "errorName": "TypeError",
+        "httpStatus": null
+      }
+    },
+    {
+      "provider": "miruro",
+      "searchCalls": 1,
+      "detailCalls": 0,
+      "episodesIpcCalls": 0,
+      "episodeListRoute": "provider:detail.episodes",
+      "search": "error",
+      "error": {
+        "status": "error",
+        "errorName": "TypeError",
+        "httpStatus": null
+      }
+    },
+    {
+      "provider": "animenosub",
+      "searchCalls": 1,
+      "detailCalls": 0,
+      "episodesIpcCalls": 0,
+      "episodeListRoute": "provider:detail.episodes",
+      "search": "error",
+      "error": {
+        "status": "error",
+        "errorName": "TypeError",
+        "httpStatus": null
+      }
+    },
+    {
+      "provider": "ohli24",
+      "searchCalls": 1,
+      "detailCalls": 0,
+      "episodesIpcCalls": 0,
+      "episodeListRoute": "provider:detail.episodes",
+      "search": "error",
+      "error": {
+        "status": "error",
+        "errorName": "TypeError",
+        "httpStatus": null
+      }
+    },
+    {
+      "provider": "linkkf",
+      "searchCalls": 1,
+      "detailCalls": 0,
+      "episodesIpcCalls": 0,
+      "episodeListRoute": "linkkf:episodes",
+      "search": "error",
+      "error": {
+        "status": "error",
+        "errorName": "TypeError",
+        "httpStatus": null
+      },
+      "episodes": "not-run-no-result",
+      "detail": "not-run-no-result"
+    }
+  ],
+  "result": "partial-or-blocked"
+}

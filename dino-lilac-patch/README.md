@@ -31,7 +31,7 @@ ChatGPT 웹 화면은 앱 내부 창으로 열리지만, **ChatGPT 웹사이트�
 - 패치 01은 요일별 편성표·자동 분기·출처 확인이다.
 - 패치 02는 한국어 자막 번역·내장 ChatGPT 웹 번역 보조 기능이다. SIWC는 새 적용 payload에서 제외한다.
 - 패치 01, 패치 02, 패치 03은 각각 ON/OFF할 수 있으며, 여덟 가지 조합을 지원하도록 설계한다.
-- ON/OFF 선택은 DinoLilacPatch 폴더의 **settings.json 한 파일**에만 저장한다. 기본값은 OFF/OFF/OFF로 안전하게 시작한다.
+- ON/OFF 선택은 DinoLilacPatch 폴더의 **settings.json 한 파일**에 저장한다. 공용 설정 코어의 미지정 기본은 OFF/OFF/OFF이며, 새 소스 사본의 관리자 화면은 첫 적용 전 Patch 03 ON(B 화면)을 제안한다.
 - LilacAnime 업데이트 이후 **버전 이름이나 미리 등록한 목록만으로 적용 여부를 결정하지 않는다**. 실제 내부 코드의 연결 지점·원본 UI·자막 구조를 각 패치별로 분석한다.
 - 구조 검사 결과가 맞더라도 격리된 앱 복사본에서 시험 적용과 회귀 검증을 마치기 전에는 실제 설치본에 적용하지 않는다.
 - 기존 LilacAnime의 업데이트·시청 기록·설정·자막과 사용자 폴더는 보존한다.
@@ -52,26 +52,26 @@ ChatGPT 웹 화면은 앱 내부 창으로 열리지만, **ChatGPT 웹사이트�
        ├─ shared\
        └─ adapters\
 
-이 구조는 **목표 설계**다. 아직 EXE나 실사용 설치 패키지는 없다. 원본 백업과 복구 기록의 안전한 저장 위치는 실제 적용 엔진 제작 때 결정한다. 불필요한 별도 설정 폴더를 사용자 PC에 만들지 않는다.
+이 폴더 구조는 **목표 배포 설계**다. 별도 EXE나 실사용 설치 패키지는 아직 없다. 관리자 MVP의 시험 사본에서는 백업과 복구 기록을 OS 임시 폴더의 사본 옆에 둔다. 실제 설치본에 이 경로를 사용하지 않는다.
 
 ## 이번에 실제 구현한 내용
 
-- settings.cjs: 세 패치 ON/OFF를 `DinoLilacPatch/settings.json` 한 파일에 저장한다. 앱 설치 폴더를 명시적으로 전달받고, 설정이 없으면 OFF/OFF/OFF로 시작한다. 이전 두 키 파일은 Patch 03을 OFF로 읽고, 손상되거나 예상 형식이 아닌 기존 설정은 덮어쓰지 않는다. 관리자 GUI나 설치본 적용 엔진에는 아직 연결되지 않았다.
+- `settings.cjs`, `manager-core.cjs`, `manager/`: 세 패치 ON/OFF를 격리 사본의 `DinoLilacPatch/settings.json`에 저장하는 Windows Electron 관리자 MVP다. 새 사본 UI 기본값은 Patch 03 ON(B 화면), Patch 01·02 OFF이며 각 스위치는 독립적이다. 적용 전 파일 백업과 SHA-256 기록, 적용 실패 자동 원복, 백업 지문을 검사하는 복구를 제공한다.
+- `isolated-target.cjs`: 관리자는 검토된 공식 v0.5.15 GitHub 소스의 고정 커밋 `16c9a3d1631061a72831e0657434003940daf531`만 복사한다. 변경되거나 실행 중인 소스, 일반 설치본, `app.asar`, symlink/junction은 거부하고 OS 임시 폴더 아래의 새 복사본에만 적용한다. 실행 명령은 저장소 루트에서 `npm run patch-manager`다.
 - settings.json: 세 스위치를 OFF로 둔 간단한 설정 예시.
 - compatibility.cjs: 각 패치의 필요 코드 지점을 독립 검증하는 **읽기 전용** 구조 분석기. 입력은 분리된 소스 스냅샷이며 설치 파일에 접근하지 않는다.
 - test/structure.test.cjs: 네 조합 저장·복원, 손상된 설정 보존, 업데이트된 실제 소스의 구조 판정, 다른 버전의 동일 구조 후보, 같은 버전에서 필수 코드가 깨진 경우, 한쪽 패치만 막히는 경우, 중복 삽입 감지와 원본 불변성 테스트.
 
 구조 판정은 disabled(사용자 OFF), blocked(필수 연결 지점 부족·중복·충돌), structural-candidate(시험 적용 후보)의 세 가지다. **structural-candidate는 실제 작동 보증이나 자동 적용 허가가 아니다.** 모든 분석에서 automaticApplyAuthorized는 false로 유지한다.
 
-## 이 단계에서는 하지 않는 작업
+## 이 단계에서 지원하지 않는 작업
 
-1. 패치 관리자 GUI와 DinoLilacPatch.exe 패키징.
-2. 실제 설치본에 패치 payload를 적용하는 작업. 세 패치별 manifest와 격리된 소스 복사본 적용은 검증하지만, 설치본에 독립 ON/OFF를 연결하지는 않았다.
-3. app.asar 읽기·압축 해제·교체, 설치본 백업과 원상 복구, 공식 업데이터 후킹.
-4. 새 버전의 실제 시험 적용·GUI 통합 검증, 실계정 ChatGPT 내장 브라우저 로그인.
+1. 이 관리자 MVP의 별도 설치 EXE 패키징.
+2. 실제 설치본에 패치 payload 적용. `app.asar` 읽기·압축 해제·교체, 설치본 백업·원상 복구, 공식 업데이터 후킹.
+3. 실계정 ChatGPT 웹 자동 입력·응답 수집·대화 삭제.
 
-위 기능들은 **사용자가 정한 현 작업 범위 밖**이므로 이 브랜치에서 진행하지 않는다.
+일반 설치본을 고르는 경로는 관리자에 없으며, 미지원 대상은 안전 검증에서 거부한다.
 
 ## 안전 경계
 
-이 내장 브라우저 변경은 GitHub의 codex/dino-chatgpt-web-translation 브랜치 안에만 있다. main, D:\LilacAnime, 사용자 프로필과 updater 캐시의 파일을 수정하지 않는다. 모든 코드는 사용자의 명령어 실행 없이 이후 GUI에 연결할 수 있도록 순수 모듈로 나눈다.
+관리자 MVP는 Windows Electron GUI로 제공되며, 허용된 공식 소스 복사본만 임시 격리 경로에 적용한다. main, `D:\LilacAnime`, 사용자 프로필과 updater 캐시의 파일을 수정하지 않는다. ChatGPT 웹 자동 전송·응답 수집·대화 삭제는 포함하지 않는다.

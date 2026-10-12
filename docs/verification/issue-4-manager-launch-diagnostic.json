@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "runAt": "2026-10-12T15:13:41.642Z",
+  "app": {
+    "sourceProfile": "official-source-16c9a3d1-v0515",
+    "version": "0.5.15",
+    "sourceCommit": "16c9a3d1631061a72831e0657434003940daf531"
+  },
+  "isolation": {
+    "managerCreatedTempCopy": true,
+    "freshUserDataSessionCacheDownloadsVideos": true,
+    "accountLogin": false
+  },
+  "scope": {
+    "streamResolution": false,
+    "providerCalls": 0
+  },
+  "providers": [],
+  "result": "harness-only-no-provider-calls"
+}

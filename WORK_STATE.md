@@ -1,5 +1,14 @@
 # 작업 상태
 
+## 2026-10-13 GitHub issue #4 — Dino Lilac Patch 관리자 MVP
+
+- 기존 issue #3 완료 브랜치의 커밋 `1fccb06f2e00e1223fb5c993947ef1a1df1b1d66`에서 새 격리 브랜치 `codex/issue-4-dinolilacpatch-mvp-20261012`로 이어서 작업했다.
+- Windows Electron 관리자 MVP를 추가했다. 고정된 공식 LilacAnime v0.5.15 소스 커밋 `16c9a3d1631061a72831e0657434003940daf531`만 새 OS 임시 사본으로 복사하며, 일반 설치본·`app.asar`·변경/실행 중인 소스·symlink/junction 경로는 거부한다. Patch 01/02/03 독립 토글, 새 화면의 Patch 03 ON 기본, 격리 사본 내부 설정, 백업·SHA-256 복구를 연결했다. 별도 EXE와 실설치 적용은 하지 않았다.
+- 포커스 테스트 27/27, 전체 `npm test` 393/393 통과(실패/건너뜀 0). 공식 v0.5.14/v0.5.15 임시 소스에서 검증했다. 실제 관리자 main/preload/renderer Electron 테스트에서 Patch 03 기본값, 적용/복구 IPC, 설정 저장과 원본 해시 복구가 통과했고 외부 요청은 0회였다.
+- 공식 v0.5.15 내장 앱 IPC로 다섯 공급원의 검색을 각 1회만 시도했다. RE:Anime, Miruro, Animenosub, Ohli24, Linkkf가 모두 `TypeError`를 반환했고 HTTP 상태와 검색 결과가 없었다. 따라서 상세/회차 IPC는 호출하지 않았고, 원인은 확정하지 못했다. 재시도, resolver, 스트림 요청은 없었다. 결과는 `docs/verification/issue-4-provider-ipc-live-redacted.json`에 기록했다.
+- ChatGPT 웹 자동 입력·응답 수집·대화 삭제는 미구현, 수동 번역만 유지한다. 실제 ChatGPT 계정과 설치본/프로필/시청 기록/다운로드/자막/`app.asar`, `main`은 사용하거나 변경하지 않았다. GitHub Actions는 실행하지 않았고 활성 `Build` 배포 workflow는 유지했다.
+- 상세: `docs/verification/issue-4-manager-mvp.md`.
+
 ## 2026-10-12 GitHub issue #2 — 패치 02 + 패치 03 구현
 
 - 시작은 `codex/dino-chatgpt-logged-out-test`의 `3aa6551dfa1be3b665a786f2f43b5631811f8d46`; 새 격리 브랜치 `codex/issue-2-patch-02-03`에서 작업한다. 패치 02 마일스톤은 `9780f15`로 먼저 커밋했다.

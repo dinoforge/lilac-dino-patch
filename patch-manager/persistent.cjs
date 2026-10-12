@@ -6,20 +6,49 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { assertSyntheticFixture, noLinksRecursive, stageSynthetic } = require('./staging.cjs');
+const { FIXTURE_MARKER, assertSyntheticFixture, noLinksRecursive, stageSynthetic } = require('./staging.cjs');
+const { assertIsolatedTarget, stageIsolatedTarget } = require('../dino-lilac-patch/isolated-target.cjs');
 const { hashBytes, readVerifiedFile, inspect } = require('./core.cjs');
 
 const STATE_DIR = '.lilac-patch-manager';
 const STATE_FILE = 'state.json';
 const LOCK_FILE = 'lock';
 
+function assertManagedTarget(root) {
+  const full = path.resolve(root);
+  return fs.existsSync(path.join(full, FIXTURE_MARKER)) || fs.existsSync(`${full}${FIXTURE_MARKER}`)
+    ? assertSyntheticFixture(full)
+    : assertIsolatedTarget(root);
+}
+
+function stageManagedTarget(root, manifest) {
+  const full = path.resolve(root);
+  return fs.existsSync(path.join(full, FIXTURE_MARKER)) || fs.existsSync(`${full}${FIXTURE_MARKER}`)
+    ? stageSynthetic(full, manifest)
+    : stageIsolatedTarget(root, manifest);
+}
+
 function statePaths(root) {
   const dir = `${path.resolve(root)}.patch-manager`;
-  return { dir, state: path.join(dir, STATE_FILE), lock: path.join(dir, LOCK_FILE), backups: path.join(dir, 'backups') };
+  const state = path.join(dir, STATE_FILE), lock = path.join(dir, LOCK_FILE), backups = path.join(dir, 'backups');
+  const assertPath = (target, kind) => {
+    let stat;
+    try { stat = fs.lstatSync(target); }
+    catch (error) { if (error.code === 'ENOENT') return; throw error; }
+    if (stat.isSymbolicLink() || (kind === 'directory' ? !stat.isDirectory() : !stat.isFile())) throw new Error('Patch manager state path is not a safe regular path');
+    const actual = fs.realpathSync(target), expected = path.resolve(target);
+    const fold = value => process.platform === 'win32' ? value.toLocaleLowerCase('en-US') : value;
+    if (fold(actual) !== fold(expected)) throw new Error('Patch manager state path resolves outside its expected location');
+  };
+  assertPath(dir, 'directory');
+  assertPath(state, 'file');
+  assertPath(lock, 'file');
+  assertPath(backups, 'directory');
+  return { dir, state, lock, backups };
 }
 
 function readState(root) {
-  assertSyntheticFixture(root);
+  assertManagedTarget(root);
   const { state } = statePaths(root);
   if (!fs.existsSync(state)) return { schema: 1, latest: null, lastApplied: null, history: [] };
   const stat = fs.lstatSync(state);
@@ -43,16 +72,18 @@ function atomicWrite(file, bytes) {
 }
 
 function writeState(root, value) {
-  assertSyntheticFixture(root);
+  assertManagedTarget(root);
   const { dir, state } = statePaths(root);
   fs.mkdirSync(dir, { recursive: true });
+  statePaths(root);
   atomicWrite(state, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function acquireLock(root) {
-  assertSyntheticFixture(root);
+  assertManagedTarget(root);
   const { dir, lock } = statePaths(root);
   fs.mkdirSync(dir, { recursive: true });
+  statePaths(root);
   let descriptor;
   try { descriptor = fs.openSync(lock, 'wx'); }
   catch (error) {
@@ -86,14 +117,16 @@ function candidateFingerprint(root, manifest) {
 
 function alreadyApplied(root, manifest, state) {
   const receipt = state.lastApplied;
-  if (!receipt || receipt.patchSet !== (manifest.patchSet || 'preview') || receipt.version !== manifest.version) return false;
+  if (!receipt || receipt.status !== 'applied' || receipt.patchSet !== (manifest.patchSet || 'preview') || receipt.version !== manifest.version) return false;
   return Object.entries(receipt.files || {}).every(([file, record]) => currentActionHash(root, { file }) === record.patchedSha256);
 }
 
 function captureBackup(root, stageRoot, manifest, receiptId) {
   const { backups, dir: stateDir } = statePaths(root);
+  fs.mkdirSync(backups, { recursive: true });
+  statePaths(root);
   const backupDir = path.join(backups, receiptId);
-  fs.mkdirSync(backupDir, { recursive: true });
+  fs.mkdirSync(backupDir, { recursive: false });
   const files = {};
   for (const action of manifest.actions) {
     const target = path.join(root, ...action.file.split('/'));
@@ -149,7 +182,7 @@ function restoreReceiptFiles(root, receipt, { allowOriginal = false } = {}) {
 }
 
 function applyUnlocked(root, manifest, options = {}) {
-  const base = assertSyntheticFixture(root);
+  const base = assertManagedTarget(root);
   noLinksRecursive(base);
   if (options.isAppRunning?.(base)) return { status: 'app-running', changed: false };
   const state = readState(base);
@@ -157,8 +190,12 @@ function applyUnlocked(root, manifest, options = {}) {
   const eligibility = inspect(base, manifest);
   if (eligibility.status !== 'eligible-for-isolated-preview') return { ...eligibility, changed: false };
 
-  const staged = stageSynthetic(base, manifest);
-  if (staged.status !== 'staged-synthetic-preview') return { ...staged, changed: false };
+  const staged = stageManagedTarget(base, manifest);
+  if (!['staged-synthetic-preview', 'staged-isolated-source'].includes(staged.status)) return { ...staged, changed: false };
+  if (options.isAppRunning?.(base)) {
+    fs.rmSync(staged.stageContainer, { recursive: true, force: true });
+    return { status: 'app-running', changed: false };
+  }
   const id = crypto.randomUUID();
   let receipt;
   try {
@@ -203,7 +240,7 @@ function applyUnlocked(root, manifest, options = {}) {
 }
 
 function applyPersistent(root, manifest, options = {}) {
-  const base = assertSyntheticFixture(root);
+  const base = assertManagedTarget(root);
   const release = acquireLock(base);
   if (!release) return { status: 'manager-busy', changed: false };
   try { return applyUnlocked(base, manifest, options); }
@@ -211,7 +248,7 @@ function applyPersistent(root, manifest, options = {}) {
 }
 
 function rollbackPersistent(root, options = {}) {
-  const base = assertSyntheticFixture(root);
+  const base = assertManagedTarget(root);
   const release = acquireLock(base);
   if (!release) return { status: 'manager-busy', changed: false };
   try {
@@ -221,6 +258,7 @@ function rollbackPersistent(root, options = {}) {
     if (!receipt || receipt.status !== 'applied') return { status: 'nothing-to-rollback', changed: false };
     restoreReceiptFiles(base, receipt);
     receipt.status = 'rolled-back';
+    state.history = state.history.map(entry => entry.id === receipt.id ? { ...entry, status: 'rolled-back' } : entry);
     state.latest = { status: 'rolled-back', receiptId: receipt.id };
     writeState(base, state);
     return { status: 'rolled-back', changed: true, receiptId: receipt.id };
@@ -233,7 +271,7 @@ async function reconcileAfterUpdate(root, manifest, {
   settleMs = 1500,
   delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 } = {}) {
-  const base = assertSyntheticFixture(root);
+  const base = assertManagedTarget(root);
   if (updateCompleteConfirmed !== true) return { status: 'update-not-confirmed', changed: false };
   const release = acquireLock(base);
   if (!release) return { status: 'manager-busy', changed: false };
