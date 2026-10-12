@@ -57,27 +57,38 @@ jobs:
         run: node tests/run-chatgpt-logged-out-live.cjs
       - name: Isolated animated-video playback (decoded moving frames)
         run: node tests/run-isolated-animation-playback.cjs
+      - name: Full Node regression suite
+        run: npm test
+
+  miruro-live-episode:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dev dependencies
+        run: npm ci
       - name: Miruro Frieren episode 1 live playback (isolated, upstream-dependent)
         id: miruro_live
         timeout-minutes: 4
-        continue-on-error: true
         env:
           DINO_MIRURO_LIVE_OPT_IN: '1'
         run: node tests/run-miruro-live-episode.cjs
-      - name: Record separate live upstream test outcome
+      - name: Record live episode result
         if: always()
         shell: pwsh
         run: |
           $outcome = "${{ steps.miruro_live.outcome }}"
           Write-Output "Miruro live episode probe outcome: $outcome"
-          Write-Output "This is not proof of audible sound, on-screen subtitles, or completing the episode."
+          Write-Output "This job is separate from the Node regression job."
           if ($outcome -ne 'success') {
-            Write-Output "::warning::Miruro real-episode probe FAILED/BLOCKED. Real-episode playback is NOT VERIFIED; inspect prior step logs."
-            "## Miruro live episode: FAILED / NOT VERIFIED" >> $env:GITHUB_STEP_SUMMARY
-            "The live provider request failed; see prior step logs. This is separate from the Node regression result." >> $env:GITHUB_STEP_SUMMARY
+            Write-Output "::error::Miruro live episode probe FAILED/BLOCKED. Real-episode playback is NOT VERIFIED; inspect the live-test step log."
+            "## Miruro live episode: FAIL / BLOCKED" >> $env:GITHUB_STEP_SUMMARY
+            "The live provider test failed in this job. The independent Node regression job reports its own result." >> $env:GITHUB_STEP_SUMMARY
           } else {
             "## Miruro live episode: SHORT PLAYBACK PROBE PASSED" >> $env:GITHUB_STEP_SUMMARY
             "Audible sound, on-screen subtitle rendering, and full episode completion remain unverified." >> $env:GITHUB_STEP_SUMMARY
           }
-      - name: Full Node regression suite
-        run: npm test

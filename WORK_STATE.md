@@ -1,5 +1,14 @@
 # 작업 상태
 
+## 2026-10-12 GitHub issue #1 — Miruro HTTP 403 / 프리렌 1기 1화
+
+- 기준 원격 브랜치 `codex/dino-chatgpt-logged-out-test`, 시작 커밋 `c340e674afce9c7c083125ea2e21feddca152f0d`에서 작업했다. `main`은 변경하지 않았다.
+- 기존 GitHub Actions run [38229821039](https://github.com/dinoforge/anime-player/actions/runs/38229821039)은 `provider:catalog` 단계에서 Miruro HTTP 403을 받아 회차 선택 전에 끝났다. 로컬 Windows에서는 같은 앱 코드/요청으로 카탈로그 검색이 성공해 Frieren S1E1, SOFT 서버, HLS를 resolve했다. 따라서 Actions 실행 환경의 접근/네트워크 거절이 가장 잘 맞지만, 기존 로그에 응답 헤더와 본문이 없어 구체적인 거절 정책은 확정하지 않았다. 우회 헤더·프록시·대체 중계는 추가하지 않았다.
+- 격리 Electron 실제 스트림 검증: 1.45초 동안 37개 프레임, 640×360, 영어 WebVTT 형식과 321개 cue 확인. `userData`, `sessionData`, `videos`는 `%TEMP%` 아래에 격리하고 runner가 정리했다. 오디오 코덱은 관찰했지만 영상이 음소거되어 실제 청취는 미검증, 자막 파일은 받았지만 화면 표시는 미검증, 전체 회차 재생은 하지 않았다.
+- 공식 v0.5.14 (`f095fc3d775451e144ed780e1fa081f739927652`) 및 v0.5.15 (`16c9a3d1631061a72831e0657434003940daf531`) 임시 복사본을 지정해 `npm test`: 382/382 통과, 실패 0, 건너뜀 0.
+- `.github/workflows/dino-embedded-web.yml`에서 실회차 검사를 별도 `miruro-live-episode` job으로 분리하고 `continue-on-error`를 제거했다. Actions의 403은 해당 job 실패와 summary/error annotation으로 드러나고 Node 회귀 결과는 독립 job에 남는다.
+- 보고서: `docs/verification/miruro-frieren-live-2026-10-12.md`. 변경된 workflow의 GitHub Actions 실행 결과는 push 후 확인한다.
+
 ## 2026-10-12 ChatGPT 웹 자동 번역 요청 판정
 
 - 요청 기준은 `codex/dino-chatgpt-web-translation`의 `508c94b`이며, 변경은 신규 `codex/dino-chatgpt-web-auto-translation`에서만 진행한다.

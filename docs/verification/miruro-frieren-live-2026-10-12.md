@@ -33,6 +33,21 @@ Miruro live episode probe outcome: failure
 
 ## 후속 검증
 
-403이 GitHub Actions 환경에서 발생한 HTTP 응답이라는 사실 외에 원인은 확정할 수 없다.
-공급원 API 상태 및 사용 권한을 정상적으로 확인할 수 있는 환경에서 먼저 검색 API 호출을 다시 검사한다.
-그 이후에만 HLS 영상 프레임을 측정할 수 있고, 실제 스피커 소리·화면 자막 표시·전체 회차 완주는 별도 검증해야 한다.
+## 2026-10-12 로컬 Windows 실회차 재현
+
+현재 작업 브랜치의 기준 커밋 `c340e674afce9c7c083125ea2e21feddca152f0d`에서 기존 격리 Electron runner를 로컬 Windows에서 실행했다. 앱의 Miruro IPC와 요청/응답 파서는 수정하지 않은 상태였다.
+
+- `provider:catalog('miruro', 'Frieren')` 성공. 앱은 `www.miruro.to`의 `/api/v1/anime`에 `q=Frieren`, `limit=15`, `sort=-popularity`를 보내고, 기존 gzip/XOR 응답을 파싱했다.
+- 2023년 《장송의 프리렌》 1기 1화를 선택하고 `SOFT - kickassanime Vid` 서버에서 스트림 주소를 얻었다. 서명된 주소는 로그에 남기지 않았다.
+- Electron/Hls.js가 실제 스트림을 재생했다. 프레임 37개, 재생 위치 1.45초, 640×360 프레임을 확인한 뒤 정지했다. 보고된 전체 길이는 약 25분 59.9초였지만 전체 회차 재생은 하지 않았다.
+- 오디오 코덱 존재는 관찰했다. 검사는 영상을 음소거했으므로 **실제 청각 출력은 미검증**이다.
+- 영어 WebVTT 파일을 받아 형식과 321개 cue 타임코드를 확인했다. 자막을 플레이어 위에 실제로 표시하는 동작은 이 검사에서 호출하지 않았으므로 **화면 자막은 미검증**이다.
+- `userData`, `sessionData`, `videos`는 전용 `%TEMP%` 하위 폴더로 지정됐고 runner가 그 임시 폴더를 종료 후 정리했다. 실제 설치본/프로필/시청 기록/다운로드 폴더는 사용하지 않았다.
+
+## 403 원인 판정
+
+GitHub Actions run [38229821039](https://github.com/dinoforge/anime-player/actions/runs/38229821039)은 같은 브랜치와 같은 앱 코드에서 `provider:catalog` 단계가 HTTP 403을 반환해 회차 선택 전 중단됐다. 기존 로그에는 응답 헤더나 본문이 없어 거절을 만든 구체적 서버 정책까지는 알 수 없다. 같은 요청 코드가 로컬 Windows 네트워크에서는 성공했으므로, **요청 형식 오류나 전체 공급원 장애보다는 GitHub Actions 실행 환경에서의 네트워크/접근 거절이 가장 잘 맞는 설명**이다. IP 차단이나 특정 보안 제품을 확정한 것은 아니며, 이를 우회하는 요청 헤더·프록시·대체 중계 서버는 추가하지 않았다.
+
+기존 workflow는 live 단계에 `continue-on-error: true`를 두어 해당 단계가 실패해도 전체 run은 성공으로 보일 수 있었다. 검증 workflow를 두 작업으로 나눠 Node 회귀 결과와 실회차 결과를 각각 표시하도록 바꿨다. 이제 403이면 `miruro-live-episode` job이 실패하고, 전체 Node 회귀 검사는 별도 job에서 독립적으로 결과를 낸다.
+
+로컬에서 짧은 실회차 프레임과 자막 파일을 확인했으므로 해당 로컬 검증은 **PASS**다. GitHub Actions의 실회차 네트워크 검증은 **BLOCKED (HTTP 403)**으로 별도 기록한다. 실제 소리, 화면에 표시된 자막, 회차 완주는 어느 쪽에서도 통과로 주장하지 않는다.
