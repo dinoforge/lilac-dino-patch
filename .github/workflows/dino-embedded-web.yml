@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - codex/dino-chatgpt-web-translation
+      - codex/dino-chatgpt-logged-out-test
   workflow_dispatch:
 permissions:
   contents: read
@@ -36,6 +37,8 @@ jobs:
       - name: Check patched source syntax
         run: |
           node --check electron/embedded-chatgpt-web.cjs
+          node --check tests/chatgpt-logged-out-live.electron.cjs
+          node --check tests/run-chatgpt-logged-out-live.cjs
           node --check electron/patch-manager-stage2.cjs
           node --check src/patch-manager-stage2.js
           node --check patch-manager/adapters/lilacanime-v0.5.14.cjs
@@ -43,6 +46,10 @@ jobs:
       - name: Test embedded UI bridge and independent patch variants
         run: |
           node --test patch-manager/test/embedded-chatgpt-web.test.cjs
+          node --test patch-manager/test/chatgpt-logged-out.test.cjs
           node --test patch-manager/test/lilacanime-independent.test.cjs
+      - name: Anonymous ChatGPT web navigation smoke (no credentials)
+        continue-on-error: true
+        run: node tests/run-chatgpt-logged-out-live.cjs
       - name: Full Node regression suite
         run: npm test
