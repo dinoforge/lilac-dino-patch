@@ -7,6 +7,7 @@
 - 공식 v0.5.15 사본의 실제 검색·상세·회차 경로는 Re:Anime 30/220, Miruro 15/220, Animenosub 2/500, 애니24 19/287건으로 확인했다. 애니24는 첫 영어 검색은 빈 결과였고 한국어 검색으로 확인했다. Linkkf API는 DNS `ENOTFOUND`; 상세·회차는 미호출이다.
 - Windows x64 `DinoLilacPatch.exe` 포터블 산출물을 생성했다. 실제 EXE를 체크아웃 밖에서 실행해 패치 01/02/03을 각각 단독 ON으로 적용하고 복구했으며 Patch 03 OFF A 경로와 각 복구 후 원본 해시를 확인했다. 대상은 관리자 생성 공식 소스 임시 사본뿐이었다.
 - 주요 검증: 포터블 빌드 성공, 패키징 EXE UI 3회 적용/복구 통과, ASAR 파일 경계 점검, 변경 JS 구문 검사 및 JSON 유효성 검사 통과, 진단기 무요청 부팅 통과. 전체 `npm test`와 GitHub Actions는 실행하지 않았다.
+- Patch 03 장애 격리 mock 확인: Miruro 실패 시에도 통합 목록의 정상 공급원 작품 4건 및 회차 선택 2건이 유지된다. 실시간 공급원 검증과는 별도다.
 - 상세: `docs/verification/issue-5-provider-diagnostics-manager-exe.md`, 집계: `docs/verification/issue-5-provider-diagnostics.json`. 남은 공급원 문제는 Linkkf DNS 해소다. 실제 영상 재생은 검증하지 않았다.
 - 변경 경로: `package.json`, `tests/run-issue4-provider-ipc-live.cjs`, `tests/run-issue5-provider-diagnostics.cjs`, `scripts/build-dino-lilac-patch-portable.cjs`, `tests/run-dino-lilac-manager-portable.cjs`, `docs/verification/issue-5-*`.
 - 원격 확인: issue #5 브랜치 원격 ref는 아직 없으며, 활성 `Build` workflow는 태그·수동 실행 전용이다. 이번 브랜치 push로 GitHub Actions가 실행되지는 않는다. Actions는 실행하지 않았고 workflow 상태도 변경하지 않았다.

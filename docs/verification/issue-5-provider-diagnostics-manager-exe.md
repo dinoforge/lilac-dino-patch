@@ -47,6 +47,8 @@ Linkkf는 앱 코드에 고정된 API 호스트의 DNS 조회가 `ENOTFOUND`였�
 
 - 통과: 생성된 EXE 실행, 패치 01/02/03의 독립 ON 및 나머지 OFF, 각 적용·복구 3회, Patch 03 OFF의 A 경로 보존, 원본 기준 해시 복구.
 - 통과: ASAR에 관리자 UI·어댑터·필요한 패치 payload가 들어가고 LilacAnime 앱 진입점은 제외된 것을 확인.
+- 통과: Patch 03 격리 동작을 합성 장애로 확인 — Miruro 실패 상태를 표시하면서 통합 목록의 나머지 공급원 작품 4건과 정상 공급원의 회차 선택 2건을 유지했다. 이 항목은 mock 입력 검증이며 실시간 공급원 성공 근거는 아니다.
+- Patch 03 ON은 EXE 첫 화면 기본값, 통합 payload 적용, `index.html` 연결로 확인했고 OFF는 payload 제외로 기존 A 경로 보존을 확인했다. 패치된 LilacAnime 앱 자체의 별도 시각 UI 실행은 이 검증에서 하지 않았다.
 - 통과: 공급원 검색/상세/회차의 실제 IPC 검증 — Re:Anime, Miruro, Animenosub, 애니24.
 - 제한: Linkkf API 도메인의 DNS 실패로 검색·상세·회차를 확인할 수 없었다.
 - GitHub Actions는 실행하지 않았다. 테스트를 위해 생성한 임시 격리 사본과 포터블 런타임은 종료 후 정리했다.
