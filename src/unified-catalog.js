@@ -161,27 +161,23 @@
   }
 
   function mount(document) {
-    if (!document || root?.DinoLilacPatchFeatures?.['patch-03'] !== true || !root?.lilac || !root?.LilacIntegratedSearch || document.getElementById('unifiedCatalogDialog')) return;
+    if (!document || root?.DinoLilacPatchFeatures?.['patch-03'] !== true || !root?.lilac || !root?.LilacIntegratedSearch || document.getElementById('unifiedCatalogView')) return;
     if (!document.getElementById('unifiedCatalogStyles')) {
       const stylesheet = document.createElement('link');
       stylesheet.id = 'unifiedCatalogStyles'; stylesheet.rel = 'stylesheet'; stylesheet.href = new URL('unified-catalog.css', document.baseURI).href;
       document.head.append(stylesheet);
     }
-    const anchor = document.getElementById('seeAllSeason');
-    if (!anchor) return;
-    const openButton = document.createElement('button');
-    openButton.type = 'button'; openButton.id = 'openUnifiedCatalog'; openButton.className = 'text-btn unified-catalog-open';
-    openButton.textContent = '통합 카탈로그';
-    anchor.insertAdjacentElement('beforebegin', openButton);
-
-    const dialog = document.createElement('dialog');
-    dialog.id = 'unifiedCatalogDialog'; dialog.className = 'unified-catalog-dialog';
-    dialog.innerHTML = '<div class="unified-catalog-panel"><header class="unified-catalog-header"><button type="button" class="unified-catalog-back" hidden>← 검색 결과</button><h2>통합 카탈로그</h2><button type="button" class="unified-catalog-close" aria-label="닫기">×</button></header><form class="unified-catalog-search"><label for="unifiedCatalogQuery">다섯 공급원에서 작품 검색</label><div><input id="unifiedCatalogQuery" type="search" maxlength="120" placeholder="작품 제목"><button type="submit">검색</button></div></form><p class="unified-catalog-status" role="status" aria-live="polite"></p><section class="unified-catalog-providers" aria-label="공급원 상태"></section><div class="unified-catalog-results"></div></div>';
-    document.body.append(dialog);
-    const status = dialog.querySelector('.unified-catalog-status');
-    const providers = dialog.querySelector('.unified-catalog-providers');
-    const results = dialog.querySelector('.unified-catalog-results');
-    const back = dialog.querySelector('.unified-catalog-back');
+    const home = document.getElementById('homeView');
+    if (!home) return;
+    const panel = document.createElement('section');
+    panel.id = 'unifiedCatalogView'; panel.className = 'content-section unified-catalog-view';
+    panel.setAttribute('aria-labelledby', 'unifiedCatalogTitle');
+    panel.innerHTML = '<header class="unified-catalog-header"><div><h2 id="unifiedCatalogTitle">통합 애니메이션</h2><p>다섯 영상 공급원의 작품과 회차를 한곳에서 찾아보세요.</p></div><button type="button" class="unified-catalog-original">기존 공급원별 목록</button><button type="button" class="unified-catalog-back" hidden>← 검색 결과</button></header><form class="unified-catalog-search"><label for="unifiedCatalogQuery">다섯 공급원 통합 검색</label><div><input id="unifiedCatalogQuery" type="search" maxlength="120" placeholder="작품 제목 입력"><button type="submit">검색</button></div></form><p class="unified-catalog-status" role="status" aria-live="polite"></p><section class="unified-catalog-providers" aria-label="공급원 상태"></section><div class="unified-catalog-results"></div>';
+    home.insertBefore(panel, home.firstElementChild);
+    const status = panel.querySelector('.unified-catalog-status');
+    const providers = panel.querySelector('.unified-catalog-providers');
+    const results = panel.querySelector('.unified-catalog-results');
+    const back = panel.querySelector('.unified-catalog-back');
     const service = createCatalogService({ lilac: root.lilac, integratedSearch: root.LilacIntegratedSearch });
     let request = 0, previousView = { type: 'browse', query: '' };
 
@@ -232,7 +228,7 @@
       results.className = 'unified-catalog-results is-detail'; results.replaceChildren();
       const title = document.createElement('h3'); applyDisplayTitle(title, group); results.append(title);
       const detail = await service.details(group);
-      if (token !== request || !dialog.open) return;
+      if (token !== request || !panel.isConnected) return;
       const ready = detail.results.filter(result => result.episodes.length);
       setProviderStatus(detail.results.map(result => ({
         provider: result.provider,
@@ -262,7 +258,6 @@
               ? root.titleOf(anime)
               : anime.title || anime.title_english || anime.title_japanese || group.title || '';
             const number = episodeNumber(episode) || 1;
-            dialog.close();
             root.resolveIntoPlayer(resolver, `${subtitleTitle} · ${episode.name || `${number}화`}`, {
               episode, subtitleTitle, image: anime.images?.webp?.large_image_url || anime.images?.jpg?.large_image_url || '',
               seriesEpisodes: choice.seriesEpisodes, resolveKind: choice.provider === 'linkkf' ? 'linkkf' : 'provider', anime
@@ -280,7 +275,7 @@
       const token = ++request; returnToResults(); status.textContent = '다섯 공급원의 최신 작품 목록을 확인하고 있습니다.';
       providers.replaceChildren(); results.replaceChildren();
       const response = await service.browse();
-      if (token !== request || !dialog.open) return;
+      if (token !== request || !panel.isConnected) return;
       const groups = root.LilacIntegratedSearch.groupCatalogResults(response.items, '');
       setProviderStatus(response.statuses); status.textContent = `통합 목록 ${groups.length}개 작품 · 공급원별 첫 목록`;
       renderGroups(groups);
@@ -290,7 +285,7 @@
       const token = ++request; returnToResults(); status.textContent = `“${query}” 검색 중입니다.`;
       providers.replaceChildren(); results.replaceChildren();
       const response = await service.search(query);
-      if (token !== request || !dialog.open) return;
+      if (token !== request || !panel.isConnected) return;
       const groups = root.LilacIntegratedSearch.groupCatalogResults(response.items, '');
       setProviderStatus(response.statuses);
       const failed = response.statuses.filter(value => value.state === 'failed').length;
@@ -298,19 +293,23 @@
       renderGroups(groups);
     }
 
-    openButton.addEventListener('click', () => { dialog.showModal(); loadBrowse().catch(error => { status.textContent = `통합 목록을 불러오지 못했습니다: ${error.message}`; }); });
-    dialog.querySelector('.unified-catalog-close').addEventListener('click', () => dialog.close());
+    panel.querySelector('.unified-catalog-original').addEventListener('click', () => {
+      const originalCatalog = document.querySelector('.nav[data-view="all"]') || document.getElementById('seeAllSeason');
+      if (originalCatalog) originalCatalog.click();
+      else status.textContent = '기존 공급원별 목록을 여는 버튼을 찾지 못했습니다.';
+    });
     back.addEventListener('click', () => {
       request++;
       const previous = previousView;
       const restore = previous.type === 'search' ? loadSearch(previous.query) : loadBrowse();
       restore.catch(error => { status.textContent = error.message; });
     });
-    dialog.querySelector('.unified-catalog-search').addEventListener('submit', event => {
-      event.preventDefault(); const query = dialog.querySelector('#unifiedCatalogQuery').value.trim();
+    panel.querySelector('.unified-catalog-search').addEventListener('submit', event => {
+      event.preventDefault(); const query = panel.querySelector('#unifiedCatalogQuery').value.trim();
       if (!query) { loadBrowse().catch(error => { status.textContent = error.message; }); return; }
       loadSearch(query).catch(error => { status.textContent = `통합 검색을 완료하지 못했습니다: ${error.message}`; });
     });
+    loadBrowse().catch(error => { status.textContent = `통합 목록을 불러오지 못했습니다: ${error.message}`; });
   }
 
   return { PROVIDERS, LABELS, normalize, episodeNumber, groupEpisodes, withTimeout, mapLimit, createCatalogService, mount };

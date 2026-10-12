@@ -825,3 +825,12 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 기존 끄기·번역 API·로컬 AI 선택과 ChatGPT 수동 복사/가져오기 경로를 보존했다. ChatGPT 웹 대화 삭제는 지원되지 않아 버튼을 비활성화했다. 새 패치 출력에 SIWC 코드를 추가하지 않았다.
 - npm test는 공식 v0.5.14 커밋 f095fc3d775451e144ed780e1fa081f739927652 및 v0.5.15 커밋 16c9a3d1631061a72831e0657434003940daf531의 OS 임시 격리 소스를 연결해 378/378 통과, 건너뜀 0이었다. 네 가지 패치 01/02 ON/OFF 조합과 공식 소스 차단·복원 검증이 통과했다. 격리 Electron renderer 테스트는 자동 버튼의 요청 복사, 모의 내장 창 열기, 불확실 묶음 중복 준비 차단, 수동 응답 검증, WebVTT 저장·적용·이어하기를 통과했다. 테스트에서 ChatGPT 네트워크 요청은 0회였다.
 - D:\LilacAnime 실설치본과 사용자 프로필을 접근하거나 수정하지 않았고 main은 변경하지 않았다. GitHub Actions run https://github.com/dinoforge/anime-player/actions/runs/38156241022는 workflow_dispatch로 커밋 b1ab8d93를 검증해 성공했다. checkout/setup-node가 Node.js 20에서 24로 강제 전환된다는 비차단 deprecation annotation이 남았다.
+
+## 2026-10-12 GitHub issue #3 Patch 03 기본 화면 및 Windows 격리 확인
+
+- 기존 `codex/issue-2-patch-02-03` 기준 커밋 `856d40fc7b9f937315042fc753a0505e2cb4f955`에서 `codex/issue-3-windows-usability` 브랜치를 만들었다. Patch 03 ON은 통합 카탈로그를 기존 `#homeView`의 첫 섹션으로 표시하고 즉시 둘러보기를 시작한다. 새 홈에서 기존 전체 공급원 카탈로그로 이동할 수 있으며 OFF는 기존 홈/A 흐름을 보존한다.
+- `src/unified-catalog.js`, `src/unified-catalog.css`, `dino-lilac-patch/compatibility.cjs`를 변경하고 `tests/unified-catalog.electron.cjs`의 공식 소스 모드를 추가했다. 구조 테스트 픽스처에도 원본 `#homeView` 앵커를 반영했다.
+- 공식 v0.5.15 커밋 `16c9a3d1631061a72831e0657434003940daf531`의 실제 `src/index.html` 복사본과 임시 Electron 프로필로 ON/OFF UI, 5개 모의 공급원, 중복 병합, 검색, 회차 상세, 공급원 장애 격리, 모의 Linkkf resolver 연결을 확인했다. 이 검사는 0 외부 요청이며 실제 공급원 검색이나 영상 재생을 입증하지 않는다.
+- 공개 홈페이지 1회 GET은 RE:Anime/Miruro/Animenosub HTTP 200, 애니24/Linkkf fetch 실패(`TypeError`)였다. 이는 홈페이지 연결성에 한정되며 앱 검색·회차·재생 결과는 미검증이다. Patch 02의 공식 v0.5.14 임시 프로필 Electron 수동 자막 가져오기·검증·저장 경로도 통과했으며 ChatGPT 실계정은 사용하지 않았다.
+- `node --test dino-lilac-patch/test/structure.test.cjs`: 10/10. 첫 전체 테스트는 합성 구조 fixture에 새 `#homeView` 앵커가 없어 390/391에서 실패해 픽스처를 보정했다. 공식 v0.5.14·v0.5.15 격리 소스 환경에서 최종 `npm test`: 391/391, 실패 0, 건너뜀 0. 검증 상세는 `docs/verification/issue-3-windows-usability.md`에 기록했다. GitHub Actions는 이번 작업에서 실행하지 않았다.
+- 실설치본 `D:\LilacAnime`, 실제 프로필·시청/다운로드 데이터, `main`은 건드리지 않았다. ChatGPT 웹 자동 입력·응답 수집·대화 삭제와 실제 영상 재생은 지원/검증되지 않았다. 다음은 변경 파일과 원격 브랜치 상태를 확인하고 의도한 파일만 커밋·푸시하는 것이다.

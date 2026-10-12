@@ -37,6 +37,7 @@ const CONTRACTS=Object.freeze({
     {file:'electron/main.cjs',needle:'const subtitleStore=new SubtitleStore({app,reconvert:reconvertSubtitle});',one:true}
   ]),
   'patch-03':Object.freeze([
+    {file:'src/index.html',needle:'id="homeView"',one:true},
     {file:'src/index.html',needle:'id="seeAllSeason"',one:true},
     {file:'src/app.js',needle:'function resolveIntoPlayer(',one:true},
     {file:'electron/main.cjs',needle:"ipcMain.handle('provider:catalog',",one:true},
