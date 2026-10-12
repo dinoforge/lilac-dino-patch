@@ -15,9 +15,11 @@ if (process.env.DINO_MIRURO_LIVE_OPT_IN !== '1' || !root ||
     !fs.existsSync(root) || fs.lstatSync(root).isSymbolicLink()) {
   throw new Error('Refusing live provider test without isolated opt-in workspace');
 }
-for (const folder of ['userData', 'sessionData']) fs.mkdirSync(path.join(root, folder), { recursive: true });
+// DownloadManager initializes Videos/LilacAnime on startup; isolate that too.
+for (const folder of ['userData', 'sessionData', 'videos']) fs.mkdirSync(path.join(root, folder), { recursive: true });
 app.setPath('userData', path.join(root, 'userData'));
 app.setPath('sessionData', path.join(root, 'sessionData'));
+app.setPath('videos', path.join(root, 'videos'));
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 require('../electron/main.cjs');
