@@ -11,7 +11,7 @@
 - 격리 Electron 패치 03 UI: strict CSP, 5개 공급원 검색, 중복 그룹, 상세 회차·Linkkf 서버 선택, 공급원 실패 후 나머지 선택 유지, 선택된 Linkkf resolver 연결. Patch 03 OFF에서 UI 미주입. 외부 HTTP 요청 0. 패치 02 격리 v0.5.14 renderer도 재검증했다.
 - `npm ci --no-audit --no-fund`는 기존 lockfile 의존성만 worktree의 `node_modules`에 설치했고 lockfile 변경은 없었다. `node --check`와 `git diff --check` 통과.
 - 미검증 경계: 실 RE:Anime/Miruro/Animenosub/Ohli24/Linkkf 검색·영상 재생, 페이지별 전체 카탈로그 탐색, 실제 ChatGPT 로그인/번역, 설치본·EXE GUI. 실 사용자 설치본과 데이터는 접근하지 않았다. GitHub Actions는 실행하지 않았다. 원격의 `Dino embedded ChatGPT patch checks`, `Dino Lilac Patch structure checks`, `SIWC isolated regression tests`는 비승인 CI라 비활성화했고, `Build` 릴리스 workflow는 활성 상태로 유지했다.
-- Patch 02는 먼저 `9780f15`로 커밋했다. P03 변경은 테스트와 원격 CI 상태 확인 후 커밋·push하고 원격 SHA를 확인한다.
+- Patch 02 마일스톤은 `9780f15`이며 Patch 03 구현은 `2778b2f`로 커밋했다. `codex/issue-2-patch-02-03` push 뒤 `git ls-remote`에서 `2778b2f7d7a4d2226878aa6fa7523d96840d13e9`와 일치함을 확인했다. GitHub Actions는 실행하지 않았다. push 후에도 비승인 CI 3개가 비활성이고 Build 릴리스 workflow는 활성 상태다.
 
 ## 2026-10-12 GitHub issue #2 — 패치 02 마일스톤
 

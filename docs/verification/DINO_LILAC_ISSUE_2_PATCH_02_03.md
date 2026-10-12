@@ -2,6 +2,7 @@
 
 작업 브랜치: `codex/issue-2-patch-02-03`
 기준 커밋: `3aa6551dfa1be3b665a786f2f43b5631811f8d46`
+Patch 02 커밋: `9780f15` · Patch 03 구현 커밋: `2778b2f7d7a4d2226878aa6fa7523d96840d13e9`
 
 ## 구현
 
@@ -20,6 +21,7 @@
 - 격리 v0.5.14 Electron renderer 재검증 통과: 회차/요일 fixture, 5개 출처 상태, ChatGPT 수동 번역 준비, 격리 프로필에 수동 번역 자막 저장, 외부 HTTP 요청 0회.
 - Patch 03 Electron 모의 UI 재검증 통과: **5개 공급원**, 공급원 부분 실패 뒤 결과 보존, 상세 회차 **3개 선택지**, Linkkf 선택 후 기존 Linkkf resolver 연결. 외부 요청 0회.
 - 구문 검사(`node --check`) 및 `git diff --check` 통과. GitHub Actions는 실행하지 않았다. 원격 비승인 CI workflow 3개는 `disabled_manually`, 빌드/릴리스 workflow는 `active` 상태임을 확인했다.
+- Patch 03 구현 push 직후 `git ls-remote`에서 원격 브랜치 SHA가 구현 커밋 SHA와 일치함을 확인했다.
 
 ## 제한
 
