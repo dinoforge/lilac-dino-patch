@@ -2,10 +2,12 @@
 // $env:LILAC_UPSTREAM_SOURCE='<temporary official v0.5.14 clone>'; node tests/run-patch-manager-stage2-v0514-electron.cjs
 'use strict';
 
+const { app, BrowserWindow, ipcMain, session } = require('electron');
+let win = null;
+let finished = false;
+const rendererErrors = [];
 process.on('uncaughtException', fail);
 process.on('unhandledRejection', fail);
-
-const { app, BrowserWindow, ipcMain, session } = require('electron');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -38,10 +40,6 @@ const savedSubtitleEntries = [];
 const copiedTexts = [];
 const embeddedWindows = [];
 const revealedFiles = [];
-let win = null;
-let finished = false;
-const rendererErrors = [];
-
 class MockEmbeddedChatGPTWindow {
   constructor(options) {
     this.options = options;
@@ -294,14 +292,14 @@ async function run() {
   const accountStatus = await win.webContents.executeJavaScript("document.querySelector('#patch0102ChatGPTAccountState').textContent");
   assert.match(accountStatus, /브라우저 로그인은 사용자가 직접 합니다/);
   const chatGPTModes = await win.webContents.executeJavaScript(`(()=>{const choice=document.querySelector('#patch0102ChatGPTAutoUnavailable');const manual=document.querySelector('#patch0102ChatGPTManual');const auto=document.querySelector('#patch0102ChatGPTAutoStart');const deletion=document.querySelector('#patch0102ChatGPTDeleteUnavailable');return {choiceDisabled:choice?.disabled===true,choiceInAutoModes:choice?.parentElement?.id==='jimakuTranslateChoices',choiceHasNoPersistedValue:!choice?.hasAttribute('data-value'),translationModes:[...document.querySelectorAll('#jimakuTranslateChoices button[data-value]')].map(button=>button.dataset.value),manualEnabled:manual?.disabled===false,autoEnabled:auto?.disabled===false,deletionDisabled:deletion?.disabled===true,reason:document.querySelector('#patch0102ChatGPTAutoReason')?.textContent||''}})()`);
-  assert.equal(chatGPTModes.choiceDisabled, false);
+  assert.equal(chatGPTModes.choiceDisabled, true);
   assert.equal(chatGPTModes.choiceInAutoModes, true);
   assert.equal(chatGPTModes.choiceHasNoPersistedValue, true, 'unsupported choice cannot overwrite the existing off/cloud/local setting');
   assert.deepEqual(chatGPTModes.translationModes, ['off', 'cloud', 'local']);
   assert.equal(chatGPTModes.manualEnabled, true);
-  assert.equal(chatGPTModes.autoEnabled, true);
+  assert.equal(chatGPTModes.autoEnabled, false, 'the unsupported settings entry remains visible only as a disabled explanation');
   assert.equal(chatGPTModes.deletionDisabled, true);
-  assert.match(chatGPTModes.reason, /자동 전송하거나 응답을 자동 수집하는 기능은 지원하지 않습니다/);
+  assert.match(chatGPTModes.reason, /웹 자동 입력·응답 수집·대화 삭제는 지원하지 않습니다/);
 
   const overview = await win.webContents.executeJavaScript(`({
     quarterTitle:document.querySelector('#seasonTitle').textContent,
@@ -340,12 +338,20 @@ async function run() {
   assert.ok(patchCalls.some(call => call.provider === 'reanime') && patchCalls.some(call => call.provider === 'miruro'));
   assert.ok(providerCalls.some(call => call.kind === 'reanime') && providerCalls.some(call => call.kind === 'animenosub'));
 
+  const autoControls = await win.webContents.executeJavaScript(`(()=>({panelButtonDisabled:document.querySelector('#patch0102WebAutoStart')?.disabled===true,settingsButtonDisabled:document.querySelector('#patch0102ChatGPTAutoStart')?.disabled===true,label:document.querySelector('#patch0102WebAutoStart')?.textContent||''}))()`);
+  assert.equal(autoControls.panelButtonDisabled, true);
+  assert.equal(autoControls.settingsButtonDisabled, true);
+  assert.match(autoControls.label, /미지원/);
   await win.webContents.executeJavaScript(`document.querySelector('#patch0102WebAutoStart').click()`);
-  console.log('experimental request preparation clicked');
+  assert.equal(copiedTexts.length, 0, 'unsupported web automation control does not prepare or submit a request');
+  assert.equal(embeddedWindows.length, 0, 'unsupported web automation control does not open ChatGPT');
+  await win.webContents.executeJavaScript(`document.querySelector('#patch0102ManualStart').click()`);
+  console.log('manual request preparation started');
   await waitFor('experimental Japanese request prepared in the manual translation panel', async () => win.webContents.executeJavaScript(
     `Boolean(document.querySelector('#patch0102ManualPanel') && !document.querySelector('#patch0102ManualPanel').classList.contains('hidden'))`
   ));
-  await waitFor('experimental request copied and the isolated embedded window opened', () =>
+  await win.webContents.executeJavaScript(`document.querySelector('#patch0102ManualCopy').click()`);
+  await waitFor('manual request copied and the isolated embedded window opened', () =>
     copiedTexts.length === 1 && embeddedWindows.length === 1 && embeddedWindows[0].loaded.length === 1);
   assert.match(copiedTexts[0], /일본어/);
   assert.deepEqual(embeddedWindows[0].loaded, ['https://chatgpt.com/']);
@@ -353,9 +359,9 @@ async function run() {
   assert.equal(embeddedWindows[0].options.webPreferences.nodeIntegration, false);
   assert.equal(embeddedWindows[0].options.webPreferences.sandbox, true);
   assert.equal(blockedRequests.length, 0, 'the mock embedded window made no ChatGPT network request');
-  await win.webContents.executeJavaScript(`document.querySelector('#patch0102WebAutoStart').click()`);
-  await waitFor('uncertain experimental batch is held without duplicate preparation', async () => win.webContents.executeJavaScript(
-    `document.querySelector('#patch0102ManualStatus').textContent.includes('중복 전송을 막기 위해 새 요청 준비를 보류했습니다')`
+  await win.webContents.executeJavaScript(`document.querySelector('#patch0102ManualRetry').click()`);
+  await waitFor('uncertain manual batch asks before duplicate preparation', async () => win.webContents.executeJavaScript(
+    `window.patchFixtureState.confirmMessages.some(message=>message.includes('전송 여부를 확인할 수 없습니다'))`
   ));
   assert.equal(copiedTexts.length, 1, 'an uncertain batch is not copied or sent again automatically');
   const expectedPrompt = realPromptHandler('japanese');

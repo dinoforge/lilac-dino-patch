@@ -148,8 +148,10 @@ test('logged-out page load failure is handled without accepting a false login re
 test('logged-out UI describes manual login and manual delivery, not verified automatic translation', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../../src/patch-manager-stage2.js'), 'utf8');
   assert.match(source, /브라우저 로그인은 사용자가 직접 합니다/);
-  assert.match(source, /ChatGPT 웹에 자동 전송하거나 응답을 자동 수집하는 기능은 지원하지 않습니다/);
-  assert.match(source, /자동 전송과 응답 수집은 지원하지 않습니다/);
+  assert.match(source, /웹 자동 입력·응답 수집·대화 삭제는 지원하지 않습니다/);
+  assert.match(source, /웹 자동 입력·응답 수집·대화 삭제는 미지원입니다/);
+  assert.match(source, /ChatGPT 웹 자동 번역 \(미지원\)/);
+  assert.match(source, /autoButton\.disabled = true/);
   assert.match(source, /id="patch0102ChatGPTDeleteUnavailable" type="button" disabled/);
   assert.match(source, /patch0102ManualImport/);
 });

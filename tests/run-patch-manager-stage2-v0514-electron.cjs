@@ -6,6 +6,10 @@ const os = require('node:os');
 const path = require('node:path');
 
 const repo = path.resolve(__dirname, '..');
+const electronCli = process.env.LILAC_ELECTRON_CLI || path.join(repo, 'node_modules', 'electron', 'cli.js');
+if (!path.isAbsolute(electronCli) || !fs.existsSync(electronCli)) {
+  throw new Error('Set LILAC_ELECTRON_CLI to an installed Electron CLI or install the repository dependencies.');
+}
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lilac-patch-stage2-electron-'));
 const realTemp = fs.realpathSync(os.tmpdir());
 if (path.dirname(fs.realpathSync(tempRoot)) !== realTemp || !path.basename(tempRoot).startsWith('lilac-patch-stage2-electron-')) {
@@ -15,7 +19,7 @@ if (path.dirname(fs.realpathSync(tempRoot)) !== realTemp || !path.basename(tempR
 let status = 1;
 try {
   const result = spawnSync(process.execPath, [
-    path.join(repo, 'node_modules', 'electron', 'cli.js'),
+    electronCli,
     path.join(repo, 'tests', 'patch-manager-stage2-v0514.electron.cjs')
   ], {
     cwd: repo,

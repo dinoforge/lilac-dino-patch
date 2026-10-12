@@ -103,21 +103,23 @@ test('experimental web translation fails closed without opening or reading ChatG
   assert.equal(driver.cancel(), true);
 });
 
-test('experimental ChatGPT web entry is enabled without changing existing translation mode selection', () => {
+test('unsupported ChatGPT web automation stays disabled while manual translation remains available', () => {
   const settingsStart = rendererSource.indexOf('function addManualTranslationSettings()');
   const settingsEnd = rendererSource.indexOf('function addManualTranslationUi()', settingsStart);
   const settings = rendererSource.slice(settingsStart, settingsEnd);
   assert.match(settings, /id = 'patch0102ChatGPTAutoUnavailable'/);
-  assert.match(settings, /choice\.textContent = 'ChatGPT 웹 자동 번역 \(실험\)'/);
-  assert.match(settings, /choice\.addEventListener\('click',/);
-  assert.doesNotMatch(settings, /choice\.disabled = true/);
+  assert.match(settings, /choice\.textContent = 'ChatGPT 웹 자동 번역 \(미지원\)'/);
+  assert.match(settings, /choice\.disabled = true/);
+  assert.match(settings, /id="patch0102ChatGPTAutoStart" type="button" disabled/);
+  assert.doesNotMatch(settings, /choice\.addEventListener\('click',/);
   assert.match(settings, /id="patch0102ChatGPTDeleteUnavailable" type="button" disabled/);
   assert.match(settings, /수동 번역 준비/);
-  assert.match(settings, /현재 묶음의 번역 요청을 복사하고 내장 창을 여는 준비만/);
+  assert.match(settings, /웹 자동 입력·응답 수집·대화 삭제는 지원하지 않습니다/);
   assert.match(rendererSource, /id = 'patch0102WebAutoStart'/);
-  assert.match(rendererSource, /const runAuto = async/);
+  assert.match(rendererSource, /ChatGPT 웹 자동 번역 \(미지원\)/);
+  assert.doesNotMatch(rendererSource, /const runAuto = async/);
   assert.doesNotMatch(rendererSource, /patchChatGPTWebTranslate|patchChatGPTWebCancel/);
-  assert.match(rendererSource, /자동 전송과 응답 수집은 지원하지 않습니다/);
+  assert.match(rendererSource, /웹 자동 입력·응답 수집·대화 삭제는 미지원입니다/);
   assert.match(rendererSource, /if \(!value\.persisted\) throw new Error/);
   assert.match(rendererSource, /value\.inflightBatch === value\.index/);
 });

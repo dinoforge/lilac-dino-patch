@@ -1,5 +1,13 @@
 # 작업 상태
 
+## 2026-10-12 GitHub issue #2 — 패치 02 마일스톤
+
+- 기준 원격 커밋 `3aa6551dfa1be3b665a786f2f43b5631811f8d46`에서 새 격리 브랜치 `codex/issue-2-patch-02-03`을 만들었다. 실제 작업 경로는 `D:\Codex-Coding-Folder\LilacAnime-Player-issue-2-patch-02-03`이다.
+- 수동 ChatGPT 번역 흐름은 유지했다. 웹 자동 입력·응답 수집·대화 삭제 UI는 `미지원`으로 표시하고 비활성화했다. 기존 번역 API, 로컬 AI, `끄기/번역 API/로컬 AI` 설정값은 수정하지 않았다.
+- 번역 VTT 저장 성공 뒤 앱 내부 임시 기록 정리 오류가 저장 실패로 오인되어 중복 재시도를 만들지 않도록 저장·즉시 적용을 정리보다 먼저 끝내게 했다. 저장 파일 작성 중 오류가 생기면 부분 파일을 제거하고, 새 결과에는 항상 ChatGPT 수동 번역 출처명을 쓴다.
+- Patch 02 집중 테스트 37/37 통과. 격리 Electron renderer에서 합성 일본어 30 cue·2묶음 수동 복사/가져오기/ID 확인/이어하기/WebVTT 저장·적용을 확인했다. 원본 타임코드 30개 유지, 외부 HTTP 요청 0회. 전체 `npm test`: 382개 중 381 통과, 실패 0, 1건 skip. skip 원인이었던 공식 소스 `.git` worktree 형식은 별도 격리 clone으로 바로잡아 `dino-lilac-patch/test/structure.test.cjs` 10/10으로 확인했다. JS 구문 검사와 `git diff --check`도 통과했다.
+- 실 ChatGPT 계정 왕복, 원본 LilacAnime 전체 GUI 및 설치본은 검증하지 않았다. 웹 자동화·웹 대화 삭제는 미구현이다. 다음 단계는 settings/adapter 독립 스위치에 Patch 03을 추가하고 통합 검색·상세·회차별 공급원 전환 MVP를 구현하는 것이다.
+
 ## 2026-10-12 GitHub issue #1 — Miruro HTTP 403 / 프리렌 1기 1화
 
 - 기준 원격 브랜치 `codex/dino-chatgpt-logged-out-test`, 시작 커밋 `c340e674afce9c7c083125ea2e21feddca152f0d`에서 작업했다. `main`은 변경하지 않았다.

@@ -133,11 +133,20 @@ function registerPatch02Handlers(deps) {
     const directory = path.join(app.getPath('userData'), 'subtitles', 'translated');
     fs.mkdirSync(directory, { recursive: true });
     const file = path.join(directory, `chatgpt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.vtt`);
-    const descriptor = fs.openSync(file, 'wx');
-    try { fs.writeFileSync(descriptor, text, 'utf8'); } finally { fs.closeSync(descriptor); }
+    let descriptor;
+    try {
+      descriptor = fs.openSync(file, 'wx');
+      fs.writeFileSync(descriptor, text, 'utf8');
+      try { fs.fsyncSync(descriptor); } catch {}
+      fs.closeSync(descriptor); descriptor = undefined;
+    } catch (error) {
+      if (descriptor !== undefined) try { fs.closeSync(descriptor); } catch {}
+      try { fs.unlinkSync(file); } catch {}
+      throw error;
+    }
     try {
       const saved = subtitleStore.save(key, {
-        source: 'chatgpt', label: input.mode === 'web-auto' ? 'ChatGPT 웹 자동 번역 (실험)' : 'ChatGPT 수동 번역', path: file,
+        source: 'chatgpt', label: 'ChatGPT 수동 번역', path: file,
         from: String(input.from || ''), fromName: String(input.fromName || '원본 자막')
       });
       if (!saved) throw new Error('번역 자막을 회차에 저장하지 못했습니다.');
