@@ -41,6 +41,8 @@ jobs:
           node --check tests/run-chatgpt-logged-out-live.cjs
           node --check tests/run-isolated-animation-playback.cjs
           node --check tests/isolated-animation-playback.electron.cjs
+          node --check tests/run-miruro-live-episode.cjs
+          node --check tests/miruro-live-episode.electron.cjs
           node --check electron/patch-manager-stage2.cjs
           node --check src/patch-manager-stage2.js
           node --check patch-manager/adapters/lilacanime-v0.5.14.cjs
@@ -55,5 +57,18 @@ jobs:
         run: node tests/run-chatgpt-logged-out-live.cjs
       - name: Isolated animated-video playback (decoded moving frames)
         run: node tests/run-isolated-animation-playback.cjs
+      - name: Miruro Frieren episode 1 live playback (isolated, upstream-dependent)
+        id: miruro_live
+        timeout-minutes: 4
+        continue-on-error: true
+        env:
+          DINO_MIRURO_LIVE_OPT_IN: '1'
+        run: node tests/run-miruro-live-episode.cjs
+      - name: Record separate live upstream test outcome
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Output "Miruro live episode probe outcome: ${{ steps.miruro_live.outcome }}"
+          Write-Output "This is not proof of audible sound, on-screen subtitles, or completing the episode."
       - name: Full Node regression suite
         run: npm test
