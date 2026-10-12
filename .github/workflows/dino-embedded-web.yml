@@ -68,7 +68,16 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          Write-Output "Miruro live episode probe outcome: ${{ steps.miruro_live.outcome }}"
+          $outcome = "${{ steps.miruro_live.outcome }}"
+          Write-Output "Miruro live episode probe outcome: $outcome"
           Write-Output "This is not proof of audible sound, on-screen subtitles, or completing the episode."
+          if ($outcome -ne 'success') {
+            Write-Output "::warning::Miruro real-episode probe FAILED/BLOCKED. Real-episode playback is NOT VERIFIED; inspect prior step logs."
+            "## Miruro live episode: FAILED / NOT VERIFIED" >> $env:GITHUB_STEP_SUMMARY
+            "The live provider request failed; see prior step logs. This is separate from the Node regression result." >> $env:GITHUB_STEP_SUMMARY
+          } else {
+            "## Miruro live episode: SHORT PLAYBACK PROBE PASSED" >> $env:GITHUB_STEP_SUMMARY
+            "Audible sound, on-screen subtitle rendering, and full episode completion remain unverified." >> $env:GITHUB_STEP_SUMMARY
+          }
       - name: Full Node regression suite
         run: npm test
