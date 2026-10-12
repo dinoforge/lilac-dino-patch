@@ -50,4 +50,10 @@ GitHub Actions run [38229821039](https://github.com/dinoforge/anime-player/actio
 
 기존 workflow는 live 단계에 `continue-on-error: true`를 두어 해당 단계가 실패해도 전체 run은 성공으로 보일 수 있었다. 검증 workflow를 두 작업으로 나눠 Node 회귀 결과와 실회차 결과를 각각 표시하도록 바꿨다. 이제 403이면 `miruro-live-episode` job이 실패하고, 전체 Node 회귀 검사는 별도 job에서 독립적으로 결과를 낸다.
 
+변경 커밋 `6487318cc16305713a9d1511f21566a39cd97b61`의 [Actions run 38232624403](https://github.com/dinoforge/anime-player/actions/runs/38232624403)에서 분리를 확인했다.
+
+- `node-and-upstream`: 성공. 전체 Node 검사 382/382 통과, 실패 0, 건너뜀 0. 공식 v0.5.14/v0.5.15 적용 검증과 합성 4초 영상 디코딩 검사도 통과.
+- `miruro-live-episode`: 실패로 명확히 표시. `provider:catalog`의 Miruro HTTP 403에서 멈췄고, 에피소드 선택이나 HLS 재생은 Actions에서 미검증. job summary에 `FAIL / BLOCKED`와 error annotation이 기록됐다.
+- 전체 workflow 결론은 `failure`이며, 이는 라이브 공급원 접근 실패다. 별도 회귀 job은 녹색으로 완료됐다.
+
 로컬에서 짧은 실회차 프레임과 자막 파일을 확인했으므로 해당 로컬 검증은 **PASS**다. GitHub Actions의 실회차 네트워크 검증은 **BLOCKED (HTTP 403)**으로 별도 기록한다. 실제 소리, 화면에 표시된 자막, 회차 완주는 어느 쪽에서도 통과로 주장하지 않는다.

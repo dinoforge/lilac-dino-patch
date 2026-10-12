@@ -7,7 +7,8 @@
 - 격리 Electron 실제 스트림 검증: 1.45초 동안 37개 프레임, 640×360, 영어 WebVTT 형식과 321개 cue 확인. `userData`, `sessionData`, `videos`는 `%TEMP%` 아래에 격리하고 runner가 정리했다. 오디오 코덱은 관찰했지만 영상이 음소거되어 실제 청취는 미검증, 자막 파일은 받았지만 화면 표시는 미검증, 전체 회차 재생은 하지 않았다.
 - 공식 v0.5.14 (`f095fc3d775451e144ed780e1fa081f739927652`) 및 v0.5.15 (`16c9a3d1631061a72831e0657434003940daf531`) 임시 복사본을 지정해 `npm test`: 382/382 통과, 실패 0, 건너뜀 0.
 - `.github/workflows/dino-embedded-web.yml`에서 실회차 검사를 별도 `miruro-live-episode` job으로 분리하고 `continue-on-error`를 제거했다. Actions의 403은 해당 job 실패와 summary/error annotation으로 드러나고 Node 회귀 결과는 독립 job에 남는다.
-- 보고서: `docs/verification/miruro-frieren-live-2026-10-12.md`. 변경된 workflow의 GitHub Actions 실행 결과는 push 후 확인한다.
+- 커밋 `6487318cc16305713a9d1511f21566a39cd97b61`의 [GitHub Actions run 38232624403](https://github.com/dinoforge/anime-player/actions/runs/38232624403): `node-and-upstream` 성공(382/382, 실패/건너뜀 0); `miruro-live-episode`는 `provider:catalog` HTTP 403으로 실패. summary와 error annotation에서 `FAIL / BLOCKED`를 확인했다. 전체 run은 이 외부 라이브 실패 때문에 failure이며 회귀 job은 독립 성공했다.
+- 보고서: `docs/verification/miruro-frieren-live-2026-10-12.md`.
 
 ## 2026-10-12 ChatGPT 웹 자동 번역 요청 판정
 
