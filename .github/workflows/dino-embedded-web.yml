@@ -39,6 +39,8 @@ jobs:
           node --check electron/embedded-chatgpt-web.cjs
           node --check tests/chatgpt-logged-out-live.electron.cjs
           node --check tests/run-chatgpt-logged-out-live.cjs
+          node --check tests/run-isolated-animation-playback.cjs
+          node --check tests/isolated-animation-playback.electron.cjs
           node --check electron/patch-manager-stage2.cjs
           node --check src/patch-manager-stage2.js
           node --check patch-manager/adapters/lilacanime-v0.5.14.cjs
@@ -51,5 +53,7 @@ jobs:
       - name: Anonymous ChatGPT web navigation smoke (no credentials)
         continue-on-error: true
         run: node tests/run-chatgpt-logged-out-live.cjs
+      - name: Isolated animated-video playback (decoded moving frames)
+        run: node tests/run-isolated-animation-playback.cjs
       - name: Full Node regression suite
         run: npm test
