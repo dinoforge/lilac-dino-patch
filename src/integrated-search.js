@@ -63,6 +63,82 @@
     }).sort((a, b) => a._resultOrder - b._resultOrder).map(({ _resultOrder, ...group }) => group);
   }
 
+  function catalogIdentity(item) {
+    const anilistId = stableId(item?.anilistId ?? item?.anilist_id ?? item?.anilist);
+    const malId = stableId(item?.malId ?? item?.myanimelistId ?? item?.myanimelist_id);
+    return { anilistId, malId };
+  }
+
+  function catalogTitle(item) {
+    return String(item?.title || item?.title_english || item?.title_japanese || item?.title_native || item?.romaji || item?.name || '')
+      .normalize('NFKC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, ' ').trim();
+  }
+
+  function catalogFallbackKey(item) {
+    const title = catalogTitle(item);
+    const year = String(item?.year || '').match(/\b(?:19|20)\d{2}\b/)?.[0] || '';
+    const type = String(item?.type || item?.format || '').normalize('NFKC').toLocaleLowerCase().trim();
+    const season = String(item?.season || item?.seasonNumber || item?.season_number || item?.cour || '').normalize('NFKC').toLocaleLowerCase().trim();
+    return title && year && type ? `title:${title}|year:${year}|type:${type}|season:${season}` : '';
+  }
+
+  // The full catalogue uses external AniList/MAL IDs when available. Without IDs,
+  // merge only an exact normalized title, year, format, and season match.
+  function groupCatalogResults(results, preferredProvider = '') {
+    const unique = [], seen = new Set();
+    for (const result of Array.isArray(results) ? results : []) {
+      if (!result || !PROVIDERS.includes(result.provider)) continue;
+      const sourceId = String(result.mal_id ?? result.id ?? '').trim();
+      if (!sourceId) continue;
+      const sourceKey = `${result.provider}:${sourceId}`;
+      if (seen.has(sourceKey)) continue;
+      seen.add(sourceKey);
+      unique.push({ ...result, mal_id: String(result.mal_id ?? `${result.provider}:${sourceId}`) });
+    }
+
+    const anilistByMal = new Map();
+    for (const item of unique) {
+      const { anilistId, malId } = catalogIdentity(item);
+      if (!anilistId || !malId) continue;
+      if (!anilistByMal.has(malId)) anilistByMal.set(malId, new Set());
+      anilistByMal.get(malId).add(anilistId);
+    }
+
+    const groups = new Map();
+    unique.forEach((item, index) => {
+      const { anilistId, malId } = catalogIdentity(item);
+      const linkedAni = malId ? anilistByMal.get(malId) : null;
+      const identityKey = anilistId
+        ? `anilist:${anilistId}`
+        : linkedAni?.size === 1
+          ? `anilist:${[...linkedAni][0]}`
+          : malId && (!linkedAni || linkedAni.size === 0)
+            ? `mal:${malId}`
+            : '';
+      const key = identityKey || catalogFallbackKey(item) || `source:${item.provider}:${String(item.mal_id)}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({ item, index });
+    });
+
+    const providerRank = new Map(PROVIDERS.map((provider, index) => [provider, index]));
+    return [...groups].map(([groupKey, entries]) => {
+      const sourceItems = entries.map(entry => entry.item);
+      sourceItems.sort((a, b) => {
+        if (a.provider === preferredProvider && b.provider !== preferredProvider) return -1;
+        if (b.provider === preferredProvider && a.provider !== preferredProvider) return 1;
+        return (providerRank.get(a.provider) ?? PROVIDERS.length) - (providerRank.get(b.provider) ?? PROVIDERS.length);
+      });
+      const primary = sourceItems[0];
+      return {
+        ...primary,
+        sourceItems,
+        sourceCount: new Set(sourceItems.map(item => item.provider)).size,
+        groupKey: `catalog:${groupKey}`,
+        _resultOrder: Math.min(...entries.map(entry => entry.index))
+      };
+    }).sort((a, b) => a._resultOrder - b._resultOrder).map(({ _resultOrder, ...group }) => group);
+  }
+
   function filterGroups(groups, provider = 'all') {
     if (provider === 'all') return Array.isArray(groups) ? groups.slice() : [];
     return (Array.isArray(groups) ? groups : []).filter(group => group.sourceItems?.some(item => item.provider === provider));
@@ -181,7 +257,7 @@
     return { items: providers.flatMap(provider => [...records.get(provider).items.values()]), statuses };
   }
 
-  const api = { PROVIDERS, groupResults, filterGroups, chooseSource, searchProviders, mergeSearchResults };
+  const api = { PROVIDERS, groupResults, groupCatalogResults, filterGroups, chooseSource, searchProviders, mergeSearchResults };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.LilacIntegratedSearch = api;
 })(typeof window !== 'undefined' ? window : globalThis);

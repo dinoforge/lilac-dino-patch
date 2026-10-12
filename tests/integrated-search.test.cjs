@@ -3,7 +3,7 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { groupResults, filterGroups, chooseSource, searchProviders, mergeSearchResults } = require('../src/integrated-search.js');
+const { groupResults, groupCatalogResults, filterGroups, chooseSource, searchProviders, mergeSearchResults } = require('../src/integrated-search.js');
 const appSource = fs.readFileSync(path.join(__dirname, '../src/app.js'), 'utf8');
 const htmlSource = fs.readFileSync(path.join(__dirname, '../src/index.html'), 'utf8');
 
@@ -66,6 +66,37 @@ test('duplicate provider entries collapse by provider item ID, not by title', ()
   assert.equal(groups.length, 1);
   assert.equal(groups[0].sourceItems.length, 2);
   assert.equal(groups[0].sourceItems[0].title, '먼저 온 제목');
+});
+
+test('unified catalog groups stable AniList identities and keeps provider IDs for detail loading', () => {
+  const groups = groupCatalogResults([
+    item('reanime', 'r-1', { anilistId: 301, id: 'r-1' }),
+    item('miruro', 'm-1', { anilistId: 301, id: 'm-1' }),
+    item('linkkf', 'l-1', { anilistId: 999, id: 'l-1' })
+  ]);
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].sourceCount, 2);
+  assert.deepEqual(groups[0].sourceItems.map(source => source.mal_id), ['reanime:r-1', 'miruro:m-1']);
+});
+
+test('unified catalog fallback dedupe requires exact title, year, format, and season', () => {
+  const groups = groupCatalogResults([
+    item('reanime', 'a', { title: ' 薬屋のひとりごと ', year: 2023, type: 'TV', season: 'fall' }),
+    item('animenosub', 'b', { title: '薬屋のひとりごと', year: '2023', type: 'tv', season: 'fall' }),
+    item('miruro', 'c', { title: '薬屋のひとりごと', year: 2024, type: 'tv', season: 'winter' }),
+    item('ohli24', 'd', { title: '薬屋のひとりごと', year: 2023, type: 'movie', season: 'fall' }),
+    item('linkkf', 'e', { title: '약방의 혼잣말', year: 2023, type: 'tv', season: 'fall' })
+  ]);
+  assert.equal(groups.length, 4);
+  assert.equal(groups.find(group => group.sourceItems.length === 2).sourceCount, 2);
+});
+
+test('unified catalog never title-merges conflicting external identities', () => {
+  const groups = groupCatalogResults([
+    item('reanime', 'a', { anilistId: 501, title: 'Same', year: 2025, type: 'TV' }),
+    item('miruro', 'b', { anilistId: 502, title: 'Same', year: 2025, type: 'TV' })
+  ]);
+  assert.equal(groups.length, 2);
 });
 
 test('provider filters retain groups that include that provider and source choice honors the filter', () => {

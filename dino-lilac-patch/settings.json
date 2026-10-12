@@ -1,6 +1,7 @@
 {
   "patches": {
     "patch-01": false,
-    "patch-02": false
+    "patch-02": false,
+    "patch-03": false
   }
 }

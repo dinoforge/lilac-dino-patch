@@ -35,6 +35,26 @@ const CONTRACTS=Object.freeze({
     {file:'electron/subtitle-store.cjs',needle:"'gemini'];",one:true},
     {file:'electron/main.cjs',needle:'app.whenReady().then(async () => {',one:true},
     {file:'electron/main.cjs',needle:'const subtitleStore=new SubtitleStore({app,reconvert:reconvertSubtitle});',one:true}
+  ]),
+  'patch-03':Object.freeze([
+    {file:'src/index.html',needle:'id="seeAllSeason"',one:true},
+    {file:'src/app.js',needle:'function resolveIntoPlayer(',one:true},
+    {file:'electron/main.cjs',needle:"ipcMain.handle('provider:catalog',",one:true},
+    {file:'electron/main.cjs',needle:"ipcMain.handle('provider:detail',",one:true},
+    {file:'electron/main.cjs',needle:"ipcMain.handle('provider:resolve',",one:true},
+    {file:'electron/main.cjs',needle:"ipcMain.handle('linkkf:home',",one:true},
+    {file:'electron/main.cjs',needle:"ipcMain.handle('linkkf:detail',",one:true},
+    {file:'electron/main.cjs',needle:"ipcMain.handle('linkkf:episodes',",one:true},
+    {file:'electron/main.cjs',needle:"ipcMain.handle('linkkf:resolve',",one:true},
+    {file:'electron/main.cjs',needle:"ipcMain.handle('catalog:search-korean',",one:true},
+    {file:'electron/preload.cjs',needle:'providerCatalog: (provider, query =',one:true},
+    {file:'electron/preload.cjs',needle:'providerDetail: anime =>',one:true},
+    {file:'electron/preload.cjs',needle:'providerResolve: episode =>',one:true},
+    {file:'electron/preload.cjs',needle:'linkkfHome: (page = 1, limit = 20)',one:true},
+    {file:'electron/preload.cjs',needle:'linkkfDetail: id =>',one:true},
+    {file:'electron/preload.cjs',needle:'linkkfEpisodes: id =>',one:true},
+    {file:'electron/preload.cjs',needle:'linkkfResolve: episode =>',one:true},
+    {file:'electron/preload.cjs',needle:'catalogKoreanSearch: (provider, query)',one:true}
   ])
 });
 const ALREADY_PATCHED=Object.freeze({
@@ -44,6 +64,11 @@ const ALREADY_PATCHED=Object.freeze({
   'patch-02':Object.freeze([
     {file:'src/index.html',needle:'siwc-subtitle-bridge.js'},
     {file:'src/index.html',needle:'manual-subtitle-translation.js'}
+  ]),
+  'patch-03':Object.freeze([
+    {file:'src/index.html',needle:'patch-manager-feature-flags.js'},
+    {file:'src/index.html',needle:'unified-catalog.js'},
+    {file:'src/patch-manager-feature-flags.js',needle:'window.DinoLilacPatchFeatures'}
   ])
 });
 
@@ -77,7 +102,8 @@ function evaluateStructure(files,settings){
       continue;
     }
     const issues=[];
-    for(const rule of [...SHARED,...CONTRACTS[id]]){
+    const sharedRules=id==='patch-03'?[{file:'src/index.html',needle:'</body>',one:true}]:SHARED;
+    for(const rule of [...sharedRules,...CONTRACTS[id]]){
       const failure=probe(files,rule);
       if(failure)issues.push(failure);
     }

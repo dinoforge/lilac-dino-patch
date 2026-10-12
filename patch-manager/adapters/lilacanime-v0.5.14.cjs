@@ -46,9 +46,15 @@ const PATCH_PAYLOAD_FILES = Object.freeze({
     ['docs/prompts/영어 번역 프롬프트.txt', 'electron/prompts/영어 번역 프롬프트.txt'],
     ['docs/prompts/일본어 번역 프롬프트.txt', 'electron/prompts/일본어 번역 프롬프트.txt'],
     ['docs/prompts/Reazon_작품용_단어사전_예시.txt', 'electron/prompts/Reazon_작품용_단어사전_예시.txt']
+  ]),
+  'patch-03': Object.freeze([
+    ['src/integrated-search.js', 'src/integrated-search.js'],
+    ['src/unified-catalog.js', 'src/unified-catalog.js'],
+    ['src/unified-catalog.css', 'src/unified-catalog.css']
   ])
 });
 const PAYLOAD_FILES = Object.freeze([
+  ['src/patch-manager-feature-flags.js', 'src/patch-manager-feature-flags.js'],
   ...SHARED_PAYLOAD_FILES,
   ...PATCH_PAYLOAD_FILES['patch-01'],
   ...PATCH_PAYLOAD_FILES['patch-02']
@@ -89,7 +95,7 @@ function makeLilacAnimeV0514Manifest(projectRoot = path.resolve(__dirname, '../.
       kind: 'insert-before',
       file: 'src/index.html',
       anchor: '</body>',
-      content: `  <script src="patch-manager-stage2-core.js"></script>\n  <script src="weekday-schedule.js"></script>\n  <script src="integrated-search.js"></script>\n  <script src="manual-subtitle-translation.js"></script>\n  <script src="patch-manager-stage2.js"></script>\n`
+      content: `  <script src="patch-manager-feature-flags.js"></script>\n  <script src="patch-manager-stage2-core.js"></script>\n  <script src="weekday-schedule.js"></script>\n  <script src="integrated-search.js"></script>\n  <script src="manual-subtitle-translation.js"></script>\n  <script src="patch-manager-stage2.js"></script>\n`
     }
   ];
   for (const [source, target] of PAYLOAD_FILES) actions.push(readPayload(projectRoot, source, target));

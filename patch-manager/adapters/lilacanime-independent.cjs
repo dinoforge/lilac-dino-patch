@@ -79,7 +79,8 @@ function readSnapshot(root) {
   const requested = new Set([
     ...PROFILE_ANCHORS,
     'src/app.js',
-    'electron/subtitle-store.cjs'
+    'electron/subtitle-store.cjs',
+    'src/patch-manager-feature-flags.js'
   ]);
   for (const relative of requested) {
     try {
@@ -126,11 +127,13 @@ function setBlocked(patches, id, issue) {
 function featureFlags(settings) {
   return Object.freeze({
     'patch-01': settings.patches['patch-01'],
-    'patch-02': settings.patches['patch-02']
+    'patch-02': settings.patches['patch-02'],
+    'patch-03': settings.patches['patch-03']
   });
 }
 
 function mainBridgeSource(flags) {
+  const stage2Flags = { 'patch-01': flags['patch-01'], 'patch-02': flags['patch-02'] };
   const deps = [`ipcMain`];
   if (flags['patch-01']) deps.push(
     'providerFetch', 'REANIME_WEB', 'ANIMENOSUB_WEB', 'reanimeItems',
@@ -142,7 +145,7 @@ function mainBridgeSource(flags) {
     "  const { registerPatch0102Handlers } = require('./patch-manager-stage2.cjs');",
     '  registerPatch0102Handlers({',
     dependencyObject,
-    `  }, ${JSON.stringify(flags)});`,
+    `  }, ${JSON.stringify(stage2Flags)});`,
     ''
   ].join('\n');
 }
@@ -155,22 +158,24 @@ function preloadBridgeSource(flags) {
 }
 
 function htmlBridgeSource(flags) {
-  const scripts = [];
-  if (flags['patch-01']) scripts.push('patch-manager-stage2-core.js', 'weekday-schedule.js', 'integrated-search.js');
-  if (flags['patch-02']) scripts.push('manual-subtitle-translation.js');
-  scripts.push('patch-manager-stage2.js');
-  const config = `<script>window.DinoLilacPatchFeatures = Object.freeze(${JSON.stringify(flags)});</script>`;
-  return `  ${config}\n${scripts.map(file => `  <script src="${file}"></script>`).join('\n')}\n`;
+  const scripts = new Set();
+  scripts.add('patch-manager-feature-flags.js');
+  if (flags['patch-01']) { scripts.add('patch-manager-stage2-core.js'); scripts.add('weekday-schedule.js'); scripts.add('integrated-search.js'); }
+  if (flags['patch-02']) scripts.add('manual-subtitle-translation.js');
+  if (flags['patch-03']) { scripts.add('integrated-search.js'); scripts.add('unified-catalog.js'); }
+  if (flags['patch-01'] || flags['patch-02']) scripts.add('patch-manager-stage2.js');
+  return `  ${[...scripts].map(file => `  <script src="${file}"></script>`).join('\n')}\n`;
 }
 
 function selectedPayloads(flags) {
-  const selected = new Set(SHARED_PAYLOAD_FILES.map(([, target]) => target));
+  const selected = new Set();
+  if (flags['patch-01'] || flags['patch-02']) for (const [, target] of SHARED_PAYLOAD_FILES) selected.add(target);
   for (const id of PATCH_IDS) {
     if (!flags[id]) continue;
     for (const [, target] of PATCH_PAYLOAD_FILES[id]) selected.add(target);
   }
   return [...selected].map(target => {
-    const entry = [...SHARED_PAYLOAD_FILES, ...PATCH_PAYLOAD_FILES['patch-01'], ...PATCH_PAYLOAD_FILES['patch-02']]
+    const entry = [...SHARED_PAYLOAD_FILES, ...PATCH_IDS.flatMap(id => PATCH_PAYLOAD_FILES[id])]
       .find(([, candidate]) => candidate === target);
     if (!entry) throw new Error(`Missing payload mapping: ${target}`);
     return entry;
@@ -179,11 +184,13 @@ function selectedPayloads(flags) {
 
 function buildManifest(payloadRoot, profile, flags) {
   const expectedFiles = { ...profile.fingerprint };
-  const actions = [
+  const actions = [{ kind: 'insert-before', file: 'src/index.html', anchor: '</body>', content: htmlBridgeSource(flags) }];
+  const featureFlags = `window.DinoLilacPatchFeatures = Object.freeze(${JSON.stringify(flags)});\n`;
+  actions.push({ kind: 'add-file', file: 'src/patch-manager-feature-flags.js', contentBase64: Buffer.from(featureFlags, 'utf8').toString('base64') });
+  if (flags['patch-01'] || flags['patch-02']) actions.unshift(
     { kind: 'insert-before', file: 'electron/main.cjs', anchor: MAIN_ANCHOR, content: mainBridgeSource(flags) },
-    { kind: 'insert-before', file: 'electron/preload.cjs', anchor: PRELOAD_ANCHOR, content: preloadBridgeSource(flags) },
-    { kind: 'insert-before', file: 'src/index.html', anchor: '</body>', content: htmlBridgeSource(flags) }
-  ];
+    { kind: 'insert-before', file: 'electron/preload.cjs', anchor: PRELOAD_ANCHOR, content: preloadBridgeSource(flags) }
+  );
   if (flags['patch-02']) {
     expectedFiles['electron/subtitle-store.cjs'] = profile.patch02Files['electron/subtitle-store.cjs'];
     actions.push({ kind: 'insert-before', file: 'electron/subtitle-store.cjs', anchor: "'gemini'];", content: "'chatgpt', " });
@@ -246,7 +253,8 @@ function makeLilacAnimePatchPlan(targetRoot, rawSettings, { payloadRoot = path.r
   const enabled = PATCH_IDS.filter(id => patches[id]?.status === 'structural-candidate');
   const manifest = profile && enabled.length ? buildManifest(payloadRoot, profile, featureFlags({ patches: {
     'patch-01': enabled.includes('patch-01'),
-    'patch-02': enabled.includes('patch-02')
+    'patch-02': enabled.includes('patch-02'),
+    'patch-03': enabled.includes('patch-03')
   } })) : null;
   const blocked = selected.filter(id => patches[id]?.status === 'blocked');
   return {

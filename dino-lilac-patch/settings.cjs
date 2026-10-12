@@ -6,23 +6,31 @@ const path=require('node:path');
 
 // Dino Lilac Patch settings contract. Disk access is explicit and limited to
 // DinoLilacPatch/settings.json under the caller-supplied install directory.
-const PATCH_IDS=Object.freeze(['patch-01','patch-02']);
+const PATCH_IDS=Object.freeze(['patch-01','patch-02','patch-03']);
 const SETTINGS_DIRECTORY='DinoLilacPatch';
 const SETTINGS_FILENAME='settings.json';
 const MAX_SETTINGS_BYTES=4096;
 const DEFAULT_SETTINGS=Object.freeze({
-  patches:Object.freeze({'patch-01':false,'patch-02':false})
+  patches:Object.freeze({'patch-01':false,'patch-02':false,'patch-03':false})
 });
 function assertSettings(input){
   if(!input||typeof input!=='object'||Array.isArray(input) ||
     Object.keys(input).some(key=>key!=='patches'))throw new Error('Invalid Dino Lilac Patch settings');
   const patches=input.patches;
   if(!patches||typeof patches!=='object'||Array.isArray(patches) ||
-    Object.keys(patches).length!==PATCH_IDS.length ||
-    PATCH_IDS.some(id=>!Object.hasOwn(patches,id)||typeof patches[id]!=='boolean')){
-    throw new Error('Patch 01 and Patch 02 must each be ON or OFF');
+    Object.keys(patches).some(id=>!PATCH_IDS.includes(id)) ||
+    !Object.hasOwn(patches,'patch-01') || !Object.hasOwn(patches,'patch-02') ||
+    typeof patches['patch-01']!=='boolean' || typeof patches['patch-02']!=='boolean' ||
+    Object.hasOwn(patches,'patch-03')&&typeof patches['patch-03']!=='boolean'){
+    throw new Error('Patch 01, Patch 02, and Patch 03 must each be ON or OFF');
   }
-  return {patches:{'patch-01':patches['patch-01'],'patch-02':patches['patch-02']}};
+  // Older settings files stored only Patch 01 and Patch 02. Preserve both
+  // values and migrate Patch 03 to its safe OFF default when next saved.
+  return {patches:{
+    'patch-01':patches['patch-01'],
+    'patch-02':patches['patch-02'],
+    'patch-03':patches['patch-03']===true
+  }};
 }
 function loadSettings(text){
   if(text==null||text==='')return assertSettings(DEFAULT_SETTINGS);
