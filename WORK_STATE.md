@@ -898,3 +898,10 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - SRT/VTT/ASS 입력을 전체 SRT로 준비하고 자막 수·번호·순서·시간을 왕복 검증한다. 번역 결과는 동일 항목을 확인한 뒤 WebVTT로 저장·현재 영상에 적용하며, 업로드·회수·검증 실패와 불확실 전송은 보존하고 자동 재전송하지 않는다. 수동 번역 입력은 기존 JSON 묶음 경로로 유지한다.
 - `node --test patch-manager/test/whole-file-subtitle-translation.test.cjs patch-manager/test/embedded-chatgpt-web.test.cjs`: 15/15 통과. 변경 CJS/JS 구문 검사와 `git diff --check` 통과. 전체 `npm test`와 CI는 실행하지 않았다.
 - 실제 ChatGPT 파일 업로드부터 영상 적용까지는 미검증이다. 현재 Computer Use 인벤토리에 LilacAnime 및 내장 ChatGPT 창이 없고 일반 Chrome의 ChatGPT 탭만 보여 그 탭은 건드리지 않았다. EXE/ZIP, 실설치본, 사용자 프로필·기록·다운로드, `main`은 변경하지 않았다.
+
+## 2026-10-13 Patch 02 백그라운드 전체 파일 번역
+
+- Patch 02의 전체 SRT 첨부, 지침 1회 전송, 완성 SRT 회수·검증·WebVTT 저장을 Electron 메인 프로세스 작업으로 옮겼다. 내장 ChatGPT BrowserWindow만 숨기고 `backgroundThrottling:false`로 설정한다. 진행 IPC, 알림, 취소, 불확실 전송 차단, 앱 종료 시 안전 중단·복구 상태 보존을 추가했다. renderer는 완료 이벤트를 받으면 동일 영상·회차·원본 자막인지 확인하고 현재 영상에 적용한다.
+- 메인 작업 관리자와 웹 드라이버 사이 진행 콜백 전달 인자 오류를 고쳤다. 불확실한 이전 요청이 있으면 같은 원본뿐 아니라 다른 자막 요청도 추가 전송하기 전에 확인하도록 막았다.
+- 대상 테스트 `patch-manager/test/chatgpt-background-translation.test.cjs`, `patch-manager/test/whole-file-subtitle-translation.test.cjs`, `patch-manager/test/embedded-chatgpt-web.test.cjs`: 19/19 통과. 변경 JS/CJS 구문 검사와 `git diff --check` 통과.
+- 테스트는 임시 디렉터리, 모의 BrowserWindow/ChatGPT 드라이버/저장 함수를 사용한 합성 검증이다. 현재 CUA 앱 인벤토리에 LilacAnime 또는 앱 소유 ChatGPT 창이 없고 일반 Chrome만 있어 그 창은 건드리지 않았다. 최소화·비활성 상태에서 실제 서비스가 응답하는지, 실계정 파일 첨부·번역·다운로드·영상 적용은 미검증이며 최종 PASS가 아니다. `main`, 실설치본, 사용자 프로필 및 CI는 변경·실행하지 않았다.

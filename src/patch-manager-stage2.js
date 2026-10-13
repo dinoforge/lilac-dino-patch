@@ -437,22 +437,22 @@
     box.innerHTML = `<b>ChatGPT 웹 번역</b>
       <p id="patch0102ChatGPTAccountState" role="status">디노 라일락 전용 내장 창에서 ChatGPT를 엽니다. 브라우저 로그인은 사용자가 직접 합니다.</p>
       <div class="setting-block">
-        <b>ChatGPT 웹 자동 번역</b>
-        <p id="patch0102ChatGPTAutoReason" role="status">선택한 자막 전체를 SRT 파일로 첨부 완료한 뒤 번역 지침을 한 번 보냅니다. 완성 SRT 파일 회수와 원본 검증에 실패하면 저장하거나 적용하지 않습니다. 직접 로그인한 내장 ChatGPT 창만 사용합니다.</p>
+        <b>ChatGPT 웹 전체 파일 백그라운드 번역</b>
+        <p id="patch0102ChatGPTAutoReason" role="status">로그인된 앱 소유 ChatGPT 창에 전체 SRT 하나를 첨부하고 지침 한 번만 보냅니다. 업로드 뒤 ChatGPT 창을 숨겨도 메인 프로세스가 진행률·취소·복구 상태를 관리합니다. 완성 파일의 전체 자막 수·번호·순서·시간을 검증한 뒤 WebVTT를 저장하고 같은 영상에만 적용합니다.</p>
       </div>
       <div class="setting-block">
         <b>번역 완료 후 ChatGPT 대화 삭제</b>
         <p id="patch0102ChatGPTDeleteReason" role="status">이 앱은 ChatGPT 대화 목록을 읽거나 대화를 삭제할 수 없습니다. 번역 자막 저장 후 해당 대화는 ChatGPT에서 직접 정리해 주세요.</p>
         <button id="patch0102ChatGPTDeleteUnavailable" type="button" disabled aria-describedby="patch0102ChatGPTDeleteReason">대화 자동 삭제 · 사용할 수 없음</button>
       </div>
-      <div class="patch0102-manual-actions"><button id="patch0102ChatGPTOpen" type="button">내장 ChatGPT 열기</button><button id="patch0102ChatGPTManual" type="button">수동 번역 준비</button><button id="patch0102ChatGPTAutoStart" type="button" aria-describedby="patch0102ChatGPTAutoReason">ChatGPT 웹 자동 번역 (실험)</button></div>
+      <div class="patch0102-manual-actions"><button id="patch0102ChatGPTOpen" type="button">내장 ChatGPT 열기</button><button id="patch0102ChatGPTManual" type="button">수동 번역 준비</button><button id="patch0102ChatGPTAutoStart" type="button" aria-describedby="patch0102ChatGPTAutoReason">ChatGPT 전체 파일 백그라운드 번역</button></div>
       <label class="setting-switch"><span><b>번역 완료 후 앱 내부 임시 데이터 정리</b><small>이 설정은 번역 작업 임시 데이터만 정리합니다. 저장된 한국어 자막과 ChatGPT 웹 대화에는 영향을 주지 않습니다.</small></span><input id="patch0102ChatGPTCleanupEnabled" type="checkbox" checked></label>
       <label>정리 시점 <select id="patch0102ChatGPTCleanupTiming"><option value="immediate">즉시</option><option value="five-minutes">5분 뒤</option><option value="on-close">앱을 닫을 때</option></select></label>`;
     pane.append(box);
     const autoChoices = $('#jimakuTranslateChoices');
     if (autoChoices && !$('#patch0102ChatGPTAutoUnavailable')) {
       const choice = document.createElement('button'); choice.id = 'patch0102ChatGPTAutoUnavailable'; choice.type = 'button';
-      choice.textContent = 'ChatGPT 웹 자동 번역 (실험)';
+      choice.textContent = 'ChatGPT 전체 파일 백그라운드 번역';
       choice.setAttribute('aria-describedby', 'patch0102ChatGPTAutoReason');
       choice.addEventListener('click', () => $('#patch0102WebAutoStart')?.click());
       autoChoices.append(choice);
@@ -474,13 +474,13 @@
     if (!target || $('#patch0102ManualRow')) return;
     const row = document.createElement('div'); row.id = 'patch0102ManualRow'; row.className = 'sheet-button-row';
     const button = document.createElement('button'); button.id = 'patch0102ManualStart'; button.type = 'button'; button.className = 'sheet-button'; button.textContent = 'ChatGPT 수동 번역';
-    const autoButton = document.createElement('button'); autoButton.id = 'patch0102WebAutoStart'; autoButton.type = 'button'; autoButton.className = 'sheet-button'; autoButton.textContent = 'ChatGPT 웹 자동 번역 (실험)'; autoButton.title = '선택 자막 전체를 하나의 SRT 파일로 첨부하고, 번역 지침 1회 전달 뒤 완성 SRT 파일을 검증합니다. 로그인은 화면에서 직접 해야 합니다.';
+    const autoButton = document.createElement('button'); autoButton.id = 'patch0102WebAutoStart'; autoButton.type = 'button'; autoButton.className = 'sheet-button'; autoButton.textContent = 'ChatGPT 전체 파일 백그라운드 번역'; autoButton.title = '선택 자막 전체를 SRT 하나로 첨부하고 지침 한 번을 보낸 뒤, 메인 프로세스가 회수·검증·저장·적용합니다.';
     row.append(button, autoButton);
     const panel = document.createElement('div'); panel.id = 'patch0102ManualPanel'; panel.className = 'patch0102-manual-panel hidden';
-    panel.innerHTML = '<div class="patch0102-manual-head"><b>ChatGPT 한국어 자막 번역</b><span id="patch0102ManualProgress"></span></div><p id="patch0102ManualStatus" role="status">선택한 자막의 번역을 준비합니다.</p><p id="patch0102WebAutoLimit">웹 자동 경로는 전체 자막을 SRT 파일 하나로 첨부하고 번역 지침을 한 번 보냅니다. 완성 SRT 파일을 회수하지 못하거나 자막 수·번호·순서·시간 검증이 실패하면 저장과 영상 적용을 중단합니다. 수동 경로는 기존 JSON 묶음 가져오기를 유지합니다.</p><div class="patch0102-manual-actions"><button id="patch0102ManualCopy" type="button">요청 복사 · 내장 ChatGPT 열기</button><button id="patch0102ManualRetry" type="button">현재 묶음 다시 복사</button><button id="patch0102ManualImport" type="button">복사한 번역 가져와 바로 적용</button><button id="patch0102ManualApply" type="button">입력한 결과 확인</button><button id="patch0102ManualStop" type="button">중단 · 저장</button><button id="patch0102ManualDiscard" type="button">작업 삭제</button></div><textarea id="patch0102ManualAnswer" rows="6" spellcheck="false" placeholder="수동 번역: ChatGPT JSON 결과 · 자동 번역 오류: 내려받은 SRT 결과"></textarea><div class="patch0102-manual-actions patch0102-manual-saved-tools"><button id="patch0102ManualRestore" type="button" class="hidden">원본 자막으로 되돌리기</button><button id="patch0102ManualReveal" type="button" class="hidden">저장 위치 열기</button></div>';
+    panel.innerHTML = '<div class="patch0102-manual-head"><b>ChatGPT 한국어 자막 번역</b><span id="patch0102ManualProgress"></span></div><p id="patch0102ManualStatus" role="status">선택한 자막의 번역을 준비합니다.</p><p id="patch0102WebAutoLimit">백그라운드 경로는 전체 자막을 SRT 파일 하나로 첨부하고 지침 한 번만 보냅니다. 메인 프로세스가 완성 파일 회수·검증·저장·적용과 복구 상태를 관리하며, 실패한 요청은 자동 재전송하지 않습니다. 수동 경로는 기존 JSON 묶음 가져오기를 유지합니다.</p><div class="patch0102-manual-actions"><button id="patch0102ManualCopy" type="button">요청 복사 · 내장 ChatGPT 열기</button><button id="patch0102ManualOpenChatGPT" type="button">내장 ChatGPT 열기 · 직접 로그인/확인</button><button id="patch0102ManualRetry" type="button">현재 묶음 다시 복사</button><button id="patch0102ManualImport" type="button">복사한 번역 가져와 바로 적용</button><button id="patch0102ManualApply" type="button">입력한 결과 확인</button><button id="patch0102ManualStop" type="button">중단 · 저장</button><button id="patch0102ManualDiscard" type="button">작업 삭제</button></div><textarea id="patch0102ManualAnswer" rows="6" spellcheck="false" placeholder="수동 번역: ChatGPT JSON 결과 · 복구한 SRT 응답"></textarea><div class="patch0102-manual-actions patch0102-manual-saved-tools"><button id="patch0102ManualRestore" type="button" class="hidden">원본 자막으로 되돌리기</button><button id="patch0102ManualReveal" type="button" class="hidden">저장 위치 열기</button></div>';
     target.after(row, panel);
     const setStatus = text => setText($('#patch0102ManualStatus'), text);
-    let translation = null, open = false, sequence = 0, preparing = false, prefs = { autoCleanup: true, cleanupTiming: 'immediate' }, sourceBeforeTranslation = null, canResume = false;
+    let translation = null, open = false, sequence = 0, preparing = false, backgroundTask = null, prefs = { autoCleanup: true, cleanupTiming: 'immediate' }, sourceBeforeTranslation = null, canResume = false;
     const current = value => Boolean(value && value === translation && value.playbackId === playbackRequestId &&
       value.subtitle === currentSubtitle && value.episodeKey === subtitleStoreKey());
     const saveSession = async (value, status = value.status, answer = $('#patch0102ManualAnswer').value) => {
@@ -492,6 +492,37 @@
       try { await api.patchSaveManualTranslationSession(value.episodeKey, value.sourceFingerprint, payload); value.persisted = true; }
       catch (error) { value.persisted = false; value.message = `임시 작업 저장 실패: ${error.message}`; }
     };
+    const applyBackgroundResult = task => {
+      const saved = task?.savedSubtitle;
+      if (task?.status !== 'completed' || !saved?.url || !saved?.path ||
+          Number(task.playbackId) !== playbackRequestId || task.episodeKey !== subtitleStoreKey() ||
+          task.sourcePath !== currentSubtitle?.path) return false;
+      sourceBeforeTranslation = { path: task.sourcePath, label: task.sourceLabel || '원본 자막', source: task.sourceKind || 'reanime' };
+      currentSubtitlePath = saved.path;
+      attachSubtitle(saved.url, 'ChatGPT 웹 자동 번역', {
+        path: saved.path, source: 'chatgpt', from: task.sourcePath,
+        fromName: task.sourceLabel || '원본 자막', saved: true
+      });
+      $('#subtitleState').textContent = '전체 파일을 검증한 한국어 자막을 저장하고 현재 영상에 적용했습니다.';
+      return true;
+    };
+    const receiveBackgroundTask = task => {
+      if (!task?.jobKey) return;
+      backgroundTask = task;
+      if (translation && !translation.jobKey && translation.episodeKey === task.episodeKey &&
+          translation.sourcePath === task.sourcePath && translation.sourceFingerprint === task.sourceFingerprint) translation.jobKey = task.jobKey;
+      if (translation?.jobKey === task.jobKey) {
+        translation.backgroundTask = task;
+        translation.autoRunning = ['running', 'cancelling'].includes(task.status);
+        translation.status = ({ running: 'awaiting-response', cancelling: 'awaiting-response', 'needs-user': 'error', interrupted: 'cancelled' })[task.status] || task.status;
+        translation.message = task.message || translation.message;
+        translation.activeJobKey = translation.autoRunning ? task.jobKey : null;
+      }
+      applyBackgroundResult(task);
+      if (translation?.jobKey === task.jobKey) render();
+    };
+    api.onPatchChatGPTWebBackgroundUpdate?.(receiveBackgroundTask);
+    Promise.resolve(api.patchChatGPTWebBackgroundStatus?.()).then(receiveBackgroundTask).catch(() => {});
     const sourceTools = () => {
       const active = currentSubtitle?.source === 'chatgpt';
       $('#patch0102ManualReveal').classList.toggle('hidden', !(active && currentSubtitle.path));
@@ -500,30 +531,54 @@
     const render = () => {
       row.classList.toggle('hidden', !manualAvailable() && !translation);
       panel.classList.toggle('hidden', !open || !translation);
-      $('#patch0102ManualStart').textContent = translation || canResume ? 'ChatGPT 번역 계속' : 'ChatGPT 수동 번역';
+      $('#patch0102ManualStart').textContent = translation?.fileMode && translation.autoRunning ? '전체 파일 백그라운드 번역 중' : translation || canResume ? 'ChatGPT 번역 계속' : 'ChatGPT 수동 번역';
       autoButton.disabled = Boolean(preparing || translation?.autoRunning || translation?.busy || translation?.prompting);
       sourceTools();
       if (!translation) return;
       const saving = translation.status === 'saving' || translation.index >= translation.batches.length;
       const progress = translation.fileMode
-        ? { completed: translation.parsed.cues.reduce((count, cue) => count + (Object.hasOwn(translation.translations, cue.id) ? 1 : 0), 0), total: translation.parsed.cues.length }
+        ? { completed: translation.backgroundTask?.status === 'completed' ? translation.parsed.cues.length : 0, total: translation.parsed.cues.length }
         : manual.progress(translation.parsed.cues, translation.translations);
-      progress.percent = progress.total ? Math.floor(progress.completed / progress.total * 100) : 0;
+      progress.percent = translation.fileMode && translation.backgroundTask
+        ? Math.max(0, Math.min(100, Number(translation.backgroundTask.progress) || 0))
+        : progress.total ? Math.floor(progress.completed / progress.total * 100) : 0;
       const workUnit = translation.fileMode ? '· 전체 파일' : `· 묶음 ${Math.min(translation.index + 1, translation.batches.length)}/${translation.batches.length}`;
-      $('#patch0102ManualProgress').textContent = `${progress.completed}/${progress.total}문장 (${progress.percent}%) ${workUnit} · ${translation.language === 'english' ? '영어' : '일본어'} · ${translation.mode === 'web-auto' ? '웹 자동' : '수동'} · ${({ ready: '준비', 'awaiting-response': 'ChatGPT 응답 대기', validating: '결과 검사', error: '오류 · 보존', cancelled: '중단 · 이어하기 가능', saving: '저장 중', completed: '완료' })[translation.status] || '준비 중'}`;
+      $('#patch0102ManualProgress').textContent = translation.fileMode
+        ? `${progress.completed ? progress.total : 0}/${progress.total}문장 · 전체 단계 ${progress.percent}% ${workUnit} · ${translation.language === 'english' ? '영어' : '일본어'} · ${translation.backgroundTask?.phase || translation.status}`
+        : `${progress.completed}/${progress.total}문장 (${progress.percent}%) ${workUnit} · ${translation.language === 'english' ? '영어' : '일본어'} · ${translation.mode === 'web-auto' ? '웹 자동' : '수동'} · ${({ ready: '준비', 'awaiting-response': 'ChatGPT 응답 대기', validating: '결과 검사', error: '오류 · 보존', cancelled: '중단 · 이어하기 가능', saving: '저장 중', completed: '완료' })[translation.status] || '준비 중'}`;
       setText($('#patch0102ManualStatus'), translation.message || '요청을 복사해 ChatGPT에 직접 붙여넣으세요.');
-      $('#patch0102ManualCopy').disabled = translation.fileMode || translation.busy || translation.autoRunning || translation.prompting || saving; $('#patch0102ManualRetry').disabled = translation.fileMode || translation.busy || translation.autoRunning || translation.prompting || saving;
+      $('#patch0102ManualCopy').disabled = translation.fileMode || translation.busy || translation.autoRunning || translation.prompting || saving;
+      const backgroundRetry = translation.fileMode && !translation.autoRunning && ['error', 'cancelled'].includes(translation.status) && !translation.backgroundTask?.savedSubtitle;
+      $('#patch0102ManualRetry').textContent = backgroundRetry
+        ? (translation.backgroundTask?.sendAttempted || translation.backgroundTask?.attached ? '입력창 확인 후 새 전체 요청' : '전체 파일 다시 시작')
+        : '현재 묶음 다시 복사';
+      $('#patch0102ManualRetry').disabled = translation.busy || translation.autoRunning || translation.prompting || saving || (translation.fileMode && !backgroundRetry);
       $('#patch0102ManualImport').disabled = translation.fileMode || translation.busy || translation.autoRunning || translation.prompting || translation.importing || saving;
       $('#patch0102ManualApply').disabled = (translation.fileMode && translation.index < translation.batches.length) || translation.busy || translation.autoRunning || translation.prompting || translation.importing;
       $('#patch0102ManualApply').textContent = saving ? '번역 자막 저장 재시도' : '결과 확인';
-      $('#patch0102ManualStop').disabled = translation.busy; $('#patch0102ManualDiscard').disabled = translation.busy || translation.autoRunning || translation.prompting;
+      $('#patch0102ManualStop').disabled = translation.fileMode ? !translation.autoRunning : translation.busy;
+      $('#patch0102ManualStop').textContent = translation.fileMode ? '백그라운드 번역 취소' : '중단 · 저장';
+      $('#patch0102ManualDiscard').disabled = translation.busy || translation.autoRunning || translation.prompting;
       $('#patch0102ManualAnswer').disabled = translation.busy || translation.autoRunning || translation.prompting || saving;
       $('#patch0102ManualAnswer').readOnly = Boolean(translation.fileMode);
     };
     const start = async (mode = 'manual') => {
-      if (translation && current(translation)) { open = true; render(); if (mode === 'web-auto') await runAuto(translation); return; }
+      if (translation && current(translation)) {
+        open = true; render();
+        if (mode === 'web-auto' && !translation.legacyUncertain) await runAuto(translation);
+        else if (translation.legacyUncertain) setStatus('이전 작업의 첨부·전송 여부가 불확실합니다. 기존 ChatGPT 대화를 확인한 뒤 `입력창 확인 후 새 전체 요청`을 눌러야 다시 보냅니다.');
+        return;
+      }
       if (preparing) return;
-      if (translation && !current(translation)) { await saveSession(translation, translation.status); translation = null; canResume = true; }
+      if (translation && !current(translation)) {
+        if (translation.fileMode && translation.autoRunning) {
+          if (mode === 'web-auto') { open = true; render(); setStatus('이미 진행 중인 전체 파일 작업을 메인 프로세스에서 계속하고 있습니다.'); return; }
+          translation = null;
+        } else {
+          if (!translation.fileMode) await saveSession(translation, translation.status);
+          translation = null; canResume = true;
+        }
+      }
       const subtitle = currentSubtitle;
       if (!manualAvailable()) { setStatus('번역할 자막 파일이 없습니다. 먼저 영어 또는 일본어 자막을 선택해 주세요.'); open = true; row.classList.remove('hidden'); panel.classList.remove('hidden'); return; }
       const id = ++sequence, playbackId = playbackRequestId;
@@ -534,6 +589,15 @@
         if (!response.ok) throw new Error(`자막 파일을 읽지 못했습니다 (HTTP ${response.status}).`);
         const sourceText = await response.text(), sourceFingerprint = await manual.fingerprintWebVtt(sourceText), key = subtitleStoreKey();
         if (!key) throw new Error('회차 정보를 확인할 수 없어 번역 작업을 시작할 수 없습니다.');
+        const recoveredTask = await api.patchChatGPTWebBackgroundStatus?.().catch(() => null);
+        if (recoveredTask) {
+          receiveBackgroundTask(recoveredTask);
+          if (recoveredTask.status === 'completed' && recoveredTask.episodeKey === key && recoveredTask.sourcePath === subtitle.path &&
+              recoveredTask.sourceFingerprint === sourceFingerprint && applyBackgroundResult(recoveredTask)) {
+            setStatus('이전에 검증·저장된 한국어 자막을 현재 영상에 적용했습니다.');
+            return;
+          }
+        }
         let saved = await api.patchManualTranslationSession(key, sourceFingerprint);
         const translationMode = mode === 'web-auto' || saved?.mode === 'web-auto' ? 'web-auto' : 'manual';
         const formatHint = subtitle.format || subtitle.path || subtitle.src;
@@ -553,7 +617,14 @@
         prefs = await api.patchManualTranslationSettings().catch(() => prefs);
         const hasSavedTranslation = await api.patchHasManualTranslationForSource(key, subtitle.path);
         if (id !== sequence || subtitle !== currentSubtitle || playbackId !== playbackRequestId) return;
-        if (saved?.status === 'completed' || hasSavedTranslation) { if (!confirm('이 자막은 이미 번역되어 저장됐습니다. 새 번역 작업을 시작할까요? 저장된 한국어 자막은 유지됩니다.')) { setStatus('저장된 번역은 유지했습니다. 새 작업을 시작하지 않았습니다.'); return; } if (saved?.status === 'completed') await api.patchRemoveManualTranslationSession(key, sourceFingerprint); saved = null; }
+        let repeatConfirmed = false;
+        if (saved?.status === 'completed' || hasSavedTranslation) {
+          if (!confirm('이 자막은 이미 번역되어 저장됐습니다. 새 번역 작업을 시작할까요? 저장된 한국어 자막은 유지됩니다.')) { setStatus('저장된 번역은 유지했습니다. 새 작업을 시작하지 않았습니다.'); return; }
+          repeatConfirmed = true;
+          if (saved?.status === 'completed') await api.patchRemoveManualTranslationSession(key, sourceFingerprint);
+          saved = null;
+        }
+        const legacyUncertain = Boolean(saved?.mode === 'web-auto' && saved.inflightBatch === 0 && saved.status !== 'completed');
         const translations = Object.create(null), knownIds = new Set(parsed.cues.map(cue => cue.id));
         if (saved) {
           if (saved.batchCount !== batches.length || saved.totalCueCount !== batches.reduce((sum, batch) => sum + batch.length, 0) || saved.language !== language || saved.sourcePath !== subtitle.path) throw new Error('저장된 원본 자막과 현재 선택이 달라 이어하기를 중단했습니다. 기존 작업은 보존했습니다.');
@@ -562,6 +633,7 @@
         }
         sourceBeforeTranslation = { path: subtitle.path, url: subtitle.src, label: subtitle.label || '원본 자막', source: subtitle.source || 'reanime' }; canResume = false;
         translation = { id, subtitle, mode: translationMode, fileMode: translationMode === 'web-auto', uploadText, uploadedCues: uploadParsed?.cues || null,
+          legacyUncertain, repeatConfirmed, backgroundTask: backgroundTask?.episodeKey === key && backgroundTask?.sourcePath === subtitle.path && backgroundTask?.sourceFingerprint === sourceFingerprint ? backgroundTask : null,
           inflightBatch: saved?.inflightBatch ?? null, autoRunning: false, prompting: false, sourcePath: subtitle.path, sourceLabel: subtitle.label || '원본 자막', sourceUrl: subtitle.src, sourceKind: subtitle.source || 'reanime', sourceFingerprint, episodeKey: key, playbackId,
           title: currentPlaybackContext.subtitleTitle || $('#skipTitle')?.value.trim() || $('#playerTitle')?.textContent || '',
           episode: Number($('#skipEpisode')?.value) || Number(currentPlaybackContext.episode?.number) || 1,
@@ -570,7 +642,13 @@
       } catch (error) {
         open = true; row.classList.remove('hidden'); panel.classList.remove('hidden'); setStatus(error.message);
       } finally { preparing = false; button.disabled = false; if (!translation) button.textContent = 'ChatGPT 수동 번역'; render(); }
-      if (translation?.mode === 'web-auto' && translation && current(translation)) await runAuto(translation);
+      if (translation?.mode === 'web-auto' && translation && current(translation)) {
+        if (translation.legacyUncertain) {
+          translation.status = 'error';
+          translation.message = '이전 전체 파일 요청 상태를 복구했습니다. 전송 여부가 불확실해 자동 재전송하지 않습니다. ChatGPT 대화를 확인한 뒤 확인 버튼을 눌러 주세요.';
+          render();
+        } else await runAuto(translation, { repeatConfirmed: translation.repeatConfirmed });
+      }
     };
     const makeBatchPrompt = async (value, batch) => {
       const instructions = await api.patchTranslationPrompt(value.language);
@@ -600,114 +678,54 @@
         '부분 결과, JSON, 코드 블록, 설명문은 반환하지 마세요. 완성 SRT 파일을 만들 수 없으면 일부 번역을 완성본처럼 반환하지 말고 파일을 만들지 못했다고 알리세요.'
       ].join('\n\n');
     };
-    const waitForWholeFileResult = async (value, jobKey, request) => {
-      const pending = Promise.resolve(request).then(result => ({ result }), error => ({ error }));
-      let outcome = null;
-      while (!outcome && current(value) && !value.stopRequested)
-        outcome = await Promise.race([pending, new Promise(resolve => setTimeout(() => resolve(null), 200))]);
-      if (!current(value) || value.stopRequested) {
-        let cancellation = null;
-        try { cancellation = await api.patchCancelChatGPTWebTranslation(jobKey); } catch {}
-        const sent = cancellation ? cancellation.sent === true : true;
-        const attached = cancellation ? cancellation.attached === true : true;
-        if (!sent && !attached && value.inflightBatch === 0) value.inflightBatch = null;
-        value.autoRunning = false; value.activeJobKey = null; value.status = 'cancelled';
-        value.message = !current(value)
-          ? `영상 또는 자막이 바뀌어 전체 파일 번역을 중단했습니다. ${sent ? '전송 여부가 불분명한 요청은 재전송하지 않습니다.' : attached ? '첨부 파일이 남아 있을 수 있으니 ChatGPT 입력창을 확인해 주세요.' : '파일 첨부 전에 중단했습니다.'}`
-          : sent ? '요청이 전송됐을 수 있어 자동 재전송하지 않습니다. 내장 ChatGPT 대화의 상태를 확인해 주세요.'
-            : attached ? '파일 첨부가 남아 있을 수 있어 자동 재첨부하지 않습니다. 입력창에서 파일을 확인하고 필요하면 제거해 주세요.'
-              : '파일 첨부 전에 중단했습니다. 현재 작업은 다시 시작할 수 있습니다.';
-        await saveSession(value, 'cancelled', value.answer);
-        if (translation === value && !current(value)) { translation = null; open = false; canResume = true; }
-        render(); return null;
-      }
-      return outcome;
-    };
-    const acceptWholeFileResult = async (value, name, content) => {
-      if (!current(value)) return false;
-      if (typeof content !== 'string' || !content.trim() || !/\.srt$/i.test(String(name || ''))) {
-        value.status = 'error'; value.message = '완성 SRT 파일을 가져오지 못했습니다. 일부 응답은 저장하거나 적용하지 않았습니다.';
-        await saveSession(value, 'error', typeof content === 'string' ? content : value.answer); render(); return false;
-      }
-      value.answer = content; $('#patch0102ManualAnswer').value = content;
-      value.status = 'validating'; value.message = '완성 SRT 파일의 전체 자막 수·번호·순서·시작·종료 시간을 원본과 대조하고 있습니다.'; render();
-      await saveSession(value, 'validating', content);
-      if (!value.persisted) {
-        value.status = 'error'; value.message = '완성 SRT를 가져왔지만 복구용 임시 기록에 보존하지 못했습니다. 저장과 적용을 중단했습니다.'; render(); return false;
-      }
-      let checked;
-      try { checked = manual.validateWholeFileResult(content, value.uploadedCues); }
-      catch (error) {
-        value.status = 'error'; value.message = `완성 자막 검증 실패: ${error.message} 파일과 작업 상태를 보존했습니다. 다시 전송하지 않았습니다.`;
-        await saveSession(value, 'error', content); render(); return false;
-      }
-      const previousIndex = value.index, previousPending = value.inflightBatch;
-      Object.assign(value.translations, checked.translations); value.index = 1; value.inflightBatch = null; value.answer = '';
-      value.status = 'saving'; value.message = '전체 자막 검증을 통과했습니다. WebVTT를 저장하고 현재 영상에 적용합니다.';
-      await saveSession(value, 'saving', '');
-      if (!value.persisted) {
-        value.index = previousIndex; value.inflightBatch = previousPending; value.translations = Object.create(null); value.answer = content;
-        $('#patch0102ManualAnswer').value = content; value.status = 'error';
-        value.message = '검증된 번역을 복구 기록에 저장하지 못해 영상 적용을 중단했습니다. 내려받은 SRT 결과와 작업 상태는 화면에 보존했습니다.';
-        await saveSession(value, 'error', content); render(); return false;
-      }
-      $('#patch0102ManualAnswer').value = ''; await save(value); return true;
-    };
-    const runAuto = async value => {
+    const runAuto = async (value, { reviewConfirmed = false, repeatConfirmed = false } = {}) => {
       if (!current(value) || value.autoRunning || value.busy || value.prompting || value.importing) return;
       if (!value.fileMode || !value.uploadText || !Array.isArray(value.uploadedCues)) {
-        value.status = 'error'; value.message = '전체 자막 파일을 준비하지 못해 자동 번역을 시작하지 않았습니다.'; render(); return;
-      }
-      if (value.index >= value.batches.length) { await save(value); return; }
-      if (value.inflightBatch === 0) {
-        if (String(value.answer || '').trim()) {
-          $('#patch0102ManualAnswer').value = value.answer;
-          await acceptWholeFileResult(value, 'recovered.srt', value.answer); return;
-        }
-        value.status = 'error';
-        value.message = '이전 전체 파일의 첨부 또는 전송 여부가 확정되지 않았습니다. 대화와 입력창을 확인하고 파일을 다시 보내지 마세요.';
-        render(); return;
+        value.status = 'error'; value.message = '전체 자막 파일을 준비하지 못해 백그라운드 번역을 시작하지 않았습니다.'; render(); return;
       }
       value.mode = 'web-auto'; value.autoRunning = true; value.stopRequested = false; open = true;
-      value.status = 'awaiting-response'; value.message = '내장 ChatGPT 창과 로그인 상태를 확인하고 있습니다.'; render();
+      value.status = 'awaiting-response'; value.message = '백그라운드 작업을 메인 프로세스에 등록하고 있습니다.'; render();
+      let handedOff = false;
       try {
-        if (!current(value) || value.stopRequested) return;
         const prompt = await makeWholeFilePrompt(value);
         if (!current(value) || value.stopRequested) return;
-        value.inflightBatch = 0; value.answer = ''; value.status = 'awaiting-response';
-        value.message = '첨부·전송 결과를 복구할 수 있도록 작업 상태를 저장하고 있습니다.';
-        await saveSession(value, 'awaiting-response', '');
-        if (!value.persisted) { value.inflightBatch = null; throw new Error('진행 상태를 저장하지 못해 파일을 첨부하거나 요청을 보내지 않았습니다.'); }
-        if (!current(value) || value.stopRequested) {
-          value.inflightBatch = null; value.status = 'cancelled'; value.message = '파일 첨부 전에 작업을 중단했습니다.';
-          await saveSession(value, 'cancelled', ''); render(); return;
+        if (reviewConfirmed && value.backgroundTask?.jobKey) {
+          const acknowledged = await api.patchAcknowledgeChatGPTWebBackgroundTranslation(value.backgroundTask.jobKey, true);
+          if (!acknowledged?.ok) throw new Error(acknowledged?.message || '이전 요청 확인 상태를 저장하지 못했습니다.');
         }
         const jobKey = `file-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
-        value.activeJobKey = jobKey; value.message = `전체 SRT ${value.uploadedCues.length}개 자막을 첨부하고 지침을 한 번 전달합니다.`; render();
-        const outcome = await waitForWholeFileResult(value, jobKey,
-          api.patchChatGPTWebTranslateFile({ jobKey, prompt, content: value.uploadText }));
-        if (!outcome || !current(value) || value.stopRequested) return;
-        const response = outcome.error ? null : outcome.result; value.activeJobKey = null;
-        if (outcome.error || !response?.ok || response.jobKey !== jobKey || typeof response.responseFile?.content !== 'string') {
-          const sent = outcome.error ? true : response?.sent === true;
-          const attached = outcome.error ? true : response?.attached === true;
-          if (!sent && !attached) value.inflightBatch = null;
-          value.status = 'error';
-          value.message = outcome.error
-            ? `전체 SRT 처리 결과를 확인하지 못했습니다. ${value.inflightBatch === null ? '파일 첨부 전에 실패해 다시 시도할 수 있습니다.' : '첨부 또는 전송 가능성을 보존했으며 자동 재전송하지 않습니다.'} ${outcome.error.message || outcome.error}`
-            : `${response?.error || '완성 SRT 파일을 가져오지 못했습니다.'}${sent ? ' 요청은 이미 전송됐을 수 있어 자동 재전송하지 않습니다.' : attached ? ' 파일이 입력창에 남아 있을 수 있어 자동 재첨부하지 않습니다.' : ' 파일을 전송하지 않았으므로 다시 시도할 수 있습니다.'}`;
-          await saveSession(value, 'error', value.answer); render(); return;
+        value.jobKey = jobKey;
+        value.message = `전체 SRT ${value.uploadedCues.length}개 자막을 한 번 첨부하고 지침 한 번을 전달합니다.`; render();
+        const response = await api.patchStartChatGPTWebBackgroundTranslation({
+          jobKey, prompt, content: value.uploadText, episodeKey: value.episodeKey,
+          sourcePath: value.sourcePath, sourceFingerprint: value.sourceFingerprint,
+          sourceLabel: value.sourceLabel, title: value.title, episode: value.episode,
+          language: value.language, sourceKind: value.sourceKind, playbackId: value.playbackId,
+          reviewConfirmed, repeatConfirmed
+        });
+        if (response?.task) receiveBackgroundTask(response.task);
+        if (!response?.ok) {
+          value.autoRunning = false; value.activeJobKey = null;
+          value.backgroundTask = response?.task || value.backgroundTask;
+          if (response?.task?.jobKey) value.jobKey = response.task.jobKey;
+          value.status = response?.requiresUserReview || response?.code === 'CHATGPT_WINDOW_CLOSED' || response?.task?.status === 'needs-user'
+            ? 'error' : response?.task?.status || 'error';
+          value.message = response?.message || '백그라운드 번역 작업을 시작하지 못했습니다.';
+          if (response?.requiresUserReview) value.message += ' ChatGPT 입력창과 대화를 직접 확인한 뒤 `입력창 확인 후 새 전체 요청`을 눌러야 새 요청을 보냅니다.';
+          render(); return;
         }
-        value.activeJobKey = null;
-        await acceptWholeFileResult(value, response.responseFile.name, response.responseFile.content);
+        handedOff = true;
+        value.backgroundTask = response.task || null;
+        value.autoRunning = ['running', 'cancelling'].includes(response.task?.status);
+        value.activeJobKey = value.autoRunning ? jobKey : null;
+        value.status = response.task?.status === 'completed' ? 'completed' : response.task?.status || 'awaiting-response';
+        value.message = response.task?.message || '메인 프로세스가 전체 파일 첨부·응답 회수·검증·저장·적용을 관리합니다. 영상은 계속 재생됩니다.';
+        render();
       } catch (error) {
-        if (current(value)) {
-          value.status = 'error'; value.message = `전체 파일 자동 번역을 중단했습니다: ${error.message}`;
-          await saveSession(value, 'error', value.answer); render();
-        }
-      } finally {
         value.autoRunning = false; value.activeJobKey = null;
-        if (current(value)) render();
+        value.status = 'error'; value.message = `백그라운드 번역을 시작하지 못했습니다: ${error.message}`; render();
+      } finally {
+        if (!handedOff) { value.autoRunning = false; value.activeJobKey = null; if (translation === value) render(); }
       }
     };
     const copyPrompt = async () => {
@@ -830,30 +848,50 @@
     button.addEventListener('click', () => start('manual'));
     autoButton.addEventListener('click', () => start('web-auto'));
     $('#patch0102ManualCopy').addEventListener('click', copyPrompt);
-    $('#patch0102ManualRetry').addEventListener('click', copyPrompt);
+    $('#patch0102ManualOpenChatGPT').addEventListener('click', () => api.patchOpenChatGPTEmbedded().then(() => {
+      if (translation) { translation.message = '내장 ChatGPT 창을 열었습니다. 로그인 또는 필요한 확인을 직접 마친 뒤 다시 시작하세요.'; render(); }
+    }).catch(error => setStatus(`내장 ChatGPT 창을 열지 못했습니다: ${error.message}`)));
+    $('#patch0102ManualRetry').addEventListener('click', () => {
+      const value = translation;
+      if (value?.fileMode) {
+        const reviewConfirmed = Boolean(value.legacyUncertain || value.backgroundTask?.sendAttempted || value.backgroundTask?.attached);
+        void runAuto(value, { reviewConfirmed, repeatConfirmed: value.repeatConfirmed });
+        return;
+      }
+      void copyPrompt();
+    });
     $('#patch0102ManualImport').addEventListener('click', importClipboard);
     $('#patch0102ManualApply').addEventListener('click', apply);
     $('#patch0102ManualStop').addEventListener('click', async () => {
       const value = translation;
-      if (value?.mode === 'web-auto') {
-        value.stopRequested = true; value.answer = $('#patch0102ManualAnswer').value; value.status = 'cancelled';
-        value.message = '자동 번역 중단을 처리하고 있습니다. 전송된 요청은 결과 확인 전까지 자동 재전송하지 않습니다.'; render();
-        let cancellation = null;
-        if (value.activeJobKey) { try { cancellation = await api.patchCancelChatGPTWebTranslation(value.activeJobKey); } catch {} }
-        value.webSent = cancellation ? cancellation.sent === true : Boolean(value.activeJobKey);
-        value.webFileAttached = cancellation ? cancellation.attached === true : Boolean(value.activeJobKey);
-        value.webStopRequested = cancellation?.stopRequested === true;
-        if (!value.webSent && !value.webFileAttached && value.inflightBatch === value.index) value.inflightBatch = null;
-        value.message = !value.webSent && value.webFileAttached ? '요청은 보내지 않았지만 파일 첨부가 입력창에 남아 있을 수 있어 자동 재첨부하지 않습니다. 입력창을 확인해 주세요.'
-          : !value.webSent ? '파일을 첨부하기 전에 자동 번역을 중단했습니다. 작업을 다시 시작할 수 있습니다.'
-          : value.webStopRequested ? 'ChatGPT 응답 생성 중지를 요청했습니다. 현재 묶음은 대화 확인 전까지 재전송하지 않습니다.'
-            : '앱의 응답 확인은 중단했습니다. ChatGPT 생성은 계속될 수 있으므로 대화에서 상태를 확인하기 전까지 재전송하지 않습니다.';
-        await saveSession(value, 'cancelled', value.answer); render(); return;
+      if (value?.fileMode) {
+        if (!value.autoRunning) return;
+        if (!value.jobKey) {
+          value.stopRequested = true; value.autoRunning = false; value.status = 'cancelled';
+          value.message = '파일 첨부 전에 백그라운드 작업 준비를 취소했습니다.'; render(); return;
+        }
+        value.stopRequested = true; value.status = 'awaiting-response';
+        value.message = '메인 프로세스가 업로드·전송 여부를 보존한 뒤 백그라운드 번역을 중단합니다.'; render();
+        try {
+          const result = await api.patchCancelChatGPTWebBackgroundTranslation(value.jobKey);
+          if (result?.task) receiveBackgroundTask(result.task);
+        } catch (error) {
+          value.message = `중단 상태를 확인하지 못했습니다. 자동 재전송은 하지 않습니다: ${error.message}`;
+          render();
+        }
+        return;
       }
       if (value) { clearTimeout(value.answerTimer); translation = null; sequence++; value.prompting = false; value.answer = $('#patch0102ManualAnswer').value; value.status = 'cancelled'; value.message = '작업을 중단했습니다. ChatGPT에 이미 직접 보낸 요청은 웹에 남아 있을 수 있습니다. 완료 묶음은 보존했습니다.'; await saveSession(value, 'cancelled'); canResume = true; }
       open = false; render();
     });
-    $('#patch0102ManualDiscard').addEventListener('click', async () => { const value = translation; if (!value || value.busy || value.autoRunning || !confirm('미완료 번역 작업과 임시 응답을 삭제할까요? 저장된 한국어 자막은 유지됩니다.')) return; clearTimeout(value.answerTimer); await api.patchRemoveManualTranslationSession(value.episodeKey, value.sourceFingerprint); translation = null; open = false; $('#patch0102ManualAnswer').value = ''; render(); });
+    $('#patch0102ManualDiscard').addEventListener('click', async () => {
+      const value = translation;
+      if (!value || value.busy || value.autoRunning || !confirm('미완료 번역 작업과 이 앱이 만든 임시 파일을 삭제할까요? 저장된 한국어 자막과 ChatGPT 대화는 유지됩니다.')) return;
+      clearTimeout(value.answerTimer);
+      await api.patchRemoveManualTranslationSession(value.episodeKey, value.sourceFingerprint).catch(() => {});
+      if (value.fileMode && value.jobKey) await api.patchDiscardChatGPTWebBackgroundTranslation(value.jobKey).catch(() => {});
+      translation = null; open = false; $('#patch0102ManualAnswer').value = ''; render();
+    });
     $('#patch0102ManualAnswer').addEventListener('input', () => { const value = translation; if (!current(value)) return; value.answer = $('#patch0102ManualAnswer').value; clearTimeout(value.answerTimer); value.answerTimer = setTimeout(() => void saveSession(value, value.status), 250); });
     $('#patch0102ManualReveal').addEventListener('click', () => { if (currentSubtitle?.source === 'chatgpt' && currentSubtitle.path) api.patchRevealManualSubtitle(currentSubtitle.path).catch(error => setStatus(`저장 위치를 열지 못했습니다: ${error.message}`)); });
     $('#patch0102ManualRestore').addEventListener('click', async () => { const translated = currentSubtitle; if (translated?.source !== 'chatgpt' || !translated.from) return; const original = sourceBeforeTranslation?.path === translated.from ? sourceBeforeTranslation : await api.patchManualTranslationSource?.(subtitleStoreKey(), translated.from); if (translated !== currentSubtitle || !original?.url) { setStatus('원본 자막을 찾지 못했습니다. 원본 출처에서 다시 선택해 주세요.'); return; } attachSubtitle(original.url, original.label || '원본 자막', { ...original, saved: true }); });

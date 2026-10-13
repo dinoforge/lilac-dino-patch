@@ -41,6 +41,7 @@ const PATCH_PAYLOAD_FILES = Object.freeze({
     ['src/manual-subtitle-translation.js', 'src/manual-subtitle-translation.js'],
     ['electron/embedded-chatgpt-web.cjs', 'electron/embedded-chatgpt-web.cjs'],
     ['electron/chatgpt-web-ui-driver.cjs', 'electron/chatgpt-web-ui-driver.cjs'],
+    ['electron/chatgpt-background-translation.cjs', 'electron/chatgpt-background-translation.cjs'],
     ['electron/manual-translation-session.cjs', 'electron/manual-translation-session.cjs'],
     ['electron/patch-manager-stage2-prompts.cjs', 'electron/patch-manager-stage2-prompts.cjs'],
     ['docs/prompts/영어 번역 프롬프트.txt', 'electron/prompts/영어 번역 프롬프트.txt'],
@@ -86,6 +87,17 @@ function makeLilacAnimeV0514Manifest(projectRoot = path.resolve(__dirname, '../.
   patchChatGPTWebTranslate: input => ipcRenderer.invoke('patch:chatgpt-web:translate', input),
   patchChatGPTWebTranslateFile: input => ipcRenderer.invoke('patch:chatgpt-web:translate-file', input),
   patchCancelChatGPTWebTranslation: jobKey => ipcRenderer.invoke('patch:chatgpt-web:cancel', jobKey),
+  patchStartChatGPTWebBackgroundTranslation: input => ipcRenderer.invoke('patch:chatgpt-web:background:start', input),
+  patchChatGPTWebBackgroundStatus: jobKey => ipcRenderer.invoke('patch:chatgpt-web:background:status', jobKey),
+  patchCancelChatGPTWebBackgroundTranslation: jobKey => ipcRenderer.invoke('patch:chatgpt-web:background:cancel', jobKey),
+  patchAcknowledgeChatGPTWebBackgroundTranslation: (jobKey, confirmed) => ipcRenderer.invoke('patch:chatgpt-web:background:acknowledge', jobKey, confirmed),
+  patchDiscardChatGPTWebBackgroundTranslation: jobKey => ipcRenderer.invoke('patch:chatgpt-web:background:discard', jobKey),
+  onPatchChatGPTWebBackgroundUpdate: callback => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on('patch:chatgpt-web:background-update', listener);
+    return () => ipcRenderer.removeListener('patch:chatgpt-web:background-update', listener);
+  },
   patchSaveManualSubtitle: input => ipcRenderer.invoke('patch:manual-subtitle-save', input),\n  patchManualTranslationSettings: () => ipcRenderer.invoke('manual-translation:settings:get'),\n  patchSaveManualTranslationSettings: value => ipcRenderer.invoke('manual-translation:settings:save', value),\n  patchManualTranslationSession: (key, fingerprint) => ipcRenderer.invoke('manual-translation:session:get', key, fingerprint),\n  patchSaveManualTranslationSession: (key, fingerprint, value) => ipcRenderer.invoke('manual-translation:session:save', key, fingerprint, value),\n  patchRemoveManualTranslationSession: (key, fingerprint) => ipcRenderer.invoke('manual-translation:session:remove', key, fingerprint),\n  patchHasManualTranslationForSource: (key, sourcePath) => ipcRenderer.invoke('manual-translation:translated-exists', key, sourcePath),\n  patchRevealManualSubtitle: file => ipcRenderer.invoke('manual-translation:subtitle:reveal', file),\n  patchManualTranslationSource: (key, file) => ipcRenderer.invoke('manual-translation:source:get', key, file),\n`
     },
     {

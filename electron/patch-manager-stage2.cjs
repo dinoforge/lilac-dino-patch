@@ -85,7 +85,7 @@ function registerPatch02Handlers(deps) {
   registerManualTranslationSessionIpc({ ipcMain, app, shell: deps.shell || require('electron').shell, subtitleStore });
   // The embedded page is opened only by explicit user action. The Patch 02
   // driver is bound to that isolated window and never reads cookies or storage.
-  let embeddedChatGPT = null, webDriver = null;
+  let embeddedChatGPT = null, webDriver = null, backgroundTranslation = null;
   function getWebService() {
     if (!embeddedChatGPT) {
       const native = deps.electron || require('electron');
@@ -103,6 +103,59 @@ function registerPatch02Handlers(deps) {
       webDriver = createWebAutoTranslation({ getWindow: () => getWebService().getWindow() });
     }
     return webDriver;
+  }
+  function saveManualSubtitle(input = {}) {
+    const key = String(input.key || '').trim(), text = String(input.text || '');
+    if (!key || key.length > MAX_EPISODE_KEY_CHARS) throw new Error('회차 식별 정보를 확인할 수 없습니다.');
+    if (text.length > MAX_TRANSLATED_VTT_CHARS || !/^WEBVTT(?:[ \t].*)?(?:\r?\n|$)/i.test(text)) {
+      throw new Error('번역 결과가 유효한 WebVTT 자막이 아닙니다.');
+    }
+    const deterministicName = input.mode === 'web-auto' && /^[a-zA-Z0-9_-]{8,96}$/.test(String(input.jobKey || ''))
+      ? `chatgpt_web_${input.jobKey}.vtt` : '';
+    const directory = path.join(app.getPath('userData'), 'subtitles', 'translated');
+    fs.mkdirSync(directory, { recursive: true });
+    const file = path.join(directory, deterministicName || `chatgpt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.vtt`);
+    const existing = deterministicName && subtitleStore.list?.(key)?.find(item => item.path === file && item.source === 'chatgpt');
+    if (existing) return existing;
+    if (fs.existsSync(file)) {
+      if (fs.readFileSync(file, 'utf8') !== text) throw new Error('이전 저장 결과와 다른 번역 내용이 발견되어 기존 파일을 덮어쓰지 않았습니다.');
+    } else {
+      let descriptor;
+      try {
+        descriptor = fs.openSync(file, 'wx');
+        fs.writeFileSync(descriptor, text, 'utf8');
+        try { fs.fsyncSync(descriptor); } catch {}
+        fs.closeSync(descriptor); descriptor = undefined;
+      } catch (error) {
+        if (descriptor !== undefined) try { fs.closeSync(descriptor); } catch {}
+        try { fs.unlinkSync(file); } catch {}
+        throw error;
+      }
+    }
+    try {
+      const mode = input.mode === 'web-auto' ? 'web-auto' : 'manual';
+      const label = mode === 'web-auto' ? 'ChatGPT 웹 자동 번역' : 'ChatGPT 수동 번역';
+      const saved = subtitleStore.save(key, {
+        source: 'chatgpt', label, path: file,
+        from: String(input.from || ''), fromName: String(input.fromName || '원본 자막')
+      });
+      if (!saved) throw new Error('번역 자막을 회차에 저장하지 못했습니다.');
+      return saved;
+    } catch (error) {
+      try { fs.unlinkSync(file); } catch {}
+      throw error;
+    }
+  }
+  function getBackgroundTranslation() {
+    if (!backgroundTranslation) {
+      const native = deps.electron || require('electron');
+      const { createChatGPTBackgroundTranslation } = require('./chatgpt-background-translation.cjs');
+      backgroundTranslation = createChatGPTBackgroundTranslation({
+        app, driver: getWebDriver(), getWindow: () => getWebService().getWindow(),
+        saveSubtitle: saveManualSubtitle, Notification: native.Notification
+      });
+    }
+    return backgroundTranslation;
   }
   ipcMain.handle('patch:chatgpt-web:open', () => getWebService().open());
   ipcMain.handle('patch:chatgpt-web:translate', async (_, input) => {
@@ -142,6 +195,11 @@ function registerPatch02Handlers(deps) {
     }
   });
   ipcMain.handle('patch:chatgpt-web:cancel', (_, jobKey) => webDriver?.cancel(String(jobKey || '')) ?? { cancelled: false, sent: false });
+  ipcMain.handle('patch:chatgpt-web:background:start', (event, input = {}) => getBackgroundTranslation().start(input, event?.sender));
+  ipcMain.handle('patch:chatgpt-web:background:status', (_, jobKey) => getBackgroundTranslation().getStatus(String(jobKey || '')));
+  ipcMain.handle('patch:chatgpt-web:background:cancel', (_, jobKey) => getBackgroundTranslation().cancel(String(jobKey || '')));
+  ipcMain.handle('patch:chatgpt-web:background:acknowledge', (_, jobKey, confirmed) => getBackgroundTranslation().acknowledge(String(jobKey || ''), confirmed === true));
+  ipcMain.handle('patch:chatgpt-web:background:discard', (_, jobKey) => getBackgroundTranslation().discard(String(jobKey || '')));
   ipcMain.handle('patch:translation-prompt', (_, language) => loadTranslationPrompt(String(language || '')));
   ipcMain.handle('patch:clipboard-copy', (_, value) => {
     const text = String(value ?? '');
@@ -158,43 +216,12 @@ function registerPatch02Handlers(deps) {
     if (text.length > 2_000_000) throw new Error('클립보드 내용이 너무 큽니다. 번역 결과 JSON만 복사해 주세요.');
     return text;
   });
-  ipcMain.handle('patch:manual-subtitle-save', (_, input = {}) => {
-    const key = String(input.key || '').trim(), text = String(input.text || '');
-    if (!key || key.length > MAX_EPISODE_KEY_CHARS) throw new Error('회차 식별 정보를 확인할 수 없습니다.');
-    if (text.length > MAX_TRANSLATED_VTT_CHARS || !/^WEBVTT(?:[ \t].*)?(?:\r?\n|$)/i.test(text)) {
-      throw new Error('번역 결과가 유효한 WebVTT 자막이 아닙니다.');
-    }
-    const directory = path.join(app.getPath('userData'), 'subtitles', 'translated');
-    fs.mkdirSync(directory, { recursive: true });
-    const file = path.join(directory, `chatgpt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.vtt`);
-    let descriptor;
-    try {
-      descriptor = fs.openSync(file, 'wx');
-      fs.writeFileSync(descriptor, text, 'utf8');
-      try { fs.fsyncSync(descriptor); } catch {}
-      fs.closeSync(descriptor); descriptor = undefined;
-    } catch (error) {
-      if (descriptor !== undefined) try { fs.closeSync(descriptor); } catch {}
-      try { fs.unlinkSync(file); } catch {}
-      throw error;
-    }
-    try {
-      const mode = input.mode === 'web-auto' ? 'web-auto' : 'manual';
-      const label = mode === 'web-auto' ? 'ChatGPT 웹 자동 번역' : 'ChatGPT 수동 번역';
-      const saved = subtitleStore.save(key, {
-        source: 'chatgpt', label, path: file,
-        from: String(input.from || ''), fromName: String(input.fromName || '원본 자막')
-      });
-      if (!saved) throw new Error('번역 자막을 회차에 저장하지 못했습니다.');
-      return saved;
-    } catch (error) {
-      try { fs.unlinkSync(file); } catch {}
-      throw error;
-    }
-  });
+  ipcMain.handle('patch:manual-subtitle-save', (_, input = {}) => saveManualSubtitle(input));
   return [
     'patch:translation-prompt', 'patch:clipboard-copy', 'patch:clipboard-read', 'patch:manual-subtitle-save',
     'patch:chatgpt-web:open', 'patch:chatgpt-web:translate', 'patch:chatgpt-web:translate-file', 'patch:chatgpt-web:cancel',
+    'patch:chatgpt-web:background:start', 'patch:chatgpt-web:background:status', 'patch:chatgpt-web:background:cancel',
+    'patch:chatgpt-web:background:acknowledge', 'patch:chatgpt-web:background:discard',
     'manual-translation:settings:get', 'manual-translation:settings:save',
     'manual-translation:session:get', 'manual-translation:session:save', 'manual-translation:session:remove',
     'manual-translation:translated-exists', 'manual-translation:subtitle:reveal', 'manual-translation:source:get'

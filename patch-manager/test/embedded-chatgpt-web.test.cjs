@@ -26,6 +26,7 @@ function makeBrowserMock({ failLoad = false } = {}) {
       this.options = options;
       this.events = {};
       this.destroyed = false;
+      this.hidden = false;
       this.loaded = [];
       this.shown = 0;
       this.focused = 0;
@@ -44,6 +45,7 @@ function makeBrowserMock({ failLoad = false } = {}) {
       if (failLoad) throw Error('mock network failure');
     }
     show() { this.shown++; }
+    hide() { this.hidden = true; }
     focus() { this.focused++; }
     destroy() { this.destroyed = true; this.events.closed?.(); }
   }
@@ -63,12 +65,15 @@ test('embedded ChatGPT uses a dedicated sandboxed profile and reuses its window'
   assert.equal(current.options.webPreferences.sandbox, true);
   assert.equal(current.options.webPreferences.webviewTag, false);
   assert.equal(current.options.webPreferences.webSecurity, true);
+  assert.equal(current.options.webPreferences.backgroundThrottling, false);
   let allowed;
   current.permission(null, 'camera', ok => { allowed = ok; });
   assert.equal(allowed, false);
   assert.deepEqual(await service.open(), { opened: true, reused: true, embedded: true });
   assert.equal(mock.windows.length, 1);
   assert.equal(current.focused, 1);
+  assert.equal(service.hide(), true);
+  assert.equal(current.hidden, true);
   current.destroy();
   assert.deepEqual(await service.open(), { opened: true, reused: false, embedded: true });
   assert.equal(mock.windows.length, 2);
@@ -264,7 +269,9 @@ test('whole-file web driver attaches one complete SRT before one instruction and
       assert.ok(targetPath);
     }
   };
-  const window = { webContents, isDestroyed: () => false };
+  const window = { hidden: true, webContents, isDestroyed: () => false,
+    show() { assert.fail('background driver must not show the ChatGPT window'); },
+    focus() { assert.fail('background driver must not focus the ChatGPT window'); } };
   const driver = createWebAutoTranslation({ getWindow: () => window, pollIntervalMs: 10, stableMs: 10,
     timeoutMs: 1000, now: () => clock, sleep: async ms => { clock += ms; } });
   try {
@@ -275,7 +282,10 @@ test('whole-file web driver attaches one complete SRT before one instruction and
     assert.equal(safeResultFileUrl('file:///C:/private/result.srt'), false);
     assert.doesNotThrow(() => new Function('return ' + clickAttachButtonScript('/c/whole-file-test')));
 
-    const result = await driver.runFile({ jobKey: 'whole-file-job-1', prompt, fileName: 'subtitle-to-translate.srt', filePath, tempDir });
+    const phases = [];
+    const result = await driver.runFile({ jobKey: 'whole-file-job-1', prompt, fileName: 'subtitle-to-translate.srt', filePath, tempDir }, {
+      onProgress: value => phases.push(value)
+    });
     assert.equal(result.ok, true);
     assert.equal(result.sent, true);
     assert.equal(result.attached, true);
@@ -284,6 +294,10 @@ test('whole-file web driver attaches one complete SRT before one instruction and
     assert.equal(order.filter(item => item === 'instruction-send').length, 1);
     assert.ok(order.indexOf('attached-file') < order.indexOf('instruction-input'));
     assert.ok(order.indexOf('instruction-input') < order.indexOf('instruction-send'));
+    assert.ok(phases.some(value => value.phase === 'authenticated'));
+    assert.ok(phases.some(value => value.phase === 'waiting-attachment'));
+    assert.equal(phases.find(value => value.phase === 'sending-instructions')?.sendAttempted, true);
+    assert.equal(phases.find(value => value.phase === 'waiting-full-file-response')?.sent, true);
     assert.equal(driver.status().attached, true);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -333,23 +347,23 @@ test('ChatGPT web automation is a separate enabled route and deletion remains di
   const settingsStart = rendererSource.indexOf('function addManualTranslationSettings()');
   const settingsEnd = rendererSource.indexOf('function addManualTranslationUi()', settingsStart);
   const settings = rendererSource.slice(settingsStart, settingsEnd);
-  assert.match(settings, /choice\.textContent = 'ChatGPT 웹 자동 번역 \(실험\)'/);
+  assert.match(settings, /choice\.textContent = 'ChatGPT 전체 파일 백그라운드 번역'/);
   assert.match(settings, /id="patch0102ChatGPTAutoStart" type="button" aria-describedby/);
   assert.match(settings, /choice\.addEventListener\('click',/);
   assert.match(settings, /id="patch0102ChatGPTDeleteUnavailable" type="button" disabled/);
   assert.match(settings, /수동 번역 준비/);
-  assert.match(settings, /선택한 자막 전체를 SRT 파일로 첨부 완료/);
+  assert.match(settings, /메인 프로세스가 진행률·취소·복구 상태를 관리/);
   assert.match(rendererSource, /id = 'patch0102WebAutoStart'/);
-  assert.match(rendererSource, /ChatGPT 웹 자동 번역 \(실험\)/);
+  assert.match(rendererSource, /ChatGPT 전체 파일 백그라운드 번역/);
   assert.match(rendererSource, /const runAuto = async/);
-  assert.match(rendererSource, /patchChatGPTWebTranslateFile/);
+  assert.match(rendererSource, /patchStartChatGPTWebBackgroundTranslation/);
+  assert.doesNotMatch(rendererSource, /patchChatGPTWebTranslateFile/);
   assert.doesNotMatch(rendererSource, /runLegacyBatchedAuto|waitForWebResult/);
-  assert.match(rendererSource, /patchCancelChatGPTWebTranslation/);
+  assert.match(rendererSource, /patchCancelChatGPTWebBackgroundTranslation/);
   const autoStart = rendererSource.slice(rendererSource.indexOf('const runAuto = async'), rendererSource.indexOf('const copyPrompt = async'));
   assert.doesNotMatch(autoStart, /patchOpenChatGPTEmbedded/, 'automatic translation must use the existing app-owned ChatGPT window');
-  assert.match(autoStart, /patchChatGPTWebTranslateFile/);
+  assert.match(autoStart, /patchStartChatGPTWebBackgroundTranslation/);
   assert.match(rendererSource, /자동 재전송하지 않습니다/);
-  assert.match(rendererSource, /if \(!value\.persisted\) throw new Error/);
   assert.match(rendererSource, /value\.inflightBatch === value\.index/);
 });
 
@@ -360,7 +374,7 @@ test('Patch 02 exposes embedded window IPC but only opens it when called', async
   try {
     const registered = registerPatch02Handlers({
       ipcMain: { handle: (channel, callback) => handlers.set(channel, callback) },
-      app: { getPath: name => { assert.equal(name, 'userData'); return userData; } },
+      app: { getPath: name => path.join(userData, name) },
       subtitleStore: { save: () => ({ path: 'translated.vtt' }) },
       clipboard: { writeText() {}, readText() { return ''; } },
       shell: { showItemInFolder() {} },
@@ -370,8 +384,12 @@ test('Patch 02 exposes embedded window IPC but only opens it when called', async
     assert.ok(registered.includes('patch:chatgpt-web:translate'));
     assert.ok(registered.includes('patch:chatgpt-web:translate-file'));
     assert.ok(registered.includes('patch:chatgpt-web:cancel'));
+    assert.ok(registered.includes('patch:chatgpt-web:background:start'));
+    assert.ok(registered.includes('patch:chatgpt-web:background:status'));
+    assert.ok(registered.includes('patch:chatgpt-web:background:cancel'));
     assert.equal(handlers.has('patch:chatgpt-web:translate'), true);
     assert.equal(handlers.has('patch:chatgpt-web:translate-file'), true);
+    assert.equal(handlers.has('patch:chatgpt-web:background:start'), true);
     assert.equal(handlers.has('siwc:connect'), false);
     assert.equal(mock.windows.length, 0);
     const closed = await handlers.get('patch:chatgpt-web:translate')(null, { jobKey: 'test-job-key-1', batchIndex: 0, prompt: 'Translate this.' });
@@ -387,6 +405,14 @@ test('Patch 02 exposes embedded window IPC but only opens it when called', async
     assert.equal(noFileWindow.sent, false);
     assert.equal(noFileWindow.attached, false);
     assert.equal(mock.windows.length, 0, 'the file IPC must not create a new ChatGPT window or session');
+    const noBackgroundWindow = await handlers.get('patch:chatgpt-web:background:start')(null, {
+      jobKey: 'whole-file-background-1', prompt: 'Translate the complete attached SRT to Korean.',
+      content: '1\n00:00:01,000 --> 00:00:02,000\nこんにちは\n', episodeKey: 'episode-1',
+      sourcePath: 'D:\\isolated\\source.vtt', sourceFingerprint: 'fingerprint-1', sourceLabel: '일본어 자막', playbackId: 1
+    });
+    assert.equal(noBackgroundWindow.ok, false);
+    assert.equal(noBackgroundWindow.code, 'CHATGPT_WINDOW_CLOSED');
+    assert.equal(mock.windows.length, 0, 'background start must not create or focus a ChatGPT window');
     const result = await handlers.get('patch:chatgpt-web:open')();
     assert.equal(result.embedded, true);
     assert.equal(mock.windows.length, 1);
@@ -407,6 +433,7 @@ test('official v0.5.14 patch manifest carries embedded bridge and no SIWC runtim
   const files = manifest.actions.filter(action => action.kind === 'add-file').map(action => action.file);
   assert.ok(files.includes('electron/embedded-chatgpt-web.cjs'));
   assert.ok(files.includes('electron/chatgpt-web-ui-driver.cjs'));
+  assert.ok(files.includes('electron/chatgpt-background-translation.cjs'));
   assert.ok(!files.includes('electron/siwc-client.cjs'));
   assert.ok(!files.includes('src/siwc-subtitle-bridge.js'));
   const preload = manifest.actions.find(action => action.file === 'electron/preload.cjs').content;
@@ -415,6 +442,8 @@ test('official v0.5.14 patch manifest carries embedded bridge and no SIWC runtim
   assert.match(preload, /patchChatGPTWebTranslate/);
   assert.match(preload, /patchChatGPTWebTranslateFile/);
   assert.match(preload, /patchCancelChatGPTWebTranslation/);
+  assert.match(preload, /patchStartChatGPTWebBackgroundTranslation/);
+  assert.match(preload, /onPatchChatGPTWebBackgroundUpdate/);
   assert.doesNotMatch(preload, /SIWC|siwc/);
   assert.doesNotMatch(html, /siwc/i);
 });

@@ -32,7 +32,7 @@ function createEmbeddedChatGPTBrowser({ BrowserWindow, partition = SESSION_PARTI
       webPreferences: {
         partition, nodeIntegration: false, contextIsolation: true, sandbox: true,
         webSecurity: true, webviewTag: false, allowRunningInsecureContent: false,
-        spellcheck: true
+        spellcheck: true, backgroundThrottling: false
       }
     });
     const current = win;
@@ -51,7 +51,7 @@ function createEmbeddedChatGPTBrowser({ BrowserWindow, partition = SESSION_PARTI
           parent: current, width: 760, height: 750,
           webPreferences: {
             partition, nodeIntegration: false, contextIsolation: true,
-            sandbox: true, webSecurity: true, webviewTag: false
+            sandbox: true, webSecurity: true, webviewTag: false, backgroundThrottling: false
           }
         }
       };
@@ -68,7 +68,12 @@ function createEmbeddedChatGPTBrowser({ BrowserWindow, partition = SESSION_PARTI
       throw new Error('ChatGPT 내장 화면을 열지 못했습니다: ' + error.message);
     }
   }
-  return { open, getWindow: () => win, home: HOME, partition };
+  function hide() {
+    if (!win || win.isDestroyed?.() || typeof win.hide !== 'function') return false;
+    win.hide();
+    return true;
+  }
+  return { open, hide, getWindow: () => win, home: HOME, partition };
 }
 
 module.exports = { HOME, SESSION_PARTITION, safeNavigation, createEmbeddedChatGPTBrowser };

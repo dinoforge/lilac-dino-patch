@@ -350,7 +350,7 @@ function createWebAutoTranslation({
   function status() {
     return active
       ? { busy: true, jobKey: active.jobKey, batchIndex: active.batchIndex, phase: active.phase, sent: active.sent, startedAt: active.startedAt,
-          ...(active.fileMode ? { fileMode: true, attached: active.attached } : {}) }
+          ...(active.fileMode ? { fileMode: true, attached: active.attached, sendAttempted: active.sendAttempted } : {}) }
       : { busy: false, ...(last || {}) };
   }
 
@@ -358,7 +358,7 @@ function createWebAutoTranslation({
     if (!active || jobKey && active.jobKey !== jobKey) {
       const previous = last && (!jobKey || last.jobKey === jobKey) ? last : null;
       return { cancelled: false, sent: Boolean(previous?.sent), stopRequested: Boolean(previous?.stopRequested), settled: true, phase: previous?.phase || null,
-        ...(previous?.fileMode ? { attached: Boolean(previous.attached) } : {}) };
+        ...(previous?.fileMode ? { attached: Boolean(previous.attached), sendAttempted: Boolean(previous.sendAttempted) } : {}) };
     }
     const job = active;
     job.cancelled = true;
@@ -370,7 +370,8 @@ function createWebAutoTranslation({
     job.stopRequested = stopRequested;
     job.phase = 'cancelled';
     await job.finished;
-    return { cancelled: true, sent: job.sent, stopRequested, settled: true, ...(job.fileMode ? { attached: Boolean(job.attached) } : {}) };
+    return { cancelled: true, sent: job.sent, stopRequested, settled: true,
+      ...(job.fileMode ? { attached: Boolean(job.attached), sendAttempted: Boolean(job.sendAttempted) } : {}) };
   }
 
   async function run(rawInput) {
@@ -468,7 +469,7 @@ function createWebAutoTranslation({
     }
   }
 
-  async function runFile(rawInput) {
+  async function runFile(rawInput, { onProgress } = {}) {
     const input = validateFileJob(rawInput);
     if (active) throw failure('WEB_TRANSLATION_BUSY', '이미 다른 ChatGPT 웹 번역 작업이 실행 중입니다.');
     const win = getWindow();
@@ -479,8 +480,17 @@ function createWebAutoTranslation({
     const finished = new Promise(resolve => { finishJob = resolve; });
     const job = active = {
       jobKey: input.jobKey, batchIndex: 0, window: win, phase: 'checking-page', fileMode: true,
-      sent: false, attached: false, cancelled: false, startedAt: now(), conversationPath: null,
+      sent: false, sendAttempted: false, attached: false, cancelled: false, startedAt: now(), conversationPath: null,
       downloadItem: null, finished, finish: finishJob
+    };
+    const report = async (phase, values = {}) => {
+      job.phase = phase;
+      Object.assign(job, values);
+      if (typeof onProgress === 'function') await onProgress({
+        jobKey: job.jobKey, phase: job.phase, sent: job.sent,
+        sendAttempted: job.sendAttempted, attached: job.attached,
+        conversationPath: job.conversationPath
+      });
     };
     let outcome = 'failed';
     try {
@@ -497,6 +507,7 @@ function createWebAutoTranslation({
         throw failure('CHATGPT_COMPOSER_NOT_EMPTY', '현재 대화 입력창에 다른 파일이 이미 첨부되어 있습니다. 기존 첨부를 보존하고 중단했습니다.');
       job.conversationPath = initial.pathname || '/';
       const baseline = { users: Number(initial.userCount) || 0, assistants: Number(initial.assistantCount) || 0 };
+      await report('authenticated');
       const debuggerClient = webContents.debugger;
       if (!debuggerClient?.sendCommand || typeof debuggerClient.attach !== 'function')
         throw failure('CHATGPT_FILE_UPLOAD_UNAVAILABLE', '내장 ChatGPT에 실제 파일을 첨부하는 Electron 기능을 사용할 수 없습니다.');
@@ -506,7 +517,7 @@ function createWebAutoTranslation({
         await debuggerClient.sendCommand('DOM.enable');
         let inputs = await findFileInputs(debuggerClient);
         if (!inputs.length) {
-          job.phase = 'opening-attachment-menu';
+          await report('opening-attachment-menu');
           const opened = await evaluate(webContents, clickAttachButtonScript(job.conversationPath));
           if (!opened) throw failure('CHATGPT_FILE_UPLOAD_UNAVAILABLE', 'ChatGPT 화면에서 파일 첨부 버튼을 하나로 확인하지 못했습니다. 파일을 선택하지 않았습니다.');
           await sleep(200);
@@ -517,9 +528,12 @@ function createWebAutoTranslation({
         if (accept && !/(^|[,\s])(?:\.srt|text\/plain|\*\/\*)(?=$|[,\s;])/i.test(accept))
           throw failure('CHATGPT_FILE_TYPE_UNSUPPORTED', 'ChatGPT 파일 선택기가 SRT 자막을 받지 않아 업로드를 중단했습니다.');
         if (job.cancelled) throw failure('CANCELLED', '파일 첨부 전에 번역을 중단했습니다.');
-        job.phase = 'attaching-source-file';
-        await debuggerClient.sendCommand('DOM.setFileInputFiles', { nodeId: inputs[0].nodeId, files: [input.filePath] });
+        // Persist conservatively before touching the file input: CDP may be
+        // interrupted after dispatch, so recovery must not assume no upload.
         job.attached = true;
+        await report('attaching-source-file', { attached: true });
+        await debuggerClient.sendCommand('DOM.setFileInputFiles', { nodeId: inputs[0].nodeId, files: [input.filePath] });
+        await report('waiting-attachment', { attached: true });
       } catch (error) {
         if (error?.code) throw error;
         throw failure('CHATGPT_FILE_UPLOAD_FAILED', '선택한 전체 SRT 파일을 ChatGPT 입력창에 첨부하지 못했습니다. 번역 지침은 보내지 않았습니다.', false, job.attached);
@@ -542,7 +556,7 @@ function createWebAutoTranslation({
       if (job.cancelled) throw failure('CANCELLED', '파일 첨부 후 번역 지침 전송 전에 중단했습니다.', false, true);
       if (!attachmentConfirmed) throw failure('CHATGPT_FILE_ATTACHMENT_UNCONFIRMED', 'ChatGPT 입력창에서 전체 SRT 첨부 완료를 확인하지 못했습니다. 번역 지침은 보내지 않았습니다.', false, true);
 
-      job.phase = 'preparing-instructions';
+      await report('preparing-instructions', { attached: true });
       const focused = await evaluate(webContents, focusComposerScript(job.conversationPath));
       if (!focused || job.cancelled) throw failure(job.cancelled ? 'CANCELLED' : 'CHATGPT_COMPOSER_FOCUS_FAILED', '번역 지침을 입력창에 안전하게 준비하지 못했습니다.', false, true);
       try { await withTimeout(webContents.insertText(input.prompt), 10_000, 'ChatGPT 입력창에 번역 지침을 준비하는 시간이 초과되었습니다.'); }
@@ -556,13 +570,20 @@ function createWebAutoTranslation({
       }
       if (job.cancelled) throw failure('CANCELLED', '번역 지침 전송 전에 중단했습니다.', false, true);
 
-      job.phase = 'sending-instructions';
+      // Main-process state is flushed before the only send click. Any crash
+      // from this point onward is treated as uncertain and is never retried.
+      job.sendAttempted = true;
+      await report('sending-instructions', { attached: true, sendAttempted: true });
       let clicked;
       try { clicked = await evaluate(webContents, clickSendScript(input.prompt, job.conversationPath, input.fileName, input.fileBytes), 5000); }
       catch { job.sent = true; throw failure('CHATGPT_SEND_UNCERTAIN', '전송 버튼 처리 결과를 확인할 수 없습니다. 같은 파일과 지침을 자동 재전송하지 않았습니다.', true, true); }
-      if (!clicked) throw failure('CHATGPT_SEND_NOT_CONFIRMED', '첨부 파일과 전송 버튼을 함께 확인하지 못해 지침을 보내지 않았습니다.', false, true);
+      if (!clicked) {
+        job.sendAttempted = false;
+        await report('preparing-instructions', { attached: true, sendAttempted: false });
+        throw failure('CHATGPT_SEND_NOT_CONFIRMED', '첨부 파일과 전송 버튼을 함께 확인하지 못해 지침을 보내지 않았습니다.', false, true);
+      }
       job.sent = true;
-      job.phase = 'waiting-full-file-response';
+      await report('waiting-full-file-response', { sent: true, sendAttempted: true, attached: true });
       const deadline = now() + Math.max(1000, Math.min(600_000, Number(timeoutMs) || DEFAULT_TIMEOUT_MS));
       let seenUser = false, previousFileSignature = '', stableSince = 0, acceptedPath = job.conversationPath;
       while (now() < deadline) {
@@ -591,7 +612,7 @@ function createWebAutoTranslation({
               if (now() - stableSince >= Math.max(500, Number(stableMs) || DEFAULT_STABLE_MS)) {
                 if (!/\.srt$/i.test(state.resultFileName)) throw failure('CHATGPT_RESULT_FILE_TYPE_UNSUPPORTED', 'ChatGPT 응답 파일이 SRT 형식이 아니어서 가져오지 않았습니다.', true, true);
                 if (!safeResultFileUrl(state.resultFileHref)) throw failure('CHATGPT_RESULT_FILE_URL_UNSUPPORTED', 'ChatGPT 결과 파일 주소를 안전하게 확인하지 못해 내려받지 않았습니다.', true, true);
-                job.phase = 'downloading-result-file';
+                await report('downloading-result-file', { sent: true, sendAttempted: true, attached: true });
                 const targetPath = path.join(input.tempDir, `${input.jobKey}-translated.srt`);
                 const downloaded = await waitForDownload(webContents, state.resultFileHref, targetPath, job);
                 if (job.cancelled) throw failure('CANCELLED', '완성 자막 파일 내려받기를 중단했습니다.', true, true);
@@ -605,7 +626,7 @@ function createWebAutoTranslation({
                 outcome = 'completed'; job.phase = 'completed';
                 return { ok: true, jobKey: input.jobKey, responseFile: { name: downloaded.fileName, content }, sent: true, attached: true };
               }
-            } else { previousFileSignature = signature; stableSince = now(); job.phase = 'checking-result-file-stability'; }
+            } else { previousFileSignature = signature; stableSince = now(); await report('checking-response-stability', { sent: true, sendAttempted: true, attached: true }); }
           } else {
             previousFileSignature = ''; stableSince = 0;
             if (String(state.assistantText || '').length > MAX_RESPONSE)
@@ -620,10 +641,11 @@ function createWebAutoTranslation({
       if (!normalized.code) normalized.code = 'CHATGPT_WEB_FAILED';
       normalized.sent = Boolean(normalized.sent || job.sent);
       normalized.attached = Boolean(normalized.attached || job.attached);
+      normalized.sendAttempted = Boolean(normalized.sendAttempted || job.sendAttempted);
       throw normalized;
     } finally {
       last = { jobKey: job.jobKey, batchIndex: 0, phase: job.phase, sent: job.sent, attached: job.attached,
-        fileMode: true, stopRequested: Boolean(job.stopRequested), outcome, finishedAt: now() };
+        sendAttempted: job.sendAttempted, fileMode: true, stopRequested: Boolean(job.stopRequested), outcome, finishedAt: now() };
       if (active === job) active = null;
       job.finish();
     }
