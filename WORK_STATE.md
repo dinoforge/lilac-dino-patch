@@ -1,5 +1,14 @@
 # 작업 상태
 
+## 2026-10-13 Patch 02 — 실제 ChatGPT 자동 번역 재검증
+
+- 기준 커밋 `eff81fc5b50d37c8d13509ac25f10c83d74a485e`에서 새 브랜치 `codex/patch-02-live-verify-20261013`를 사용했다. 로그인된 격리 v0.5.15 프로필에서 빈 새 대화 입력창에 전송 버튼이 아직 없을 수 있음을 확인해, `electron/chatgpt-web-ui-driver.cjs`의 입력 전 검사를 입력창 1개·빈 상태·생성 중 아님으로 제한했다. 실제 입력 후에는 기존과 같이 예상 프롬프트 및 활성 전송 버튼을 검증한다. 관련 모의의 입력 전 전송 버튼 상태도 0개로 갱신했다.
+- 집중 테스트 `node --test patch-manager/test/embedded-chatgpt-web.test.cjs`: 9/9 통과. 드라이버 `node --check`, `git diff --check` 통과.
+- 사용자는 격리 ChatGPT 창에 직접 로그인했다고 확인했다. 앱 재시작 후 컴퓨터 사용 도구가 앱 창 목록에서 LilacAnime 본창만 반환했다. UI 트리에는 LilacAnime 홈이 나왔지만 같은 캡처 이미지에는 다른 ChatGPT 화면이 표시됐고, 본창 클릭은 `failed to activate captured window`로 실패했다. 창을 다시 찾고 상태를 재캡처해도 앱 식별과 화면 이미지가 맞지 않아 자동 입력·전송은 시작하지 않았다. 실제 응답, 다중 묶음, JSON/ID/타임코드, VTT 저장, 영상 적용, 중단·이어하기는 검증하지 못했다. 모의 결과는 실제 성공으로 간주하지 않는다.
+- 소스 수정에 따른 허용 예외로 Windows 포터블 패키지를 다시 만들고 `dist/DinoLilacPatch-live-verify-20261013/DinoLilacPatch.zip`을 생성했다. ZIP에는 `DinoLilacPatch.exe` 한 파일만 있으며, ZIP 안 파일과 EXE의 SHA-256이 `583619379C2CB462016DAD31808084490DD1646E47E0F75E9890A4FAF466456F`로 일치한다. ZIP SHA-256은 `EAEBC9F6E343E75AF5B5062A9D16F0C80273C030E81A7C5EC5E01D687FE43EA9`이다. 이번 작업에서는 압축 해제된 EXE 실행은 하지 않았다. 이전 `dist/dino-lilac-patch-issue5` 산출물은 보존했다. 빌드가 만든 중간 출력 폴더 `dist/dino-lilac-patch-issue5-live-verify-failed-20261013`는 cleanup 도구가 작업을 거부해 남아 있다.
+- GitHub Actions는 실행하거나 설정하지 않았다. 현재 브랜치는 기존 workflow push 필터 대상이 아니다.
+- 실제 설치본, 사용자 프로필 파일, 시청 기록, 다운로드, `main`, Patch 01·03 및 재생 기능은 변경하지 않았다.
+
 ## 2026-10-13 Patch 02 — 실 ChatGPT 검증 및 포터블 ZIP
 
 - 기준 `9199bd6021cc1b46e1630a947b25445adb3ba92b`에서 새 브랜치 `codex/patch-02-live-zip-20261013`를 만들었다. 빈 ChatGPT 입력창에서 전송 버튼이 비활성인 상태를 허용하고, 프롬프트 입력 뒤 활성화 상태를 확인하도록 드라이버 사전 검사를 수정했다. 관련 단위 테스트는 입력 전 비활성·입력 후 활성 모의를 반영한다.

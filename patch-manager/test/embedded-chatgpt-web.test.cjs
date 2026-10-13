@@ -121,7 +121,7 @@ test('web UI scripts compile and automatic translation captures only a new stabl
         inspections++;
         const base = { host: 'chatgpt.com', pathname: '/c/synthetic-thread', loginRequired: false, challenge: false,
           composerCount: 1, composerEmpty: !sent && !script.includes(JSON.stringify(prompt)),
-          composerMatchesExpected: script.includes(JSON.stringify(prompt)), sendButtonCount: 1,
+          composerMatchesExpected: script.includes(JSON.stringify(prompt)), sendButtonCount: script.includes(JSON.stringify(prompt)) ? 1 : 0,
           sendButtonEnabled: script.includes(JSON.stringify(prompt)),
           userCount: sent ? 1 : 0, latestUserMatchesExpected: sent, assistantCount: sent && inspections > 2 ? 1 : 0,
           assistantText: sent && inspections > 2 ? '{"1":"안녕","2":"고마워"}' : '', generating: false };
@@ -169,7 +169,7 @@ test('web driver rejects a concurrent job and cancellation waits for the active 
         const prepared = script.includes(JSON.stringify(prompt));
         return { host: 'chatgpt.com', pathname: '/', loginRequired: false, challenge: false,
           composerCount: 1, composerEmpty: !prepared, composerMatchesExpected: prepared,
-          sendButtonCount: 1, sendButtonEnabled: true, userCount: 0, latestUserMatchesExpected: false,
+          sendButtonCount: prepared ? 1 : 0, sendButtonEnabled: prepared, userCount: 0, latestUserMatchesExpected: false,
           assistantCount: 0, assistantText: '', generating: false };
       }
       return false;
