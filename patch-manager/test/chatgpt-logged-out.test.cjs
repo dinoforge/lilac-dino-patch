@@ -10,7 +10,6 @@ const path = require('node:path');
 const { createEmbeddedChatGPTBrowser, HOME, SESSION_PARTITION } =
   require('../../electron/embedded-chatgpt-web.cjs');
 const { registerPatch02Handlers } = require('../../electron/patch-manager-stage2.cjs');
-const { AUTOMATIC_OUTPUT_UNAVAILABLE } = require('../../electron/chatgpt-web-ui-driver.cjs');
 
 function blankAccountBrowser({ fails = 0 } = {}) {
   const windows = [];
@@ -81,7 +80,7 @@ test('logged-out clean browser opens home without reading account state or submi
   assert.equal(mock.pageExecutions, 0);
 });
 
-test('logged-out Patch 02 IPC does not open the browser or save a subtitle on auto-translate', async () => {
+test('logged-out Patch 02 IPC stops safely without sending or saving a subtitle', async () => {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'dino-web-logged-out-'));
   const handlers = new Map();
   const mock = blankAccountBrowser();
@@ -102,30 +101,30 @@ test('logged-out Patch 02 IPC does not open the browser or save a subtitle on au
       electron: mock
     });
     assert.equal(mock.windows.length, 0);
-    await assert.rejects(
-      handlers.get('patch:chatgpt-web:translate')(null, {
-        jobKey: 'logged-out-fixture-1', prompt: 'Translate this synthetic cue.'
-      }),
-      error => error.message === AUTOMATIC_OUTPUT_UNAVAILABLE
-    );
-    assert.equal(mock.windows.length, 0, 'the unsupported automatic method must not open ChatGPT');
+    const unopened = await handlers.get('patch:chatgpt-web:translate')(null, {
+      jobKey: 'logged-out-fixture-1', batchIndex: 0, prompt: 'Translate this synthetic cue.'
+    });
+    assert.equal(unopened.code, 'CHATGPT_WINDOW_CLOSED');
+    assert.equal(mock.windows.length, 0, 'the translation IPC does not open the browser implicitly');
     assert.equal(saved, 0);
     assert.equal(copied, 0);
     assert.deepEqual(await handlers.get('patch:chatgpt-web:open')(), {
       opened: true, reused: false, embedded: true
     });
     assert.equal(mock.windows[0].authenticated, false);
-    await assert.rejects(
-      handlers.get('patch:chatgpt-web:translate')(null, {
-        jobKey: 'logged-out-fixture-1', prompt: 'Translate this synthetic cue.'
-      }),
-      error => error.message === AUTOMATIC_OUTPUT_UNAVAILABLE
-    );
+    const blocked = await handlers.get('patch:chatgpt-web:translate')(null, {
+      jobKey: 'logged-out-fixture-2', batchIndex: 0, prompt: 'Translate this synthetic cue.'
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.sent, false);
+    assert.equal(blocked.code, 'CHATGPT_PAGE_UNAVAILABLE');
     assert.equal(saved, 0, 'no translated subtitle is saved without a verified response');
     assert.equal(copied, 0, 'the test never reads the system clipboard');
     assert.equal(mock.protectedReads, 0);
-    assert.equal(mock.pageExecutions, 0);
-    assert.equal(await handlers.get('patch:chatgpt-web:cancel')(), true);
+    assert.equal(mock.pageExecutions, 1, 'only page-level logged-out preflight was attempted');
+    assert.deepEqual(await handlers.get('patch:chatgpt-web:cancel')(null, 'logged-out-fixture-2'), {
+      cancelled: false, sent: false, stopRequested: false, settled: true, phase: 'checking-page'
+    });
   } finally {
     fs.rmSync(userData, { recursive: true, force: true });
   }
@@ -145,13 +144,12 @@ test('logged-out page load failure is handled without accepting a false login re
   assert.equal(mock.windows[1].authenticated, false);
 });
 
-test('logged-out UI describes manual login and manual delivery, not verified automatic translation', () => {
+test('logged-out UI explains manual login while offering separate automatic and manual routes', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../../src/patch-manager-stage2.js'), 'utf8');
   assert.match(source, /브라우저 로그인은 사용자가 직접 합니다/);
-  assert.match(source, /웹 자동 입력·응답 수집·대화 삭제는 지원하지 않습니다/);
-  assert.match(source, /웹 자동 입력·응답 수집·대화 삭제는 미지원입니다/);
-  assert.match(source, /ChatGPT 웹 자동 번역 \(미지원\)/);
-  assert.match(source, /autoButton\.disabled = true/);
+  assert.match(source, /ChatGPT 웹 자동 번역 \(실험\)/);
+  assert.match(source, /const runAuto = async/);
+  assert.match(source, /자동 재전송하지 않습니다/);
   assert.match(source, /id="patch0102ChatGPTDeleteUnavailable" type="button" disabled/);
   assert.match(source, /patch0102ManualImport/);
 });

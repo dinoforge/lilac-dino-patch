@@ -5,10 +5,14 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const vm = require('node:vm');
 const {
   HOME, SESSION_PARTITION, safeNavigation, createEmbeddedChatGPTBrowser
 } = require('../../electron/embedded-chatgpt-web.cjs');
-const { AUTOMATIC_OUTPUT_UNAVAILABLE, createWebAutoTranslation } = require('../../electron/chatgpt-web-ui-driver.cjs');
+const {
+  validateJob, inspectScript, focusComposerScript, clickSendScript, clearComposerScript, clickStopScript,
+  createWebAutoTranslation
+} = require('../../electron/chatgpt-web-ui-driver.cjs');
 const { registerPatch02Handlers } = require('../../electron/patch-manager-stage2.cjs');
 const { makeLilacAnimeV0514Manifest } = require('../adapters/lilacanime-v0.5.14.cjs');
 const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/patch-manager-stage2.js'), 'utf8');
@@ -93,33 +97,108 @@ test('embedded page load failure destroys the dedicated window', async () => {
   assert.equal(mock.windows[0].destroyed, true);
 });
 
-test('experimental web translation fails closed without opening or reading ChatGPT', async () => {
-  let opened = 0;
-  const driver = createWebAutoTranslation({ open: async () => { opened++; }, getWindow: () => { opened++; return null; } });
-  await assert.rejects(driver.run({ jobKey: 'test-job-key-1', prompt: 'Translate these subtitle cues.' }), error => error.message === AUTOMATIC_OUTPUT_UNAVAILABLE);
-  await assert.rejects(driver.run({ jobKey: 'bad', prompt: '' }), /비어 있거나 크기 제한/);
-  assert.equal(opened, 0);
+test('web UI scripts compile and automatic translation captures only a new stable response', async () => {
+  const prompt = 'Translate synthetic cue IDs 1 and 2.';
+  const conversationPath = '/c/synthetic-thread';
+  const scripts = [inspectScript(prompt, true), focusComposerScript(conversationPath), clickSendScript(prompt, conversationPath),
+    clearComposerScript(prompt, conversationPath), clickStopScript(conversationPath)];
+  for (const script of scripts) new Function('return ' + script);
+  for (const script of scripts.slice(1)) {
+    assert.equal(vm.runInNewContext(script, { location: { hostname: 'chatgpt.com', pathname: '/c/other-thread' } }), false,
+      'focus, send, clear, and stop actions are bound to the original conversation');
+  }
+  assert.deepEqual(validateJob({ jobKey: 'test-job-key-1', batchIndex: 0, prompt }), { jobKey: 'test-job-key-1', batchIndex: 0, prompt });
+  assert.throws(() => validateJob({ jobKey: 'bad', batchIndex: 0, prompt: '' }), /비어 있거나 크기 제한/);
+
+  let sent = false, inserted = '', clock = 0, inspections = 0;
+  const webContents = {
+    isDestroyed: () => false,
+    insertText: async text => { inserted = text; },
+    executeJavaScript: async script => {
+      if (script.includes('dino-chatgpt-auto:focus')) return true;
+      if (script.includes('dino-chatgpt-auto:send')) { sent = true; return true; }
+      if (script.includes('dino-chatgpt-auto:inspect')) {
+        inspections++;
+        const base = { host: 'chatgpt.com', pathname: '/c/synthetic-thread', loginRequired: false, challenge: false,
+          composerCount: 1, composerEmpty: !sent && !script.includes(JSON.stringify(prompt)),
+          composerMatchesExpected: script.includes(JSON.stringify(prompt)), sendButtonCount: 1, sendButtonEnabled: true,
+          userCount: sent ? 1 : 0, latestUserMatchesExpected: sent, assistantCount: sent && inspections > 2 ? 1 : 0,
+          assistantText: sent && inspections > 2 ? '{"1":"안녕","2":"고마워"}' : '', generating: false };
+        return base;
+      }
+      return false;
+    }
+  };
+  const win = { webContents, isDestroyed: () => false };
+  const driver = createWebAutoTranslation({ getWindow: () => win, pollIntervalMs: 10, stableMs: 500, now: () => clock, sleep: async ms => { clock += ms; } });
+  const result = await driver.run({ jobKey: 'test-job-key-1', batchIndex: 0, prompt });
+  assert.equal(inserted, prompt);
+  assert.equal(result.ok, true);
+  assert.equal(result.batchIndex, 0);
+  assert.equal(result.response, '{"1":"안녕","2":"고마워"}');
+  assert.equal(result.sent, true);
   assert.equal(driver.busy(), false);
-  assert.equal(driver.cancel(), true);
 });
 
-test('unsupported ChatGPT web automation stays disabled while manual translation remains available', () => {
+test('web UI automation stops before sending when the account page is logged out or unsupported', async () => {
+  let executed = 0, inserted = 0;
+  const driver = createWebAutoTranslation({ getWindow: () => ({ isDestroyed: () => false, webContents: {
+    isDestroyed: () => false,
+    insertText: async () => { inserted++; },
+    executeJavaScript: async script => { executed++; return { host: 'chatgpt.com', pathname: '/auth/login', loginRequired: true, challenge: false, composerCount: 0 }; }
+  } }) });
+  await assert.rejects(driver.run({ jobKey: 'test-job-key-1', batchIndex: 0, prompt: 'Synthetic prompt.' }), error => error.code === 'CHATGPT_LOGIN_REQUIRED' && error.sent === false);
+  assert.equal(executed, 1);
+  assert.equal(inserted, 0);
+  assert.equal(driver.busy(), false);
+});
+
+test('web driver rejects a concurrent job and cancellation waits for the active input step', async () => {
+  const prompt = 'Synthetic concurrency cue.';
+  let releaseInsert, announceInsert, sendCount = 0;
+  const insertGate = new Promise(resolve => { releaseInsert = resolve; });
+  const insertStarted = new Promise(resolve => { announceInsert = resolve; });
+  const driver = createWebAutoTranslation({ getWindow: () => ({ isDestroyed: () => false, webContents: {
+    isDestroyed: () => false,
+    insertText: async () => { announceInsert(); await insertGate; },
+    executeJavaScript: async script => {
+      if (script.includes('dino-chatgpt-auto:focus')) return true;
+      if (script.includes('dino-chatgpt-auto:send')) { sendCount++; return true; }
+      if (script.includes('dino-chatgpt-auto:inspect')) {
+        const prepared = script.includes(JSON.stringify(prompt));
+        return { host: 'chatgpt.com', pathname: '/', loginRequired: false, challenge: false,
+          composerCount: 1, composerEmpty: !prepared, composerMatchesExpected: prepared,
+          sendButtonCount: 1, sendButtonEnabled: true, userCount: 0, latestUserMatchesExpected: false,
+          assistantCount: 0, assistantText: '', generating: false };
+      }
+      return false;
+    }
+  } }) });
+  const running = driver.run({ jobKey: 'active-job-key-1', batchIndex: 0, prompt });
+  await insertStarted;
+  await assert.rejects(driver.run({ jobKey: 'active-job-key-2', batchIndex: 0, prompt }), error => error.code === 'WEB_TRANSLATION_BUSY');
+  const cancelling = driver.cancel('active-job-key-1');
+  releaseInsert();
+  assert.deepEqual(await cancelling, { cancelled: true, sent: false, stopRequested: false, settled: true });
+  await assert.rejects(running, error => error.code === 'CANCELLED' && error.sent === false);
+  assert.equal(sendCount, 0);
+});
+
+test('ChatGPT web automation is a separate enabled route and deletion remains disabled', () => {
   const settingsStart = rendererSource.indexOf('function addManualTranslationSettings()');
   const settingsEnd = rendererSource.indexOf('function addManualTranslationUi()', settingsStart);
   const settings = rendererSource.slice(settingsStart, settingsEnd);
-  assert.match(settings, /id = 'patch0102ChatGPTAutoUnavailable'/);
-  assert.match(settings, /choice\.textContent = 'ChatGPT 웹 자동 번역 \(미지원\)'/);
-  assert.match(settings, /choice\.disabled = true/);
-  assert.match(settings, /id="patch0102ChatGPTAutoStart" type="button" disabled/);
-  assert.doesNotMatch(settings, /choice\.addEventListener\('click',/);
+  assert.match(settings, /choice\.textContent = 'ChatGPT 웹 자동 번역 \(실험\)'/);
+  assert.match(settings, /id="patch0102ChatGPTAutoStart" type="button" aria-describedby/);
+  assert.match(settings, /choice\.addEventListener\('click',/);
   assert.match(settings, /id="patch0102ChatGPTDeleteUnavailable" type="button" disabled/);
   assert.match(settings, /수동 번역 준비/);
-  assert.match(settings, /웹 자동 입력·응답 수집·대화 삭제는 지원하지 않습니다/);
+  assert.match(settings, /로그인 필요, 접근 확인/);
   assert.match(rendererSource, /id = 'patch0102WebAutoStart'/);
-  assert.match(rendererSource, /ChatGPT 웹 자동 번역 \(미지원\)/);
-  assert.doesNotMatch(rendererSource, /const runAuto = async/);
-  assert.doesNotMatch(rendererSource, /patchChatGPTWebTranslate|patchChatGPTWebCancel/);
-  assert.match(rendererSource, /웹 자동 입력·응답 수집·대화 삭제는 미지원입니다/);
+  assert.match(rendererSource, /ChatGPT 웹 자동 번역 \(실험\)/);
+  assert.match(rendererSource, /const runAuto = async/);
+  assert.match(rendererSource, /patchChatGPTWebTranslate|patchCancelChatGPTWebTranslation/);
+  assert.match(rendererSource, /중복 전송/);
   assert.match(rendererSource, /if \(!value\.persisted\) throw new Error/);
   assert.match(rendererSource, /value\.inflightBatch === value\.index/);
 });
@@ -143,11 +222,20 @@ test('Patch 02 exposes embedded window IPC but only opens it when called', async
     assert.equal(handlers.has('patch:chatgpt-web:translate'), true);
     assert.equal(handlers.has('siwc:connect'), false);
     assert.equal(mock.windows.length, 0);
-    await assert.rejects(handlers.get('patch:chatgpt-web:translate')(null, { jobKey: 'test-job-key-1', prompt: 'Translate this.' }), error => error.message === AUTOMATIC_OUTPUT_UNAVAILABLE);
-    assert.equal(mock.windows.length, 0, 'the unavailable handler does not open ChatGPT');
+    const closed = await handlers.get('patch:chatgpt-web:translate')(null, { jobKey: 'test-job-key-1', batchIndex: 0, prompt: 'Translate this.' });
+    assert.equal(closed.ok, false);
+    assert.equal(closed.code, 'CHATGPT_WINDOW_CLOSED');
+    assert.equal(mock.windows.length, 0, 'the renderer must open the dedicated window before starting a job');
     const result = await handlers.get('patch:chatgpt-web:open')();
     assert.equal(result.embedded, true);
     assert.equal(mock.windows.length, 1);
+    const unsupported = await handlers.get('patch:chatgpt-web:translate')(null, { jobKey: 'test-job-key-2', batchIndex: 0, prompt: 'Translate this.' });
+    assert.equal(unsupported.ok, false);
+    assert.equal(unsupported.code, 'CHATGPT_PAGE_UNAVAILABLE');
+    assert.equal(unsupported.sent, false);
+    assert.deepEqual(await handlers.get('patch:chatgpt-web:cancel')(null, 'test-job-key-2'), {
+      cancelled: false, sent: false, stopRequested: false, settled: true, phase: 'checking-page'
+    });
   } finally {
     fs.rmSync(userData, { recursive: true, force: true });
   }
@@ -163,7 +251,8 @@ test('official v0.5.14 patch manifest carries embedded bridge and no SIWC runtim
   const preload = manifest.actions.find(action => action.file === 'electron/preload.cjs').content;
   const html = manifest.actions.find(action => action.file === 'src/index.html').content;
   assert.match(preload, /patchOpenChatGPTEmbedded/);
-  assert.doesNotMatch(preload, /patchChatGPTWebTranslate|patchChatGPTWebCancel/);
+  assert.match(preload, /patchChatGPTWebTranslate/);
+  assert.match(preload, /patchCancelChatGPTWebTranslation/);
   assert.doesNotMatch(preload, /SIWC|siwc/);
   assert.doesNotMatch(html, /siwc/i);
 });

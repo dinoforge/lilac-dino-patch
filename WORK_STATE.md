@@ -1,5 +1,14 @@
 # 작업 상태
 
+## 2026-10-13 Patch 02 — ChatGPT 자막 번역
+
+- 기준 커밋 `fe2c0fd275d3029b1793df65cf6b856c7b2ff7ee`에서 새 브랜치 `codex/patch-02-chatgpt-automation-20261013`을 만들었다. 변경 범위는 Patch 02 ChatGPT 번역 경로와 해당 격리 검증뿐이다.
+- 기존 수동 흐름(번역 프롬프트 준비·복사, 클립보드 결과 가져오기, cue ID/JSON 검사, WebVTT 저장 및 즉시 적용)을 유지하고 저장 오류 복구를 보강했다. 자동 경로는 내장 격리 ChatGPT 창에서 입력·전송·새 응답 안정화 확인·ID 검증·다음 묶음 처리·저장/적용까지 연결했다. 진행 기록을 전송 전에 저장하며, 전송 결과가 불분명한 작업은 자동 재전송하지 않고 수동 복구 또는 사용자 확인을 요구한다. 취소·이어하기·동시 작업 차단을 추가했고, 전송/정리/중지 동작은 원래 대화 경로에 제한한다.
+- 대화 자동 삭제는 비활성 상태다. 자동화는 ChatGPT 화면의 DOM만 보며 로그인 정보·쿠키·저장소를 읽지 않는다. 기존 `off/cloud/local` 선택과 API/local AI 엔진 경로는 변경하지 않았다.
+- 집중 Node 테스트 28/28 통과, 수정 JS 구문 검사 및 `git diff --check` 통과. 공식 v0.5.15의 매니저 생성 격리 복사본 Electron 테스트에서 일본어 수동 30 cue/2묶음, 영어 자동 UI 모의 30 cue/2묶음, WebVTT 저장·적용, 중단·세션 재개·중복 전송 방지를 통과했다. Patch 01/03은 OFF였고 외부 HTTP 요청은 0회였다.
+- 실제 `https://chatgpt.com` 익명 화면은 별도 격리 프로필로 열어 사전 점검했다. 로그인 필요 상태가 감지되어 요청을 입력·전송하지 않았고, 응답도 수집하지 않았다. 따라서 실제 계정 자동 번역 성공은 미검증이다. 기존 API 경로는 코드와 분리된 `cloud`/`local` 선택을 확인했으며, API 키나 실제 번역 API 호출은 사용하지 않았다.
+- 실제 설치본 `D:\LilacAnime`, 사용자 데이터, `main`, Patch 01·03, 공급원/재생 기능, 패치 관리자 EXE는 변경하지 않았다. GitHub Actions는 실행하지 않았다.
+
 ## 2026-10-13 GitHub issue #5 — 공급원 진단 및 DinoLilacPatch 포터블 EXE
 
 - 기준 `codex/issue-4-dinolilacpatch-mvp-20261012` / `9e2c8bf6774426ed827aacf8e7c890d7d8358d58`에서 새 브랜치 `codex/issue-5-provider-diagnostics-exe-20261013`를 만들었다.

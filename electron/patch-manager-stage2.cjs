@@ -82,8 +82,8 @@ function registerPatch02Handlers(deps) {
   const { loadTranslationPrompt } = require('./patch-manager-stage2-prompts.cjs');
   const { registerManualTranslationSessionIpc } = require('./manual-translation-session.cjs');
   registerManualTranslationSessionIpc({ ipcMain, app, shell: deps.shell || require('electron').shell, subtitleStore });
-  // The embedded page is opened only by explicit user action. Automated
-  // response collection is deliberately unavailable; the IPC below fails closed.
+  // The embedded page is opened only by explicit user action. The Patch 02
+  // driver is bound to that isolated window and never reads cookies or storage.
   let embeddedChatGPT = null, webDriver = null;
   function getWebService() {
     if (!embeddedChatGPT) {
@@ -99,15 +99,23 @@ function registerPatch02Handlers(deps) {
   function getWebDriver() {
     if (!webDriver) {
       const { createWebAutoTranslation } = require('./chatgpt-web-ui-driver.cjs');
-      webDriver = createWebAutoTranslation();
+      webDriver = createWebAutoTranslation({ getWindow: () => getWebService().getWindow() });
     }
     return webDriver;
   }
   ipcMain.handle('patch:chatgpt-web:open', () => getWebService().open());
-  // Preserve a fail-closed handler for stale renderer payloads. It never opens
-  // a browser, submits a prompt, or reads ChatGPT output.
-  ipcMain.handle('patch:chatgpt-web:translate', (_, input) => getWebDriver().run(input));
-  ipcMain.handle('patch:chatgpt-web:cancel', () => webDriver?.cancel() ?? true);
+  ipcMain.handle('patch:chatgpt-web:translate', async (_, input) => {
+    try { return await getWebDriver().run(input); }
+    catch (error) {
+      return {
+        ok: false,
+        code: typeof error?.code === 'string' ? error.code : 'CHATGPT_WEB_FAILED',
+        error: String(error?.message || 'ChatGPT 웹 번역에 실패했습니다.').slice(0, 1000),
+        sent: error?.sent === true
+      };
+    }
+  });
+  ipcMain.handle('patch:chatgpt-web:cancel', (_, jobKey) => webDriver?.cancel(String(jobKey || '')) ?? { cancelled: false, sent: false });
   ipcMain.handle('patch:translation-prompt', (_, language) => loadTranslationPrompt(String(language || '')));
   ipcMain.handle('patch:clipboard-copy', (_, value) => {
     const text = String(value ?? '');
@@ -145,8 +153,10 @@ function registerPatch02Handlers(deps) {
       throw error;
     }
     try {
+      const mode = input.mode === 'web-auto' ? 'web-auto' : 'manual';
+      const label = mode === 'web-auto' ? 'ChatGPT 웹 자동 번역' : 'ChatGPT 수동 번역';
       const saved = subtitleStore.save(key, {
-        source: 'chatgpt', label: 'ChatGPT 수동 번역', path: file,
+        source: 'chatgpt', label, path: file,
         from: String(input.from || ''), fromName: String(input.fromName || '원본 자막')
       });
       if (!saved) throw new Error('번역 자막을 회차에 저장하지 못했습니다.');

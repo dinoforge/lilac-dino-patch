@@ -8,6 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow } = require('electron');
 const { createEmbeddedChatGPTBrowser, SESSION_PARTITION } = require('../electron/embedded-chatgpt-web.cjs');
+const { inspectScript, CHATGPT_HOSTS } = require('../electron/chatgpt-web-ui-driver.cjs');
 
 const root = process.env.DINO_LOGGED_OUT_SMOKE_ROOT;
 const temp = fs.realpathSync(os.tmpdir());
@@ -33,13 +34,22 @@ async function main() {
     const win = service.getWindow();
     if (!result?.opened || !win || win.isDestroyed()) throw new Error('Browser failed to open');
     const currentUrl = win.webContents.getURL();
-    // Do not read page content, login fields, cookies, clipboard or session secrets.
     const origin = new URL(currentUrl).origin;
     if (!origin.startsWith('https://')) throw new Error('Unexpected insecure navigation');
+    if (!CHATGPT_HOSTS.has(new URL(currentUrl).hostname.toLowerCase())) throw new Error('Unexpected ChatGPT host');
+    // This checks only visible UI readiness booleans and counts. It does not
+    // return input values, conversation text, cookies, clipboard or session data.
+    const ui = await win.webContents.executeJavaScript(inspectScript('', false), true);
+    if (!CHATGPT_HOSTS.has(ui?.host)) throw new Error('UI preflight ran outside an allowed ChatGPT host');
+    console.log('anonymous_ui_preflight=' + JSON.stringify({
+      loginRequired: ui.loginRequired === true, challengePresent: ui.challenge === true,
+      composerCount: Number(ui.composerCount) || 0, sendButtonCount: Number(ui.sendButtonCount) || 0,
+      generating: ui.generating === true
+    }));
     console.log('anonymous_site_navigation=loaded');
     console.log('anonymous_site_origin=' + origin);
     console.log('authenticated=not_attempted');
-    console.log('login_screen_verified=false');
+    console.log('login_or_challenge_bypass=false');
     console.log('auto_submission=false');
     console.log('output_extraction=false');
     return 0;
