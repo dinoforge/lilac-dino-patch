@@ -1,5 +1,13 @@
 # 작업 상태
 
+## 2026-10-13 Patch 02 — 내장 ChatGPT 창 식별 BLOCKED
+
+- 기준 커밋 `782033c0880ac3845491c8ebc8c9fd65cd62d0ed`에서 새 브랜치 `codex/patch-02-window-identity-20261013`를 만들었다.
+- 창 목록의 `LilacAnime` 항목 `29819340`은 컴퓨터 사용 도구의 Windows 창 ID이며 Electron `BrowserWindow.id`가 아니다. 별도 ChatGPT 데스크톱 창 항목과 혼동하지 않았다. 앱 UI의 접근성 트리와 캡처 이미지가 일치하지 않고, 이전 캡처 창 활성화도 실패했으므로 어떠한 클릭이나 텍스트 입력도 하지 않았다.
+- 격리 v0.5.15 프로세스에는 `--remote-debugging-port`가 없었다. Patch 02의 `createEmbeddedChatGPTBrowser`는 BrowserWindow 참조를 모듈 클로저에 보관하고 `getWindow()`만 반환하며, BrowserWindow ID·webContents ID·현재 URL·생성/종료 기록을 안전하게 읽는 진단 IPC는 없다. 현재 창 목록에는 내장 ChatGPT 창이 별도 대상 창으로 보이지 않아, 해당 참조·로그인 상태·현재 URL을 확인할 수 없었다.
+- 식별이 확인되기 전 신규 ChatGPT 창을 열거나 앱을 재시작하면 안 되므로 실계정 번역 단계에 진입하지 않았다. 현재 로그인 상태, 자동 요청 입력·전송, 응답 수집, 여러 묶음, ID/타임코드, VTT 저장/적용, 중단·이어하기는 모두 실검증 BLOCKED/NOT TESTED다. 이번 차단 진단에서는 소스 코드를 수정하지 않았고 별도 테스트를 실행하지 않았다.
+- 실제 설치본·실제 사용자 프로필/기록/다운로드, `main`, Patch 01·03은 변경하지 않았다. EXE/ZIP 및 GitHub Actions는 실행·수정하지 않았다.
+
 ## 2026-10-13 Patch 02 — 실제 ChatGPT 자동 번역 재검증
 
 - 기준 커밋 `eff81fc5b50d37c8d13509ac25f10c83d74a485e`에서 새 브랜치 `codex/patch-02-live-verify-20261013`를 사용했다. 로그인된 격리 v0.5.15 프로필에서 빈 새 대화 입력창에 전송 버튼이 아직 없을 수 있음을 확인해, `electron/chatgpt-web-ui-driver.cjs`의 입력 전 검사를 입력창 1개·빈 상태·생성 중 아님으로 제한했다. 실제 입력 후에는 기존과 같이 예상 프롬프트 및 활성 전송 버튼을 검증한다. 관련 모의의 입력 전 전송 버튼 상태도 0개로 갱신했다.
