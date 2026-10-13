@@ -121,7 +121,8 @@ test('web UI scripts compile and automatic translation captures only a new stabl
         inspections++;
         const base = { host: 'chatgpt.com', pathname: '/c/synthetic-thread', loginRequired: false, challenge: false,
           composerCount: 1, composerEmpty: !sent && !script.includes(JSON.stringify(prompt)),
-          composerMatchesExpected: script.includes(JSON.stringify(prompt)), sendButtonCount: 1, sendButtonEnabled: true,
+          composerMatchesExpected: script.includes(JSON.stringify(prompt)), sendButtonCount: 1,
+          sendButtonEnabled: script.includes(JSON.stringify(prompt)),
           userCount: sent ? 1 : 0, latestUserMatchesExpected: sent, assistantCount: sent && inspections > 2 ? 1 : 0,
           assistantText: sent && inspections > 2 ? '{"1":"안녕","2":"고마워"}' : '', generating: false };
         return base;

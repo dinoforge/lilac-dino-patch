@@ -250,7 +250,7 @@ function createWebAutoTranslation({
       if (initial?.challenge) throw failure('CHATGPT_CHALLENGE', '접근 확인 화면이 표시되어 자동 전송을 중단했습니다. 화면에서 직접 처리한 뒤 다시 시작해 주세요.');
       if (initial?.loginRequired) throw failure('CHATGPT_LOGIN_REQUIRED', '내장 ChatGPT 로그인이 필요합니다. 로그인은 화면에서 직접 완료해 주세요.');
       if (initial?.composerCount === 0) throw failure('CHATGPT_UI_UNSUPPORTED', '내장 ChatGPT 화면에서 번역 입력창을 찾지 못해 전송하지 않았습니다. 로그인 여부와 화면 상태를 직접 확인해 주세요.');
-      if (initial?.composerCount !== 1 || !initial.composerEmpty || initial.sendButtonCount !== 1 || !initial.sendButtonEnabled || initial.generating)
+      if (initial?.composerCount !== 1 || !initial.composerEmpty || initial.sendButtonCount !== 1 || initial.generating)
         throw failure('CHATGPT_UI_UNSUPPORTED', 'ChatGPT 화면 구조가 예상과 달라 전송하지 않았습니다. 입력 내용을 지우거나 다른 버튼을 누르지 않았습니다.');
       job.conversationPath = initial.pathname || '/';
       const baseline = { users: Number(initial.userCount) || 0, assistants: Number(initial.assistantCount) || 0 };
