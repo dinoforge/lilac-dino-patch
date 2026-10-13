@@ -891,3 +891,10 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 공개 홈페이지 1회 GET은 RE:Anime/Miruro/Animenosub HTTP 200, 애니24/Linkkf fetch 실패(`TypeError`)였다. 이는 홈페이지 연결성에 한정되며 앱 검색·회차·재생 결과는 미검증이다. Patch 02의 공식 v0.5.14 임시 프로필 Electron 수동 자막 가져오기·검증·저장 경로도 통과했으며 ChatGPT 실계정은 사용하지 않았다.
 - `node --test dino-lilac-patch/test/structure.test.cjs`: 10/10. 첫 전체 테스트는 합성 구조 fixture에 새 `#homeView` 앵커가 없어 390/391에서 실패해 픽스처를 보정했다. 공식 v0.5.14·v0.5.15 격리 소스 환경에서 최종 `npm test`: 391/391, 실패 0, 건너뜀 0. 검증 상세는 `docs/verification/issue-3-windows-usability.md`에 기록했다. GitHub Actions는 이번 작업에서 실행하지 않았다.
 - 실설치본 `D:\LilacAnime`, 실제 프로필·시청/다운로드 데이터, `main`은 건드리지 않았다. ChatGPT 웹 자동 입력·응답 수집·대화 삭제와 실제 영상 재생은 지원/검증되지 않았다. 기능 및 검증 변경은 `ab1a861ccf36976f3e2a39e8de85bf6a114ecb17`로 커밋해 `origin/codex/issue-3-windows-usability`에 푸시했고, 원격 ref를 대조해 확인했다. 이 브랜치에 대한 Actions 실행은 없으며 PR도 만들지 않았다.
+
+## 2026-10-13 Patch 02 전체 자막 파일 자동 번역 입력
+
+- `codex/patch-02-whole-file-translation-20261013`에서 기존 청크 JSON 자동 경로를 전체 자막 SRT 파일 첨부·번역 지침 1회 전달·완성 SRT 파일 회수 경로로 바꿨다. 웹 자동 경로는 사용자가 먼저 연 기존 앱 소유 ChatGPT 창만 사용하고, 창이 없으면 새 창을 만들지 않고 중단한다.
+- SRT/VTT/ASS 입력을 전체 SRT로 준비하고 자막 수·번호·순서·시간을 왕복 검증한다. 번역 결과는 동일 항목을 확인한 뒤 WebVTT로 저장·현재 영상에 적용하며, 업로드·회수·검증 실패와 불확실 전송은 보존하고 자동 재전송하지 않는다. 수동 번역 입력은 기존 JSON 묶음 경로로 유지한다.
+- `node --test patch-manager/test/whole-file-subtitle-translation.test.cjs patch-manager/test/embedded-chatgpt-web.test.cjs`: 15/15 통과. 변경 CJS/JS 구문 검사와 `git diff --check` 통과. 전체 `npm test`와 CI는 실행하지 않았다.
+- 실제 ChatGPT 파일 업로드부터 영상 적용까지는 미검증이다. 현재 Computer Use 인벤토리에 LilacAnime 및 내장 ChatGPT 창이 없고 일반 Chrome의 ChatGPT 탭만 보여 그 탭은 건드리지 않았다. EXE/ZIP, 실설치본, 사용자 프로필·기록·다운로드, `main`은 변경하지 않았다.

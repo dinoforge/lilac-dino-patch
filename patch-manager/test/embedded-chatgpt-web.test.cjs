@@ -6,11 +6,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
+const { EventEmitter } = require('node:events');
 const {
   HOME, SESSION_PARTITION, safeNavigation, createEmbeddedChatGPTBrowser
 } = require('../../electron/embedded-chatgpt-web.cjs');
 const {
-  validateJob, inspectScript, focusComposerScript, clickSendScript, clearComposerScript, clickStopScript,
+  validateJob, validateFileJob, inspectScript, focusComposerScript, clickAttachButtonScript, clickSendScript, clearComposerScript, clickStopScript,
+  MAX_SUBTITLE_FILE_BYTES, safeResultFileUrl,
   createWebAutoTranslation
 } = require('../../electron/chatgpt-web-ui-driver.cjs');
 const { registerPatch02Handlers } = require('../../electron/patch-manager-stage2.cjs');
@@ -185,6 +187,148 @@ test('web driver rejects a concurrent job and cancellation waits for the active 
   assert.equal(sendCount, 0);
 });
 
+test('whole-file web driver attaches one complete SRT before one instruction and downloads a new SRT response', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dino-chatgpt-whole-driver-test-'));
+  const filePath = path.join(tempDir, 'subtitle-to-translate.srt');
+  const prompt = 'Translate the attached complete subtitle to Korean once.';
+  const source = '1\n00:00:01,000 --> 00:00:02,000\nこんにちは\n';
+  const translated = '1\n00:00:01,000 --> 00:00:02,000\n안녕하세요\n';
+  fs.writeFileSync(filePath, source, 'utf8');
+  const order = [];
+  let sent = false, fileWasSet = false, clock = 0;
+  const session = new EventEmitter();
+  const debuggerClient = {
+    attached: false,
+    isAttached() { return this.attached; },
+    attach() { this.attached = true; },
+    detach() { this.attached = false; },
+    async sendCommand(method, params = {}) {
+      order.push(method);
+      if (method === 'DOM.enable') return {};
+      if (method === 'DOM.getDocument') return { root: { nodeId: 1 } };
+      if (method === 'DOM.querySelectorAll') return { nodeIds: [2] };
+      if (method === 'DOM.describeNode') return { node: { attributes: ['type', 'file', 'accept', '.srt'] } };
+      if (method === 'DOM.setFileInputFiles') {
+        assert.deepEqual(params.files, [filePath]);
+        fileWasSet = true;
+        order.push('attached-file');
+        return {};
+      }
+      throw new Error(`Unexpected CDP method: ${method}`);
+    }
+  };
+  const webContents = {
+    debugger: debuggerClient,
+    session,
+    isDestroyed: () => false,
+    async insertText(value) { order.push('instruction-input'); assert.equal(value, prompt); },
+    async executeJavaScript(script) {
+      if (script.includes('dino-chatgpt-auto:send')) { order.push('instruction-send'); sent = true; return true; }
+      if (script.includes('dino-chatgpt-auto:inspect')) {
+        const base = { host: 'chatgpt.com', pathname: '/c/whole-file-test', loginRequired: false, challenge: false,
+          composerCount: 1, composerEmpty: !sent, composerMatchesExpected: script.includes(JSON.stringify(prompt)),
+          sendButtonCount: script.includes(JSON.stringify(prompt)) ? 1 : 0,
+          sendButtonEnabled: script.includes(JSON.stringify(prompt)), userCount: sent ? 1 : 0,
+          latestUserMatchesExpected: sent, latestUserHasFileName: sent, assistantCount: sent ? 1 : 0,
+          assistantText: '', generating: false, selectedFileCount: fileWasSet && !sent ? 1 : 0,
+          expectedFileInputMatches: fileWasSet && !sent, composerFileNameVisible: fileWasSet && !sent, composerHasAttachmentMarker: fileWasSet && !sent,
+          uploadBusy: false, resultFileCount: sent ? 1 : 0,
+          resultFileName: sent ? 'translated_subtitles.srt' : '',
+          resultFileHref: sent ? 'https://chatgpt.com/backend-api/files/translated_subtitles.srt' : '' };
+        if (script.includes(JSON.stringify(prompt)) && !sent) {
+          base.composerEmpty = false;
+          base.composerMatchesExpected = true;
+          base.sendButtonCount = 1;
+          base.sendButtonEnabled = true;
+          base.selectedFileCount = fileWasSet ? 1 : 0;
+          base.expectedFileInputMatches = true;
+          base.composerFileNameVisible = true;
+          base.composerHasAttachmentMarker = true;
+        }
+        return base;
+      }
+      if (script.includes('dino-chatgpt-auto:focus')) return true;
+      if (script.includes('dino-chatgpt-auto:attach-button')) return false;
+      return false;
+    },
+    downloadURL(url) {
+      order.push('result-download');
+      const item = new EventEmitter();
+      let targetPath = '';
+      item.getURL = () => url;
+      item.getFilename = () => 'translated_subtitles.srt';
+      item.setSavePath = value => { targetPath = value; fs.writeFileSync(targetPath, translated, 'utf8'); };
+      item.cancel = () => {};
+      session.emit('will-download', {}, item, webContents);
+      setImmediate(() => item.emit('done', {}, 'completed'));
+      assert.ok(targetPath);
+    }
+  };
+  const window = { webContents, isDestroyed: () => false };
+  const driver = createWebAutoTranslation({ getWindow: () => window, pollIntervalMs: 10, stableMs: 10,
+    timeoutMs: 1000, now: () => clock, sleep: async ms => { clock += ms; } });
+  try {
+    assert.equal(validateFileJob({ jobKey: 'whole-file-job-1', prompt, fileName: 'subtitle-to-translate.srt', filePath, tempDir }).fileBytes,
+      Buffer.byteLength(source));
+    assert.equal(MAX_SUBTITLE_FILE_BYTES, 12_000_000);
+    assert.equal(safeResultFileUrl('https://chatgpt.com/backend-api/files/result.srt'), true);
+    assert.equal(safeResultFileUrl('file:///C:/private/result.srt'), false);
+    assert.doesNotThrow(() => new Function('return ' + clickAttachButtonScript('/c/whole-file-test')));
+
+    const result = await driver.runFile({ jobKey: 'whole-file-job-1', prompt, fileName: 'subtitle-to-translate.srt', filePath, tempDir });
+    assert.equal(result.ok, true);
+    assert.equal(result.sent, true);
+    assert.equal(result.attached, true);
+    assert.deepEqual(result.responseFile, { name: 'translated_subtitles.srt', content: translated });
+    assert.equal(order.filter(item => item === 'instruction-input').length, 1);
+    assert.equal(order.filter(item => item === 'instruction-send').length, 1);
+    assert.ok(order.indexOf('attached-file') < order.indexOf('instruction-input'));
+    assert.ok(order.indexOf('instruction-input') < order.indexOf('instruction-send'));
+    assert.equal(driver.status().attached, true);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('whole-file web driver stops before prompting when ChatGPT attachment cannot be confirmed', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dino-chatgpt-whole-no-attach-test-'));
+  const filePath = path.join(tempDir, 'subtitle-to-translate.srt');
+  const prompt = 'Translate the complete subtitle once.';
+  fs.writeFileSync(filePath, '1\n00:00:01,000 --> 00:00:02,000\nこんにちは\n', 'utf8');
+  let inserted = 0, clock = 0;
+  const debuggerClient = {
+    isAttached: () => false, attach() {}, detach() {},
+    async sendCommand(method) {
+      if (method === 'DOM.enable') return {};
+      if (method === 'DOM.getDocument') return { root: { nodeId: 1 } };
+      if (method === 'DOM.querySelectorAll') return { nodeIds: [2] };
+      if (method === 'DOM.describeNode') return { node: { attributes: ['type', 'file', 'accept', '.srt'] } };
+      if (method === 'DOM.setFileInputFiles') return {};
+      throw new Error(`Unexpected CDP method: ${method}`);
+    }
+  };
+  const driver = createWebAutoTranslation({ getWindow: () => ({ isDestroyed: () => false, webContents: {
+    debugger: debuggerClient, isDestroyed: () => false,
+    insertText: async () => { inserted++; },
+    executeJavaScript: async script => {
+      if (script.includes('dino-chatgpt-auto:inspect')) return { host: 'chatgpt.com', pathname: '/c/test', loginRequired: false, challenge: false,
+        composerCount: 1, composerEmpty: true, composerMatchesExpected: false, sendButtonCount: 0, sendButtonEnabled: false,
+        userCount: 0, assistantCount: 0, generating: false, selectedFileCount: 0, expectedFileInputMatches: false,
+        composerFileNameVisible: false, composerHasAttachmentMarker: false, uploadBusy: true };
+      if (script.includes('dino-chatgpt-auto:attach-button')) return false;
+      return false;
+    }
+  } }), pollIntervalMs: 100, now: () => clock, sleep: async ms => { clock += 45_000; } });
+  try {
+    await assert.rejects(driver.runFile({ jobKey: 'whole-file-job-2', prompt, fileName: 'subtitle-to-translate.srt', filePath, tempDir }),
+      error => error.code === 'CHATGPT_FILE_ATTACHMENT_UNCONFIRMED' && error.sent === false && error.attached === true);
+    assert.equal(inserted, 0);
+    assert.equal(driver.status().sent, false);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('ChatGPT web automation is a separate enabled route and deletion remains disabled', () => {
   const settingsStart = rendererSource.indexOf('function addManualTranslationSettings()');
   const settingsEnd = rendererSource.indexOf('function addManualTranslationUi()', settingsStart);
@@ -194,12 +338,17 @@ test('ChatGPT web automation is a separate enabled route and deletion remains di
   assert.match(settings, /choice\.addEventListener\('click',/);
   assert.match(settings, /id="patch0102ChatGPTDeleteUnavailable" type="button" disabled/);
   assert.match(settings, /수동 번역 준비/);
-  assert.match(settings, /로그인 필요, 접근 확인/);
+  assert.match(settings, /선택한 자막 전체를 SRT 파일로 첨부 완료/);
   assert.match(rendererSource, /id = 'patch0102WebAutoStart'/);
   assert.match(rendererSource, /ChatGPT 웹 자동 번역 \(실험\)/);
   assert.match(rendererSource, /const runAuto = async/);
-  assert.match(rendererSource, /patchChatGPTWebTranslate|patchCancelChatGPTWebTranslation/);
-  assert.match(rendererSource, /중복 전송/);
+  assert.match(rendererSource, /patchChatGPTWebTranslateFile/);
+  assert.doesNotMatch(rendererSource, /runLegacyBatchedAuto|waitForWebResult/);
+  assert.match(rendererSource, /patchCancelChatGPTWebTranslation/);
+  const autoStart = rendererSource.slice(rendererSource.indexOf('const runAuto = async'), rendererSource.indexOf('const copyPrompt = async'));
+  assert.doesNotMatch(autoStart, /patchOpenChatGPTEmbedded/, 'automatic translation must use the existing app-owned ChatGPT window');
+  assert.match(autoStart, /patchChatGPTWebTranslateFile/);
+  assert.match(rendererSource, /자동 재전송하지 않습니다/);
   assert.match(rendererSource, /if \(!value\.persisted\) throw new Error/);
   assert.match(rendererSource, /value\.inflightBatch === value\.index/);
 });
@@ -219,14 +368,25 @@ test('Patch 02 exposes embedded window IPC but only opens it when called', async
     });
     assert.ok(registered.includes('patch:chatgpt-web:open'));
     assert.ok(registered.includes('patch:chatgpt-web:translate'));
+    assert.ok(registered.includes('patch:chatgpt-web:translate-file'));
     assert.ok(registered.includes('patch:chatgpt-web:cancel'));
     assert.equal(handlers.has('patch:chatgpt-web:translate'), true);
+    assert.equal(handlers.has('patch:chatgpt-web:translate-file'), true);
     assert.equal(handlers.has('siwc:connect'), false);
     assert.equal(mock.windows.length, 0);
     const closed = await handlers.get('patch:chatgpt-web:translate')(null, { jobKey: 'test-job-key-1', batchIndex: 0, prompt: 'Translate this.' });
     assert.equal(closed.ok, false);
     assert.equal(closed.code, 'CHATGPT_WINDOW_CLOSED');
     assert.equal(mock.windows.length, 0, 'the renderer must open the dedicated window before starting a job');
+    const noFileWindow = await handlers.get('patch:chatgpt-web:translate-file')(null, {
+      jobKey: 'whole-file-ipc-1', prompt: 'Translate the attached complete subtitle.',
+      content: '1\n00:00:01,000 --> 00:00:02,000\nこんにちは\n'
+    });
+    assert.equal(noFileWindow.ok, false);
+    assert.equal(noFileWindow.code, 'CHATGPT_WINDOW_CLOSED');
+    assert.equal(noFileWindow.sent, false);
+    assert.equal(noFileWindow.attached, false);
+    assert.equal(mock.windows.length, 0, 'the file IPC must not create a new ChatGPT window or session');
     const result = await handlers.get('patch:chatgpt-web:open')();
     assert.equal(result.embedded, true);
     assert.equal(mock.windows.length, 1);
@@ -253,6 +413,7 @@ test('official v0.5.14 patch manifest carries embedded bridge and no SIWC runtim
   const html = manifest.actions.find(action => action.file === 'src/index.html').content;
   assert.match(preload, /patchOpenChatGPTEmbedded/);
   assert.match(preload, /patchChatGPTWebTranslate/);
+  assert.match(preload, /patchChatGPTWebTranslateFile/);
   assert.match(preload, /patchCancelChatGPTWebTranslation/);
   assert.doesNotMatch(preload, /SIWC|siwc/);
   assert.doesNotMatch(html, /siwc/i);

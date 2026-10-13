@@ -6,6 +6,7 @@ const path = require('node:path');
 
 const MAX_SESSION_BYTES = 24 * 1024 * 1024;
 const MAX_ANSWER_CHARS = 2_000_000;
+const MAX_WHOLE_FILE_ANSWER_CHARS = 12_000_000;
 const MAX_TRANSLATIONS = 20_000;
 const CLEANUP_TIMINGS = new Set(['immediate', 'five-minutes', 'on-close']);
 const SESSION_STATES = new Set(['ready', 'awaiting-response', 'validating', 'error', 'cancelled', 'saving', 'completed']);
@@ -48,7 +49,7 @@ function sanitizeSession(key, fingerprint, value, now) {
     translations[id] = text;
   }
   const answer = String(value.answer ?? '');
-  if (answer.length > MAX_ANSWER_CHARS) throw new Error('임시 응답이 너무 큽니다.');
+  if (answer.length > (value.mode === 'web-auto' ? MAX_WHOLE_FILE_ANSWER_CHARS : MAX_ANSWER_CHARS)) throw new Error('임시 응답이 너무 큽니다.');
   const record = {
     schema: 1,
     episodeKey: key,

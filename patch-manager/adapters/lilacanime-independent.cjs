@@ -58,6 +58,7 @@ const PATCH02_PRELOAD = Object.freeze([
   "  patchReadText: () => ipcRenderer.invoke('patch:clipboard-read'),",
   "  patchOpenChatGPTEmbedded: () => ipcRenderer.invoke('patch:chatgpt-web:open'),",
   "  patchChatGPTWebTranslate: input => ipcRenderer.invoke('patch:chatgpt-web:translate', input),",
+  "  patchChatGPTWebTranslateFile: input => ipcRenderer.invoke('patch:chatgpt-web:translate-file', input),",
   "  patchCancelChatGPTWebTranslation: jobKey => ipcRenderer.invoke('patch:chatgpt-web:cancel', jobKey),",
   "  patchSaveManualSubtitle: input => ipcRenderer.invoke('patch:manual-subtitle-save', input),",
   "  patchManualTranslationSettings: () => ipcRenderer.invoke('manual-translation:settings:get'),",

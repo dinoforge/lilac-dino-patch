@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const MAX_TRANSLATED_VTT_CHARS = 12_000_000;
@@ -115,6 +116,31 @@ function registerPatch02Handlers(deps) {
       };
     }
   });
+  ipcMain.handle('patch:chatgpt-web:translate-file', async (_, input = {}) => {
+    let tempDir = '';
+    try {
+      const jobKey = String(input.jobKey || ''), prompt = String(input.prompt || ''), content = String(input.content || '');
+      if (!/^[a-zA-Z0-9_-]{8,96}$/.test(jobKey)) throw new Error('번역 작업 식별자가 올바르지 않습니다.');
+      if (!prompt.trim() || prompt.length > 120_000) throw new Error('번역 지침이 비어 있거나 크기 제한을 넘었습니다.');
+      const bytes = Buffer.byteLength(content, 'utf8');
+      if (!content.trim() || content.includes('\0') || bytes > 12_000_000 || !/\d{1,}:\d{2}:\d{2}[,.]\d{1,3}\s*-->\s*\d{1,}:\d{2}:\d{2}[,.]\d{1,3}/.test(content))
+        throw new Error('첨부할 전체 SRT 파일이 비어 있거나 올바른 자막 파일이 아닙니다.');
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dino-chatgpt-whole-'));
+      const fileName = 'subtitle-to-translate.srt', filePath = path.join(tempDir, fileName);
+      fs.writeFileSync(filePath, content, { encoding: 'utf8', flag: 'wx' });
+      return await getWebDriver().runFile({ jobKey, prompt, fileName, filePath, tempDir });
+    } catch (error) {
+      return {
+        ok: false,
+        code: typeof error?.code === 'string' ? error.code : 'CHATGPT_WEB_FAILED',
+        error: String(error?.message || 'ChatGPT 전체 자막 파일 번역에 실패했습니다.').slice(0, 1000),
+        sent: error?.sent === true,
+        attached: error?.attached === true
+      };
+    } finally {
+      if (tempDir) try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {}
+    }
+  });
   ipcMain.handle('patch:chatgpt-web:cancel', (_, jobKey) => webDriver?.cancel(String(jobKey || '')) ?? { cancelled: false, sent: false });
   ipcMain.handle('patch:translation-prompt', (_, language) => loadTranslationPrompt(String(language || '')));
   ipcMain.handle('patch:clipboard-copy', (_, value) => {
@@ -168,7 +194,7 @@ function registerPatch02Handlers(deps) {
   });
   return [
     'patch:translation-prompt', 'patch:clipboard-copy', 'patch:clipboard-read', 'patch:manual-subtitle-save',
-    'patch:chatgpt-web:open', 'patch:chatgpt-web:translate', 'patch:chatgpt-web:cancel',
+    'patch:chatgpt-web:open', 'patch:chatgpt-web:translate', 'patch:chatgpt-web:translate-file', 'patch:chatgpt-web:cancel',
     'manual-translation:settings:get', 'manual-translation:settings:save',
     'manual-translation:session:get', 'manual-translation:session:save', 'manual-translation:session:remove',
     'manual-translation:translated-exists', 'manual-translation:subtitle:reveal', 'manual-translation:source:get'

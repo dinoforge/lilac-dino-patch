@@ -15,10 +15,114 @@
       const timingIndex = lines.findIndex(line => /\d{2}:\d{2}(?::\d{2})?\.\d{3}\s*-->\s*\d{2}:\d{2}(?::\d{2})?\.\d{3}/.test(line));
       if (timingIndex < 0) continue;
       const textLines = lines.slice(timingIndex + 1);
-      cues.push({ id: cues.length + 1, text: textLines.join('\n'), timingIndex });
+      const timing = lines[timingIndex].match(/(\d{2}:\d{2}(?::\d{2})?\.\d{3})\s*-->\s*(\d{2}:\d{2}(?::\d{2})?\.\d{3})/);
+      if (!timing) throw new Error('WebVTT 자막의 시작·종료 시간을 읽지 못했습니다.');
+      cues.push({ id: cues.length + 1, sourceNumber: String(cues.length + 1), text: textLines.join('\n'), timingIndex,
+        startMs: parseTimestamp(timing[1], 'vtt'), endMs: parseTimestamp(timing[2], 'vtt'), start: timing[1], end: timing[2] });
     }
     if (!cues.length) throw new Error('번역할 자막 문장을 찾지 못했습니다.');
-    return { text, blocks, cues };
+    return { format: 'vtt', text, blocks, cues };
+  }
+
+  function parseTimestamp(value, format = 'srt') {
+    const text = String(value || '').trim();
+    if (format === 'ass') {
+      const match = text.match(/^(\d+):(\d{2}):(\d{2})\.(\d{2})$/);
+      if (!match) throw new Error('ASS 자막의 시간이 올바르지 않습니다.');
+      return (((Number(match[1]) * 60 + Number(match[2])) * 60 + Number(match[3])) * 1000) + Number(match[4]) * 10;
+    }
+    const match = text.match(/^(?:(\d{1,}):)?(\d{2}):(\d{2})[,.](\d{1,3})$/);
+    if (!match) throw new Error('자막의 시작·종료 시간 형식을 읽지 못했습니다.');
+    const hours = Number(match[1] || 0), minutes = Number(match[2]), seconds = Number(match[3]);
+    if (minutes > 59 || seconds > 59) throw new Error('자막의 시작·종료 시간이 범위를 벗어났습니다.');
+    const millis = Number(match[4].padEnd(3, '0'));
+    return (((hours * 60 + minutes) * 60 + seconds) * 1000) + millis;
+  }
+
+  function formatSrtTimestamp(milliseconds) {
+    const value = Number(milliseconds);
+    if (!Number.isSafeInteger(value) || value < 0) throw new Error('자막 시간을 변환할 수 없습니다.');
+    const hours = Math.floor(value / 3_600_000), minutes = Math.floor(value / 60_000) % 60;
+    const seconds = Math.floor(value / 1000) % 60, millis = value % 1000;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')},${String(millis).padStart(3, '0')}`;
+  }
+
+  function parseSrt(value) {
+    const text = normalize(value).trim();
+    const blocks = text.split(/\n[ \t]*\n+/);
+    const cues = [], numbers = new Set();
+    for (const block of blocks) {
+      const lines = block.split('\n');
+      const timingIndex = lines.findIndex(line => /^\s*\d{1,}:\d{2}:\d{2}[,.]\d{1,3}\s*-->\s*\d{1,}:\d{2}:\d{2}[,.]\d{1,3}\s*$/.test(line));
+      if (timingIndex < 0) throw new Error('SRT 블록에서 시작·종료 시간표를 찾지 못해 전체 파일 변환을 중단했습니다.');
+      const rawNumber = timingIndex > 0 ? lines[timingIndex - 1].trim() : '';
+      const sourceNumber = rawNumber || String(cues.length + 1);
+      if (!/^\d+$/.test(sourceNumber) || numbers.has(sourceNumber)) throw new Error('SRT 자막 번호가 숫자가 아니거나 중복되어 원본을 보존할 수 없습니다.');
+      numbers.add(sourceNumber);
+      const timing = lines[timingIndex].match(/^\s*(\d{1,}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,}:\d{2}:\d{2}[,.]\d{1,3})\s*$/);
+      let startMs, endMs;
+      try { startMs = parseTimestamp(timing[1]); endMs = parseTimestamp(timing[2]); }
+      catch { throw new Error('SRT 자막의 시작·종료 시간을 읽지 못했습니다.'); }
+      if (endMs < startMs) throw new Error('SRT 자막의 종료 시간이 시작 시간보다 빠릅니다.');
+      cues.push({ id: cues.length + 1, sourceNumber, text: lines.slice(timingIndex + 1).join('\n'),
+        startMs, endMs, start: timing[1], end: timing[2] });
+    }
+    if (!cues.length) throw new Error('SRT 자막 문장을 찾지 못했습니다.');
+    return { format: 'srt', text, blocks, cues };
+  }
+
+  function parseAss(value) {
+    const text = normalize(value).trim();
+    let inEvents = false, fields = null;
+    const cues = [];
+    for (const line of text.split('\n')) {
+      const section = line.match(/^\s*\[([^\]]+)\]\s*$/);
+      if (section) { inEvents = section[1].toLowerCase() === 'events'; fields = null; continue; }
+      if (!inEvents) continue;
+      const format = line.match(/^\s*Format\s*:\s*(.+)$/i);
+      if (format) { fields = format[1].split(',').map(field => field.trim().toLowerCase()); continue; }
+      if (!/^\s*Dialogue\s*:/i.test(line)) continue;
+      if (!fields || fields.at(-1) !== 'text') throw new Error('ASS 자막 형식의 Text 필드를 안전하게 확인할 수 없습니다.');
+      const values = line.replace(/^\s*Dialogue\s*:\s*/i, '').split(',');
+      if (values.length < fields.length) throw new Error('ASS 자막의 Dialogue 항목 수가 형식 정의와 맞지 않습니다.');
+      const row = values.slice(0, fields.length - 1).concat(values.slice(fields.length - 1).join(','));
+      const startText = row[fields.indexOf('start')], endText = row[fields.indexOf('end')];
+      if (startText == null || endText == null) throw new Error('ASS 자막의 Start/End 필드를 찾지 못했습니다.');
+      const startMs = parseTimestamp(startText, 'ass'), endMs = parseTimestamp(endText, 'ass');
+      if (endMs < startMs) throw new Error('ASS 자막의 종료 시간이 시작 시간보다 빠릅니다.');
+      const rawText = row[fields.indexOf('text')];
+      cues.push({ id: cues.length + 1, sourceNumber: String(cues.length + 1), startMs, endMs,
+        start: startText, end: endText, text: rawText.replace(/\\[Nn]/g, '\n').replace(/\\h/g, '\u00a0') });
+    }
+    if (!cues.length) throw new Error('ASS Events에서 번역할 Dialogue 항목을 찾지 못했습니다.');
+    return { format: 'ass', text, cues };
+  }
+
+  function parseSubtitleFile(value, formatHint = '') {
+    const text = normalize(value);
+    const hint = String(formatHint || '').toLowerCase().replace(/^.*\./, '');
+    if (/^\s*WEBVTT(?:\s|$)/i.test(text) || hint === 'vtt') return parseWebVtt(text);
+    if (/^\s*\[script info\]/i.test(text) || /^\s*\[events\]/i.test(text) || hint === 'ass' || hint === 'ssa') return parseAss(text);
+    return parseSrt(text);
+  }
+
+  function toSrt(parsed) {
+    if (!parsed || !Array.isArray(parsed.cues) || !parsed.cues.length) throw new Error('변환할 전체 자막을 확인하지 못했습니다.');
+    return `${parsed.cues.map(cue => `${cue.sourceNumber || cue.id}\n${formatSrtTimestamp(cue.startMs)} --> ${formatSrtTimestamp(cue.endMs)}\n${cue.text || ''}`).join('\n\n')}\n`;
+  }
+
+  function validateWholeFileResult(value, expectedCues) {
+    const result = parseSrt(value);
+    if (!Array.isArray(expectedCues) || result.cues.length !== expectedCues.length) throw new Error('완성 자막의 전체 cue 개수가 원본과 다릅니다. 저장하지 않았습니다.');
+    const translations = Object.create(null);
+    for (let index = 0; index < expectedCues.length; index++) {
+      const original = expectedCues[index], translated = result.cues[index];
+      if (translated.sourceNumber !== String(original.sourceNumber || original.id)) throw new Error(`완성 자막 ${index + 1}번의 번호 또는 순서가 원본과 다릅니다. 저장하지 않았습니다.`);
+      if (translated.startMs !== original.startMs || translated.endMs !== original.endMs) throw new Error(`완성 자막 ${index + 1}번의 시작·종료 시간이 원본과 다릅니다. 저장하지 않았습니다.`);
+      if (String(original.text || '').trim() && !String(translated.text || '').trim()) throw new Error(`완성 자막 ${index + 1}번의 번역이 비어 있습니다. 저장하지 않았습니다.`);
+      translations[original.id] = translated.text;
+    }
+    return { translations, cues: result.cues };
   }
 
   function makeBatches(cues, { maxCues = 24, maxChars = 7000 } = {}) {
@@ -111,5 +215,30 @@
     return `${output.trimEnd()}\n`;
   }
 
-  return { parseWebVtt, makeBatches, detectSourceLanguage, fingerprintWebVtt, progress, makePrompt, parseResponse, renderWebVtt };
+  function renderTranslatedWebVtt(parsed, translations) {
+    if (parsed?.format === 'vtt') return renderWebVtt(parsed, translations);
+    if (!parsed || !Array.isArray(parsed.cues) || !parsed.cues.length) throw new Error('원본 자막 연결 정보를 확인하지 못했습니다.');
+    const blocks = parsed.cues.map(cue => {
+      if (!Object.hasOwn(translations, cue.id)) throw new Error(`원본 ${cue.id}번 cue의 번역이 없어 자막을 만들지 않았습니다.`);
+      const start = formatSrtTimestamp(cue.startMs).replace(',', '.');
+      const end = formatSrtTimestamp(cue.endMs).replace(',', '.');
+      return `${cue.sourceNumber || cue.id}\n${start} --> ${end}\n${translations[cue.id] || ''}`;
+    });
+    return `WEBVTT\n\n${blocks.join('\n\n')}\n`;
+  }
+
+  function validateRenderedWebVtt(sourceParsed, value) {
+    const rendered = parseWebVtt(value);
+    if (!sourceParsed || !Array.isArray(sourceParsed.cues) || rendered.cues.length !== sourceParsed.cues.length)
+      throw new Error('저장할 WebVTT 자막 개수가 원본과 달라 적용하지 않았습니다.');
+    for (let index = 0; index < sourceParsed.cues.length; index++) {
+      const original = sourceParsed.cues[index], output = rendered.cues[index];
+      if (output.id !== original.id || output.startMs !== original.startMs || output.endMs !== original.endMs)
+        throw new Error(`저장할 WebVTT ${index + 1}번 cue의 순서 또는 시간이 원본과 달라 적용하지 않았습니다.`);
+    }
+    return rendered;
+  }
+
+  return { parseWebVtt, parseSrt, parseAss, parseSubtitleFile, toSrt, validateWholeFileResult,
+    makeBatches, detectSourceLanguage, fingerprintWebVtt, progress, makePrompt, parseResponse, renderWebVtt, renderTranslatedWebVtt, validateRenderedWebVtt };
 });
