@@ -905,3 +905,9 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 메인 작업 관리자와 웹 드라이버 사이 진행 콜백 전달 인자 오류를 고쳤다. 불확실한 이전 요청이 있으면 같은 원본뿐 아니라 다른 자막 요청도 추가 전송하기 전에 확인하도록 막았다.
 - 대상 테스트 `patch-manager/test/chatgpt-background-translation.test.cjs`, `patch-manager/test/whole-file-subtitle-translation.test.cjs`, `patch-manager/test/embedded-chatgpt-web.test.cjs`: 19/19 통과. 변경 JS/CJS 구문 검사와 `git diff --check` 통과.
 - 테스트는 임시 디렉터리, 모의 BrowserWindow/ChatGPT 드라이버/저장 함수를 사용한 합성 검증이다. 현재 CUA 앱 인벤토리에 LilacAnime 또는 앱 소유 ChatGPT 창이 없고 일반 Chrome만 있어 그 창은 건드리지 않았다. 최소화·비활성 상태에서 실제 서비스가 응답하는지, 실계정 파일 첨부·번역·다운로드·영상 적용은 미검증이며 최종 PASS가 아니다. `main`, 실설치본, 사용자 프로필 및 CI는 변경·실행하지 않았다.
+
+## 2026-10-13 Patch 02 번역 중 일시정지 및 적용 후 재생 복귀
+
+- `src/patch-manager-stage2.js`에서 전체 파일 자동 번역 시작 시 같은 영상 요소·재생 요청 ID·회차·소스 URL을 묶은 재생 lease를 만들고, 재생 중이면 동기적으로 일시정지한다. 검증된 WebVTT 트랙의 load 확인 후에만 원래 위치를 복구해 재생한다. 원래 일시정지였거나 취소·오류·영상 변경이면 자동 재생하지 않는다. 로그인/사용자 확인 대기에는 기존 lease를 보존하고, 재시도 중 사용자가 다시 재생한 경우에는 그 시점 상태를 새 lease로 잡는다.
+- `patch-manager/test/embedded-chatgpt-web.test.cjs`에 lease, 늦은 자막 트랙, 잘못된 트랙, 회차 변경, 로그인 대기 상태 테스트를 추가했다. 세 Patch 02 집중 테스트 파일 23/23 통과, 변경 JS/CJS 구문 검사 및 `git diff --check` 통과.
+- 관리자가 만든 격리 공식 v0.5.15 소스 복사본을 전용 `%TEMP%\dino-patch02-live-electron-20261013` 프로필로 열었다. 창 목록과 프로세스 경로에서 대상 LilacAnime 본창을 식별했다. 그러나 해당 복사본의 Patch 02는 묶음 JSON 구현이라 현재 브랜치의 전체 파일 첨부·백그라운드 IPC 경로가 없었고, 실행 시점에도 영상/일본어 자막은 열려 있지 않았다. 실계정 로그인·파일 첨부·요청 전송·응답 회수·저장·적용·재생 복귀는 수행하지 않았다. 실제 검증은 BLOCKED이며 모의 테스트와 혼동하지 않는다. 일반 Chrome, 실설치본, `main`, EXE/ZIP 및 GitHub Actions는 사용·수정·실행하지 않았다.

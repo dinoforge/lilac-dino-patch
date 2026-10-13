@@ -367,6 +367,171 @@ test('ChatGPT web automation is a separate enabled route and deletion remains di
   assert.match(rendererSource, /value\.inflightBatch === value\.index/);
 });
 
+test('background translation playback lease restores only the original playing video after apply', async () => {
+  const declaration = name => {
+    const start = rendererSource.indexOf(`const ${name} =`);
+    const end = rendererSource.indexOf('\n    };', start);
+    assert.ok(start >= 0 && end > start, `renderer helper ${name} must exist`);
+    return rendererSource.slice(start, end + '\n    };'.length);
+  };
+  const video = {
+    currentSrc: 'blob:synthetic-video', currentTime: 42, paused: false, ended: false, pauseCalls: 0, playCalls: 0,
+    pause() { this.pauseCalls++; this.paused = true; },
+    async play() { this.playCalls++; this.paused = false; }
+  };
+  const context = {
+    $: selector => selector === '#video' ? video : null,
+    videoSource: item => String(item?.currentSrc || item?.src || ''),
+    playbackRequestId: 8,
+    subtitleStoreKey: () => 'show-1-episode-3',
+    setStatus() {}
+  };
+  const helpers = vm.runInNewContext([
+    declaration('capturePlaybackLease'), declaration('playbackLeaseMatches'), declaration('resumePlaybackLease'),
+    '({ capturePlaybackLease, playbackLeaseMatches, resumePlaybackLease })'
+  ].join('\n'), context);
+
+  const lease = helpers.capturePlaybackLease();
+  assert.equal(lease.position, 42);
+  assert.equal(lease.wasPlaying, true);
+  assert.equal(video.pauseCalls, 1, 'the player is paused synchronously when the lease is captured');
+  assert.equal(video.paused, true);
+  video.currentTime = 90;
+  assert.equal(helpers.playbackLeaseMatches(lease), true);
+  assert.equal(await helpers.resumePlaybackLease(lease), true);
+  assert.equal(video.currentTime, 42, 'the original playhead is restored before playback resumes');
+  assert.equal(video.playCalls, 1);
+
+  video.paused = true;
+  const originallyPaused = helpers.capturePlaybackLease();
+  assert.equal(originallyPaused.wasPlaying, false);
+  assert.equal(await helpers.resumePlaybackLease(originallyPaused), false);
+  assert.equal(video.playCalls, 1, 'an originally paused video stays paused');
+
+  video.paused = false;
+  const stale = helpers.capturePlaybackLease();
+  context.playbackRequestId++;
+  assert.equal(await helpers.resumePlaybackLease(stale), false);
+  assert.equal(video.paused, true, 'a different playback request is never resumed');
+  assert.equal(video.playCalls, 1);
+});
+
+test('completed background result waits for the subtitle track and rejects a changed playback', async () => {
+  const declaration = name => {
+    const start = rendererSource.indexOf(`const ${name} =`);
+    const end = rendererSource.indexOf('\n    };', start);
+    assert.ok(start >= 0 && end > start, `renderer helper ${name} must exist`);
+    return rendererSource.slice(start, end + '\n    };'.length);
+  };
+  const makeHarness = ({ readyState = 0 } = {}) => {
+    const status = { textContent: '' };
+    const track = {
+      readyState, listeners: Object.create(null), removed: false,
+      addEventListener(name, callback) { this.listeners[name] = callback; },
+      remove() { this.removed = true; }
+    };
+    const video = {
+      currentSrc: 'blob:synthetic-video', currentTime: 18, paused: false, ended: false, pauseCalls: 0, playCalls: 0,
+      pause() { this.pauseCalls++; this.paused = true; },
+      async play() { this.playCalls++; this.paused = false; },
+      querySelector(selector) { return selector === 'track' ? track : null; }
+    };
+    const source = { path: 'source.vtt', src: 'file:///source.vtt' };
+    const translation = { jobKey: 'whole-file-job-test', playbackId: 8, episodeKey: 'show-1-episode-3', subtitle: source, stopRequested: false };
+    const context = {
+      $: selector => selector === '#video' ? video : selector === '#subtitleState' ? status : null,
+      videoSource: item => String(item?.currentSrc || item?.src || ''), playbackRequestId: 8,
+      subtitleStoreKey: () => 'show-1-episode-3', setStatus() {}, render() {}, queueMicrotask,
+      currentSubtitle: source, translation, currentSubtitlePath: 'source.vtt', sourceBeforeTranslation: null,
+      abandonedBackgroundJobs: new Set(), pendingBackgroundApply: new Map(), completedBackgroundApply: new Set(),
+      attachSubtitle(src, label, meta) {
+        context.currentSubtitle = { src, label, ...meta };
+        if (translation.applyingBackgroundResult) {
+          translation.subtitle = context.currentSubtitle;
+          translation.applyingBackgroundResult = false;
+        }
+      }
+    };
+    const functions = vm.runInNewContext([
+      declaration('capturePlaybackLease'), declaration('playbackLeaseMatches'),
+      declaration('resumePlaybackLease'), declaration('applyBackgroundResult'),
+      '({ capturePlaybackLease, applyBackgroundResult })'
+    ].join('\n'), context);
+    translation.playbackLease = functions.capturePlaybackLease();
+    return { context, functions, track, video, status, translation };
+  };
+  const task = {
+    jobKey: 'whole-file-job-test', status: 'completed', playbackId: 8, episodeKey: 'show-1-episode-3', sourcePath: 'source.vtt',
+    sourceLabel: 'Japanese', savedSubtitle: { path: 'translated.vtt', url: 'file:///translated.vtt' }
+  };
+  const success = makeHarness();
+  success.video.currentTime = 39;
+  assert.equal(success.functions.applyBackgroundResult(task), true);
+  assert.equal(success.video.paused, true);
+  assert.equal(success.video.playCalls, 0, 'saved output alone does not resume playback');
+  success.track.listeners.load();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(success.video.currentTime, 18);
+  assert.equal(success.video.playCalls, 1, 'playback resumes only after the attached subtitle track loads');
+  assert.equal(success.context.completedBackgroundApply.has(task.jobKey), true);
+
+  const failed = makeHarness({ readyState: 3 });
+  assert.equal(failed.functions.applyBackgroundResult(task), true);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(failed.video.paused, true, 'a subtitle load error never resumes playback');
+  assert.equal(failed.video.playCalls, 0);
+
+  const stale = makeHarness();
+  assert.equal(stale.functions.applyBackgroundResult(task), true);
+  stale.context.playbackRequestId++;
+  stale.track.listeners.load();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(stale.video.playCalls, 0, 'a different playback request is never resumed');
+  assert.equal(stale.track.removed, true, 'a late translated track is removed after the playback changes');
+});
+
+test('automatic video resume is gated on the saved subtitle track load event and task identity', () => {
+  const applyStart = rendererSource.indexOf('const applyBackgroundResult = task =>');
+  const applyEnd = rendererSource.indexOf('const receiveBackgroundTask = task =>', applyStart);
+  const apply = rendererSource.slice(applyStart, applyEnd);
+  assert.match(rendererSource, /autoButton\.addEventListener\('click',[\s\S]*?capturePlaybackLease\(\)/);
+  assert.match(apply, /Number\(task\.playbackId\) === playbackRequestId/);
+  assert.match(apply, /task\.episodeKey === subtitleStoreKey\(\)/);
+  assert.match(apply, /track\.addEventListener\('load'/);
+  assert.match(apply, /track\.addEventListener\('error'/);
+  const finishStart = apply.indexOf('const finishApply = async loaded =>');
+  const finishEnd = apply.indexOf("track.addEventListener('load'", finishStart);
+  const finishApply = apply.slice(finishStart, finishEnd);
+  assert.match(finishApply, /if \(!loaded\)[\s\S]*?return;/);
+  assert.match(finishApply, /await resumePlaybackLease\(lease\)/,
+    'playback restoration lives inside the callback after successful track load');
+  assert.match(rendererSource, /stale\.fileMode \? api\.patchCancelChatGPTWebBackgroundTranslation/);
+  assert.match(rendererSource, /translation\.stopRequested\)\) return false/);
+});
+
+test('login-required background state keeps the original playback lease for retry', () => {
+  const start = rendererSource.indexOf('const receiveBackgroundTask = task =>');
+  const end = rendererSource.indexOf('api.onPatchChatGPTWebBackgroundUpdate', start);
+  const declaration = rendererSource.slice(start, end).trim().replace(/;$/, '');
+  assert.ok(start >= 0 && end > start, 'background state receiver must exist');
+  const lease = { position: 12, wasPlaying: true };
+  const context = {
+    translation: {
+      jobKey: 'needs-login-job', episodeKey: 'show-1-episode-3', sourcePath: 'source.vtt',
+      sourceFingerprint: 'fingerprint', playbackLease: lease
+    },
+    playbackRequestId: 8,
+    subtitleStoreKey: () => 'show-1-episode-3',
+    currentSubtitle: { path: 'source.vtt' },
+    abandonedBackgroundJobs: new Set(), pendingBackgroundApply: new Map(), completedBackgroundApply: new Set(),
+    applyBackgroundResult() { return false; }, render() {}
+  };
+  vm.runInNewContext(`${declaration}; receiveBackgroundTask({ jobKey: 'needs-login-job', status: 'needs-user', episodeKey: 'show-1-episode-3', sourcePath: 'source.vtt', sourceFingerprint: 'fingerprint' });`, context);
+  assert.equal(context.translation.status, 'error', 'the UI still reports that user action is required');
+  assert.equal(context.translation.playbackLease, lease, 'the original playing state survives login and confirmation waits');
+  assert.equal(context.translation.autoRunning, false);
+});
+
 test('Patch 02 exposes embedded window IPC but only opens it when called', async () => {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'dino-chatgpt-web-ipc-'));
   const mock = makeBrowserMock();
