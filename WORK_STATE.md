@@ -921,3 +921,12 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 기존 앱에는 Stats for Nerds 오버레이가 없고 별도의 오류 정보 복사 기능만 있었다. `src/index.html`, `src/player.js`, `src/player-android.css`에 읽기 전용 오버레이를 추가했다. 플레이어 설정에서 표시/숨김을 전환하며, 해상도·측정 FPS/드롭 프레임·HLS 품질/비트레이트·재생 위치·속도·버퍼·공급원·서버 도메인을 표시하고 읽을 수 없는 값은 `확인 불가`로 표현한다. 임시 프로필 Electron 앱에서 표시/숨김과 확인 불가 값 표기를 확인했지만 실제 영상에서 값이 갱신되는지는 검증하지 못했다.
 - 격리 현재 앱에서 Attack on Titan 검색은 24개 그룹, 4/5개 공급원 상태를 반환했다. 첫 회차 재생 시도 후 renderer가 응답하지 않아 10초 재생·탐색·일본어 자막·실제 오버레이 값 갱신은 확인하지 못했다. 이 차단은 패치 적용 실패와 별도로 기록하며, 재생 구조는 변경하지 않았다.
 - 실제 설치본 `D:\LilacAnime`, 사용자 프로필/기록/다운로드, main, Patch 01/02/03 소스, EXE/ZIP 및 GitHub Actions는 수정·실행하지 않았다. `node --check src/player.js`와 `git diff --check`가 통과했다. 매트릭스 로그와 임시 프로필 증거는 `%TEMP%\DinoLilacPatch-MVP` 아래 보존했다.
+
+## 2026-10-14 Patch 02 베타 이름, Patch 04·05 및 v0.5.21 호환
+
+- 기준 `59893775948cf4a34ec1eebf0eed728efaade671`에서 `codex/patch-04-05-v0521-matrix-20261014`를 만들었다. 공식 원본은 v0.5.15 `16c9a3d1631061a72831e0657434003940daf531`과 v0.5.21 `bf80119686fd42d2fcf704ce4946e28461e09f60`; 최신 v0.5.21 릴리스는 [공식 릴리스 페이지](https://github.com/whispelyn-byte/LilacAnime-desktop/releases/tag/v0.5.21)에서 확인했다.
+- 매니저에 Patch 04·05 독립 토글을 연결하고 Patch 02 표시 이름을 `ChatGPT 자막 번역 (베타)`로 바꿨다. Patch 04는 실제 해상도·프레임 측정·HLS/버퍼/재생 컨텍스트를 읽는 전용 오버레이, Patch 05는 선택된 회차만 HLS 마스터/미디어 목록으로 공급원·서버 화질을 검증해 기존 화질 선택으로 넘기는 경로다. Patch 03 회차 병합은 동일한 안정 series identity와 일반 회차 번호가 확인될 때 제목 차이를 허용한다.
+- v0.5.15·v0.5.21 각각 32개 ON/OFF 상태 적용·복구를 격리 소스에서 검사했다. 실제 Electron 패치 매니저 UI도 양 버전에서 Patch 01~05 개별 적용·복구를 수행했고, 복구 뒤 복사된 공식 소스 전체 파일 SHA-256이 일치했다. 집중 테스트는 86개 중 81 통과·5 건너뜀·0 실패, 전체 `node --test`는 425개 중 409 통과·16 건너뜀·0 실패다.
+- 패치 전부 ON으로 만든 v0.5.21 임시 앱 프로세스는 테스트 APPDATA/USERPROFILE 아래 실행했으나 주 창 제목이 `Error`였다. Computer Use가 두 차례 다른 기존 b021 LilacAnime 창의 화면을 반환해 본창과 캡처가 불일치했다. 잘못된 창은 조작하지 않았으며 실제 앱 렌더링, 실제 영상/자막 재생, Patch 04 실시간 값, Patch 05 실공급원 화질은 BLOCKED/NOT TESTED다. 실제 ChatGPT 자동 번역은 베타이며 미검증이다.
+- 임시 v0.5.21 앱은 정상 종료했고 manager 복구 뒤 공식 복사 콘텐츠 fingerprint `b372f4b1724e455399d23ef3c609a0a7ef363c54e611e6b1393a6b07379ebd18`가 일치했다. 복구된 테스트 복사본은 `%TEMP%\DinoLilacPatch-MVP\isolated-targets` 아래 남아 있다. 실설치본·실사용 데이터·기존 ChatGPT 프로필·`main`은 변경하지 않았고 EXE/ZIP 및 GitHub Actions는 만들거나 실행하지 않았다.
+- 최종 브랜치 커밋 `aaeebdff853fef1b75367c2cceb7882219d990bc`를 origin에 push했고 원격 SHA가 일치한다. 작업 트리는 깨끗하다.
