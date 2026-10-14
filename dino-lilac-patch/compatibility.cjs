@@ -56,6 +56,21 @@ const CONTRACTS=Object.freeze({
     {file:'electron/preload.cjs',needle:'linkkfEpisodes: id =>',one:true},
     {file:'electron/preload.cjs',needle:'linkkfResolve: episode =>',one:true},
     {file:'electron/preload.cjs',needle:'catalogKoreanSearch: (provider, query)',one:true}
+  ]),
+  'patch-04':Object.freeze([
+    {file:'src/index.html',needle:'id="videoStage"',one:true},
+    {file:'src/index.html',needle:'id="video"',one:true},
+    {file:'src/index.html',needle:'id="playerSettings"',one:true},
+    {file:'src/player.js',needle:'function renderQualityChoices()',one:true}
+  ]),
+  'patch-05':Object.freeze([
+    {file:'src/index.html',needle:'id="playerSettings"',one:true},
+    {file:'src/app.js',needle:'function mountEpisodeList(',one:true},
+    {file:'electron/main.cjs',needle:'async function resolveProviderEpisode(',one:true},
+    {file:'electron/main.cjs',needle:'async function resolveStreamPage(',one:true},
+    {file:'electron/preload.cjs',needle:'providerResolve: episode =>',one:true},
+    {file:'src/player.js',needle:'function applyDefaultQuality()',one:true},
+    {file:'src/player.js',needle:"const wanted = parseInt(localStorage.getItem('defaultQuality') || '1080p', 10);",one:true}
   ])
 });
 const ALREADY_PATCHED=Object.freeze({
@@ -70,6 +85,15 @@ const ALREADY_PATCHED=Object.freeze({
     {file:'src/index.html',needle:'patch-manager-feature-flags.js'},
     {file:'src/index.html',needle:'unified-catalog.js'},
     {file:'src/patch-manager-feature-flags.js',needle:'window.DinoLilacPatchFeatures'}
+  ]),
+  'patch-04':Object.freeze([
+    {file:'src/index.html',needle:'patch04-playback-stats.js'},
+    {file:'src/patch-manager-feature-flags.js',needle:"'patch-04': true"}
+  ]),
+  'patch-05':Object.freeze([
+    {file:'src/index.html',needle:'patch05-episode-quality.js'},
+    {file:'src/patch-manager-feature-flags.js',needle:"'patch-05': true"},
+    {file:'electron/preload.cjs',needle:"patchEpisodeQuality: episode => ipcRenderer.invoke('patch:episode-quality', episode)"}
   ])
 });
 
@@ -103,7 +127,7 @@ function evaluateStructure(files,settings){
       continue;
     }
     const issues=[];
-    const sharedRules=id==='patch-03'?[{file:'src/index.html',needle:'</body>',one:true}]:SHARED;
+    const sharedRules=['patch-03','patch-04'].includes(id)?[{file:'src/index.html',needle:'</body>',one:true}]:SHARED;
     for(const rule of [...sharedRules,...CONTRACTS[id]]){
       const failure=probe(files,rule);
       if(failure)issues.push(failure);

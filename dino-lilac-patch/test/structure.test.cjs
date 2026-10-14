@@ -10,16 +10,17 @@ const {evaluateStructure}=require('../compatibility.cjs');
 function fixture(version='0.5.14'){
   return {
     'package.json':JSON.stringify({name:'lilac',version}),
-    'electron/main.cjs':"app.whenReady().then(async () => { const subtitleStore=new SubtitleStore({app,reconvert:reconvertSubtitle}); };\nconst providerFetch,REANIME_WEB,ANIMENOSUB_WEB,reanimeItems,miruroApi,miruroItem,miruroHasEpisodes,animenosubList,cheerio;\n  ipcMain.handle('provider:season', (_, provider) => homeShows(provider,'season'));\n  ipcMain.handle('provider:catalog', fake);\n  ipcMain.handle('provider:detail', fake);\n  ipcMain.handle('provider:resolve', fake);\n  ipcMain.handle('linkkf:home', fake);\n  ipcMain.handle('linkkf:detail', fake);\n  ipcMain.handle('linkkf:episodes', fake);\n  ipcMain.handle('linkkf:resolve', fake);\n  ipcMain.handle('catalog:search-korean', fake);",
+    'electron/main.cjs':"app.whenReady().then(async () => { const subtitleStore=new SubtitleStore({app,reconvert:reconvertSubtitle}); };\nconst providerFetch,REANIME_WEB,ANIMENOSUB_WEB,reanimeItems,miruroApi,miruroItem,miruroHasEpisodes,animenosubList,cheerio;\nasync function resolveProviderEpisode() {}\nasync function resolveStreamPage() {}\n  ipcMain.handle('provider:season', (_, provider) => homeShows(provider,'season'));\n  ipcMain.handle('provider:catalog', fake);\n  ipcMain.handle('provider:detail', fake);\n  ipcMain.handle('provider:resolve', fake);\n  ipcMain.handle('linkkf:home', fake);\n  ipcMain.handle('linkkf:detail', fake);\n  ipcMain.handle('linkkf:episodes', fake);\n  ipcMain.handle('linkkf:resolve', fake);\n  ipcMain.handle('catalog:search-korean', fake);",
     'electron/preload.cjs':"  providerSeason: provider => ipcRenderer.invoke('provider:season', provider),\n  providerCatalog: (provider, query = '', offset = 0, sort = '') => ipcRenderer.invoke('provider:catalog', provider, query, offset, sort),\n  providerDetail: anime => ipcRenderer.invoke('provider:detail', anime),\n  providerResolve: episode => ipcRenderer.invoke('provider:resolve', episode),\n  linkkfHome: (page = 1, limit = 20) => ipcRenderer.invoke('linkkf:home', page, limit),\n  linkkfDetail: id => ipcRenderer.invoke('linkkf:detail', id),\n  linkkfEpisodes: id => ipcRenderer.invoke('linkkf:episodes', id),\n  linkkfResolve: episode => ipcRenderer.invoke('linkkf:resolve', episode),\n  catalogKoreanSearch: (provider, query) => ipcRenderer.invoke('catalog:search-korean', provider, query),",
     'electron/subtitle-store.cjs':"const sources=['gemini'];",
-    'src/index.html':'<main id="homeView"><div id="seasonRail"></div><div id="scheduleRail"></div><button id="seeAllSeason"></button><div id="subtitleTranslateRow"></div><section data-settings-pane="translate"></section></main></body>',
-    'src/app.js':'function animeById() {}\nfunction renderCards() {}\nfunction resolveIntoPlayer() {}\nfunction attachSubtitle() {}\nfunction subtitleStoreKey() {}'
+    'src/index.html':'<main id="homeView"><div id="seasonRail"></div><div id="scheduleRail"></div><button id="seeAllSeason"></button><div id="subtitleTranslateRow"></div><section data-settings-pane="translate"></section><div id="videoStage"><video id="video"></video></div><aside id="playerSettings"></aside></main></body>',
+    'src/app.js':'function animeById() {}\nfunction renderCards() {}\nfunction resolveIntoPlayer() {}\nfunction mountEpisodeList() {}\nfunction attachSubtitle() {}\nfunction subtitleStoreKey() {}',
+    'src/player.js':"function renderQualityChoices() {}\nfunction applyDefaultQuality() {\n  const wanted = parseInt(localStorage.getItem('defaultQuality') || '1080p', 10);\n}"
   };
 }
-function enabled(p1,p2,p3=false){return {patches:{'patch-01':p1,'patch-02':p2,'patch-03':p3}};}
+function enabled(p1,p2,p3=false,p4=false,p5=false){return {patches:{'patch-01':p1,'patch-02':p2,'patch-03':p3,'patch-04':p4,'patch-05':p5}};}
 
-test('one local settings file persists three independent switches and migrates older settings',()=>{
+test('one local settings file persists five independent switches and migrates older settings',()=>{
   assert.deepEqual(loadSettings(''),DEFAULT_SETTINGS);
   assert.deepEqual(loadSettings(toSettingsJson(enabled(true,false))),enabled(true,false));
   assert.deepEqual(loadSettings('{"patches":{"patch-01":true,"patch-02":false}}'),enabled(true,false));
@@ -31,13 +32,14 @@ test('one local settings file persists three independent switches and migrates o
   for(const broken of [
     {patches:{'patch-01':'on','patch-02':false}},
     {patches:{'patch-01':false}},
-    {patches:{'patch-01':false,'patch-02':false,'patch-03':'on'}}
+    {patches:{'patch-01':false,'patch-02':false,'patch-03':'on'}},
+    {patches:{'patch-01':false,'patch-02':false,'patch-04':true,'patch-05':'on'}}
   ])assert.throws(()=>toSettingsJson(broken));
   assert.throws(()=>setPatchEnabled(original,'unknown',true));
   assert.throws(()=>loadSettings('{bad json'));
 });
 
-test('settings persist all eight combinations in the single DinoLilacPatch/settings.json file',()=>{
+test('settings persist all 32 combinations in the single DinoLilacPatch/settings.json file',()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'dino-lilac-settings-'));
   const install=path.join(root,'LilacAnime');
   fs.mkdirSync(install);
@@ -49,14 +51,14 @@ test('settings persist all eight combinations in the single DinoLilacPatch/setti
     assert.equal(fs.existsSync(missingInstall),false,'a mistyped app path is never created implicitly');
     assert.deepEqual(readSettingsFile(install),enabled(false,false));
     assert.equal(fs.existsSync(directory),false,'reading a missing settings file does not create extra folders');
-    for(const patch01 of [false,true])for(const patch02 of [false,true])for(const patch03 of [false,true]){
-      const selected=enabled(patch01,patch02,patch03);
+    for(const patch01 of [false,true])for(const patch02 of [false,true])for(const patch03 of [false,true])for(const patch04 of [false,true])for(const patch05 of [false,true]){
+      const selected=enabled(patch01,patch02,patch03,patch04,patch05);
       writeSettingsFile(install,selected);
       assert.deepEqual(readSettingsFile(install),selected);
     }
-    assert.deepEqual(setPatchEnabledAndSave(install,'patch-01',false),enabled(false,true,true));
-    assert.deepEqual(readSettingsFile(install),enabled(false,true,true));
-    assert.deepEqual(fs.readdirSync(directory),['settings.json'],'the two switches share one settings file and no temp file remains');
+    assert.deepEqual(setPatchEnabledAndSave(install,'patch-01',false),enabled(false,true,true,true,true));
+    assert.deepEqual(readSettingsFile(install),enabled(false,true,true,true,true));
+    assert.deepEqual(fs.readdirSync(directory),['settings.json'],'the five switches share one settings file and no temp file remains');
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
 
@@ -73,12 +75,14 @@ test('malformed persisted settings fail closed and are not overwritten by a togg
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
 
-test('all eight ON/OFF combinations produce independent read-only compatibility reports',()=>{
-  for(const a of [false,true])for(const b of [false,true])for(const c of [false,true]){
-    const result=evaluateStructure(fixture(),enabled(a,b,c));
+test('all 32 ON/OFF combinations produce independent read-only compatibility reports',()=>{
+  for(const a of [false,true])for(const b of [false,true])for(const c of [false,true])for(const d of [false,true])for(const e of [false,true]){
+    const result=evaluateStructure(fixture(),enabled(a,b,c,d,e));
     assert.equal(result.patches['patch-01'].status,a?'structural-candidate':'disabled');
     assert.equal(result.patches['patch-02'].status,b?'structural-candidate':'disabled');
     assert.equal(result.patches['patch-03'].status,c?'structural-candidate':'disabled');
+    assert.equal(result.patches['patch-04'].status,d?'structural-candidate':'disabled');
+    assert.equal(result.patches['patch-05'].status,e?'structural-candidate':'disabled');
     assert.equal(result.automaticApplyAuthorized,false);
     assert.equal(result.mayWriteInstalledFiles,false);
   }

@@ -36,6 +36,17 @@
     return value;
   }
 
+  function episodeSeriesKey(entry) {
+    return String(entry?.seriesKey || '').trim();
+  }
+
+  function isSpecialEpisode(episode) {
+    if (episode?.special === true || episode?.isSpecial === true || episode?.is_special === true) return true;
+    const type = normalize(episode?.type || episode?.format || '');
+    if (/^(?:special|ova|oad|movie|film)$/.test(type)) return true;
+    return /(?:^|\s)(?:ova|oad|special|movie|film)(?:\s|\d|$)|특별편|극장판/i.test(String(episode?.title || episode?.name || ''));
+  }
+
   function groupEpisodes(entries) {
     const groups = new Map();
     for (const entry of Array.isArray(entries) ? entries : []) {
@@ -43,14 +54,19 @@
       if (!episode || !PROVIDERS.includes(entry.provider)) continue;
       const number = episodeNumber(episode), title = episodeTitle(episode);
       const id = String(episode.id ?? episode.token ?? episode.slug ?? episode.name ?? 'unknown');
-      // Cross-provider merging requires both a stable episode number and an exact
-      // non-empty normalized title. Ambiguous titles remain separate choices.
-      const key = number > 0 && title
-        ? `episode:${number}:${title}`
+      const series = episodeSeriesKey(entry), special = isSpecialEpisode(episode);
+      const dub = episode.dub === true || /dub|더빙/i.test(normalize(episode.language || '')) ? 'dub' : 'sub';
+      const part = normalize(episode.part ?? episode.partNumber ?? episode.part_number ?? '');
+      // A group identity comes from the shared anime matcher (stable MAL/AniList ID,
+      // or exact title/year/type/season fallback). Episode titles vary by source;
+      // only ordinary numbered episodes with that series identity are merged.
+      // Specials stay source-specific because episode numbers alone are ambiguous.
+      const key = series && number > 0 && !special
+        ? `series:${series}|episode:${number}|dub:${dub}|part:${part}`
         : `source:${entry.provider}:${id}:${entry.serverName || ''}`;
       if (!groups.has(key)) groups.set(key, { key, number, title, name: String(episode.title || episode.name || `${number || '?'}화`), choices: [] });
       const group = groups.get(key);
-      group.choices.push({ provider: entry.provider, serverName: entry.serverName || '', episode, anime: entry.anime, seriesEpisodes: entry.seriesEpisodes || [] });
+      group.choices.push({ provider: entry.provider, serverName: entry.serverName || '', episode, anime: entry.anime, seriesEpisodes: entry.seriesEpisodes || [], seriesKey: series });
     }
     const rank = new Map(PROVIDERS.map((provider, index) => [provider, index]));
     return [...groups.values()].map(group => ({
@@ -152,6 +168,7 @@
         serverName: episode.serverName || '',
         episode,
         anime: result.anime,
+        seriesKey: group.groupKey || '',
         seriesEpisodes: result.episodes.filter(item => item.serverName === (episode.serverName || ''))
       })));
       return { results, episodes, groupedEpisodes: groupEpisodes(episodes) };
@@ -248,10 +265,11 @@
         const row = document.createElement('li'); const name = document.createElement('strong'); name.textContent = episodeGroup.name; row.append(name);
         const choices = document.createElement('div'); choices.className = 'unified-catalog-choices';
         for (const choice of episodeGroup.choices) {
+          root.DinoPatch05?.mountChoice?.(choices, choice.episode);
           const play = document.createElement('button'); play.type = 'button'; play.className = 'unified-catalog-play';
           play.textContent = `${LABELS[choice.provider] || choice.provider}${choice.serverName ? ` · ${choice.serverName}` : ''}에서 재생`;
           play.addEventListener('click', () => {
-            const episode = choice.episode, anime = choice.anime;
+            const episode = root.DinoPatch05?.preparePlayback?.(choice.episode) || choice.episode, anime = choice.anime;
             const resolver = choice.provider === 'linkkf' ? () => root.lilac.linkkfResolve(episode) : () => root.lilac.providerResolve(episode);
             if (typeof root.resolveIntoPlayer !== 'function') { status.textContent = '현재 플레이어 연결을 찾지 못했습니다. 앱을 다시 열고 시도해 주세요.'; return; }
             const subtitleTitle = typeof root.titleOf === 'function'
@@ -312,5 +330,5 @@
     loadBrowse().catch(error => { status.textContent = `통합 목록을 불러오지 못했습니다: ${error.message}`; });
   }
 
-  return { PROVIDERS, LABELS, normalize, episodeNumber, groupEpisodes, withTimeout, mapLimit, createCatalogService, mount };
+  return { PROVIDERS, LABELS, normalize, episodeNumber, episodeSeriesKey, isSpecialEpisode, groupEpisodes, withTimeout, mapLimit, createCatalogService, mount };
 });

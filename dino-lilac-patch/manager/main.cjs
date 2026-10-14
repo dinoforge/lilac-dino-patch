@@ -33,7 +33,7 @@ function sendError(error) {
 
 ipcMain.handle('manager:choose-source', async () => {
   try {
-    const result = await dialog.showOpenDialog(mainWindow, { title: '공식 LilacAnime v0.5.15 소스 폴더 선택', properties: ['openDirectory'] });
+    const result = await dialog.showOpenDialog(mainWindow, { title: '공식 LilacAnime v0.5.15 / v0.5.21 소스 폴더 선택', properties: ['openDirectory'] });
     if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
     const target = manager.createTargetFromSource(result.filePaths[0]);
     activeTarget = target.root;

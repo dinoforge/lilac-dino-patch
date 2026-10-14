@@ -42,6 +42,33 @@ const SOURCE_PROFILES = Object.freeze([
     }),
     patch02Files: Object.freeze({
       'electron/subtitle-store.cjs': 'bfec7a17e735d63336e62b36fea3ed90412f821ec299591ffb71fcae7b3877be'
+    }),
+    patch04Files: Object.freeze({
+      'src/player.js': '73bcb05bdadbc49806987126fc43969305d1a26fb49981766e178144dab9ecf2'
+    }),
+    patch05Files: Object.freeze({
+      'src/app.js': '2e1e54b6dd54af3f6fbd4066f602d559e6327d8f6be9159b5d1a17f700a227e1',
+      'src/player.js': '73bcb05bdadbc49806987126fc43969305d1a26fb49981766e178144dab9ecf2'
+    })
+  }),
+  Object.freeze({
+    id: 'official-source-bf801196-v0521',
+    version: '0.5.21',
+    fingerprint: Object.freeze({
+      'package.json': '233c293386c7f285815cf99579f3556263584dc7fcb7ab1a80d532d8c58f888d',
+      'src/index.html': 'cf55be8e8cc92c851c4c871f73cb58ec53258fae76aab59b5547ad8ebab7f560',
+      'electron/main.cjs': '64154e5fdb0a4a7e72203f22fad4e14099d32f4897838baffcbd63ace944495c',
+      'electron/preload.cjs': '8b413e049cad7a66875c3a4158d4c6c6228f4cbf020b33348cd6d0f7b8984010'
+    }),
+    patch02Files: Object.freeze({
+      'electron/subtitle-store.cjs': 'bfec7a17e735d63336e62b36fea3ed90412f821ec299591ffb71fcae7b3877be'
+    }),
+    patch04Files: Object.freeze({
+      'src/player.js': '5f8876f77cff34cfbc990a3fa5383388947b47d88ee0501c43b1cb5a186ecdd7'
+    }),
+    patch05Files: Object.freeze({
+      'src/app.js': 'dc82917c7bcb020e695a4c894c1fbc49d4f48c9d648992e6654bf518842cb433',
+      'src/player.js': '5f8876f77cff34cfbc990a3fa5383388947b47d88ee0501c43b1cb5a186ecdd7'
     })
   })
 ]);
@@ -76,6 +103,9 @@ const PATCH02_PRELOAD = Object.freeze([
   "  patchRevealManualSubtitle: file => ipcRenderer.invoke('manual-translation:subtitle:reveal', file),",
   "  patchManualTranslationSource: (key, file) => ipcRenderer.invoke('manual-translation:source:get', key, file),"
 ]);
+const PATCH05_PRELOAD = Object.freeze([
+  "  patchEpisodeQuality: episode => ipcRenderer.invoke('patch:episode-quality', episode),"
+]);
 
 function normalizeSettings(input) {
   if (input == null) return assertSettings(DEFAULT_SETTINGS);
@@ -88,6 +118,8 @@ function readSnapshot(root) {
   const requested = new Set([
     ...PROFILE_ANCHORS,
     'src/app.js',
+    'src/player.js',
+    'src/player-android.css',
     'electron/subtitle-store.cjs',
     'src/patch-manager-feature-flags.js'
   ]);
@@ -137,32 +169,73 @@ function featureFlags(settings) {
   return Object.freeze({
     'patch-01': settings.patches['patch-01'],
     'patch-02': settings.patches['patch-02'],
-    'patch-03': settings.patches['patch-03']
+    'patch-03': settings.patches['patch-03'],
+    'patch-04': settings.patches['patch-04'],
+    'patch-05': settings.patches['patch-05']
   });
 }
 
 function mainBridgeSource(flags) {
-  const stage2Flags = { 'patch-01': flags['patch-01'], 'patch-02': flags['patch-02'] };
-  const deps = [`ipcMain`];
-  if (flags['patch-01']) deps.push(
-    'providerFetch', 'REANIME_WEB', 'ANIMENOSUB_WEB', 'reanimeItems',
-    'miruroApi', 'miruroItem', 'miruroHasEpisodes', 'animenosubList', 'cheerio'
-  );
-  if (flags['patch-02']) deps.push('app', 'subtitleStore', 'clipboard: require("electron").clipboard', 'shell: require("electron").shell');
-  const dependencyObject = deps.map(value => `    ${value}`).join(',\n');
-  return [
-    "  const { registerPatch0102Handlers } = require('./patch-manager-stage2.cjs');",
-    '  registerPatch0102Handlers({',
-    dependencyObject,
-    `  }, ${JSON.stringify(stage2Flags)});`,
-    ''
-  ].join('\n');
+  const lines = [];
+  if (flags['patch-01'] || flags['patch-02']) {
+    const stage2Flags = { 'patch-01': flags['patch-01'], 'patch-02': flags['patch-02'] };
+    const deps = [`ipcMain`];
+    if (flags['patch-01']) deps.push(
+      'providerFetch', 'REANIME_WEB', 'ANIMENOSUB_WEB', 'reanimeItems',
+      'miruroApi', 'miruroItem', 'miruroHasEpisodes', 'animenosubList', 'cheerio'
+    );
+    if (flags['patch-02']) deps.push('app', 'subtitleStore', 'clipboard: require("electron").clipboard', 'shell: require("electron").shell');
+    lines.push(
+      "  const { registerPatch0102Handlers } = require('./patch-manager-stage2.cjs');",
+      '  registerPatch0102Handlers({',
+      deps.map(value => `    ${value}`).join(',\n'),
+      `  }, ${JSON.stringify(stage2Flags)});`
+    );
+  }
+  if (flags['patch-05']) {
+    lines.push(
+      "  const { registerPatch05Handlers } = require('./patch-manager-stage5.cjs');",
+      '  registerPatch05Handlers({',
+      [
+        '    ipcMain', '    providerFetch', '    resolveStreamPage', '    resolveProviderEpisode',
+        '    reanimeServers', '    animenosubServers', '    miruroApi', '    MIRURO_KINDS',
+        '    linkkfFetch', '    REANIME_WEB', '    ANIMENOSUB_WEB', '    LINKKF_WEB', '    OHLI24_WEB', '    LINKANI_WEB'
+      ].join(',\n'),
+      '  });',
+      '  const resolveProviderEpisodeBeforePatch05 = resolveProviderEpisode;',
+      '  resolveProviderEpisode = async episode => {',
+      "    if (episode?.provider === 'reanime' && episode.patch05Server) {",
+      '      const servers = await reanimeServers(episode);',
+      '      const selected = servers.find(server => String(server.name || "") === String(episode.patch05Server));',
+      "      if (!selected) throw new Error('선택한 Re:Anime 서버가 더 이상 제공되지 않습니다.');",
+      '      return resolveStreamPage(selected.url, `${REANIME_WEB}/`, 30000);',
+      '    }',
+      '    return resolveProviderEpisodeBeforePatch05(episode);',
+      '  };',
+      "  ipcMain.removeHandler('linkkf:resolve');",
+      "  ipcMain.handle('linkkf:resolve', async (_, episode) => {",
+      '    playerStreamHeaders = null;',
+      '    let playerUrl = "";',
+      '    try {',
+      '      const root = await linkkfFetch(`https://emdlinkkf.5imgdarr.top/apilink2.php?data=${encodeURIComponent(episode.token)}`);',
+      '      const links = Array.isArray(root.data) ? root.data : [];',
+      '      const chosen = episode.patch05Server ? links.find(item => String(item.server || "") === String(episode.patch05Server)) : null;',
+      '      if (episode.patch05Server && !chosen) throw new Error("선택한 Linkkf 서버가 더 이상 제공되지 않습니다.");',
+      '      playerUrl = (chosen || links.find(item => String(item.server).toUpperCase() === "NR-HD") || links[0] || {}).link || "";',
+      '    } catch (error) { if (episode.patch05Server) throw error; }',
+      '    if (!playerUrl) playerUrl = `${LINKKF_WEB}/up/${encodeURIComponent(episode.postId)}/watch/?slug=${encodeURIComponent(episode.slug)}`;',
+      '    return resolveStreamPage(playerUrl, `${LINKKF_WEB}/`, 15000);',
+      '  });'
+    );
+  }
+  return lines.length ? `${lines.join('\n')}\n` : '';
 }
 
 function preloadBridgeSource(flags) {
   const lines = [];
   if (flags['patch-01']) lines.push(...PATCH01_PRELOAD);
   if (flags['patch-02']) lines.push(...PATCH02_PRELOAD);
+  if (flags['patch-05']) lines.push(...PATCH05_PRELOAD);
   return lines.length ? `${lines.join('\n')}\n` : '';
 }
 
@@ -172,6 +245,8 @@ function htmlBridgeSource(flags) {
   if (flags['patch-01']) { scripts.add('patch-manager-stage2-core.js'); scripts.add('weekday-schedule.js'); scripts.add('integrated-search.js'); }
   if (flags['patch-02']) scripts.add('manual-subtitle-translation.js');
   if (flags['patch-03']) { scripts.add('integrated-search.js'); scripts.add('unified-catalog.js'); }
+  if (flags['patch-04']) scripts.add('patch04-playback-stats.js');
+  if (flags['patch-05']) scripts.add('patch05-episode-quality.js');
   if (flags['patch-01'] || flags['patch-02']) scripts.add('patch-manager-stage2.js');
   return `  ${[...scripts].map(file => `  <script src="${file}"></script>`).join('\n')}\n`;
 }
@@ -196,13 +271,18 @@ function buildManifest(payloadRoot, profile, flags) {
   const actions = [{ kind: 'insert-before', file: 'src/index.html', anchor: '</body>', content: htmlBridgeSource(flags) }];
   const featureFlags = `window.DinoLilacPatchFeatures = Object.freeze(${JSON.stringify(flags)});\n`;
   actions.push({ kind: 'add-file', file: 'src/patch-manager-feature-flags.js', contentBase64: Buffer.from(featureFlags, 'utf8').toString('base64') });
-  if (flags['patch-01'] || flags['patch-02']) actions.unshift(
+  if (flags['patch-01'] || flags['patch-02'] || flags['patch-05']) actions.unshift(
     { kind: 'insert-before', file: 'electron/main.cjs', anchor: MAIN_ANCHOR, content: mainBridgeSource(flags) },
     { kind: 'insert-before', file: 'electron/preload.cjs', anchor: PRELOAD_ANCHOR, content: preloadBridgeSource(flags) }
   );
   if (flags['patch-02']) {
     expectedFiles['electron/subtitle-store.cjs'] = profile.patch02Files['electron/subtitle-store.cjs'];
     actions.push({ kind: 'insert-before', file: 'electron/subtitle-store.cjs', anchor: "'gemini'];", content: "'chatgpt', " });
+  }
+  if (flags['patch-04']) expectedFiles['src/player.js'] = profile.patch04Files['src/player.js'];
+  if (flags['patch-05']) {
+    expectedFiles['src/app.js'] = profile.patch05Files['src/app.js'];
+    expectedFiles['src/player.js'] = profile.patch05Files['src/player.js'];
   }
   for (const [source, target] of selectedPayloads(flags)) actions.push(readPayload(payloadRoot, source, target));
 
@@ -258,12 +338,25 @@ function makeLilacAnimePatchPlan(targetRoot, rawSettings, { payloadRoot = path.r
       kind: 'target-fingerprint-mismatch', file: 'electron/subtitle-store.cjs'
     });
   }
+  for (const [id, filesKey] of [['patch-04', 'patch04Files'], ['patch-05', 'patch05Files']]) {
+    if (!flags[id]) continue;
+    const reviewedFiles = knownProfile?.[filesKey];
+    if (!reviewedFiles) {
+      setBlocked(patches, id, { kind: 'unreviewed-source-version', file: id === 'patch-04' ? 'src/player.js' : 'src/app.js' });
+      continue;
+    }
+    for (const [file, expected] of Object.entries(reviewedFiles)) {
+      if (hashes[file] !== expected) setBlocked(patches, id, { kind: 'target-fingerprint-mismatch', file });
+    }
+  }
 
   const enabled = PATCH_IDS.filter(id => patches[id]?.status === 'structural-candidate');
   const manifest = profile && enabled.length ? buildManifest(payloadRoot, profile, featureFlags({ patches: {
     'patch-01': enabled.includes('patch-01'),
     'patch-02': enabled.includes('patch-02'),
-    'patch-03': enabled.includes('patch-03')
+    'patch-03': enabled.includes('patch-03'),
+    'patch-04': enabled.includes('patch-04'),
+    'patch-05': enabled.includes('patch-05')
   } })) : null;
   const blocked = selected.filter(id => patches[id]?.status === 'blocked');
   return {

@@ -14,7 +14,13 @@ const TARGETS_RELATIVE = path.join('DinoLilacPatch-MVP', 'isolated-targets');
 const OFFICIAL_V0515_PROFILE = 'official-source-16c9a3d1-v0515';
 const OFFICIAL_V0515_COMMIT = '16c9a3d1631061a72831e0657434003940daf531';
 const OFFICIAL_V0515_ORIGIN = 'https://github.com/whispelyn-byte/lilacanime-desktop.git';
-const ALL_PATCHES = Object.freeze({ patches: { 'patch-01': true, 'patch-02': true, 'patch-03': true } });
+const OFFICIAL_V0521_PROFILE = 'official-source-bf801196-v0521';
+const OFFICIAL_V0521_COMMIT = 'bf80119686fd42d2fcf704ce4946e28461e09f60';
+const OFFICIAL_SOURCE_PROFILES = Object.freeze([
+  Object.freeze({ profile: OFFICIAL_V0515_PROFILE, version: '0.5.15', commit: OFFICIAL_V0515_COMMIT }),
+  Object.freeze({ profile: OFFICIAL_V0521_PROFILE, version: '0.5.21', commit: OFFICIAL_V0521_COMMIT })
+]);
+const ALL_PATCHES = Object.freeze({ patches: { 'patch-01': true, 'patch-02': true, 'patch-03': true, 'patch-04': true, 'patch-05': true } });
 const SOURCE_CONTENT = Object.freeze(['package.json', 'package-lock.json', 'electron', 'src', 'build']);
 const PROFILE_FILES = Object.freeze(['package.json', 'src/index.html', 'electron/main.cjs', 'electron/preload.cjs']);
 
@@ -69,11 +75,10 @@ function sourceProfile(root) {
     origin = git(['remote', 'get-url', 'origin']).toLocaleLowerCase('en-US');
     changes = git(['status', '--porcelain', '--untracked-files=all']);
   } catch {
-    throw new Error('Select a clean Git checkout of the pinned official v0.5.15 source');
+    throw new Error('공식 v0.5.15 또는 v0.5.21의 고정 커밋 체크아웃을 선택해 주세요.');
   }
-  if (commit !== OFFICIAL_V0515_COMMIT || origin !== OFFICIAL_V0515_ORIGIN || changes) {
-    throw new Error('Source must be the clean official v0.5.15 checkout pinned by this MVP');
-  }
+  const official = OFFICIAL_SOURCE_PROFILES.find(item => item.commit === commit);
+  if (!official || origin !== OFFICIAL_V0515_ORIGIN || changes) throw new Error('소스는 고정된 공식 v0.5.15 또는 v0.5.21 커밋이어야 합니다.');
   const runningCheck = [
     "$target = [IO.Path]::GetFullPath($env:DINO_LILAC_SOURCE_ROOT).TrimEnd([char]92)",
     "$running = Get-CimInstance Win32_Process -Filter \"name='LilacAnime.exe' OR name='electron.exe'\" | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($target, [StringComparison]::OrdinalIgnoreCase) -ge 0 } | Select-Object -First 1",
@@ -91,9 +96,9 @@ function sourceProfile(root) {
   }
   if (runningState !== 'stopped') throw new Error('Close the selected LilacAnime source app before making an isolated copy');
   const plan = makeLilacAnimePatchPlan(full, ALL_PATCHES);
-  if (plan.profile !== OFFICIAL_V0515_PROFILE || plan.version !== '0.5.15' ||
+  if (plan.profile !== official.profile || plan.version !== official.version ||
       Object.values(plan.patches).some(patch => patch.status !== 'structural-candidate')) {
-    throw new Error('Source does not match the reviewed official LilacAnime v0.5.15 structure');
+    throw new Error(`공식 LilacAnime v${official.version} 구조 지문이 검토된 프로필과 일치하지 않습니다.`);
   }
   const sourceHashes = Object.fromEntries(PROFILE_FILES.map(file => [file, hashBytes(readVerifiedFile(full, file))]));
   return { root: full, profile: plan.profile, version: plan.version, sourceHashes };
@@ -202,7 +207,7 @@ function assertIsolatedTarget(root) {
   const marker = JSON.parse(fs.readFileSync(markerFile, 'utf8'));
   if (marker?.schema !== 1 || marker.kind !== 'manager-created-isolated-source' ||
       marker.safety !== 'os-temp-only-no-install-or-profile' || marker.root !== path.basename(full) ||
-      marker.profile !== OFFICIAL_V0515_PROFILE || marker.version !== '0.5.15' ||
+      !OFFICIAL_SOURCE_PROFILES.some(item => item.profile === marker.profile && item.version === marker.version) ||
       !/^[a-f0-9]{32}$/.test(marker.nonce) || !marker.sourceHashes ||
       PROFILE_FILES.some(file => !/^[a-f0-9]{64}$/.test(marker.sourceHashes[file] || ''))) {
     throw new Error('Isolated target marker is invalid or unsupported');
@@ -241,6 +246,9 @@ module.exports = {
   TARGET_MARKER,
   OFFICIAL_V0515_PROFILE,
   OFFICIAL_V0515_COMMIT,
+  OFFICIAL_V0521_PROFILE,
+  OFFICIAL_V0521_COMMIT,
+  OFFICIAL_SOURCE_PROFILES,
   SOURCE_CONTENT,
   PROFILE_FILES,
   copiedContentFingerprint,

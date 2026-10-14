@@ -147,7 +147,7 @@ test('logged-out page load failure is handled without accepting a false login re
 test('logged-out UI explains manual login while offering separate automatic and manual routes', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../../src/patch-manager-stage2.js'), 'utf8');
   assert.match(source, /브라우저 로그인은 사용자가 직접 합니다/);
-  assert.match(source, /ChatGPT 웹 자동 번역 \(실험\)/);
+  assert.match(source, /ChatGPT 자막 번역 \(베타\)/);
   assert.match(source, /const runAuto = async/);
   assert.match(source, /자동 재전송하지 않습니다/);
   assert.match(source, /id="patch0102ChatGPTDeleteUnavailable" type="button" disabled/);

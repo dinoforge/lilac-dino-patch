@@ -6,12 +6,12 @@ const path=require('node:path');
 
 // Dino Lilac Patch settings contract. Disk access is explicit and limited to
 // DinoLilacPatch/settings.json under the caller-supplied install directory.
-const PATCH_IDS=Object.freeze(['patch-01','patch-02','patch-03']);
+const PATCH_IDS=Object.freeze(['patch-01','patch-02','patch-03','patch-04','patch-05']);
 const SETTINGS_DIRECTORY='DinoLilacPatch';
 const SETTINGS_FILENAME='settings.json';
 const MAX_SETTINGS_BYTES=4096;
 const DEFAULT_SETTINGS=Object.freeze({
-  patches:Object.freeze({'patch-01':false,'patch-02':false,'patch-03':false})
+  patches:Object.freeze({'patch-01':false,'patch-02':false,'patch-03':false,'patch-04':false,'patch-05':false})
 });
 function assertSettings(input){
   if(!input||typeof input!=='object'||Array.isArray(input) ||
@@ -21,15 +21,19 @@ function assertSettings(input){
     Object.keys(patches).some(id=>!PATCH_IDS.includes(id)) ||
     !Object.hasOwn(patches,'patch-01') || !Object.hasOwn(patches,'patch-02') ||
     typeof patches['patch-01']!=='boolean' || typeof patches['patch-02']!=='boolean' ||
-    Object.hasOwn(patches,'patch-03')&&typeof patches['patch-03']!=='boolean'){
-    throw new Error('Patch 01, Patch 02, and Patch 03 must each be ON or OFF');
+    Object.hasOwn(patches,'patch-03')&&typeof patches['patch-03']!=='boolean' ||
+    Object.hasOwn(patches,'patch-04')&&typeof patches['patch-04']!=='boolean' ||
+    Object.hasOwn(patches,'patch-05')&&typeof patches['patch-05']!=='boolean'){
+    throw new Error('Patch 01 through Patch 05 must each be ON or OFF');
   }
-  // Older settings files stored only Patch 01 and Patch 02. Preserve both
-  // values and migrate Patch 03 to its safe OFF default when next saved.
+  // Older settings files stored only Patch 01 through Patch 03. Preserve
+  // those values and migrate new patches to the safe OFF default.
   return {patches:{
     'patch-01':patches['patch-01'],
     'patch-02':patches['patch-02'],
-    'patch-03':patches['patch-03']===true
+    'patch-03':patches['patch-03']===true,
+    'patch-04':patches['patch-04']===true,
+    'patch-05':patches['patch-05']===true
   }};
 }
 function loadSettings(text){

@@ -12,7 +12,7 @@ const { hashBytes, readVerifiedFile } = require('../core.cjs');
 
 test('manager rejects arbitrary folders and permits no production-target path', () => {
   assert.throws(() => assertIsolatedTarget(fs.realpathSync(os.tmpdir())), /manager-created isolated source copy/);
-  assert.throws(() => manager.createTargetFromSource(fs.realpathSync(os.tmpdir())), /official v0\.5\.15|clean Git checkout/);
+  assert.throws(() => manager.createTargetFromSource(fs.realpathSync(os.tmpdir())), /official v0\.5\.15|v0\.5\.21|고정 커밋/);
 });
 
 const sourceRoot = process.env.DINO_LILAC_V0515_SOURCE;
@@ -49,7 +49,7 @@ test('pinned official source can be copied, independently patched, and hash-veri
 
     const patch03 = manager.applySettings(root, { patches: { 'patch-01': false, 'patch-02': false, 'patch-03': true } }, { isAppRunning: () => false });
     assert.equal(patch03.status, 'applied');
-    assert.deepEqual(patch03.settings.patches, { 'patch-01': false, 'patch-02': false, 'patch-03': true });
+    assert.deepEqual(patch03.settings.patches, { 'patch-01': false, 'patch-02': false, 'patch-03': true, 'patch-04': false, 'patch-05': false });
     assert.match(fs.readFileSync(path.join(root, 'src', 'index.html'), 'utf8'), /unified-catalog\.js/);
     state = manager.inspectTarget(root);
     assert.equal(state.mode, 'applied');
@@ -57,7 +57,7 @@ test('pinned official source can be copied, independently patched, and hash-veri
 
     const switchToA = manager.applySettings(root, { patches: { 'patch-01': true, 'patch-02': true, 'patch-03': false } }, { isAppRunning: () => false });
     assert.equal(switchToA.status, 'applied');
-    assert.deepEqual(switchToA.settings.patches, { 'patch-01': true, 'patch-02': true, 'patch-03': false });
+    assert.deepEqual(switchToA.settings.patches, { 'patch-01': true, 'patch-02': true, 'patch-03': false, 'patch-04': false, 'patch-05': false });
     assert.doesNotMatch(fs.readFileSync(path.join(root, 'src', 'index.html'), 'utf8'), /unified-catalog\.js/);
 
     const restored = manager.restoreTarget(root, { isAppRunning: () => false });
@@ -66,8 +66,8 @@ test('pinned official source can be copied, independently patched, and hash-veri
     for (const file of anchors) assert.equal(hashBytes(readVerifiedFile(root, file)), originalHashes[file], `${file} restored to its pinned source hash`);
     state = manager.inspectTarget(root);
     assert.equal(state.mode, 'ready');
-    assert.deepEqual(state.settings.patches, { 'patch-01': false, 'patch-02': false, 'patch-03': false });
-    assert.deepEqual(PATCH_IDS, ['patch-01', 'patch-02', 'patch-03']);
+    assert.deepEqual(state.settings.patches, { 'patch-01': false, 'patch-02': false, 'patch-03': false, 'patch-04': false, 'patch-05': false });
+    assert.deepEqual(PATCH_IDS, ['patch-01', 'patch-02', 'patch-03', 'patch-04', 'patch-05']);
   } finally {
     assert.equal(assertIsolatedTarget(root), root, 'cleanup is limited to the manager-created temp copy');
     fs.rmSync(root, { recursive: true, force: true });

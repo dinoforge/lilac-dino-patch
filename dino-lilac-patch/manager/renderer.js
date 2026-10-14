@@ -5,7 +5,9 @@ const byId = id => document.getElementById(id);
 const checks = {
   'patch-01': byId('patch01'),
   'patch-02': byId('patch02'),
-  'patch-03': byId('patch03')
+  'patch-03': byId('patch03'),
+  'patch-04': byId('patch04'),
+  'patch-05': byId('patch05')
 };
 let hasTarget = false;
 let canApply = false;
@@ -52,7 +54,7 @@ function renderTarget(payload) {
   const initial = { ...state.settings.patches };
   if (!state.settingsStored && state.mode === 'ready') initial['patch-03'] = true;
   for (const [id, checkbox] of Object.entries(checks)) checkbox.checked = initial[id];
-  for (const id of ['patch-01', 'patch-02', 'patch-03']) {
+  for (const id of Object.keys(checks)) {
     const [label, tone] = patchLabel(state.patches?.[id]);
     setChip(byId(`status${id.slice(-2)}`), label, tone);
   }
@@ -64,8 +66,8 @@ function renderTarget(payload) {
   const latest = state.latest && state.latest !== 'not-applied' ? `최근 작업: ${state.latest}.` : '';
   const intro = state.mode === 'modified-after-apply'
     ? '적용 후 파일 변경이 감지되어 자동 덮어쓰기를 차단했습니다.'
-    : state.mode === 'applied' ? '패치 적용 상태를 백업 지문과 대조했습니다.' : '격리 사본을 확인했습니다. 새 사본은 Patch 03 ON(B 화면)으로 시작합니다.';
-  setMessage(intro, `${latest} Patch 03 OFF는 원본 A 화면을 유지합니다. 세 패치는 독립적으로 선택할 수 있습니다.`);
+    : state.mode === 'applied' ? '패치 적용 상태를 백업 지문과 대조했습니다.' : '격리 사본을 확인했습니다. 새 사본은 Patch 03 ON(B 화면), Patch 04·05 OFF로 시작합니다.';
+  setMessage(intro, `${latest} Patch 03 OFF는 원본 A 화면을 유지합니다. 다섯 패치는 독립적으로 선택할 수 있습니다.`);
 }
 
 function selectedSettings() {
