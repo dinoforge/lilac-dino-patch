@@ -4,7 +4,8 @@ const {assertSettings,PATCH_IDS}=require('./settings.cjs');
 
 // Read-only structural probes. This file intentionally does NOT import fs,
 // manipulate app.asar, recognize arbitrary versions as safe, or patch any path.
-// Probes are based on connection points of the official v0.5.14 source.
+// P01/P02 retain their older source anchors. Patch 03 additionally requires
+// the reviewed episode-list, quality and resolver hooks from supported builds.
 // A passing probe is only a CANDIDATE for further isolated runtime testing.
 const SHARED=Object.freeze([
   {file:'electron/main.cjs',needle:"  ipcMain.handle('provider:season', (_, provider) => homeShows(provider,'season'));",one:true},
@@ -40,6 +41,10 @@ const CONTRACTS=Object.freeze({
     {file:'src/index.html',needle:'id="homeView"',one:true},
     {file:'src/index.html',needle:'id="seeAllSeason"',one:true},
     {file:'src/app.js',needle:'function resolveIntoPlayer(',one:true},
+    {file:'src/app.js',needle:'function mountEpisodeList(',one:true},
+    {file:'electron/main.cjs',needle:'async function resolveProviderEpisode(',one:true},
+    {file:'electron/main.cjs',needle:'async function resolveStreamPage(',one:true},
+    {file:'electron/main.cjs',needle:"  ipcMain.handle('provider:season', (_, provider) => homeShows(provider,'season'));",one:true},
     {file:'electron/main.cjs',needle:"ipcMain.handle('provider:catalog',",one:true},
     {file:'electron/main.cjs',needle:"ipcMain.handle('provider:detail',",one:true},
     {file:'electron/main.cjs',needle:"ipcMain.handle('provider:resolve',",one:true},
@@ -51,11 +56,14 @@ const CONTRACTS=Object.freeze({
     {file:'electron/preload.cjs',needle:'providerCatalog: (provider, query =',one:true},
     {file:'electron/preload.cjs',needle:'providerDetail: anime =>',one:true},
     {file:'electron/preload.cjs',needle:'providerResolve: episode =>',one:true},
+    {file:'electron/preload.cjs',needle:"providerSeason: provider => ipcRenderer.invoke('provider:season', provider),",one:true},
     {file:'electron/preload.cjs',needle:'linkkfHome: (page = 1, limit = 20)',one:true},
     {file:'electron/preload.cjs',needle:'linkkfDetail: id =>',one:true},
     {file:'electron/preload.cjs',needle:'linkkfEpisodes: id =>',one:true},
     {file:'electron/preload.cjs',needle:'linkkfResolve: episode =>',one:true},
-    {file:'electron/preload.cjs',needle:'catalogKoreanSearch: (provider, query)',one:true}
+    {file:'electron/preload.cjs',needle:'catalogKoreanSearch: (provider, query)',one:true},
+    {file:'src/player.js',needle:'function applyDefaultQuality()',one:true},
+    {file:'src/player.js',needle:"const wanted = parseInt(localStorage.getItem('defaultQuality') || '1080p', 10);",one:true}
   ]),
   'patch-04':Object.freeze([
     {file:'src/index.html',needle:'id="videoStage"',one:true},
@@ -63,15 +71,6 @@ const CONTRACTS=Object.freeze({
     {file:'src/index.html',needle:'id="playerSettings"',one:true},
     {file:'src/player.js',needle:'function renderQualityChoices()',one:true}
   ]),
-  'patch-05':Object.freeze([
-    {file:'src/index.html',needle:'id="playerSettings"',one:true},
-    {file:'src/app.js',needle:'function mountEpisodeList(',one:true},
-    {file:'electron/main.cjs',needle:'async function resolveProviderEpisode(',one:true},
-    {file:'electron/main.cjs',needle:'async function resolveStreamPage(',one:true},
-    {file:'electron/preload.cjs',needle:'providerResolve: episode =>',one:true},
-    {file:'src/player.js',needle:'function applyDefaultQuality()',one:true},
-    {file:'src/player.js',needle:"const wanted = parseInt(localStorage.getItem('defaultQuality') || '1080p', 10);",one:true}
-  ])
 });
 const ALREADY_PATCHED=Object.freeze({
   'patch-01':Object.freeze([
@@ -84,17 +83,16 @@ const ALREADY_PATCHED=Object.freeze({
   'patch-03':Object.freeze([
     {file:'src/index.html',needle:'patch-manager-feature-flags.js'},
     {file:'src/index.html',needle:'unified-catalog.js'},
-    {file:'src/patch-manager-feature-flags.js',needle:'window.DinoLilacPatchFeatures'}
+    {file:'src/index.html',needle:'patch05-episode-quality.js'},
+    {file:'src/patch-manager-feature-flags.js',needle:'window.DinoLilacPatchFeatures'},
+    {file:'src/patch-manager-feature-flags.js',needle:'"patch-05":true'},
+    {file:'electron/preload.cjs',needle:"patchEpisodeQuality: episode => ipcRenderer.invoke('patch:episode-quality', episode)"},
+    {file:'electron/main.cjs',needle:'registerPatch05Handlers'}
   ]),
   'patch-04':Object.freeze([
     {file:'src/index.html',needle:'patch04-playback-stats.js'},
     {file:'src/patch-manager-feature-flags.js',needle:"'patch-04': true"}
   ]),
-  'patch-05':Object.freeze([
-    {file:'src/index.html',needle:'patch05-episode-quality.js'},
-    {file:'src/patch-manager-feature-flags.js',needle:"'patch-05': true"},
-    {file:'electron/preload.cjs',needle:"patchEpisodeQuality: episode => ipcRenderer.invoke('patch:episode-quality', episode)"}
-  ])
 });
 
 function probe(files,rule){

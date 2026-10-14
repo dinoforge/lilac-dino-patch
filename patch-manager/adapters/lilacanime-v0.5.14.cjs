@@ -51,17 +51,15 @@ const PATCH_PAYLOAD_FILES = Object.freeze({
   'patch-03': Object.freeze([
     ['src/integrated-search.js', 'src/integrated-search.js'],
     ['src/unified-catalog.js', 'src/unified-catalog.js'],
-    ['src/unified-catalog.css', 'src/unified-catalog.css']
+    ['src/unified-catalog.css', 'src/unified-catalog.css'],
+    ['src/patch05-episode-quality.js', 'src/patch05-episode-quality.js'],
+    ['src/patch05-episode-quality.css', 'src/patch05-episode-quality.css'],
+    ['electron/patch-manager-stage5.cjs', 'electron/patch-manager-stage5.cjs']
   ]),
   'patch-04': Object.freeze([
     ['src/patch04-playback-stats.js', 'src/patch04-playback-stats.js'],
     ['src/patch04-playback-stats.css', 'src/patch04-playback-stats.css']
   ]),
-  'patch-05': Object.freeze([
-    ['src/patch05-episode-quality.js', 'src/patch05-episode-quality.js'],
-    ['src/patch05-episode-quality.css', 'src/patch05-episode-quality.css'],
-    ['electron/patch-manager-stage5.cjs', 'electron/patch-manager-stage5.cjs']
-  ])
 });
 const PAYLOAD_FILES = Object.freeze([
   ['src/patch-manager-feature-flags.js', 'src/patch-manager-feature-flags.js'],

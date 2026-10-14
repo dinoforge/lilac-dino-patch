@@ -4,7 +4,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
-const {DEFAULT_SETTINGS,loadSettings,setPatchEnabled,toSettingsJson,settingsFilePath,readSettingsFile,writeSettingsFile,setPatchEnabledAndSave}=require('../settings.cjs');
+const {DEFAULT_SETTINGS,loadSettings,loadSettingsState,setPatchEnabled,toSettingsJson,settingsFilePath,readSettingsFile,readSettingsFileState,writeSettingsFile,setPatchEnabledAndSave}=require('../settings.cjs');
 const {evaluateStructure}=require('../compatibility.cjs');
 
 function fixture(version='0.5.14'){
@@ -18,12 +18,15 @@ function fixture(version='0.5.14'){
     'src/player.js':"function renderQualityChoices() {}\nfunction applyDefaultQuality() {\n  const wanted = parseInt(localStorage.getItem('defaultQuality') || '1080p', 10);\n}"
   };
 }
-function enabled(p1,p2,p3=false,p4=false,p5=false){return {patches:{'patch-01':p1,'patch-02':p2,'patch-03':p3,'patch-04':p4,'patch-05':p5}};}
+function enabled(p1,p2,p3=false,p4=false){return {patches:{'patch-01':p1,'patch-02':p2,'patch-03':p3,'patch-04':p4}};}
 
-test('one local settings file persists five independent switches and migrates older settings',()=>{
+test('one local settings file persists four switches and migrates a legacy Patch 05 key without enabling Patch 03',()=>{
   assert.deepEqual(loadSettings(''),DEFAULT_SETTINGS);
   assert.deepEqual(loadSettings(toSettingsJson(enabled(true,false))),enabled(true,false));
   assert.deepEqual(loadSettings('{"patches":{"patch-01":true,"patch-02":false}}'),enabled(true,false));
+  const migrated=loadSettingsState('{"patches":{"patch-01":true,"patch-02":false,"patch-03":false,"patch-04":true,"patch-05":true}}');
+  assert.deepEqual(migrated,{settings:enabled(true,false,false,true),legacyPatch05:true});
+  assert.equal(migrated.settings.patches['patch-03'],false,'legacy Patch 05 never turns Patch 03 on');
   assert.deepEqual(setPatchEnabled(enabled(false,false),'patch-02',true),enabled(false,true));
   const original=enabled(true,false);
   const after=setPatchEnabled(original,'patch-02',true);
@@ -39,7 +42,7 @@ test('one local settings file persists five independent switches and migrates ol
   assert.throws(()=>loadSettings('{bad json'));
 });
 
-test('settings persist all 32 combinations in the single DinoLilacPatch/settings.json file',()=>{
+test('settings persist all 16 combinations in the single DinoLilacPatch/settings.json file',()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'dino-lilac-settings-'));
   const install=path.join(root,'LilacAnime');
   fs.mkdirSync(install);
@@ -51,14 +54,18 @@ test('settings persist all 32 combinations in the single DinoLilacPatch/settings
     assert.equal(fs.existsSync(missingInstall),false,'a mistyped app path is never created implicitly');
     assert.deepEqual(readSettingsFile(install),enabled(false,false));
     assert.equal(fs.existsSync(directory),false,'reading a missing settings file does not create extra folders');
-    for(const patch01 of [false,true])for(const patch02 of [false,true])for(const patch03 of [false,true])for(const patch04 of [false,true])for(const patch05 of [false,true]){
-      const selected=enabled(patch01,patch02,patch03,patch04,patch05);
+    for(const patch01 of [false,true])for(const patch02 of [false,true])for(const patch03 of [false,true])for(const patch04 of [false,true]){
+      const selected=enabled(patch01,patch02,patch03,patch04);
       writeSettingsFile(install,selected);
       assert.deepEqual(readSettingsFile(install),selected);
     }
-    assert.deepEqual(setPatchEnabledAndSave(install,'patch-01',false),enabled(false,true,true,true,true));
-    assert.deepEqual(readSettingsFile(install),enabled(false,true,true,true,true));
-    assert.deepEqual(fs.readdirSync(directory),['settings.json'],'the five switches share one settings file and no temp file remains');
+    assert.deepEqual(setPatchEnabledAndSave(install,'patch-01',false),enabled(false,true,true,true));
+    assert.deepEqual(readSettingsFile(install),enabled(false,true,true,true));
+    fs.writeFileSync(file,'{"patches":{"patch-01":true,"patch-02":false,"patch-03":false,"patch-04":false,"patch-05":true}}','utf8');
+    assert.deepEqual(readSettingsFileState(install),{settings:enabled(true,false,false,false),legacyPatch05:true,stored:true});
+    writeSettingsFile(install,readSettingsFile(install));
+    assert.doesNotMatch(fs.readFileSync(file,'utf8'),/patch-05/,'writing migrated settings removes the retired toggle without changing Patch 03');
+    assert.deepEqual(fs.readdirSync(directory),['settings.json'],'the four switches share one settings file and no temp file remains');
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
 
@@ -75,17 +82,33 @@ test('malformed persisted settings fail closed and are not overwritten by a togg
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
 
-test('all 32 ON/OFF combinations produce independent read-only compatibility reports',()=>{
-  for(const a of [false,true])for(const b of [false,true])for(const c of [false,true])for(const d of [false,true])for(const e of [false,true]){
-    const result=evaluateStructure(fixture(),enabled(a,b,c,d,e));
+test('all 16 ON/OFF combinations produce independent read-only compatibility reports',()=>{
+  for(const a of [false,true])for(const b of [false,true])for(const c of [false,true])for(const d of [false,true]){
+    const result=evaluateStructure(fixture(),enabled(a,b,c,d));
     assert.equal(result.patches['patch-01'].status,a?'structural-candidate':'disabled');
     assert.equal(result.patches['patch-02'].status,b?'structural-candidate':'disabled');
     assert.equal(result.patches['patch-03'].status,c?'structural-candidate':'disabled');
     assert.equal(result.patches['patch-04'].status,d?'structural-candidate':'disabled');
-    assert.equal(result.patches['patch-05'].status,e?'structural-candidate':'disabled');
+    assert.equal(Object.hasOwn(result.patches,'patch-05'),false);
     assert.equal(result.automaticApplyAuthorized,false);
     assert.equal(result.mayWriteInstalledFiles,false);
   }
+});
+
+test('Patch 03 compatibility requires the integrated episode list and quality selection hooks',()=>{
+  const files=fixture();
+  delete files['src/player.js'];
+  const report=evaluateStructure(files,enabled(false,false,true,false));
+  assert.equal(report.patches['patch-03'].status,'blocked');
+  assert.ok(report.patches['patch-03'].issues.some(issue=>issue.file==='src/player.js'));
+});
+
+test('legacy standalone Patch 05 payload is rejected as already patched Patch 03 state',()=>{
+  const files=fixture();
+  files['src/patch-manager-feature-flags.js']='window.DinoLilacPatchFeatures = Object.freeze({"patch-01":false,"patch-02":false,"patch-03":false,"patch-04":false,"patch-05":true});';
+  const report=evaluateStructure(files,enabled(false,false,true,false));
+  assert.equal(report.patches['patch-03'].status,'blocked');
+  assert.ok(report.patches['patch-03'].issues.some(issue=>issue.kind==='already-patched-or-modified'));
 });
 
 test('new version with unchanged required structure is a candidate, not a pre-whitelisted version',()=>{

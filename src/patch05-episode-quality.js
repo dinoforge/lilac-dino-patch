@@ -1,6 +1,6 @@
 'use strict';
 (() => {
-  if (window.DinoLilacPatchFeatures?.['patch-05'] !== true) return;
+  if (window.DinoLilacPatchFeatures?.['patch-03'] !== true) return;
   const api = window.lilac;
   if (typeof api?.patchEpisodeQuality !== 'function') return;
   if (!document.querySelector('#patch05EpisodeQualityStyle')) {

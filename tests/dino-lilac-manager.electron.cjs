@@ -73,49 +73,57 @@ app.whenReady().then(async () => {
   try {
     await waitFor('manager main window', () => BrowserWindow.getAllWindows().length === 1);
     win = BrowserWindow.getAllWindows()[0];
-    await waitFor('real manager preload and target state', () => win.webContents.executeJavaScript(`Boolean(window.dinoPatchManager && document.querySelector("#patch05") && document.querySelector("#targetPath").textContent.includes("LilacAnime-${sourceVersion}-"))`));
-    const initial = await win.webContents.executeJavaScript('({patch01:document.querySelector("#patch01").checked,patch02:document.querySelector("#patch02").checked,patch03:document.querySelector("#patch03").checked,patch04:document.querySelector("#patch04").checked,patch05:document.querySelector("#patch05").checked,applyDisabled:document.querySelector("#apply").disabled,patch02Label:document.querySelector("label[for=patch02] strong").textContent})');
-    assert.deepEqual(initial, { patch01: false, patch02: false, patch03: true, patch04: false, patch05: false, applyDisabled: false, patch02Label: 'ChatGPT 자막 번역 (베타)' }, 'new source copy defaults to B mode; five independent switches are visible');
+    await waitFor('real manager preload and target state', () => win.webContents.executeJavaScript(`Boolean(window.dinoPatchManager && document.querySelector("#patch04") && !document.querySelector("#patch05") && document.querySelector("#targetPath").textContent.includes("LilacAnime-${sourceVersion}-"))`));
+    const initial = await win.webContents.executeJavaScript('({patch01:document.querySelector("#patch01").checked,patch02:document.querySelector("#patch02").checked,patch03:document.querySelector("#patch03").checked,patch04:document.querySelector("#patch04").checked,patch05Visible:Boolean(document.querySelector("#patch05")),applyDisabled:document.querySelector("#apply").disabled,patch02Label:document.querySelector("label[for=patch02] strong").textContent})');
+    assert.deepEqual(initial, { patch01: false, patch02: false, patch03: true, patch04: false, patch05Visible: false, applyDisabled: false, patch02Label: 'ChatGPT 자막 번역 (베타)' }, 'the manager exposes only Patch 01-04 and new source copies default to Patch 03');
     assert.match(await win.webContents.executeJavaScript('document.querySelector("label[for=patch02] small").textContent'), /수동 번역 및 SRT 전체 파일 자동 번역/);
-
-    await win.webContents.executeJavaScript('window.confirm=()=>true;document.querySelector("#apply").click()');
-    await waitFor('actual manager apply IPC', () => win.webContents.executeJavaScript('document.querySelector("#message").textContent.includes("적용 결과")'));
-    let state = manager.inspectTarget(target.root);
-    assert.equal(state.mode, 'applied');
-    assert.deepEqual(state.settings.patches, { 'patch-01': false, 'patch-02': false, 'patch-03': true, 'patch-04': false, 'patch-05': false });
-    const patch03Html = fs.readFileSync(path.join(target.root, 'src', 'index.html'), 'utf8');
-    assert.match(patch03Html, /unified-catalog\.js/);
-    assert.equal(fs.existsSync(path.join(target.root, 'DinoLilacPatch', 'settings.json')), true);
-
-    await win.webContents.executeJavaScript('document.querySelector("#restore").click()');
-    await waitFor('actual manager restore IPC', () => win.webContents.executeJavaScript('document.querySelector("#message").textContent.includes("복구 결과")'));
-    state = manager.inspectTarget(target.root);
-    assert.equal(state.mode, 'ready');
-    assert.deepEqual(state.settings.patches, { 'patch-01': false, 'patch-02': false, 'patch-03': false, 'patch-04': false, 'patch-05': false });
-    assertOfficialFilesRestored(target.root, 'Patch 03 restore');
-    assert.doesNotMatch(fs.readFileSync(path.join(target.root, 'src', 'index.html'), 'utf8'), /unified-catalog\.js/);
-    assert.equal(await win.webContents.executeJavaScript('document.querySelector("#patch03").checked'), false);
-
-    const applySingle = async (checkboxId, patchId, expectedPayload, expectedAnchor) => {
-      await win.webContents.executeJavaScript(`(()=>{for(const id of ['patch01','patch02','patch03','patch04','patch05'])document.querySelector('#'+id).checked=false;document.querySelector('#${checkboxId}').checked=true;window.confirm=()=>true;document.querySelector('#apply').click();})()`);
-      await waitFor(`${patchId} manager apply`, () => win.webContents.executeJavaScript('document.querySelector("#message").textContent.includes("적용 결과")'));
-      const appliedState = manager.inspectTarget(target.root);
-      assert.equal(appliedState.settings.patches[patchId], true);
-      assert.equal(fs.existsSync(path.join(target.root, ...expectedPayload.split('/'))), true, `${patchId} payload is part of the real manager application`);
-      assert.match(fs.readFileSync(path.join(target.root, ...expectedAnchor.file.split('/')), 'utf8'), expectedAnchor.pattern);
-      await win.webContents.executeJavaScript('document.querySelector("#restore").click()');
-      await waitFor(`${patchId} manager restore`, () => win.webContents.executeJavaScript('document.querySelector("#message").textContent.includes("복구 결과")'));
-      assert.equal(manager.inspectTarget(target.root).mode, 'ready');
-      assert.equal(fs.existsSync(path.join(target.root, ...expectedPayload.split('/'))), false, `${patchId} payload is removed by restore`);
-      assertOfficialFilesRestored(target.root, `${patchId} restore`);
-    };
-    await applySingle('patch01', 'patch-01', 'src/weekday-schedule.js', { file: 'src/index.html', pattern: /weekday-schedule\.js/ });
-    await applySingle('patch02', 'patch-02', 'src/manual-subtitle-translation.js', { file: 'src/index.html', pattern: /manual-subtitle-translation\.js/ });
-    await applySingle('patch04', 'patch-04', 'src/patch04-playback-stats.js', { file: 'src/index.html', pattern: /patch04-playback-stats\.js/ });
-    await applySingle('patch05', 'patch-05', 'electron/patch-manager-stage5.cjs', { file: 'electron/preload.cjs', pattern: /patchEpisodeQuality/ });
-
-    assertOfficialFilesRestored(target.root, 'all individual patch restores');
-    console.log('ISOLATED_DINO_PATCH_MANAGER_ELECTRON_RESULT=' + JSON.stringify({ ui: 'actual manager main+preload+renderer', target: `pinned official v${sourceVersion} temp copy`, newCopyDefault: initial, apply: 'Patch 01-05 independently applied through actual manager UI and restored', restore: 'SHA-256 verified', externalRequests: 0 }));
+    const combinations = [];
+    for (const p1 of [false, true]) for (const p2 of [false, true]) for (const p3 of [false, true]) for (const p4 of [false, true]) {
+      combinations.push({ 'patch-01': p1, 'patch-02': p2, 'patch-03': p3, 'patch-04': p4 });
+    }
+    const settingsValue = flags => ({ patches: flags });
+    const settingsJson = () => JSON.parse(fs.readFileSync(path.join(target.root, 'DinoLilacPatch', 'settings.json'), 'utf8'));
+    for (const flags of combinations) {
+      const enabledCount = Object.values(flags).filter(Boolean).length;
+      const ids = ['patch-01', 'patch-02', 'patch-03', 'patch-04'];
+      await win.webContents.executeJavaScript(`(()=>{const flags=${JSON.stringify(flags)};const ids=${JSON.stringify(ids)};for(const patch of ids){const checkbox=document.querySelector('#patch'+patch.slice(-2));checkbox.checked=flags[patch];}window.confirm=()=>true;document.querySelector('#apply').click();})()`);
+      await waitFor(`actual manager apply ${JSON.stringify(flags)}`, () => win.webContents.executeJavaScript('document.querySelector("#message").textContent.includes("적용 결과")'));
+      let state = manager.inspectTarget(target.root);
+      assert.deepEqual(state.settings, settingsValue(flags));
+      assert.deepEqual(settingsJson(), settingsValue(flags), 'persisted settings contain only Patch 01-04');
+      if (enabledCount) {
+        const indexHtml = fs.readFileSync(path.join(target.root, 'src', 'index.html'), 'utf8');
+        const mainSource = fs.readFileSync(path.join(target.root, 'electron', 'main.cjs'), 'utf8');
+        const preloadSource = fs.readFileSync(path.join(target.root, 'electron', 'preload.cjs'), 'utf8');
+        const flagsSource = fs.readFileSync(path.join(target.root, 'src', 'patch-manager-feature-flags.js'), 'utf8');
+        assert.equal(indexHtml.includes('unified-catalog.js'), flags['patch-03']);
+        assert.equal(indexHtml.includes('patch05-episode-quality.js'), flags['patch-03'], 'quality UI is integrated with Patch 03 only');
+        assert.equal(fs.existsSync(path.join(target.root, 'src', 'patch05-episode-quality.css')), flags['patch-03']);
+        assert.equal(fs.existsSync(path.join(target.root, 'electron', 'patch-manager-stage5.cjs')), flags['patch-03']);
+        assert.equal(preloadSource.includes('patchEpisodeQuality'), flags['patch-03']);
+        assert.equal(mainSource.includes('registerPatch05Handlers'), flags['patch-03']);
+        assert.equal(flagsSource.includes('"patch-03":true'), flags['patch-03']);
+        assert.equal(flagsSource.includes('patch-05'), false, 'no independent Patch 05 feature flag is emitted');
+        assert.equal(fs.existsSync(path.join(target.root, 'src', 'patch04-playback-stats.js')), flags['patch-04']);
+        assert.equal(fs.existsSync(path.join(target.root, 'src', 'weekday-schedule.js')), flags['patch-01']);
+        assert.equal(fs.existsSync(path.join(target.root, 'src', 'manual-subtitle-translation.js')), flags['patch-02']);
+        assert.equal(state.mode, 'applied');
+        await win.webContents.executeJavaScript('document.querySelector("#restore").click()');
+        await waitFor(`actual manager restore ${JSON.stringify(flags)}`, () => win.webContents.executeJavaScript('document.querySelector("#message").textContent.includes("복구 결과")'));
+        state = manager.inspectTarget(target.root);
+        assert.equal(state.mode, 'ready');
+        assert.deepEqual(state.settings.patches, { 'patch-01': false, 'patch-02': false, 'patch-03': false, 'patch-04': false });
+        assertOfficialFilesRestored(target.root, `restore ${JSON.stringify(flags)}`);
+        for (const file of ['src/patch05-episode-quality.js', 'src/patch05-episode-quality.css', 'electron/patch-manager-stage5.cjs', 'src/patch04-playback-stats.js']) {
+          assert.equal(fs.existsSync(path.join(target.root, ...file.split('/'))), false, `restore removes ${file}`);
+        }
+      } else {
+        assert.equal(state.mode, 'ready', 'all OFF leaves the official source untouched');
+        assertOfficialFilesRestored(target.root, 'all patches OFF');
+      }
+    }
+    assertOfficialFilesRestored(target.root, 'all 16 apply/restore combinations');
+    console.log('ISOLATED_DINO_PATCH_MANAGER_ELECTRON_RESULT=' + JSON.stringify({ ui: 'actual manager main+preload+renderer', target: `pinned official v${sourceVersion} temp copy`, newCopyDefault: initial, combinations: 16, applyRestore: 'all Patch 01-04 combinations through actual manager UI', patch03Quality: 'included iff Patch 03 ON', restore: 'tracked-source SHA-256 verified after each enabled combination', externalRequests: 0 }));
     win.destroy(); win = null;
     if (target) {
       const root = assertIsolatedTarget(target.root);

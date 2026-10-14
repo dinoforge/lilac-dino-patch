@@ -4,7 +4,7 @@ const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const {
-  assertSettings, DEFAULT_SETTINGS, PATCH_IDS, readSettingsFile, writeSettingsFile, settingsFilePath
+  assertSettings, DEFAULT_SETTINGS, PATCH_IDS, readSettingsFileState, writeSettingsFile, settingsFilePath
 } = require('./settings.cjs');
 const { assertIsolatedTarget, createIsolatedTarget } = require('./isolated-target.cjs');
 const { makeLilacAnimePatchPlan } = require('../patch-manager/adapters/lilacanime-independent.cjs');
@@ -28,10 +28,16 @@ function currentReceiptMatches(root, receipt) {
 }
 
 function getActiveState(root) {
-  const settings = readSettingsFile(root);
+  const saved = readSettingsFileState(root);
+  const settings = saved.settings;
   const state = readState(root);
   const receipt = state.lastApplied?.status === 'applied' ? state.lastApplied : null;
-  return { settings, state, receipt, receiptMatches: receipt ? currentReceiptMatches(root, receipt) : false };
+  const legacyPatch05Receipt = typeof receipt?.patchSet === 'string' && /(?:-|\+)patch-05(?:\+|$)/.test(receipt.patchSet);
+  return {
+    settings, state, receipt,
+    receiptMatches: receipt ? currentReceiptMatches(root, receipt) : false,
+    legacyPatch05Migration: saved.legacyPatch05 || legacyPatch05Receipt
+  };
 }
 
 function summarizePlan(plan) {
@@ -56,7 +62,7 @@ function summarizePlan(plan) {
 
 function inspectTarget(targetRoot) {
   const root = assertIsolatedTarget(targetRoot);
-  const { settings, state, receipt, receiptMatches } = getActiveState(root);
+  const { settings, state, receipt, receiptMatches, legacyPatch05Migration } = getActiveState(root);
   const settingsStored = fs.existsSync(settingsFilePath(root));
   if (receipt) {
     return {
@@ -65,6 +71,7 @@ function inspectTarget(targetRoot) {
       profile: 'official-source-16c9a3d1-v0515',
       settings,
       settingsStored,
+      legacyPatch05Migration,
       patches: Object.fromEntries(PATCH_IDS.map(id => [id, {
         selection: settings.patches[id] ? 'on' : 'off',
         status: receiptMatches ? (settings.patches[id] ? 'applied' : 'disabled') : 'blocked',
@@ -81,6 +88,7 @@ function inspectTarget(targetRoot) {
     ...summarizePlan(plan),
     settings,
     settingsStored,
+    legacyPatch05Migration,
     receiptId: null,
     backupAvailable: false,
     latest: state.latest?.status || 'not-applied'
@@ -125,7 +133,7 @@ function applySettings(targetRoot, rawSettings, options = {}) {
   if (active.receipt && !active.receiptMatches) {
     return { status: 'modified-after-apply', changed: false, receiptId: active.receipt.id };
   }
-  if (active.receipt && flagsEqual(active.settings, requested)) {
+  if (active.receipt && flagsEqual(active.settings, requested) && !active.legacyPatch05Migration) {
     return { status: 'already-applied', changed: false, receiptId: active.receipt.id, settings: active.settings };
   }
   if (active.receipt) {

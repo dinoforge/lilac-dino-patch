@@ -14,7 +14,6 @@ const { cleanupSyntheticFixture } = require('../staging.cjs');
 const { registerPatch0102Handlers } = require('../../electron/patch-manager-stage2.cjs');
 
 const sourceSets = [
-  { version: '0.5.14', root: process.env.LILAC_UPSTREAM_V0514_SOURCE || process.env.LILAC_UPSTREAM_SOURCE || '' },
   { version: '0.5.15', root: process.env.LILAC_UPSTREAM_V0515_SOURCE || '' },
   { version: '0.5.21', root: process.env.LILAC_UPSTREAM_V0521_SOURCE || '' }
 ].map(item => ({ ...item, available: Boolean(item.root && fs.existsSync(path.join(item.root, '.git'))) }));
@@ -84,14 +83,14 @@ function withOfficialFixture(sourceRoot, callback) {
   finally { cleanupSyntheticFixture(fixture.root); }
 }
 
-function settings(patch01, patch02, patch03 = false, patch04 = false, patch05 = false) {
-  return { patches: { 'patch-01': patch01, 'patch-02': patch02, 'patch-03': patch03, 'patch-04': patch04, 'patch-05': patch05 } };
+function settings(patch01, patch02, patch03 = false, patch04 = false) {
+  return { patches: { 'patch-01': patch01, 'patch-02': patch02, 'patch-03': patch03, 'patch-04': patch04 } };
 }
 
 function assertOnlyPatch(plan, id) {
   assert.ok(plan.manifest, 'selected compatible patch must produce a manifest');
   assert.equal(plan.patches[id].status, 'structural-candidate');
-  for (const other of ['patch-01', 'patch-02', 'patch-03', 'patch-04', 'patch-05']) if (other !== id) assert.equal(plan.patches[other].status, 'disabled');
+  for (const other of ['patch-01', 'patch-02', 'patch-03', 'patch-04']) if (other !== id) assert.equal(plan.patches[other].status, 'disabled');
   const files = plan.manifest.actions.filter(action => action.kind === 'add-file').map(action => action.file);
   const html = plan.manifest.actions.find(action => action.file === 'src/index.html').content;
   const flagsContent = Buffer.from(plan.manifest.actions.find(action => action.file === 'src/patch-manager-feature-flags.js').contentBase64, 'base64').toString('utf8');
@@ -103,7 +102,7 @@ function assertOnlyPatch(plan, id) {
     assert.ok(files.includes('src/patch-manager-stage2.js'));
     assert.ok(!files.includes('src/manual-subtitle-translation.js'));
     assert.ok(!files.includes('electron/embedded-chatgpt-web.cjs'));
-    assert.match(flagsContent, /"patch-01":true,"patch-02":false,"patch-03":false,"patch-04":false,"patch-05":false/);
+    assert.match(flagsContent, /"patch-01":true,"patch-02":false,"patch-03":false,"patch-04":false/);
     assert.match(html, /weekday-schedule\.js/);
     assert.doesNotMatch(html, /manual-subtitle-translation\.js|siwc-subtitle-bridge\.js/);
     assert.match(main, /\{"patch-01":true,"patch-02":false\}/);
@@ -115,7 +114,7 @@ function assertOnlyPatch(plan, id) {
     assert.ok(files.includes('electron/embedded-chatgpt-web.cjs'));
     assert.ok(!files.includes('electron/siwc-client.cjs'));
     assert.ok(files.includes('electron/prompts/영어 번역 프롬프트.txt'));
-    assert.match(flagsContent, /"patch-01":false,"patch-02":true,"patch-03":false,"patch-04":false,"patch-05":false/);
+    assert.match(flagsContent, /"patch-01":false,"patch-02":true,"patch-03":false,"patch-04":false/);
     assert.doesNotMatch(html, /weekday-schedule\.js|patch-manager-stage2-core\.js/);
     assert.match(html, /manual-subtitle-translation\.js[\s\S]*patch-manager-stage2\.js/);
     assert.doesNotMatch(html, /siwc-subtitle-bridge\.js/);
@@ -130,14 +129,19 @@ function assertOnlyPatch(plan, id) {
     assert.ok(files.includes('src/integrated-search.js'));
     assert.ok(files.includes('src/unified-catalog.js'));
     assert.ok(files.includes('src/unified-catalog.css'));
+    assert.ok(files.includes('src/patch05-episode-quality.js'));
+    assert.ok(files.includes('src/patch05-episode-quality.css'));
+    assert.ok(files.includes('electron/patch-manager-stage5.cjs'));
     assert.ok(!files.includes('src/patch-manager-stage2.js'));
     assert.ok(!files.includes('electron/patch-manager-stage2.cjs'));
-    assert.doesNotMatch(html, /unified-catalog\.css/);
     assert.match(html, /integrated-search\.js[\s\S]*unified-catalog\.js/);
-    assert.match(flagsContent, /"patch-01":false,"patch-02":false,"patch-03":true,"patch-04":false,"patch-05":false/);
+    assert.match(html, /unified-catalog\.js[\s\S]*patch05-episode-quality\.js/);
+    assert.match(flagsContent, /"patch-01":false,"patch-02":false,"patch-03":true,"patch-04":false/);
     assert.match(html, /patch-manager-feature-flags\.js/);
     assert.doesNotMatch(html, /patch-manager-stage2\.js/);
-    assert.equal(plan.manifest.actions.some(action => ['electron/main.cjs', 'electron/preload.cjs'].includes(action.file)), false);
+    assert.match(main, /registerPatch05Handlers/);
+    assert.match(main, /episode\.patch05Server/);
+    assert.match(preload, /patchEpisodeQuality/);
   } else if (id === 'patch-04') {
     assert.ok(files.includes('src/patch04-playback-stats.js'));
     assert.ok(files.includes('src/patch04-playback-stats.css'));
@@ -145,15 +149,6 @@ function assertOnlyPatch(plan, id) {
     assert.match(flagsContent, /"patch-04":true/);
     assert.doesNotMatch(html, /manual-subtitle-translation\.js|patch05-episode-quality\.js/);
     assert.equal(plan.manifest.actions.some(action => ['electron/main.cjs', 'electron/preload.cjs'].includes(action.file)), false);
-  } else if (id === 'patch-05') {
-    assert.ok(files.includes('electron/patch-manager-stage5.cjs'));
-    assert.ok(files.includes('src/patch05-episode-quality.js'));
-    assert.ok(files.includes('src/patch05-episode-quality.css'));
-    assert.match(html, /patch05-episode-quality\.js/);
-    assert.match(main, /registerPatch05Handlers/);
-    assert.match(preload, /patchEpisodeQuality/);
-    assert.match(flagsContent, /"patch-05":true/);
-    assert.doesNotMatch(html, /unified-catalog\.js|manual-subtitle-translation\.js/);
   } else {
     assert.equal(files.filter(file => file === 'src/patch-manager-stage2.js').length, 1, 'shared renderer bridge is copied once');
     assert.equal(files.filter(file => file === 'electron/patch-manager-stage2.cjs').length, 1, 'shared IPC bridge is copied once');
@@ -232,7 +227,7 @@ test('main IPC registration loads only the selected patch handlers', () => {
 });
 
 for (const source of sourceSets) {
-test(`official LilacAnime ${source.version}: all 32 independent settings combinations apply and roll back`, {
+test(`official LilacAnime ${source.version}: all 16 Patch 01-04 combinations apply and roll back`, {
     skip: !source.available && `Set LILAC_UPSTREAM_V${source.version.replaceAll('.', '')}_SOURCE to the isolated official source clone`
   }, () => withOfficialFixture(source.root, ({ root, files, sourceRoot }) => {
     const officialBefore = snapshot(sourceRoot, files);
@@ -244,9 +239,9 @@ test(`official LilacAnime ${source.version}: all 32 independent settings combina
     assert.deepEqual(snapshot(root, files), fixtureBefore, 'OFF/OFF must leave every source file untouched');
 
     const combinations = [];
-    for (const p1 of [false, true]) for (const p2 of [false, true]) for (const p3 of [false, true]) for (const p4 of [false, true]) for (const p5 of [false, true]) {
-      if (!p1 && !p2 && !p3 && !p4 && !p5) continue;
-      combinations.push([settings(p1, p2, p3, p4, p5), [p1 && 'patch-01', p2 && 'patch-02', p3 && 'patch-03', p4 && 'patch-04', p5 && 'patch-05'].filter(Boolean).join('+')]);
+    for (const p1 of [false, true]) for (const p2 of [false, true]) for (const p3 of [false, true]) for (const p4 of [false, true]) {
+      if (!p1 && !p2 && !p3 && !p4) continue;
+      combinations.push([settings(p1, p2, p3, p4), [p1 && 'patch-01', p2 && 'patch-02', p3 && 'patch-03', p4 && 'patch-04'].filter(Boolean).join('+')]);
     }
     for (const [flags, id] of combinations) {
       const plan = makeLilacAnimePatchPlan(root, flags);
@@ -259,8 +254,8 @@ test(`official LilacAnime ${source.version}: all 32 independent settings combina
         assert.deepEqual(Object.keys(plan.manifest.expectedFiles).sort(), [
           'electron/main.cjs', 'electron/preload.cjs',
           ...(flags.patches['patch-02'] ? ['electron/subtitle-store.cjs'] : []),
-          ...(flags.patches['patch-04'] || flags.patches['patch-05'] ? ['src/player.js'] : []),
-          ...(flags.patches['patch-05'] ? ['src/app.js'] : []),
+          ...(flags.patches['patch-04'] || flags.patches['patch-03'] ? ['src/player.js'] : []),
+          ...(flags.patches['patch-03'] ? ['src/app.js'] : []),
           'package.json', 'src/index.html'
         ].sort());
         const additions = plan.manifest.actions.filter(action => action.kind === 'add-file').map(action => action.file);
@@ -268,8 +263,9 @@ test(`official LilacAnime ${source.version}: all 32 independent settings combina
         assert.equal(additions.includes('src/manual-subtitle-translation.js'), flags.patches['patch-02']);
         assert.equal(additions.includes('src/unified-catalog.js'), flags.patches['patch-03']);
         assert.equal(additions.includes('src/patch04-playback-stats.js'), flags.patches['patch-04']);
-        assert.equal(additions.includes('src/patch05-episode-quality.js'), flags.patches['patch-05']);
-        assert.equal(additions.includes('electron/patch-manager-stage5.cjs'), flags.patches['patch-05']);
+        assert.equal(additions.includes('src/patch05-episode-quality.js'), flags.patches['patch-03']);
+        assert.equal(additions.includes('src/patch05-episode-quality.css'), flags.patches['patch-03']);
+        assert.equal(additions.includes('electron/patch-manager-stage5.cjs'), flags.patches['patch-03']);
         assert.equal(additions.filter(file => file === 'src/patch-manager-stage2.js').length, flags.patches['patch-01'] || flags.patches['patch-02'] ? 1 : 0);
         assert.equal(additions.filter(file => file === 'electron/patch-manager-stage2.cjs').length, flags.patches['patch-01'] || flags.patches['patch-02'] ? 1 : 0);
       }

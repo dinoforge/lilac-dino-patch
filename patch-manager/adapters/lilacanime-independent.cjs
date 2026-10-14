@@ -46,7 +46,7 @@ const SOURCE_PROFILES = Object.freeze([
     patch04Files: Object.freeze({
       'src/player.js': '73bcb05bdadbc49806987126fc43969305d1a26fb49981766e178144dab9ecf2'
     }),
-    patch05Files: Object.freeze({
+    patch03Files: Object.freeze({
       'src/app.js': '2e1e54b6dd54af3f6fbd4066f602d559e6327d8f6be9159b5d1a17f700a227e1',
       'src/player.js': '73bcb05bdadbc49806987126fc43969305d1a26fb49981766e178144dab9ecf2'
     })
@@ -66,7 +66,7 @@ const SOURCE_PROFILES = Object.freeze([
     patch04Files: Object.freeze({
       'src/player.js': '5f8876f77cff34cfbc990a3fa5383388947b47d88ee0501c43b1cb5a186ecdd7'
     }),
-    patch05Files: Object.freeze({
+    patch03Files: Object.freeze({
       'src/app.js': 'dc82917c7bcb020e695a4c894c1fbc49d4f48c9d648992e6654bf518842cb433',
       'src/player.js': '5f8876f77cff34cfbc990a3fa5383388947b47d88ee0501c43b1cb5a186ecdd7'
     })
@@ -170,8 +170,7 @@ function featureFlags(settings) {
     'patch-01': settings.patches['patch-01'],
     'patch-02': settings.patches['patch-02'],
     'patch-03': settings.patches['patch-03'],
-    'patch-04': settings.patches['patch-04'],
-    'patch-05': settings.patches['patch-05']
+    'patch-04': settings.patches['patch-04']
   });
 }
 
@@ -192,7 +191,7 @@ function mainBridgeSource(flags) {
       `  }, ${JSON.stringify(stage2Flags)});`
     );
   }
-  if (flags['patch-05']) {
+  if (flags['patch-03']) {
     lines.push(
       "  const { registerPatch05Handlers } = require('./patch-manager-stage5.cjs');",
       '  registerPatch05Handlers({',
@@ -235,7 +234,7 @@ function preloadBridgeSource(flags) {
   const lines = [];
   if (flags['patch-01']) lines.push(...PATCH01_PRELOAD);
   if (flags['patch-02']) lines.push(...PATCH02_PRELOAD);
-  if (flags['patch-05']) lines.push(...PATCH05_PRELOAD);
+  if (flags['patch-03']) lines.push(...PATCH05_PRELOAD);
   return lines.length ? `${lines.join('\n')}\n` : '';
 }
 
@@ -246,7 +245,7 @@ function htmlBridgeSource(flags) {
   if (flags['patch-02']) scripts.add('manual-subtitle-translation.js');
   if (flags['patch-03']) { scripts.add('integrated-search.js'); scripts.add('unified-catalog.js'); }
   if (flags['patch-04']) scripts.add('patch04-playback-stats.js');
-  if (flags['patch-05']) scripts.add('patch05-episode-quality.js');
+  if (flags['patch-03']) scripts.add('patch05-episode-quality.js');
   if (flags['patch-01'] || flags['patch-02']) scripts.add('patch-manager-stage2.js');
   return `  ${[...scripts].map(file => `  <script src="${file}"></script>`).join('\n')}\n`;
 }
@@ -271,7 +270,7 @@ function buildManifest(payloadRoot, profile, flags) {
   const actions = [{ kind: 'insert-before', file: 'src/index.html', anchor: '</body>', content: htmlBridgeSource(flags) }];
   const featureFlags = `window.DinoLilacPatchFeatures = Object.freeze(${JSON.stringify(flags)});\n`;
   actions.push({ kind: 'add-file', file: 'src/patch-manager-feature-flags.js', contentBase64: Buffer.from(featureFlags, 'utf8').toString('base64') });
-  if (flags['patch-01'] || flags['patch-02'] || flags['patch-05']) actions.unshift(
+  if (flags['patch-01'] || flags['patch-02'] || flags['patch-03']) actions.unshift(
     { kind: 'insert-before', file: 'electron/main.cjs', anchor: MAIN_ANCHOR, content: mainBridgeSource(flags) },
     { kind: 'insert-before', file: 'electron/preload.cjs', anchor: PRELOAD_ANCHOR, content: preloadBridgeSource(flags) }
   );
@@ -280,9 +279,9 @@ function buildManifest(payloadRoot, profile, flags) {
     actions.push({ kind: 'insert-before', file: 'electron/subtitle-store.cjs', anchor: "'gemini'];", content: "'chatgpt', " });
   }
   if (flags['patch-04']) expectedFiles['src/player.js'] = profile.patch04Files['src/player.js'];
-  if (flags['patch-05']) {
-    expectedFiles['src/app.js'] = profile.patch05Files['src/app.js'];
-    expectedFiles['src/player.js'] = profile.patch05Files['src/player.js'];
+  if (flags['patch-03']) {
+    expectedFiles['src/app.js'] = profile.patch03Files['src/app.js'];
+    expectedFiles['src/player.js'] = profile.patch03Files['src/player.js'];
   }
   for (const [source, target] of selectedPayloads(flags)) actions.push(readPayload(payloadRoot, source, target));
 
@@ -338,7 +337,7 @@ function makeLilacAnimePatchPlan(targetRoot, rawSettings, { payloadRoot = path.r
       kind: 'target-fingerprint-mismatch', file: 'electron/subtitle-store.cjs'
     });
   }
-  for (const [id, filesKey] of [['patch-04', 'patch04Files'], ['patch-05', 'patch05Files']]) {
+  for (const [id, filesKey] of [['patch-03', 'patch03Files'], ['patch-04', 'patch04Files']]) {
     if (!flags[id]) continue;
     const reviewedFiles = knownProfile?.[filesKey];
     if (!reviewedFiles) {
@@ -355,8 +354,7 @@ function makeLilacAnimePatchPlan(targetRoot, rawSettings, { payloadRoot = path.r
     'patch-01': enabled.includes('patch-01'),
     'patch-02': enabled.includes('patch-02'),
     'patch-03': enabled.includes('patch-03'),
-    'patch-04': enabled.includes('patch-04'),
-    'patch-05': enabled.includes('patch-05')
+    'patch-04': enabled.includes('patch-04')
   } })) : null;
   const blocked = selected.filter(id => patches[id]?.status === 'blocked');
   return {

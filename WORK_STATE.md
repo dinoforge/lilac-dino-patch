@@ -930,3 +930,13 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 패치 전부 ON으로 만든 v0.5.21 임시 앱 프로세스는 테스트 APPDATA/USERPROFILE 아래 실행했으나 주 창 제목이 `Error`였다. Computer Use가 두 차례 다른 기존 b021 LilacAnime 창의 화면을 반환해 본창과 캡처가 불일치했다. 잘못된 창은 조작하지 않았으며 실제 앱 렌더링, 실제 영상/자막 재생, Patch 04 실시간 값, Patch 05 실공급원 화질은 BLOCKED/NOT TESTED다. 실제 ChatGPT 자동 번역은 베타이며 미검증이다.
 - 임시 v0.5.21 앱은 정상 종료했고 manager 복구 뒤 공식 복사 콘텐츠 fingerprint `b372f4b1724e455399d23ef3c609a0a7ef363c54e611e6b1393a6b07379ebd18`가 일치했다. 복구된 테스트 복사본은 `%TEMP%\DinoLilacPatch-MVP\isolated-targets` 아래 남아 있다. 실설치본·실사용 데이터·기존 ChatGPT 프로필·`main`은 변경하지 않았고 EXE/ZIP 및 GitHub Actions는 만들거나 실행하지 않았다.
 - 최종 브랜치 커밋 `aaeebdff853fef1b75367c2cceb7882219d990bc`를 origin에 push했고 원격 SHA가 일치한다. 작업 트리는 깨끗하다.
+
+## 2026-10-14 Patch 05를 Patch 03에 통합
+
+- 기준 커밋 `6c06a478faa15331689cc8d0915d05b8c2c4775c`에서 `codex/patch-05-merge-into-patch-03-20261014` 브랜치를 만들었다. 패치 식별자는 Patch 01~04로 정리했고, Patch 04는 독립 토글로 유지했다.
+- 공급원·서버별 HLS 화질 UI, preload IPC, 메인 프로세스 검사기와 서버 선택 연결은 Patch 03이 ON일 때 함께 적용되도록 했다. Patch 03 OFF에서는 화질 UI, stage5 IPC 파일/등록, 통합 목록과 공급원 선택 스크립트를 적용하지 않는다. 기존 Patch 05 HLS 안전 검사·요청 제한·타임아웃 구현은 재사용했다.
+- 기존 설정에 저장된 `patch-05` 키는 읽을 때만 호환하고, 다음 적용·복구에서 제거한다. 저장되어 있던 Patch 03 값만 보존하며 Patch 05 값으로 Patch 03을 켜지 않는다. 레거시 Patch 05 적용 영수증이 있으면 동일 설정 재적용도 복구 후 새 Patch 01~04 구성으로 이전한다.
+- 공식 v0.5.15 (`16c9a3d1631061a72831e0657434003940daf531`)와 v0.5.21 (`bf80119686fd42d2fcf704ce4946e28461e09f60`) 임시 원본에서 Node 적용/복구 조합 매트릭스 9/9 통과. 실제 Electron 패치 관리자 UI에서도 버전별 16개 조합을 전부 적용했고, 활성 조합 복구 뒤 추적된 공식 파일 SHA-256이 원본과 일치했다. Patch 03 단독 ON에는 화질 UI·CSS·IPC가 포함되고 Patch 03 OFF에는 포함되지 않았다.
+- 설정/구조/레거시 영수증 마이그레이션 검사 14/14 통과. `npm test`는 424개 중 419 통과, 5 건너뜀, 0 실패. GitHub Actions는 실행하지 않았다. 원격 상태에서 CI 워크플로 3개는 이미 disabled, Build는 tag/workflow_dispatch 전용 active 상태임을 읽기 전용으로 확인했다.
+- 실제 공급원 HLS 품질 조회와 v0.5.15/v0.5.21 패치 앱의 화면 렌더링은 수행하지 않았다. HLS 안전·429·타임아웃 단위 검사는 모의 응답 기반이며 통과했지만 실제 공급원 화질은 NOT TESTED다.
+- `D:\LilacAnime`, 사용자 프로필/시청 기록/다운로드, 기존 ChatGPT 프로필, `main`, EXE/ZIP, Actions 설정은 변경하지 않았다.

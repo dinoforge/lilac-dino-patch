@@ -6,8 +6,7 @@ const checks = {
   'patch-01': byId('patch01'),
   'patch-02': byId('patch02'),
   'patch-03': byId('patch03'),
-  'patch-04': byId('patch04'),
-  'patch-05': byId('patch05')
+  'patch-04': byId('patch04')
 };
 let hasTarget = false;
 let canApply = false;
@@ -66,8 +65,10 @@ function renderTarget(payload) {
   const latest = state.latest && state.latest !== 'not-applied' ? `최근 작업: ${state.latest}.` : '';
   const intro = state.mode === 'modified-after-apply'
     ? '적용 후 파일 변경이 감지되어 자동 덮어쓰기를 차단했습니다.'
-    : state.mode === 'applied' ? '패치 적용 상태를 백업 지문과 대조했습니다.' : '격리 사본을 확인했습니다. 새 사본은 Patch 03 ON(B 화면), Patch 04·05 OFF로 시작합니다.';
-  setMessage(intro, `${latest} Patch 03 OFF는 원본 A 화면을 유지합니다. 다섯 패치는 독립적으로 선택할 수 있습니다.`);
+    : state.legacyPatch05Migration === true
+      ? '기존 Patch 05 설정을 감지했습니다. Patch 03 설정은 유지되며, 적용을 눌러 Patch 03 통합 구성으로 이전하세요.'
+    : state.mode === 'applied' ? '패치 적용 상태를 백업 지문과 대조했습니다.' : '격리 사본을 확인했습니다. 새 사본은 Patch 03 ON(B 화면), Patch 04 OFF로 시작합니다.';
+  setMessage(intro, `${latest} Patch 03 ON은 통합 목록·공급원 선택·회차별 화질 확인을 함께 적용합니다. Patch 03 OFF는 이 기능들을 모두 비활성화합니다. 네 패치를 개별 선택할 수 있습니다.`);
 }
 
 function selectedSettings() {

@@ -20,7 +20,7 @@ const OFFICIAL_SOURCE_PROFILES = Object.freeze([
   Object.freeze({ profile: OFFICIAL_V0515_PROFILE, version: '0.5.15', commit: OFFICIAL_V0515_COMMIT }),
   Object.freeze({ profile: OFFICIAL_V0521_PROFILE, version: '0.5.21', commit: OFFICIAL_V0521_COMMIT })
 ]);
-const ALL_PATCHES = Object.freeze({ patches: { 'patch-01': true, 'patch-02': true, 'patch-03': true, 'patch-04': true, 'patch-05': true } });
+const ALL_PATCHES = Object.freeze({ patches: { 'patch-01': true, 'patch-02': true, 'patch-03': true, 'patch-04': true } });
 const SOURCE_CONTENT = Object.freeze(['package.json', 'package-lock.json', 'electron', 'src', 'build']);
 const PROFILE_FILES = Object.freeze(['package.json', 'src/index.html', 'electron/main.cjs', 'electron/preload.cjs']);
 
