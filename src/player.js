@@ -10,6 +10,122 @@ window.addEventListener('keydown', () => { usingKeyboard = true; }, true);
 window.addEventListener('pointerdown', () => { usingKeyboard = false; }, true);
 const autoSkipState = { enteredKey: null, enteredAt: 0, skippedKey: null };
 
+const PLAYER_STATS_UNKNOWN = '확인 불가';
+let playerStatsTimer = null, playerStatsFrameRequest = null;
+let playerStatsFrameWindow = { startedAt: 0, frames: 0, lastPresented: null };
+let playerStatsMeasuredFps = null, playerStatsLastFrameAt = 0;
+function playbackStatsEnabled() { return localStorage.getItem('playerPlaybackStats') === 'true'; }
+function playbackStatsValue(value, suffix = '') { return value == null || value === '' ? PLAYER_STATS_UNKNOWN : `${value}${suffix}`; }
+function playbackStatsDomain() {
+  try { return new URL(currentPlaybackContext.currentUrl).hostname || PLAYER_STATS_UNKNOWN; }
+  catch { return PLAYER_STATS_UNKNOWN; }
+}
+function playbackStatsBufferedAhead(video) {
+  try {
+    for (let index = video.buffered.length - 1; index >= 0; index--) {
+      const start = video.buffered.start(index), end = video.buffered.end(index);
+      if (video.currentTime >= start && video.currentTime <= end) return Math.max(0, end - video.currentTime);
+    }
+  } catch { /* buffered ranges are not exposed by every source */ }
+  return null;
+}
+function playbackStatsLevel() {
+  const levels = hlsPlayer?.levels || [], index = hlsPlayer?.manualLevel >= 0 ? hlsPlayer.manualLevel : hlsPlayer?.currentLevel;
+  return Number.isInteger(index) && index >= 0 ? levels[index] || null : null;
+}
+function playbackStatsText() {
+  const video = $('#video'), level = playbackStatsLevel(), duration = typeof playbackDuration === 'function' ? playbackDuration() : video.duration;
+  const dimensions = video.videoWidth > 0 && video.videoHeight > 0 ? `${video.videoWidth}×${video.videoHeight}` : null;
+  const measuredFps = !video.paused && playerStatsMeasuredFps != null && performance.now() - playerStatsLastFrameAt < 1600
+    ? playerStatsMeasuredFps.toFixed(1) : null;
+  let dropped = null;
+  try {
+    const quality = video.getVideoPlaybackQuality?.();
+    if (quality && Number.isFinite(quality.droppedVideoFrames)) dropped = String(quality.droppedVideoFrames);
+  } catch { /* browser may not expose playback quality */ }
+  const resolution = level?.width > 0 && level?.height > 0 ? `${level.width}×${level.height}` : dimensions;
+  const bitrate = Number(level?.averageBitrate || level?.bitrate);
+  const bitrateLabel = Number.isFinite(bitrate) && bitrate > 0 ? `${(bitrate / 1_000_000).toFixed(2)} Mbps` : null;
+  const codec = [level?.videoCodec, level?.audioCodec].filter(value => typeof value === 'string' && value.trim()).join(' / ') || null;
+  const provider = currentPlaybackContext.videoServer || currentPlaybackContext.episode?.provider || currentPlaybackContext.resolveKind || null;
+  const rate = Number.isFinite(video.playbackRate) ? `${video.playbackRate.toFixed(2)}x` : null;
+  const time = Number.isFinite(video.currentTime) ? formatTime(video.currentTime) : null;
+  const total = Number.isFinite(duration) && duration > 0 ? formatTime(duration) : null;
+  const ahead = playbackStatsBufferedAhead(video);
+  const buffer = ahead == null ? null : `${ahead.toFixed(1)}초`;
+  const qualityLabel = level ? `${level.width || '?'}×${level.height || '?'}${bitrateLabel ? ` · ${bitrateLabel}` : ''}` : null;
+  return [
+    `해상도 ${playbackStatsValue(resolution)}`,
+    `FPS ${playbackStatsValue(measuredFps)} · 드롭 ${playbackStatsValue(dropped)}`,
+    `코덱 ${playbackStatsValue(codec)}`,
+    `HLS 화질/비트레이트 ${playbackStatsValue(qualityLabel)}`,
+    `재생 ${playbackStatsValue(time)} / ${playbackStatsValue(total)} · 속도 ${playbackStatsValue(rate)}`,
+    `버퍼 ${playbackStatsValue(buffer)}`,
+    `공급원 ${playbackStatsValue(provider)} · 서버 ${playbackStatsDomain()}`
+  ].join('\n');
+}
+function updatePlaybackStats() {
+  const overlay = $('#playerStatsOverlay');
+  if (!overlay || !playbackStatsEnabled()) return;
+  overlay.textContent = playbackStatsText();
+}
+function watchPlaybackStatsFrames(_now, metadata) {
+  playerStatsFrameRequest = null;
+  if (!playbackStatsEnabled()) return;
+  const now = performance.now(), presented = Number(metadata?.presentedFrames);
+  if (!playerStatsFrameWindow.startedAt) {
+    playerStatsFrameWindow = { startedAt: now, frames: 1, lastPresented: Number.isFinite(presented) ? presented : null };
+  } else {
+    const delta = Number.isFinite(presented) && playerStatsFrameWindow.lastPresented != null
+      ? Math.max(0, presented - playerStatsFrameWindow.lastPresented) : 1;
+    playerStatsFrameWindow.frames += delta;
+    if (Number.isFinite(presented)) playerStatsFrameWindow.lastPresented = presented;
+    const elapsed = now - playerStatsFrameWindow.startedAt;
+    if (elapsed >= 1000) {
+      playerStatsMeasuredFps = playerStatsFrameWindow.frames * 1000 / elapsed;
+      playerStatsLastFrameAt = now;
+      playerStatsFrameWindow = { startedAt: now, frames: 0, lastPresented: Number.isFinite(presented) ? presented : null };
+      updatePlaybackStats();
+    }
+  }
+  if (playbackStatsEnabled() && typeof $('#video').requestVideoFrameCallback === 'function') {
+    playerStatsFrameRequest = $('#video').requestVideoFrameCallback(watchPlaybackStatsFrames);
+  }
+}
+function startPlaybackStatsFrameWatch() {
+  const video = $('#video');
+  if (!playbackStatsEnabled() || video.paused || typeof video.requestVideoFrameCallback !== 'function' || playerStatsFrameRequest != null) return;
+  playerStatsFrameWindow = { startedAt: 0, frames: 0, lastPresented: null };
+  playerStatsFrameRequest = video.requestVideoFrameCallback(watchPlaybackStatsFrames);
+}
+function setPlaybackStatsVisible(enabled) {
+  localStorage.setItem('playerPlaybackStats', String(Boolean(enabled)));
+  $('#playerStatsOverlay').classList.toggle('hidden', !enabled);
+  if (enabled) {
+    updatePlaybackStats();
+    if (!playerStatsTimer) playerStatsTimer = setInterval(updatePlaybackStats, 500);
+    startPlaybackStatsFrameWatch();
+  } else {
+    if (playerStatsTimer) clearInterval(playerStatsTimer);
+    playerStatsTimer = null;
+    if (playerStatsFrameRequest != null && typeof $('#video').cancelVideoFrameCallback === 'function') {
+      $('#video').cancelVideoFrameCallback(playerStatsFrameRequest);
+    }
+    playerStatsFrameRequest = null;
+  }
+}
+for (const eventName of ['loadedmetadata', 'timeupdate', 'progress', 'ratechange', 'playing', 'pause', 'waiting', 'seeked', 'emptied']) {
+  $('#video').addEventListener(eventName, () => {
+    if (eventName === 'playing') startPlaybackStatsFrameWatch();
+    if (eventName === 'pause' && playerStatsFrameRequest != null && typeof $('#video').cancelVideoFrameCallback === 'function') {
+      $('#video').cancelVideoFrameCallback(playerStatsFrameRequest);
+      playerStatsFrameRequest = null;
+    }
+    updatePlaybackStats();
+  });
+}
+setPlaybackStatsVisible(playbackStatsEnabled());
+
 const PLAYER_ASPECTS = { original: 0, '16:9': 16 / 9, '21:9': 21 / 9, '4:3': 4 / 3, fill: 0 };
 function playerAspect() {
   const value = localStorage.getItem('playerAspect') || 'original';
@@ -73,6 +189,7 @@ function syncPlayerSettingsUI() {
   $('#psFontName').textContent = fontFile ? fontFile.split(/[\\/]/).pop() : '기본 글꼴 사용 중';
   const speed = $('#video').playbackRate || 1;
   $('#psSpeedLabel').textContent = `${speed.toFixed(2)}x`;
+  $('#psPlaybackStats').checked = playbackStatsEnabled();
   $$('#psSpeeds button').forEach(button => button.classList.toggle('selected', Number(button.dataset.speed) === speed));
   const seconds = Number(localStorage.getItem('seekSeconds') || 10);
   $('#psSeekNote').textContent = `뒤로/앞으로 버튼 이동: ${seconds}초`;
@@ -744,6 +861,7 @@ $('#playerSettingsButton').onclick = () => openPlayerSettings(!playerSettingsOpe
 $('#closePlayerSettings').onclick = () => { openPlayerSettings(false); $('#playerSettingsButton').focus(); };
 $('#psSkipButton').onchange = event => { localStorage.setItem('playerSkipButton', String(event.target.checked)); updateSkipState($('#video')); };
 $('#psAutoSkip').onchange = event => localStorage.setItem('playerAutoSkip', String(event.target.checked));
+$('#psPlaybackStats').onchange = event => setPlaybackStatsVisible(event.target.checked);
 $$('#psSubtitleSources button').forEach(button => button.onclick = () => selectSubtitleSource(button.dataset.source));
 $('#resetSeriesSubtitleSource').onclick = () => {
   if (!resetSeriesSubtitleSource()) return;

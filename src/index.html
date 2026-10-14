@@ -109,6 +109,7 @@
         <div id="immersivePlayer" class="immersive-player controls-visible">
           <div id="videoStage" class="video-stage"><video id="video" playsinline preload="auto"></video></div>
           <div id="playerSpeedBoost" class="player-speed-boost hidden" role="status">2배속</div>
+          <section id="playerStatsOverlay" class="player-stats-overlay hidden" aria-label="실시간 재생 정보" aria-live="off"></section>
           <div id="playerEmpty" class="player-loading"><span class="player-spinner"></span><p>영상을 준비하고 있어요</p><div id="playerDiagnosticActions" class="player-diagnostics hidden"><button id="copyPlayerDiagnostics" type="button" class="sheet-button">오류 정보 복사</button><small>앱 버전·운영체제·공급원·오류 단계·서버 도메인이 복사돼요. 작품명·전체 주소·쿠키·자막 내용은 들어가지 않으며, 복사한 정보는 직접 확인한 뒤 원하는 곳에 붙여넣으세요.</small><span id="playerDiagnosticStatus" role="status" aria-live="polite"></span></div></div>
           <div class="player-shade player-shade-top"></div><div class="player-shade player-shade-bottom"></div>
           <header class="player-top">
@@ -150,6 +151,7 @@
               <div class="ps-pane" data-ps-pane="play" role="tabpanel">
                 <section id="psServers" class="ps-section hidden"><p class="ps-group">영상 서버</p><small class="ps-note">영상이 안 나오거나 자꾸 끊기면 다른 서버를 골라 보세요. 보통은 자동이 알맞게 고릅니다.</small><small id="psServerNote" class="ps-note ps-playing"></small><div id="psServerList" class="ps-server-list"></div></section><section id="psQuality" class="ps-section hidden"><p class="ps-group">화질</p><small class="ps-note">숫자가 클수록 선명하지만, 인터넷이 느리면 끊길 수 있어요.</small><div id="psQualityList" class="ps-chips"></div></section>
                 <div class="ps-row ps-speed"><span><b>재생 속도</b><small id="psSpeedLabel">1.00x</small></span><div id="psSpeeds" class="ps-chips"><button type="button" data-speed="0.75">0.75x</button><button type="button" data-speed="1">1.00x</button><button type="button" data-speed="1.25">1.25x</button><button type="button" data-speed="1.5">1.50x</button><button type="button" data-speed="2">2.00x</button><button type="button" data-speed="3">3.00x</button><button type="button" data-speed="4">4.00x</button></div></div>
+                <section class="ps-section"><p class="ps-group">재생 정보</p><label class="ps-switch"><span><b>실시간 재생 정보 오버레이</b><small>확인할 수 있는 영상·버퍼 정보를 표시합니다</small></span><input id="psPlaybackStats" type="checkbox"></label></section>
                 <small id="psSeekNote" class="ps-note">뒤로/앞으로 버튼 이동: 10초</small>
                 <section class="ps-section"><p class="ps-group">화면 비율</p><div id="psAspects" class="ps-chips"><button type="button" data-aspect="original">원본</button><button type="button" data-aspect="16:9">16:9</button><button type="button" data-aspect="21:9">21:9</button><button type="button" data-aspect="4:3">4:3</button><button type="button" data-aspect="fill">화면 채우기</button></div><small class="ps-note">선택한 비율로 영상을 늘립니다. 화면 채우기는 창이나 모니터에 맞춰 여백 없이 늘립니다.</small></section>
                 <p class="ps-group">건너뛰기</p>

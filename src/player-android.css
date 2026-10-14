@@ -128,6 +128,19 @@
 .player-speed-boost { position: absolute; top: 90px; left: 50%; transform: translateX(-50%); z-index: 3; padding: 8px 18px; border-radius: 20px; background: #000b; color: #fff; font-weight: 700; pointer-events: none; }
 .player-speed-boost.hidden { display: none; }
 
+/* Read-only playback diagnostics. Keep the panel in the upper corner, away from subtitle cues. */
+.player-stats-overlay {
+  position: absolute; z-index: 3; top: 84px; right: 20px; width: min(320px, calc(100% - 40px));
+  padding: 8px 10px; border: 1px solid #ffffff20; border-radius: 9px;
+  background: #000000a8; color: #ffffffd9; font: 11px/1.45 ui-monospace, Consolas, monospace;
+  white-space: pre-line; pointer-events: none; user-select: none; text-shadow: 0 1px 2px #000;
+}
+.player-stats-overlay.hidden { display: none; }
+.immersive-player.windowed .player-stats-overlay { top: 78px; right: 164px; }
+@media (max-width: 700px) {
+  .player-stats-overlay { top: 70px; right: 10px; width: min(260px, calc(100% - 20px)); font-size: 10px; }
+}
+
 /* Picture-in-picture source: composed frames with subtitles; it only has to exist in the page. */
 .pip-source { position: fixed; left: 0; top: 0; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
 #miniPlayer.active { color: var(--lilac, #c8a2c8); }
