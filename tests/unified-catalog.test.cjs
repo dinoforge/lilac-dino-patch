@@ -5,13 +5,14 @@ const assert = require('node:assert/strict');
 const Catalog = require('../src/unified-catalog.js');
 const IntegratedSearch = require('../src/integrated-search.js');
 
-test('episode sources merge only on exact non-empty title and number and retain server variants', () => {
+test('episode sources merge by the same resolved series and episode number despite title differences', () => {
+  const seriesKey = 'anilist:12345';
   const groups = Catalog.groupEpisodes([
-    { provider: 'reanime', episode: { name: '1화', number: 1 }, anime: { title: '작품' }, seriesEpisodes: [] },
-    { provider: 'miruro', episode: { name: '1화', number: 1 }, anime: { title: '작품' }, seriesEpisodes: [] },
-    { provider: 'linkkf', serverName: '서버 A', episode: { name: '1화', number: 1, token: 'one-a' }, anime: { title: '작품' }, seriesEpisodes: [] },
-    { provider: 'linkkf', serverName: '서버 B', episode: { name: '1화', number: 1, token: 'one-b' }, anime: { title: '작품' }, seriesEpisodes: [] },
-    { provider: 'ohli24', episode: { name: 'Episode 1', number: 1 }, anime: { title: '작품' }, seriesEpisodes: [] }
+    { provider: 'reanime', seriesKey, episode: { name: '1화', number: 1 }, anime: { title: '작품' }, seriesEpisodes: [] },
+    { provider: 'miruro', seriesKey, episode: { name: 'Episode 1', number: 1 }, anime: { title: '작품' }, seriesEpisodes: [] },
+    { provider: 'linkkf', seriesKey, serverName: '서버 A', episode: { name: '1화', number: 1, token: 'one-a' }, anime: { title: '작품' }, seriesEpisodes: [] },
+    { provider: 'linkkf', seriesKey, serverName: '서버 B', episode: { name: 'Episode 1', number: 1, token: 'one-b' }, anime: { title: '작품' }, seriesEpisodes: [] },
+    { provider: 'ohli24', seriesKey, episode: { name: 'Episode 1', number: 1 }, anime: { title: '작품' }, seriesEpisodes: [] }
   ]);
   assert.equal(groups.length, 1);
   assert.equal(groups[0].choices.length, 5);
