@@ -915,7 +915,7 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 ## 2026-10-14 Patch 01·02·03 적용/복구 매트릭스 및 재생 정보 오버레이
 
 - 기준 `d0fbb41629873162e33db39fe965d25f4f4055b0`에서 `codex/playback-stats-patch-matrix-20261014` 브랜치로 진행했다. 공식 LilacAnime v0.5.15 고정 커밋 `16c9a3d1631061a72831e0657434003940daf531`의 새 격리 target에서 8개 ON/OFF 조합을 각각 적용하고 Electron 앱을 실제 실행했다. 각 조합 후 manager restore가 `restorationVerified=true`를 반환했고, 최종 원본 복사 콘텐츠 fingerprint는 `64691eed75885c41bed0bdd5dc297255a345e146b65b454b3dd6bc4dd09ff8bb`였다. OFF/OFF/OFF는 원본 상태, 각 패치 단독과 조합에서 해당 script/IPC가 선택적으로 로드되는 것을 확인했다.
-- P01 ON/OFF/OFF 앱에서 2025년 1분기 선택 후 실제 분기 카탈로그·7일 탭·방영 일정 상태를 확인했고, 작품 상세의 28개 회차 행 및 Re:Anime/Miruro 공급원 선택 UI를 확인했다. 해당 요청에서 Miruro 분기 API는 HTTP 429였고 Linkkf는 확인 실패였다. P01 선택한 회차의 영상 재생은 검증하지 않았다.
+- P01 ON/OFF/OFF 앱에서 2025년 1분기 선택 후 실제 분기 카탈로그·7일 탭·방영 일정 상태를 확인했고, 작품 상세의 회차 목록(프로브에서 28개 회차 액션 컨트롤) 및 Re:Anime/Miruro 공급원 선택 UI를 확인했다. 해당 요청에서 Miruro 분기 API는 HTTP 429였고 Linkkf는 확인 실패였다. P01 선택한 회차의 영상 재생은 검증하지 않았다.
 - P02 OFF/ON/OFF 앱에서 자막 번역 설정의 수동/전체 파일 자동 번역 UI와 관련 preload IPC 함수들이 표시됐고, 대화 자동 삭제 버튼은 비활성화였다. ChatGPT 로그인·창 열기·요청 전송·전체 SRT 준비/회수는 하지 않았다. Patch 02 전체 자동 번역은 실계정 경로 기준 BLOCKED이며, 번역 완료 적용은 NOT TESTED다.
 - P03 검색·상세의 실제 공급원 호출에서 Re:Anime/Miruro/Animenosub 결과는 표시됐고 Linkkf는 실패해도 나머지 공급원은 남았다. 세부 검사에서 RE:Anime 12화와 Miruro 12화가 있는 작품의 총 24개 회차 행을 확인했으나 동일 회차 번호에 제목이 다르면 하나로 합쳐지지 않아 회차별 공급원 전환이 분리됐다. 이 P03 동작 결함은 이번 범위에서 수정하지 않았다. 애니24는 결과 0건 또는 확인 실패로 남아 있다.
 - 기존 앱에는 Stats for Nerds 오버레이가 없고 별도의 오류 정보 복사 기능만 있었다. `src/index.html`, `src/player.js`, `src/player-android.css`에 읽기 전용 오버레이를 추가했다. 플레이어 설정에서 표시/숨김을 전환하며, 해상도·측정 FPS/드롭 프레임·HLS 품질/비트레이트·재생 위치·속도·버퍼·공급원·서버 도메인을 표시하고 읽을 수 없는 값은 `확인 불가`로 표현한다. 임시 프로필 Electron 앱에서 표시/숨김과 확인 불가 값 표기를 확인했지만 실제 영상에서 값이 갱신되는지는 검증하지 못했다.
