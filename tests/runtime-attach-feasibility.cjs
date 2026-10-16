@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { findUnexpectedWorkingTreePaths } = require('./runtime-attach-working-tree.cjs');
+const { createIsolatedEnvironment } = require('./runtime-attach-isolated-env.cjs');
 
 const REPO = path.resolve(__dirname, '..');
 const BASE_BRANCH = 'codex/runtime-companion-prototype';
@@ -109,21 +110,40 @@ function cleanupOwnedTempTree(tempRoot, sourceRoot, osTempReal) {
 function waitForExit(child, timeoutMs, onTimeout) {
   return new Promise((resolve, reject) => {
     let timedOut = false;
+    let settled = false;
+    let escalationTimer;
+    let finalTimer;
+    const finish = (code, signal, stillRunning = false) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(escalationTimer);
+      clearTimeout(finalTimer);
+      resolve({ code, signal, timedOut, stillRunning });
+    };
     const timer = setTimeout(() => {
       if (child.exitCode !== null || child.signalCode !== null) return;
       timedOut = true;
       let terminationRequested = false;
       try { terminationRequested = child.kill(); } catch {}
-      onTimeout({ terminationRequested });
+      onTimeout({ pid: child.pid || null, terminationRequested, target: 'harness-spawned-electron-child-only' });
+      escalationTimer = setTimeout(() => {
+        if (child.exitCode !== null || child.signalCode !== null) return;
+        let secondTerminationRequested = false;
+        try { secondTerminationRequested = child.kill(); } catch {}
+        onTimeout({ pid: child.pid || null, terminationRequested: secondTerminationRequested, target: 'harness-spawned-electron-child-only', retry: true });
+        finalTimer = setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) finish(null, null, true);
+        }, 3000);
+      }, 5000);
     }, timeoutMs);
     child.once('error', error => {
       clearTimeout(timer);
+      clearTimeout(escalationTimer);
+      clearTimeout(finalTimer);
       reject(error);
     });
-    child.once('exit', (code, signal) => {
-      clearTimeout(timer);
-      resolve({ code, signal, timedOut });
-    });
+    child.once('exit', (code, signal) => finish(code, signal));
   });
 }
 
@@ -207,8 +227,12 @@ async function run() {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), TEMP_PREFIX));
   const sourceRoot = path.join(tempRoot, 'source');
   const profileRoot = path.join(tempRoot, 'profile');
+  const runtimeTemp = path.join(tempRoot, 'runtime-temp');
   fs.mkdirSync(sourceRoot, { recursive: true });
   fs.mkdirSync(profileRoot, { recursive: true });
+  fs.mkdirSync(path.join(profileRoot, 'appdata', 'roaming'), { recursive: true });
+  fs.mkdirSync(path.join(profileRoot, 'appdata', 'local'), { recursive: true });
+  fs.mkdirSync(runtimeTemp, { recursive: true });
   const tempReal = fs.realpathSync(tempRoot);
   const osTempReal = fs.realpathSync(os.tmpdir());
   if (path.dirname(tempReal).toLowerCase() !== osTempReal.toLowerCase() || !path.basename(tempReal).startsWith(TEMP_PREFIX)) {
@@ -260,22 +284,28 @@ async function run() {
       testHookOutsideSourceArchive: true
     });
 
-    const environment = { ...process.env };
-    delete environment.NODE_OPTIONS;
-    delete environment.ELECTRON_RUN_AS_NODE;
-    delete environment.ELECTRON_NO_ATTACH_CONSOLE;
-    environment.NODE_PATH = path.join(REPO, 'node_modules');
-    environment.LILAC_RUNTIME_ATTACH_TEMP = tempRoot;
-    environment.LILAC_RUNTIME_ATTACH_PROFILE = profileRoot;
-    environment.LILAC_RUNTIME_ATTACH_SOURCE = sourceRoot;
-    environment.LILAC_RUNTIME_ATTACH_REPO = REPO;
-    environment.LILAC_RUNTIME_ATTACH_NODE = process.execPath;
-    environment.LILAC_RUNTIME_ATTACH_HOOK = path.join(__dirname, 'runtime-attach-fixture', 'host-hook.cjs');
-    environment.LILAC_RUNTIME_ATTACH_AGENT = path.join(__dirname, 'runtime-attach-fixture', 'agent.cjs');
-    environment.LILAC_RUNTIME_ATTACH_CATALOG = path.join(REPO, 'companion', 'core', 'catalog.cjs');
-    environment.LILAC_RUNTIME_ATTACH_LOG = logPath;
-    environment.LILAC_RUNTIME_ATTACH_SCREENSHOT = screenshotPath;
-    environment.LILAC_RUNTIME_ATTACH_SCREENSHOT_RELATIVE = path.relative(REPO, screenshotPath).split(path.sep).join('/');
+    const environment = createIsolatedEnvironment({
+      electronExecutable: electronExe,
+      nodeExecutable: process.execPath,
+      tempRoot,
+      profileRoot,
+      sourceRoot,
+      repoRoot: REPO,
+      hookPath: path.join(__dirname, 'runtime-attach-fixture', 'host-hook.cjs'),
+      agentPath: path.join(__dirname, 'runtime-attach-fixture', 'agent.cjs'),
+      catalogPath: path.join(REPO, 'companion', 'core', 'catalog.cjs'),
+      logPath,
+      screenshotPath,
+      screenshotRelative: path.relative(REPO, screenshotPath).split(path.sep).join('/')
+    });
+    appendLog(logPath, 'child-environment-isolated', {
+      parentEnvironmentCopied: false,
+      allowlistedKeys: Object.keys(environment).sort(),
+      startupInjectionVariablesPresent: false,
+      apiKeysAndUnrelatedSecretsInherited: false,
+      appDataAndTemporaryPathsConfinedToTestRoot: true,
+      runtimeTempPath: runtimeTemp
+    });
 
     electronChild = spawn(electronExe, [sourceRoot], {
       cwd: sourceRoot,
@@ -283,6 +313,7 @@ async function run() {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
     });
+    appendLog(logPath, 'isolated-electron-child-started', { pid: electronChild.pid || null, executable: electronExe, temporaryAppOnly: true });
     let recentOutput = '';
     electronChild.stdout.setEncoding('utf8');
     electronChild.stderr.setEncoding('utf8');
@@ -290,9 +321,13 @@ async function run() {
     electronChild.stderr.on('data', chunk => { recentOutput = (recentOutput + chunk).slice(-5000); });
     result = await waitForExit(electronChild, 120000, details => appendLog(logPath, 'electron-test-timeout', {
       temporaryAppOnly: true,
-      terminationRequested: details.terminationRequested
+      ...details
     }));
-    exited = true;
+    exited = !result.stillRunning;
+    if (result.stillRunning) {
+      appendLog(logPath, 'electron-process-still-running', { pid: electronChild.pid || null, temporarySourceRetained: true });
+      throw new Error('The isolated Electron process did not exit after bounded termination requests; its temporary tree was retained.');
+    }
     const executionLog = fs.readFileSync(logPath, 'utf8').split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
     const probeResult = executionLog.findLast(entry => entry.event === 'result');
     if (result.timedOut || result.code !== 0 || !probeResult || probeResult.status !== 'passed') {
@@ -339,7 +374,12 @@ async function run() {
     console.log(JSON.stringify({ passed: true, log: path.relative(REPO, logPath), screenshot: path.relative(REPO, screenshotPath), cleanupComplete }));
   } catch (error) {
     if (electronChild && !exited && electronChild.pid && electronChild.exitCode === null && electronChild.signalCode === null) {
-      appendLog(logPath, 'cleanup-deferred', { reason: 'Electron process has not exited; no process termination was attempted.' });
+      appendLog(logPath, 'cleanup-deferred', {
+        reason: 'Electron process remains active after bounded termination requests; temporary files are retained to avoid racing a live process.',
+        pid: electronChild.pid,
+        terminationAttemptsMade: Boolean(result && result.timedOut),
+        target: 'harness-spawned-electron-child-only'
+      });
     } else if (fs.existsSync(tempRoot)) {
       try {
         const cleanup = cleanupOwnedTempTree(tempRoot, sourceRoot, osTempReal);
