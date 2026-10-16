@@ -2,11 +2,9 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const childProcess = require('node:child_process');
+const { spawn } = require('node:child_process');
 const readline = require('node:readline');
 const { pathToFileURL } = require('node:url');
-const { createFixtureAgentSpawnAllowlist, installNetworkGuard } = require('./network-guard.cjs');
-const { stopOwnedChild } = require('./owned-child.cjs');
 
 let appRef;
 let mainWindow;
@@ -16,7 +14,6 @@ let runFinished = false;
 let runFailed = false;
 let browserBlockedRequests = 0;
 let mainBlockedRequests = 0;
-let allowFixtureAgentSpawn;
 
 function log(event, details = {}) {
   const target = process.env.LILAC_RUNTIME_ATTACH_LOG;
@@ -32,30 +29,17 @@ function failClosed(api) {
   return error;
 }
 
-function disableMainProcessNetwork(electronNet) {
-  allowFixtureAgentSpawn = createFixtureAgentSpawnAllowlist({
-    nodeExecutable: process.env.LILAC_RUNTIME_ATTACH_NODE,
-    agentScript: process.env.LILAC_RUNTIME_ATTACH_AGENT,
-    workingDirectory: process.env.LILAC_RUNTIME_ATTACH_REPO,
-    environment: process.env
-  });
-  return installNetworkGuard({
-    globalObject: globalThis,
-    electronNet,
-    modules: {
-      http: require('node:http'),
-      https: require('node:https'),
-      net: require('node:net'),
-      tls: require('node:tls'),
-      dgram: require('node:dgram'),
-      dns: require('node:dns'),
-      dnsPromises: require('node:dns/promises')
-    },
-    childProcess,
-    allowFixtureSpawn: allowFixtureAgentSpawn,
-    onBlocked: failClosed,
-    onAllowedSpawn: details => log('allowed-fixture-agent-spawn', details)
-  });
+function disableMainProcessNetwork(net) {
+  const rejectFetch = api => (...args) => Promise.reject(failClosed(api));
+  globalThis.fetch = rejectFetch('global.fetch');
+  if (typeof net.fetch === 'function') net.fetch = rejectFetch('electron.net.fetch');
+  if (typeof net.request === 'function') net.request = (...args) => { throw failClosed('electron.net.request'); };
+
+  for (const moduleName of ['node:http', 'node:https']) {
+    const client = require(moduleName);
+    if (typeof client.request === 'function') client.request = (...args) => { throw failClosed(moduleName + '.request'); };
+    if (typeof client.get === 'function') client.get = (...args) => { throw failClosed(moduleName + '.get'); };
+  }
 }
 
 function configure(options) {
@@ -88,7 +72,7 @@ function configure(options) {
   app.commandLine.appendSwitch('disable-sync');
   app.commandLine.appendSwitch('disable-component-update');
   app.commandLine.appendSwitch('host-resolver-rules', 'MAP * ~NOTFOUND');
-  const networkGuard = disableMainProcessNetwork(net);
+  disableMainProcessNetwork(net);
 
   app.whenReady().then(() => {
     const guard = session.defaultSession.webRequest;
@@ -108,14 +92,10 @@ function configure(options) {
     log('network-guard-ready', {
       browserSchemesBlocked: ['http:', 'https:', 'ws:', 'wss:', 'ftp:'],
       mainFetchAndElectronNetBlocked: true,
-      nodeNetworkApisBlocked: networkGuard.blockedNodeApis,
-      fixtureAgentSpawnAllowlisted: networkGuard.fixtureSpawnAllowlisted,
       chromiumHostResolutionBlocked: true,
-      operatingSystemFirewallIsolation: false,
       debuggerTcpPort: false
     });
   }).catch(error => failTest(error));
-  return networkGuard;
 }
 
 function evaluate(expression) {
@@ -135,7 +115,7 @@ function startFixtureAgent() {
   const node = process.env.LILAC_RUNTIME_ATTACH_NODE;
   const script = process.env.LILAC_RUNTIME_ATTACH_AGENT;
   if (!node || !script || !fs.existsSync(script)) throw new Error('Companion fixture agent is unavailable.');
-  fixtureAgent = childProcess.spawn(node, [script], {
+  fixtureAgent = spawn(node, [script], {
     cwd: process.env.LILAC_RUNTIME_ATTACH_REPO,
     env: process.env,
     windowsHide: true,
@@ -143,7 +123,6 @@ function startFixtureAgent() {
   });
   const output = readline.createInterface({ input: fixtureAgent.stdout, crlfDelay: Infinity });
   const errors = readline.createInterface({ input: fixtureAgent.stderr, crlfDelay: Infinity });
-  fixtureAgent.stdin.on('error', error => log('fixture-agent-stdin-error', { message: String(error && error.message || error).slice(0, 200) }));
   errors.on('line', line => log('fixture-agent-stderr', { line: String(line).slice(0, 300) }));
   output.on('line', line => {
     let message;
@@ -163,7 +142,10 @@ function startFixtureAgent() {
         reject(new Error(fixtureAgent.fixtureError || 'Timed out waiting for Companion fixture data.'));
       }
     }, 25);
-    fixtureAgent.once('exit', (code, signal) => log('fixture-agent-exit-observed', { pid: fixtureAgent.pid || null, code, signal }));
+    fixtureAgent.once('exit', (code, signal) => {
+      fixtureAgent.exitCode = code;
+      fixtureAgent.exitSignal = signal;
+    });
     fixtureAgent.once('error', error => {
       clearInterval(poll);
       reject(error);
@@ -171,13 +153,17 @@ function startFixtureAgent() {
   });
 }
 
-async function requestAgentShutdown(reason = 'normal-completion') {
-  return stopOwnedChild(fixtureAgent, {
-    reason,
-    shutdownMessage: JSON.stringify({ type: 'shutdown' }) + '\n',
-    graceMs: 3000,
-    terminationWaitMs: 3000,
-    onEvent: (event, details) => log(event, details)
+function requestAgentShutdown() {
+  if (!fixtureAgent || fixtureAgent.exitCode !== null) return Promise.resolve({ exitCode: fixtureAgent && fixtureAgent.exitCode, graceful: true });
+  fixtureAgent.stdin.write(JSON.stringify({ type: 'shutdown' }) + '\n');
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Companion fixture agent did not exit gracefully.')), 10000);
+    fixtureAgent.once('exit', (code, signal) => {
+      clearTimeout(timeout);
+      fixtureAgent.exitCode = code;
+      fixtureAgent.exitSignal = signal;
+      resolve({ exitCode: code, signal, graceful: code === 0 });
+    });
   });
 }
 
@@ -343,25 +329,26 @@ async function runProbe(win) {
   appRef.quit();
 }
 
-async function failTest(error) {
+function failTest(error) {
   if (runFailed || runFinished) return;
   runFailed = true;
   clearTimeout(watchdog);
   log('result', { status: 'failed', message: String(error && error.message || error).slice(0, 500) });
-  const stopped = await requestAgentShutdown('probe-failure');
-  log('fixture-agent-failure-cleanup', { ...stopped });
+  if (fixtureAgent && fixtureAgent.exitCode === null && fixtureAgent.stdin.writable) {
+    try { fixtureAgent.stdin.write(JSON.stringify({ type: 'shutdown' }) + '\n'); } catch {}
+  }
   try {
     if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.debugger.isAttached()) mainWindow.webContents.debugger.detach();
   } catch {}
   try { appRef.quit(); } catch {}
 }
 
-const watchdog = setTimeout(() => { void failTest(new Error('Runtime attach probe timed out.')); }, 90000);
+const watchdog = setTimeout(() => failTest(new Error('Runtime attach probe timed out.')), 90000);
 watchdog.unref();
 
 function attachWindow(win) {
   win.webContents.once('did-finish-load', () => {
-    runProbe(win).catch(error => { void failTest(error); });
+    runProbe(win).catch(error => failTest(error));
   });
 }
 
