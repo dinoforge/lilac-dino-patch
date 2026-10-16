@@ -91,7 +91,7 @@ upstream에 제안할 versioned runtime extension API 요청 초안을 작성했
 - 네트워크 guard는 `global.fetch`, Electron `net`, Node `http`/`https`/`net`/`tls`/`dgram`/`dns`/`dns/promises`와 자식 프로세스 실행 API를 차단한다. 단 한 번의 허용은 검증된 테스트 Node 실행 파일로 고정 fixture 스크립트를 격리된 작업 디렉터리·동일 허용목록 환경·파이프 stdio로 띄우는 경우뿐이다. 9개 main-process 요청은 `global.fetch`에서 차단됐고 Chromium 외부 요청은 0건이었다.
 - 정상 경로에서 fixture 프로세스는 종료 메시지를 받고 종료 코드 0으로 끝났다. 이어 실제 원본 화면에서 요일표 DOM을 제거하고 원본 DOM 노드가 유지된 것을 확인한 다음 CDP를 분리했다. 원본 검색·설정·상세 UI는 그 뒤에도 작동했다.
 - 실패 경로는 별도 단위 테스트로 검증한다. 종료 메시지 후 제한 시간 동안 기다리고, 필요하면 harness가 직접 생성한 정확한 자식 프로세스만 종료 요청한다. Electron 자식이 종료되지 않으면 살아 있는 프로세스와 경쟁하지 않도록 임시 사본을 보존하고 실패를 기록한다. 기존 앱이나 프로세스 이름을 찾아 종료하지 않는다.
-- 실증 로그: [runtime-attach-evidence-20261016T150504Z.jsonl](runtime-attach-evidence-20261016T150504Z.jsonl). 실제 원본 renderer 캡처: [runtime-attach-v0.5.14-20261016T150504Z.png](assets/runtime-attach-v0.5.14-20261016T150504Z.png).
+- 실증 로그: [runtime-attach-evidence-20261016T150725Z.jsonl](runtime-attach-evidence-20261016T150725Z.jsonl). 실제 원본 renderer 캡처: [runtime-attach-v0.5.14-20261016T150725Z.png](assets/runtime-attach-v0.5.14-20261016T150725Z.png).
 - 이 실행은 v0.5.14 임시 사본의 `electron/main.cjs` 한 파일만 시험용으로 바꾸었다. 사본의 `src/index.html`·preload 해시는 유지됐고, `app.asar`는 만들지 않았다. 격리 프로필에 생성된 47개 파일의 해시를 기록한 후 임시 트리와 의존성 junction을 제거했으며 `cleanupComplete: true`다. `D:\LilacAnime`, 기존 프로필, 기존 업데이트 캐시, 기존 설치 프로세스는 접근하지 않았다.
-- `node tests/runtime-attach-feasibility.cjs --run` 통과. 전체 `npm test` 307/307 및 격리 환경·네트워크 API·자식 종료 정책의 단위 테스트 7/7 통과. 로그는 UTC `2026-10-16T15:05:04Z` 실행을 기록한다.
+- `node tests/runtime-attach-feasibility.cjs --run` 통과. 전체 `npm test` 307/307 및 격리 환경·네트워크 API·자식 종료 정책의 단위 테스트 7/7 통과. 로그는 UTC `2026-10-16T15:07:26Z` 실행을 기록하며 로컬 사용자명·임시 경로·프로세스 ID는 저장하지 않는다.
 - 한계: 이는 API 후킹을 적용한 harness 기반 시험이지 OS 방화벽 차단이나 배포된 Companion이 수정되지 않은 설치본에 연결되는 증명이 아니다. 실제 공급원, 재생 제어, 원본 사용자 프로필, OS 수준 네트워크 격리는 시험하지 않았다.

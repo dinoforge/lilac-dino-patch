@@ -11,7 +11,7 @@
 - fixture 호스트에서 `fetch`, Electron `net`, Node HTTP(S)/TCP/TLS/UDP/DNS와 임의 child-process 실행을 차단한다. 한 번의 정확한 allowlist만 합성 데이터용 fixture Node 자식 실행을 허용한다. 이건 프로세스 내부 API guard이며 OS 방화벽/AppContainer 수준 네트워크 격리는 아니다.
 - fixture 자식의 정상 종료를 기다리고 실패 때 제한 시간 후 harness 소유의 정확한 자식만 종료 요청한다. 종료가 확인되지 않으면 임시 디렉터리를 보존하도록 했다. 관련 환경·네트워크·정리 테스트를 추가했다.
 - `npm test` 307/307 통과. 커밋 `bc36bb8`로 지정 브랜치에 저장했다. 격리 v0.5.14 사본에서 `node tests/runtime-attach-feasibility.cjs --run`도 실제 재실행 통과: 화면 UI·합성 데이터 연결, 9개 `global.fetch` 차단, renderer 외부 요청 0건, fixture 자식 종료 코드 0, UI 제거 뒤 CDP 분리, 원본 UI 생존, 임시 프로필 47개 파일 해시 기록, 임시 트리·junction 정리 완료.
-- 최신 증거: `docs/verification/runtime-attach-evidence-20261016T150504Z.jsonl`과 `docs/verification/assets/runtime-attach-v0.5.14-20261016T150504Z.png`. 검사·업데이트 제약 및 안전 경계는 `docs/verification/RUNTIME_ATTACH_FEASIBILITY.md`에 반영했다.
+- 최신 증거: `docs/verification/runtime-attach-evidence-20261016T150725Z.jsonl`과 `docs/verification/assets/runtime-attach-v0.5.14-20261016T150725Z.png`. 검사·업데이트 제약 및 안전 경계는 `docs/verification/RUNTIME_ATTACH_FEASIBILITY.md`에 반영했다. 공개될 수 있는 기록에서 로컬 사용자명·임시 절대 경로·프로세스 ID는 제외했다.
 - upstream 지원 API 요청 초안 `docs/verification/UPSTREAM_RUNTIME_EXTENSION_API_REQUEST_DRAFT.md`를 작성했다. 아직 제출하거나 upstream에 연락하지 않았다. OS 방화벽 변경, 설치본/실사용 프로필 테스트, playback control 검증은 이번 범위에서 실행하지 않았다.
 
 ## 2026-10-11 v0.5.14 런타임 Companion 연결 실증
