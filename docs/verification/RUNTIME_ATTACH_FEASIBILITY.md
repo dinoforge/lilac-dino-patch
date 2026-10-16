@@ -25,7 +25,9 @@ node tests/runtime-attach-feasibility.cjs --run
 
 실행기는 현재 브랜치와 기준 커밋, 원본 패키지 버전, 기존 로컬 Electron 런타임을 확인한다. 공식 소스를 시스템 임시 폴더에 풀고, 고유 앱 ID와 `userData`, `sessionData`, cache, 로그, crash dump 경로를 그 폴더 아래에만 지정했다. 의존성은 기존 프로젝트 `node_modules` 접합점을 사용했으며 설치나 빌드는 하지 않았다.
 
-네트워크 시험은 격리 사본 안에서 막았다. main-process `fetch`·Electron `net`·Node HTTP 요청은 거부했고, Chromium의 HTTP(S)/WebSocket/FTP 요청도 세션 단계에서 취소하도록 설정했다. DNS 조회 차단 스위치도 켰다. 기록상 main-process 요청 9건은 차단됐고 렌더러의 외부 요청은 0건이었다. 디버거에 TCP 포트를 할당하거나 공개하지 않았다.
+네트워크 시험은 격리 사본 안에서 막았다. main-process `fetch`·Electron `net`·Node HTTP(S) 외에도 Node TCP/TLS/UDP/DNS API와 임의 child process 실행을 차단하고, 정확한 Node 실행 파일·fixture 스크립트·작업 디렉터리·환경·stdio 조합의 Companion 합성 데이터 프로세스 한 번만 허용한다. Chromium HTTP(S)/WebSocket/FTP 요청도 세션 단계에서 취소하고 DNS 차단 스위치를 켰다. 최신 재실행의 main-process `fetch` 9건은 차단됐고 렌더러 외부 요청은 0건이었다. 디버거에 TCP 포트를 할당하거나 공개하지 않았다.
+
+이 차단은 테스트 프로세스 내부 API 경계다. Windows 방화벽, AppContainer, VM 같은 OS 수준 네트워크 격리는 설정하지 않았으며, Node 모듈 패치만으로 네이티브 모듈이나 직접 시스템 호출까지 차단했다고 주장하지 않는다. 따라서 로그의 `operatingSystemFirewallIsolation`은 `false`다. 실험은 합성 데이터만 다루고 실제 공급원 요청은 실행하지 않는다.
 
 시험용 고리만 있는 사본에서 원본 렌더러가 `file:`의 `src/index.html`인지, 문서 제목이 `LilacAnime`인지, 홈·검색·설정·상세 다이얼로그 노드와 `window.lilac`가 있는지 확인했다. 첫 실행 changelog는 임시 프로필에서 원본 확인 버튼으로 닫았다. 그 뒤 `companion/core/catalog.cjs`를 불러오는 별도 Node 자식이 합성 주간 데이터 7개와 출처 상태 5개를 전달했다. 렌더러 DOM API와 `textContent`로 월~일 버튼을 만들고 7개 버튼을 각각 눌러 선택 작품이 바뀌는 것을 확인했다.
 
@@ -72,7 +74,9 @@ v0.5.14에서 확인한 홈 삽입점은 `#homeView` 안의 `#scheduleSection` �
 
 프로덕션 적용 전제는 원본 main에서 명시적으로 지원하는 host bridge 또는 upstream 확장 API다. 이 전제가 없으면 격리된 시험 결과를 근거로 기존 설치본에 원격 디버깅 포트를 열거나 자동 삽입하지 않는다.
 
-## 최신 재현 실행
+upstream에 제안할 versioned runtime extension API 요청 초안을 작성했지만 게시하거나 upstream에 연락하지 않았다: [UPSTREAM_RUNTIME_EXTENSION_API_REQUEST_DRAFT.md](UPSTREAM_RUNTIME_EXTENSION_API_REQUEST_DRAFT.md).
+
+## 이전 재현 실행 (2026-10-10)
 
 - `node tests/runtime-attach-feasibility.cjs --run`: 통과. v0.5.14 소스 사본 main에 시험용 hook 하나만 넣고 실제 원본 renderer의 `#homeView`에서 실행했다.
 - 삽입 UI의 `getBoundingClientRect()`가 화면 안의 1080×253 영역을 반환했고, changelog 모달이 닫힌 상태임을 검사한 뒤 PNG를 캡처했다.
@@ -80,3 +84,14 @@ v0.5.14에서 확인한 홈 삽입점은 `#homeView` 안의 `#scheduleSection` �
 - `npm test`: 296/296 통과. `node --check` 3개 파일과 `git diff --cached --check` 통과.
 - 최신 재현 실행 시각은 로그의 `2026-10-10T18:12:08Z`이며, 화면 증거는 `assets/runtime-attach-v0.5.14-20261010T181208Z.png`다.
 - 실행기는 기준 커밋 `dcd6b981`에서 파생된 새 브랜치 커밋에서도 재실행 가능하도록 `git merge-base` 조상 관계를 확인한다. 로그와 화면 캡처가 이미 있어도 자체 증거 파일명 규칙에 해당하면 실행을 허용한다.
+
+## 2026-10-16 격리·네트워크·종료 처리 강화 후 재실증
+
+- 실행 자식에 부모 `process.env` 전체를 복사하지 않는다. `PATH`, `SYSTEMROOT`와 Electron/Node 실행 폴더, 임시 `HOME`·`USERPROFILE`·`APPDATA`·`LOCALAPPDATA`·`TEMP`·`TMP`, 로컬 `NODE_PATH`, 시험에 필요한 `LILAC_RUNTIME_ATTACH_*`만 전달한다. `NODE_OPTIONS`, `ELECTRON_RUN_AS_NODE`, API 키, 사용자 환경의 기존 앱 데이터 경로는 전달하지 않는다. 로그에는 허용 키 이름만 남기며 환경 값은 남기지 않는다.
+- 네트워크 guard는 `global.fetch`, Electron `net`, Node `http`/`https`/`net`/`tls`/`dgram`/`dns`/`dns/promises`와 자식 프로세스 실행 API를 차단한다. 단 한 번의 허용은 검증된 테스트 Node 실행 파일로 고정 fixture 스크립트를 격리된 작업 디렉터리·동일 허용목록 환경·파이프 stdio로 띄우는 경우뿐이다. 9개 main-process 요청은 `global.fetch`에서 차단됐고 Chromium 외부 요청은 0건이었다.
+- 정상 경로에서 fixture 프로세스는 종료 메시지를 받고 종료 코드 0으로 끝났다. 이어 실제 원본 화면에서 요일표 DOM을 제거하고 원본 DOM 노드가 유지된 것을 확인한 다음 CDP를 분리했다. 원본 검색·설정·상세 UI는 그 뒤에도 작동했다.
+- 실패 경로는 별도 단위 테스트로 검증한다. 종료 메시지 후 제한 시간 동안 기다리고, 필요하면 harness가 직접 생성한 정확한 자식 프로세스만 종료 요청한다. Electron 자식이 종료되지 않으면 살아 있는 프로세스와 경쟁하지 않도록 임시 사본을 보존하고 실패를 기록한다. 기존 앱이나 프로세스 이름을 찾아 종료하지 않는다.
+- 실증 로그: [runtime-attach-evidence-20261016T150504Z.jsonl](runtime-attach-evidence-20261016T150504Z.jsonl). 실제 원본 renderer 캡처: [runtime-attach-v0.5.14-20261016T150504Z.png](assets/runtime-attach-v0.5.14-20261016T150504Z.png).
+- 이 실행은 v0.5.14 임시 사본의 `electron/main.cjs` 한 파일만 시험용으로 바꾸었다. 사본의 `src/index.html`·preload 해시는 유지됐고, `app.asar`는 만들지 않았다. 격리 프로필에 생성된 47개 파일의 해시를 기록한 후 임시 트리와 의존성 junction을 제거했으며 `cleanupComplete: true`다. `D:\LilacAnime`, 기존 프로필, 기존 업데이트 캐시, 기존 설치 프로세스는 접근하지 않았다.
+- `node tests/runtime-attach-feasibility.cjs --run` 통과. 전체 `npm test` 307/307 및 격리 환경·네트워크 API·자식 종료 정책의 단위 테스트 7/7 통과. 로그는 UTC `2026-10-16T15:05:04Z` 실행을 기록한다.
+- 한계: 이는 API 후킹을 적용한 harness 기반 시험이지 OS 방화벽 차단이나 배포된 Companion이 수정되지 않은 설치본에 연결되는 증명이 아니다. 실제 공급원, 재생 제어, 원본 사용자 프로필, OS 수준 네트워크 격리는 시험하지 않았다.
