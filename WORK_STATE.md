@@ -5,15 +5,6 @@
 - 사후 코드 리뷰에서 `git status --porcelain`의 상태 코드를 버리고 경로만 허용하던 문제를 수정했다. 이제 새로 생성된 미추적 시각 증거만 허용하고, 추적 파일 수정·삭제, 기존 증거 변경, staged 파일과 무관한 미추적 파일은 거부한다.
 - 상태 판별 회귀 테스트 4개를 추가했다. `npm test` 300/300, 관련 JS/CJS `node --check`, `git diff --check`가 통과했다. Electron 런타임 실험은 다시 실행하지 않았다.
 
-## 2026-10-17 런타임 실증 격리·네트워크·정리 강화
-
-- 테스트용 Electron/Node 자식 환경을 명시적 허용목록으로 바꿨다. 사용자 환경 전체, API 키, `NODE_OPTIONS`, `ELECTRON_RUN_AS_NODE`, 사용자 프로필 경로를 상속하지 않고 `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA`/`TEMP`/`TMP`를 고유 임시 트리로 보낸다.
-- fixture 호스트에서 `fetch`, Electron `net`, Node HTTP(S)/TCP/TLS/UDP/DNS와 임의 child-process 실행을 차단한다. 한 번의 정확한 allowlist만 합성 데이터용 fixture Node 자식 실행을 허용한다. 이건 프로세스 내부 API guard이며 OS 방화벽/AppContainer 수준 네트워크 격리는 아니다.
-- fixture 자식의 정상 종료를 기다리고 실패 때 제한 시간 후 harness 소유의 정확한 자식만 종료 요청한다. 종료가 확인되지 않으면 임시 디렉터리를 보존하도록 했다. 관련 환경·네트워크·정리 테스트를 추가했다.
-- `npm test` 307/307 통과. 커밋 `bc36bb8`로 지정 브랜치에 저장했다. 격리 v0.5.14 사본에서 `node tests/runtime-attach-feasibility.cjs --run`도 실제 재실행 통과: 화면 UI·합성 데이터 연결, 9개 `global.fetch` 차단, renderer 외부 요청 0건, fixture 자식 종료 코드 0, UI 제거 뒤 CDP 분리, 원본 UI 생존, 임시 프로필 47개 파일 해시 기록, 임시 트리·junction 정리 완료.
-- 최신 증거: `docs/verification/runtime-attach-evidence-20261016T150504Z.jsonl`과 `docs/verification/assets/runtime-attach-v0.5.14-20261016T150504Z.png`. 검사·업데이트 제약 및 안전 경계는 `docs/verification/RUNTIME_ATTACH_FEASIBILITY.md`에 반영했다.
-- upstream 지원 API 요청 초안 `docs/verification/UPSTREAM_RUNTIME_EXTENSION_API_REQUEST_DRAFT.md`를 작성했다. 아직 제출하거나 upstream에 연락하지 않았다. OS 방화벽 변경, 설치본/실사용 프로필 테스트, playback control 검증은 이번 범위에서 실행하지 않았다.
-
 ## 2026-10-11 v0.5.14 런타임 Companion 연결 실증
 
 - 요청 기준 `codex/runtime-companion-prototype` / `dcd6b9818c0f13fd9970cc3c94e4539fd33aeb64`에서 `codex/runtime-attach-feasibility`를 만들었다. upstream v0.5.14 (`f095fc3d775451e144ed780e1fa081f739927652`) 소스 아카이브를 시스템 임시 폴더에 풀어 실제 Electron renderer를 시험했다.
