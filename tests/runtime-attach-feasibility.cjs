@@ -304,7 +304,7 @@ async function run() {
       startupInjectionVariablesPresent: false,
       apiKeysAndUnrelatedSecretsInherited: false,
       appDataAndTemporaryPathsConfinedToTestRoot: true,
-      runtimeTempPath: runtimeTemp
+      runtimeTempPathRecorded: false
     });
 
     electronChild = spawn(electronExe, [sourceRoot], {
@@ -313,7 +313,12 @@ async function run() {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
     });
-    appendLog(logPath, 'isolated-electron-child-started', { pid: electronChild.pid || null, executable: electronExe, temporaryAppOnly: true });
+    appendLog(logPath, 'isolated-electron-child-started', {
+      temporaryAppOnly: true,
+      executableFromExistingLocalDependency: true,
+      executablePathRecorded: false,
+      processIdRecorded: false
+    });
     let recentOutput = '';
     electronChild.stdout.setEncoding('utf8');
     electronChild.stderr.setEncoding('utf8');
