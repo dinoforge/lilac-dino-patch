@@ -720,3 +720,9 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - `npm run pack`, `npm run test:phase1-main`, `npm run test:phase1-electron`, `npm run test:phase1-exe` 통과. 패키지 main smoke는 합성 HTTP fixture 91회, 외부 네트워크 요청 0회였고 renderer smoke 오류와 차단된 외부 요청도 0회였다.
 - 사용자 승인으로 고유 앱 ID의 per-user NSIS(124,485,145바이트)를 `%TEMP%` 임시 폴더에 설치하고 설치본 `LilacAnime.exe`를 임시 `APPDATA`/`LOCALAPPDATA`/Chromium 프로필로 실행했다. 홈·검색 UI, preload bridge, 앱 정보 IPC, 이어보기 경계와 회차 종료가 통과했다. 전용 HKCU 등록과 설치 폴더를 제거했으며 기존 `LilacAnime 0.5.9` HKLM 등록 경로는 유지됐다. 실제 공급원·영상·자막은 요청하지 않았다.
 - NSIS 산출물을 담은 임시 폴더 `%TEMP%\lilac-nsis-season-d90875ee6d49403aa4884d9b7b6158d9`와 옵션 충돌로 중단된 첫 빌드 폴더 `%TEMP%\lilac-nsis-season-28191216e1ea444f8ceadf6697007068`는 남아 있다. 임시 폴더 재귀 삭제 명령이 자동 검토에서 거부되어 제거하지 않았다. 앱 설치와 HKCU 등록은 이미 정상 제거했다.
+
+## 2026-10-17 일정 요청 대기 분리
+
+- 현재 지정 소스는 `package.json` 0.5.9이며 Patch 01의 7열 달력과 공식 v0.5.27 `provider:schedule` 경로는 포함하지 않는다. 대신 이 소스에 존재하는 Linkkf + AniList 주간 일정 호출의 직렬 대기를 확인했다. Linkkf 요청은 최대 3회·회당 30초까지 기다린 뒤에야 AniList 일정 요청이 시작될 수 있었다.
+- 기존 Linkkf main IPC와 `#scheduleSection/#scheduleTabs/#scheduleRail`은 유지했다. renderer에서 두 출처를 병렬 시작하고 Linkkf 12초, AniList 17초 UI 마감시간을 적용했다. 같은 출처의 진행 중 요청은 공유하고, 응답 실패·timeout·요청 제한·미요청 상태를 분리해 캐시 상태에도 남긴다.
+- `tests/weekday-schedule.test.cjs`, `tests/player-interactions.test.cjs`와 구문 검사를 통과했다. 두 테스트 파일 합계 52/52, `git diff --check` 통과. 검증은 합성 지연 요청이며 실제 공급원 응답과 공식 v0.5.27 Electron 실행·7열 배정은 미검증이다. 현재 작업 폴더만 사용했고 별도 source 폴더, userData, sessionData는 만들거나 실행하지 않았다.

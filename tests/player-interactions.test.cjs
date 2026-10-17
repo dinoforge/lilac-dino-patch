@@ -9,6 +9,7 @@ const source = fs.readFileSync(path.join(__dirname, '../src/player.js'), 'utf8')
 const playerCss = fs.readFileSync(path.join(__dirname, '../src/player-android.css'), 'utf8');
 const mainSource = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
 const indexHtml = fs.readFileSync(path.join(__dirname, '../src/index.html'), 'utf8');
+const { settleProviderSchedule } = require('../src/weekday-schedule.js');
 function appSection(start, end) {
   const first = appSource.indexOf(start), last = appSource.indexOf(end, first);
   assert.ok(first >= 0 && last > first, 'Missing app section: ' + start);
@@ -464,7 +465,7 @@ function scheduleHarness(linkkfSchedule, options = {}) {
   const buttons = Array.from({ length: 7 }, () => ({ classList: classList(), attrs: {}, setAttribute(name, value) { this.attrs[name] = value; } }));
   const rail = { classList: classList(), innerHTML: '', replaceChildren() { this.innerHTML = ''; } };
   const retry = { classList: classList('hidden'), onclick: null };
-  const status = { textContent: '' }, storage = new Map();
+  const status = { textContent: '' }, storage = new Map(), logs = [];
   const listeners = {}, ui = new Map([
     ['#scheduleRail', rail], ['#scheduleRetry', retry], ['#scheduleStatus', status],
     ['#airingSection', { classList: classList() }], ['#airingRail', { innerHTML: '' }],
@@ -486,7 +487,8 @@ function scheduleHarness(linkkfSchedule, options = {}) {
     LilacQuarterSelection: lilacQuarterSelection,
     LilacWeekdaySchedule: {
       PROVIDERS: ['reanime', 'miruro', 'animenosub', 'ohli24', 'linkkf'],
-      mergeWeekdaySchedules: days => days,
+      mergeWeekdaySchedules: options.mergeWeekdaySchedules || ((days, upcoming) => { const result=days.map(day=>day.slice());for(const item of upcoming)result[0].push(item.anime);return result; }),
+      settleProviderSchedule,
       scheduleCacheKey: source => `weekdaySchedule:v3:2026:4:${source || 'test'}`
     },
     readQuarterSelection: () => ({ year: 2027, quarter: 1, label: '2027년 1분기' }),
@@ -494,6 +496,7 @@ function scheduleHarness(linkkfSchedule, options = {}) {
     selectHomeQuarter: options.selectHomeQuarter || (async () => {}),
     loadLatestEpisodeRail: options.loadLatestEpisodeRail || (() => {}),
     latestEpisodeSectionTitle: provider => `${provider} 최신 회차`,
+    console: { info: (...values) => logs.push(values.join(' ')) },
     renderHero() {},
     store: { get: key => storage.get(key) ?? null, set: (key, value) => storage.set(key, value) },
     $: selector => ui.get(selector) || null,
@@ -502,7 +505,7 @@ function scheduleHarness(linkkfSchedule, options = {}) {
   });
   vm.runInContext(appSection('const SCHEDULE_TABS=', '\nfunction loadLinkkfHome()'), context);
   return {
-    context, rail, retry, status, buttons, storage,
+    context, rail, retry, status, buttons, storage, logs,
     setHomeCalendarReady() { vm.runInContext('homeCalendarReady=true', context); },
     triggerCalendarChange(change) { nextCalendarChange = change; listeners['window:focus']?.(); },
     triggerDocumentVisibilityChange(change) { nextCalendarChange = change; listeners['document:visibilitychange']?.(); }
@@ -527,6 +530,29 @@ test('weekday schedule marks all days unavailable when the schedule request fail
   assert.match(h.rail.innerHTML, /일정 정보를 불러오지 못했습니다/);
   assert.equal(h.retry.classList.contains('hidden'), false);
   assert.equal(h.buttons[6].attrs['aria-selected'], 'true');
+});
+
+test('a stalled Linkkf schedule cannot block a completed AniList schedule', async () => {
+  let anilistStarted = false;
+  const h = scheduleHarness(() => new Promise(() => {}), {
+    source: 'reanime',
+    airing: [{ provider: 'reanime', id: 'season-work', anilistId: 1001 }],
+    providerWeekdayEpisodes: async () => {
+      anilistStarted = true;
+      return { supported: true, data: [{ anime: { id: 'anilist-scheduled-work' }, episode: 3, airingAt: 1 }] };
+    }
+  });
+  vm.runInContext('scheduleRequestTimeouts={linkkf:5,anilist:50}', h.context);
+
+  await h.context.loadLinkkfSchedule(0);
+
+  assert.equal(anilistStarted, true, 'AniList starts without waiting for Linkkf');
+  assert.match(h.rail.innerHTML, /anilist-scheduled-work/, 'the completed source is rendered after Linkkf times out');
+  assert.match(h.status.textContent, /Linkkf 응답 시간 초과/);
+  assert.match(h.status.textContent, /Re:Anime 1개 회차 일정/);
+  assert.equal(h.retry.classList.contains('hidden'), false);
+  assert.ok(h.logs.some(line => /AniList\/Re:Anime request started/.test(line)));
+  assert.ok(h.logs.some(line => /Linkkf request timeout/.test(line)));
 });
 
 test('weekday schedule caches verified days and a fresh cache avoids another provider request', async () => {
@@ -566,7 +592,7 @@ test('quarter activation refreshes the quarter catalog, airing list, Linkkf days
   assert.equal(calls.linkkf, 1, 'a repeated activation on the same date sends no extra refresh');
 });
 
-test('quarter airing refresh failure keeps saved airing data and reports the schedule failure', async () => {
+test('quarter airing refresh failure keeps saved airing data and marks its AniList schedule unverified', async () => {
   let weekdayCalls = 0;
   const h = scheduleHarness(async () => ({ days: Array.from({ length: 7 }, () => []), unavailableDays: [] }), {
     source: 'reanime',
@@ -580,7 +606,7 @@ test('quarter airing refresh failure keeps saved airing data and reports the sch
   assert.equal(h.context.state.airing[0].id, 'saved');
   assert.equal(weekdayCalls, 0, 'a failed airing refresh must not query AniList with stale candidates');
   assert.match(h.context.$('#latestEpisodeStatus').textContent, /저장된 목록을 유지합니다: offline/);
-  assert.match(h.status.textContent, /Re:Anime 일정 확인 실패/);
+  assert.match(h.status.textContent, /Re:Anime 일정 확인 불가/);
 });
 
 test('removing LinkAni migrates only the saved content source and preserves user data', () => {

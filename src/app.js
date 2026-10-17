@@ -1342,6 +1342,21 @@ let scheduleRequest=0;
 let activeScheduleDay=0;
 let scheduleSearchRequest=0;
 const weekdayAvailabilityCache=new Map();
+let scheduleRequestTimeouts={linkkf:12000,anilist:17000};
+const scheduleProviderInFlight=new Map();
+function requestScheduleSource(key,label,operation,timeoutMs){
+  console.info(`[weekday-schedule] ${label} request started`);
+  let pending=scheduleProviderInFlight.get(key);
+  if(!pending){
+    pending=Promise.resolve().then(operation).then(value=>({ok:true,value}),error=>({ok:false,error}));
+    scheduleProviderInFlight.set(key,pending);pending.then(()=>{if(scheduleProviderInFlight.get(key)===pending)scheduleProviderInFlight.delete(key)});
+  }
+  return LilacWeekdaySchedule.settleProviderSchedule(label,()=>pending,{timeoutMs}).then(result=>{
+    if(result.state==='success')result=result.value?.ok?{...result,value:result.value.value}:{...result,state:'failed',error:result.value?.error||new Error('Schedule request failed')};
+    console.info(`[weekday-schedule] ${label} request ${result.state} (${result.elapsedMs}ms)`);
+    return result;
+  });
+}
 function renderScheduleTab(index){
   index=Math.max(0,Math.min(6,Number(index)||0));activeScheduleDay=index;
   $$('#scheduleTabs button').forEach((button,i)=>{button.classList.toggle('selected',i===index);button.setAttribute('aria-selected',String(i===index))});
@@ -1360,22 +1375,53 @@ async function loadLinkkfSchedule(selected,{force=false,refreshEpisodes=false,sk
   if(!linkkfSchedule&&cached){linkkfSchedule=cached.days;linkkfScheduleUnavailableDays=Array.isArray(cached.unavailableDays)?cached.unavailableDays:[]}
   if(!linkkfSchedule){linkkfScheduleUnavailableDays=[];$('#scheduleRail').classList.add('loading-cards');$('#scheduleRail').replaceChildren()}
   renderScheduleTab(selected);
-  if(cached&&cached.age<30*60*1000&&!force){const source=state.source==='reanime'?'Re:Anime':state.source==='miruro'?'Miruro':'';showScheduleStatus(`저장된 통합 요일표${source&&cached.upcomingCount?` · ${source} ${cached.upcomingCount}개 회차 일정`:''} · 작품을 열면 공급원별 회차를 확인합니다.`,false);return}
+  const providerLabel=state.source==='reanime'?'Re:Anime':state.source==='miruro'?'Miruro':'';
+  if(cached&&cached.age<30*60*1000&&!force){
+    const states=cached.providerStates||{},linkkfState=states.linkkf||(linkkfScheduleUnavailableDays.length?'partial':'success'),upcomingState=providerLabel?(states.upcoming||'unknown'):'not-applicable';
+    const linkkfIssue=linkkfState==='timeout'?'Linkkf 응답 시간 초과':linkkfState==='failed'?'Linkkf 확인 실패':linkkfState==='partial'?'Linkkf 일부 요일 확인 불가':'';
+    const providerIssue=upcomingState==='timeout'?`${providerLabel} 일정 응답 시간 초과`:upcomingState==='failed'?`${providerLabel} 일정 확인 실패`:upcomingState==='rate-limited'?`${providerLabel} 일정 요청 제한`:upcomingState==='unknown'?`${providerLabel} 일정 상태 확인 불가`:upcomingState==='unavailable'||upcomingState==='skipped'?`${providerLabel} 일정 확인 불가`:'';
+    const issues=[linkkfIssue,providerIssue].filter(Boolean),source=providerLabel&&cached.upcomingCount?` · ${providerLabel} ${cached.upcomingCount}개 회차 일정`:'';
+    showScheduleStatus(`저장된 통합 요일표${source}${issues.length?` · ${issues.join(' · ')}`:' · 작품을 열면 공급원별 회차를 확인합니다.'}`,issues.length>0);return;
+  }
   showScheduleStatus(linkkfSchedule?'저장된 요일표 표시 중 · Linkkf에서 갱신하고 있습니다.':'Linkkf 요일별 방영표를 불러오는 중...');
   try{
-    let linkkfDays=Array.from({length:7},()=>[]),linkkfFailed=false,upcoming=[],upcomingFailed=false,providerLabel='';
-    try{const result=await window.lilac.linkkfSchedule(),days=Array.isArray(result)?result:result?.days;if(!Array.isArray(days))throw new Error('Invalid schedule response');linkkfDays=Array.from({length:7},(_,index)=>Array.isArray(days[index])?days[index].slice(0,50):[]);linkkfScheduleUnavailableDays=Array.isArray(result?.unavailableDays)?result.unavailableDays.filter(index=>Number.isInteger(index)&&index>=0&&index<7):[]}catch{linkkfFailed=true;linkkfScheduleUnavailableDays=Array.from({length:7},(_,index)=>index)}
-    if(['reanime','miruro'].includes(state.source)){
-      providerLabel=state.source==='reanime'?'Re:Anime':'Miruro';
-      if(skipUpcoming)upcomingFailed=true;
-      else if(Array.isArray(state.airing)&&state.airing.length){try{const result=await window.lilac.providerWeekdayEpisodes(state.source,state.airing.slice(0,120),refreshEpisodes);if(result?.supported){upcoming=Array.isArray(result.data)?result.data:[];upcomingFailed=Boolean(result.rateLimited)}else upcomingFailed=true}catch{upcomingFailed=true}}
+    let linkkfDays=Array.from({length:7},()=>[]),linkkfFailed=false,upcoming=[],upcomingFailed=false;
+    const linkkfTask=requestScheduleSource('linkkf:week','Linkkf',()=>window.lilac.linkkfSchedule(),scheduleRequestTimeouts.linkkf);
+    let upcomingTask=Promise.resolve({provider:`AniList/${state.source}`,state:'skipped'});
+    if(providerLabel&&!skipUpcoming&&Array.isArray(state.airing)&&state.airing.length){
+      const candidates=state.airing.slice(0,120),candidateKey=candidates.map(item=>Number(item?.anilistId)||0).filter(Boolean).sort((a,b)=>a-b).join(',');
+      const dayKey=new Date().toISOString().slice(0,10);
+      upcomingTask=requestScheduleSource(`anilist:${state.source}:${dayKey}:${candidateKey}`,`AniList/${providerLabel}`,()=>window.lilac.providerWeekdayEpisodes(state.source,candidates,refreshEpisodes),scheduleRequestTimeouts.anilist);
+    }else if(providerLabel)upcomingTask=Promise.resolve({provider:`AniList/${state.source}`,state:skipUpcoming?'skipped':'unavailable'});
+    const [linkkfResult,upcomingResult]=await Promise.all([linkkfTask,upcomingTask]);
+    if(linkkfResult.state==='success'){
+      const result=linkkfResult.value,days=Array.isArray(result)?result:result?.days;
+      if(Array.isArray(days)){
+        linkkfDays=Array.from({length:7},(_,index)=>Array.isArray(days[index])?days[index].slice(0,50):[]);
+        linkkfScheduleUnavailableDays=Array.isArray(result?.unavailableDays)?result.unavailableDays.filter(index=>Number.isInteger(index)&&index>=0&&index<7):[];
+      }else{linkkfFailed=true;linkkfScheduleUnavailableDays=Array.from({length:7},(_,index)=>index)}
+    }else{linkkfFailed=true;linkkfScheduleUnavailableDays=Array.from({length:7},(_,index)=>index)}
+    if(providerLabel){
+      if(upcomingResult.state==='success'){
+        const result=upcomingResult.value;
+        if(result?.supported){upcoming=Array.isArray(result.data)?result.data:[];upcomingFailed=Boolean(result.rateLimited)}else upcomingFailed=true;
+      }else upcomingFailed=true;
     }
     if(request!==scheduleRequest||cacheKey!==scheduleCacheKey())return;
     linkkfSchedule=LilacWeekdaySchedule.mergeWeekdaySchedules(linkkfDays,upcoming);
-    const savedAt=Date.now();try{store.set(cacheKey,{savedAt,days:linkkfSchedule,unavailableDays:linkkfScheduleUnavailableDays,upcomingCount:upcoming.length})}catch{}
+    const linkkfState=linkkfFailed?'failed':linkkfScheduleUnavailableDays.length?'partial':'success';
+    const upcomingState=!providerLabel?'not-applicable':upcomingResult.state==='success'&&upcomingResult.value?.rateLimited?'rate-limited':upcomingFailed?upcomingResult.state==='success'?'failed':upcomingResult.state:'success';
+    const providerStates={linkkf:linkkfState,upcoming:upcomingState};
+    const savedAt=Date.now();try{store.set(cacheKey,{savedAt,days:linkkfSchedule,unavailableDays:linkkfScheduleUnavailableDays,upcomingCount:upcoming.length,providerStates})}catch{}
     const goodDays=7-linkkfScheduleUnavailableDays.length,segments=[];
-    if(!linkkfFailed)segments.push(`Linkkf ${goodDays}/7일`);else segments.push('Linkkf 확인 실패');
-    if(providerLabel)segments.push(upcomingFailed?`${providerLabel} 일정 확인 실패`:`${providerLabel} ${upcoming.length}개 회차 일정`);
+    if(linkkfState==='success')segments.push(`Linkkf ${goodDays}/7일`);else if(linkkfState==='partial')segments.push(`Linkkf ${goodDays}/7일 · 일부 요일 확인 불가`);else segments.push(linkkfResult.state==='timeout'?'Linkkf 응답 시간 초과':'Linkkf 확인 실패');
+    if(providerLabel){
+      if(upcomingState==='success')segments.push(`${providerLabel} ${upcoming.length}개 회차 일정`);
+      else if(upcomingState==='rate-limited')segments.push(`${providerLabel} 일정 요청 제한`);
+      else if(upcomingState==='timeout')segments.push(`${providerLabel} 일정 응답 시간 초과`);
+      else if(upcomingState==='skipped'||upcomingState==='unavailable')segments.push(`${providerLabel} 일정 확인 불가`);
+      else segments.push(`${providerLabel} 일정 확인 실패`);
+    }
     segments.push(`작품을 열면 ${LilacWeekdaySchedule.PROVIDERS.length}개 공급원의 같은 회차를 확인합니다.`);
     showScheduleStatus(segments.join(' · '),linkkfFailed||upcomingFailed||linkkfScheduleUnavailableDays.length>0);
   }catch{
