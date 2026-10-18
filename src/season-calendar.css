@@ -1,0 +1,36 @@
+#searchView.season-calendar-mode>:not(#seasonCalendarView){display:none!important}
+.season-calendar-view{min-width:0;padding:0 var(--ott-gutter,24px) 40px}
+.season-calendar-head{display:flex;align-items:center;gap:14px;margin:8px 0 12px}
+.season-calendar-head>div{min-width:0}
+.season-calendar-head h1{margin:0 0 4px;font-size:clamp(20px,2.3vw,28px)}
+.season-calendar-head p{margin:0;color:var(--muted);font-size:13px}
+.season-calendar-status{min-height:18px;margin:0 0 10px;color:var(--muted);font-size:12px;line-height:1.5}
+.season-calendar-grid{display:flex;gap:10px;min-width:0;overflow-x:auto;overscroll-behavior-inline:contain;padding:4px 2px 12px;scroll-snap-type:x proximity;scrollbar-color:var(--line) transparent;scrollbar-width:thin}
+.season-calendar-day{box-sizing:border-box;flex:0 0 13.6%;min-width:162px;max-width:232px;scroll-snap-align:start;overflow:hidden;border:1px solid var(--line);border-radius:var(--ott-radius,8px);background:var(--panel)}
+.season-calendar-day.today{border-color:color-mix(in srgb,var(--lilac) 32%,var(--line))}
+.season-calendar-day-head{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 9px;border-bottom:1px solid var(--line);background:var(--panel)}
+.season-calendar-day.today>.season-calendar-day-head{background:color-mix(in srgb,var(--lilac) 12%,var(--panel));border-bottom-color:color-mix(in srgb,var(--lilac) 24%,var(--line))}
+.season-calendar-day-head h2{margin:0;color:var(--text);font-size:14px}
+.season-calendar-day-head span{color:var(--muted);font-size:11px;white-space:nowrap}
+.season-calendar-day.today .season-calendar-day-head h2{color:var(--lilac)}
+.season-calendar-day-items{display:grid;gap:8px;padding:8px 5px}
+.season-calendar-view .season-calendar-card{display:block;width:100%;min-width:0;margin:0;padding:0;border:0;border-radius:0;background:transparent;color:var(--text);font:inherit;text-align:left;appearance:none}
+.season-calendar-view .season-calendar-card:focus-visible{outline:2px solid var(--lilac);outline-offset:2px;border-radius:var(--ott-radius,8px)}
+.season-calendar-card .season-calendar-poster{width:100%;aspect-ratio:2/3}
+.season-calendar-badge{pointer-events:none}
+.season-calendar-meta{min-height:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.season-calendar-day-empty{margin:0;padding:12px 7px;color:var(--muted);font-size:11px;line-height:1.5}
+.season-calendar-unknown{margin-top:18px;padding:16px 0 0;border:0;border-top:1px solid var(--line);border-radius:0;background:transparent}
+.season-calendar-subhead{display:flex;align-items:center;gap:10px}
+.season-calendar-subhead h2{margin:0;font-size:15px}
+.season-calendar-subhead span{color:var(--muted);font-size:11px}
+.season-calendar-unknown>p{margin:7px 0 10px;color:var(--muted);font-size:11px;line-height:1.5}
+.season-calendar-unknown-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
+.season-calendar-unknown-grid .season-calendar-card{max-width:220px}
+@media(max-width:650px){
+  .season-calendar-view{padding-left:12px;padding-right:12px}
+  .season-calendar-head{align-items:flex-start;gap:8px;flex-direction:column}
+  .season-calendar-day{flex-basis:162px;min-width:162px}
+  .season-calendar-unknown{padding-top:12px}
+  .season-calendar-unknown-grid{grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
+}

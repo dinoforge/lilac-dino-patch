@@ -235,7 +235,9 @@ const catalogUpdateUI = (() => {
   $('#seeAllSeason').onclick = () => {
     if (homeOrder === 'season') {
       const quarter = QUARTER_PROVIDERS.includes(state.source);
-      showHomeList(homeItems(), quarter ? (state.quarterSelection?.label || '분기별 작품') : '이번 시즌 신작');
+      const label = quarter ? (state.quarterSelection?.label || '분기별 작품') : '이번 시즌 신작';
+      if (quarter && window.LilacSeasonCalendar) window.LilacSeasonCalendar.open(homeItems(), label, state.quarterSelection);
+      else showHomeList(homeItems(), label);
       return;
     }
     try { localStorage.setItem('allSort:' + state.source, 'updated'); } catch {}

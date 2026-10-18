@@ -23,6 +23,8 @@ const { createTranslator } = require('./subtitle-translator.cjs');
 const { QUARTER_PROVIDERS, quarterForDate, quarterPeriod, quarterQuery } = require('./quarter-catalog.cjs');
 const { fetchLatestEpisodes } = require('./latest-episodes.cjs');
 const { fetchWeekdayEpisodes } = require('./weekday-episodes.cjs');
+const { createWeeklySchedule } = require('./weekly-schedule.cjs');
+const { createProviderSchedule } = require('./provider-schedule.cjs');
 const { createCatalogBrowser } = require('./catalog-browser.cjs');
 const { createCatalogUpdates } = require('./catalog-updates.cjs');
 const { filterProviderServers } = require('../src/player-failover.js');
@@ -620,6 +622,25 @@ async function hlsProbe(url,headers={}){
 // /search/keyword-…html. A series page has the original (Japanese) title, genres, air date, the story and its episodes
 // (newest first); an episode page embeds the cdndania (FirePlayer) player.
 const OHLI24_WEB='https://www.ohli24.net';
+// The current official provider schedule uses ani.ohli24.com. Keep this schedule-only
+// adapter separate from the legacy catalog/detail/playback path above.
+const OHLI24_SCHEDULE_WEB='https://ani.ohli24.com';
+async function ohliSchedulePage(url){
+  const response=await net.fetch(url,{signal:AbortSignal.timeout(13000),headers:{'User-Agent':LINKKF_UA,Accept:'text/html,application/xhtml+xml','Accept-Language':'ko-KR,ko;q=0.9',Referer:`${OHLI24_SCHEDULE_WEB}/`}});
+  if(!response.ok)throw new Error(`애니24 일정 HTTP ${response.status}`);
+  const html=await response.text(),json=html.match(/<script data-page="app" type="application\/json">([\s\S]*?)<\/script>/)?.[1];
+  if(!json)throw new Error('애니24 일정 페이지를 읽지 못했습니다.');
+  return JSON.parse(json).props||{};
+}
+function ohliScheduleAnime(item={}){
+  const slug=String(item.slug||item.title||''),rows=Array.isArray(item?.metadata?.info_rows)?Object.fromEntries(item.metadata.info_rows):{};
+  const count=Number(item.episodes_count)||Number(String(item.eps||'').match(/\d+/)?.[0])||null;
+  const year=String(rows['방영일']||rows['상영일']||item.published_at||'').match(/\d{4}/)?.[0]||'';
+  return {provider:'ohli24',id:slug,mal_id:`ohli24:${slug}`,title:String(item.title||slug),title_english:'',title_japanese:String(item.original_title||rows['원제']||''),
+    images:{webp:{large_image_url:item.thumbnail?`${OHLI24_SCHEDULE_WEB}/storage/${item.thumbnail}`:''}},year,type:item.category==='극장판'?'Movie':'TV',episodes:Number(item.episode_total)||count,
+    availableEpisodes:count,totalEpisodes:Number(item.episode_total)||null,status:String(item.category||(item.eps?'방영중':'')),genres:String(item.tags_string||'').split(',').map(name=>name.trim()).filter(Boolean).map(name=>({name})),
+    anilistId:Number(item.anilist_id)||null,malId:Number(item.mal_id)||null,url:`${OHLI24_SCHEDULE_WEB}/c/${encodeURIComponent(slug)}`};
+}
 async function ohliFetch(url){
   const response=await net.fetch(url,{signal:AbortSignal.timeout(30000),headers:{'User-Agent':LINKKF_UA,Accept:'text/html,application/xhtml+xml','Accept-Language':'ko-KR,ko;q=0.9',Referer:`${OHLI24_WEB}/`}});
   if(!response.ok)throw new Error(`애니24 HTTP ${response.status}`);
@@ -2213,6 +2234,18 @@ app.whenReady().then(async () => {
   ipcMain.handle('provider:airing', (_, provider) => homeShows(provider,'airing'));
   ipcMain.handle('provider:latest-episodes', (_, provider, candidates) => fetchLatestEpisodes(provider, candidates));
   ipcMain.handle('provider:weekday-episodes', (_, provider, candidates, refresh) => fetchWeekdayEpisodes(provider, candidates, { refresh: refresh === true }));
+  const weeklySchedule = createWeeklySchedule(day => anissiaFetch(`/anime/schedule/${day}`));
+  const providerSchedule = createProviderSchedule({
+    nativeTimeoutMs:15000, fallbackTimeoutMs:7000,
+    fallback:weeklySchedule,
+    reanimeBase:REANIME_WEB, reanimeFetch:url=>providerFetch(url,{json:true,referer:`${REANIME_WEB}/schedule`}), reanimeItems,
+    miruroApi, miruroItem,
+    animenosubBase:ANIMENOSUB_WEB, animenosubFetch:url=>providerFetch(url,{referer:`${ANIMENOSUB_WEB}/`}), animenosubItems:animenosubList,
+    ohliBase:OHLI24_SCHEDULE_WEB, ohliPage:ohliSchedulePage, ohliAnime:ohliScheduleAnime,
+    linkkfBase:LINKKF_API, linkkfTags:LINKKF_SCHEDULE_TAGS, linkkfFetch:url=>linkkfFetch(url,7000), linkkfAnime
+  });
+  ipcMain.handle('anime:weekly-schedule', (_, day) => weeklySchedule(Number(day)));
+  ipcMain.handle('provider:schedule', async (_, provider, day) => providerSchedule(String(provider||''),Number(day)));
   catalogUpdates = createCatalogUpdates({
     reanimeBase: REANIME_WEB,
     reanimeFetch: url => providerFetch(url, { json: true, referer: `${REANIME_WEB}/` }),

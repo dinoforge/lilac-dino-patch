@@ -103,6 +103,8 @@ function switchView(name) {
   if(name!==current){cancelPendingPlaybackLookups();if(current==='search')invalidateIntegratedSearch()}
   if(name==='player'&&current&&current!=='player')viewBeforePlayer=current;
   document.body.classList.toggle('player-mode',name==='player');
+  $('#searchView').classList.remove('season-calendar-mode');
+  $('#seasonCalendarView')?.classList.add('hidden');
   $$('.view').forEach(v => v.classList.toggle('active', v.id === `${name}View`));
   $$('.nav').forEach(n => n.classList.toggle('active', n.dataset.view === name));
   if (name === 'library') renderLibrary();
