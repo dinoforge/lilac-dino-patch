@@ -21,6 +21,56 @@ test('concurrent AniList callers share a conservative global request interval', 
   assert.ok(Math.floor(60_000 / MIN_REQUEST_INTERVAL_MS) < 30, 'The configured interval must stay below the documented degraded limit');
 });
 
+test('high-priority season schedule requests move ahead of queued title lookups without bypassing the interval', async t => {
+  let now = 1_800_000_100_000;
+  const starts = [];
+  const fetchImpl = async (_url, options) => {
+    starts.push(JSON.parse(options.body).query);
+    return { status: 200, ok: true };
+  };
+  const waitImpl = async milliseconds => {
+    now += milliseconds;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  };
+  t.after(resetAniListClientState);
+  const request = (query, priority = 0) => requestAniListGraphQL(`query ${query} { Viewer { id } }`, {}, {
+    fetchImpl, now: () => now, waitImpl, minIntervalMs: 100, priority
+  });
+
+  const first = request('First');
+  await Promise.resolve();
+  const queued = request('Queued');
+  const normal = request('Normal');
+  const schedule = request('Schedule', 100);
+  await Promise.all([first, queued, normal, schedule]);
+  assert.deepEqual(starts, ['query First { Viewer { id } }', 'query Queued { Viewer { id } }',
+    'query Schedule { Viewer { id } }', 'query Normal { Viewer { id } }']);
+});
+
+test('a timed-out queued AniList request is removed before a later slot can send it', async t => {
+  let now = 1_800_000_200_000;
+  const starts = [];
+  let releaseSlot;
+  const controller = new AbortController();
+  t.after(resetAniListClientState);
+  const first = requestAniListGraphQL('query First { Viewer { id } }', {}, {
+    now: () => now, minIntervalMs: 1000,
+    fetchImpl: async () => { starts.push('first'); return { status: 200, ok: true }; }
+  });
+  await first;
+  const pending = requestAniListGraphQL('query Cancelled { Viewer { id } }', {}, {
+    now: () => now, minIntervalMs: 1000, signal: controller.signal,
+    waitImpl: milliseconds => new Promise(resolve => { now += milliseconds; releaseSlot = resolve; }),
+    fetchImpl: async () => { starts.push('cancelled'); return { status: 200, ok: true }; }
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  controller.abort(Object.assign(new Error('deadline'), { name: 'TimeoutError' }));
+  await assert.rejects(pending, /deadline/);
+  releaseSlot?.();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(starts, ['first']);
+});
+
 test('AniList sends GraphQL requests and shares Retry-After cooldown across callers', async t => {
   const now = 1_800_000_000_000;
   let requests = 0;
