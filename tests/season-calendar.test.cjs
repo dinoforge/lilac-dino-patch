@@ -147,13 +147,13 @@ test('provider-site title matching requires exact aliases, same year, and compat
     'season-year-format-mismatch');
 });
 
-test('provider-site evidence preserves source and distinguishes same-episode weekday conflict from multiple unverified days', () => {
+test('provider-site evidence requires active numbered series releases and preserves same-episode weekday conflicts', () => {
   const catalog = { provider: 'reanime', id: 'series-a', mal_id: 'reanime:series-a', title: 'Series A',
-    anilistId: 410, year: 2026, season: 'FALL', type: 'TV' };
+    anilistId: 410, year: 2026, season: 'FALL', type: 'TV', status: 'RELEASING' };
   const reanime = { provider: 'reanime', id: 'series-a', mal_id: 'reanime:series-a', title: 'Series A',
-    anilistId: 410, year: 2026, season: 'FALL', type: 'TV' };
+    anilistId: 410, year: 2026, season: 'FALL', type: 'TV', status: 'RELEASING' };
   const miruro = { provider: 'miruro', id: 'm-1', mal_id: 'miruro:m-1', title: 'Series A',
-    anilistId: 410, year: 2026, season: 'FALL', type: 'TV' };
+    anilistId: 410, year: 2026, season: 'FALL', type: 'TV', status: 'RELEASING' };
   const conflict = model.reconcileProviderScheduleEvidence([
     { provider: 'reanime', day: 0, anime: reanime, episode: 5, time: '20:30', timed: true, timeBasis: '한국 시간' },
     { provider: 'miruro', day: 1, anime: miruro, episode: 5, time: '21:00', timed: true, timeBasis: '한국 시간' }
@@ -165,20 +165,94 @@ test('provider-site evidence preserves source and distinguishes same-episode wee
   assert.equal(conflict.scheduleEvidence[0].catalogId, catalog.mal_id);
   assert.equal(conflict.scheduleEvidence[0].sourceTitle, 'Series A');
 
-  const multipleEpisodes = model.reconcileProviderScheduleEvidence([
+  const differentEpisodes = model.reconcileProviderScheduleEvidence([
     { provider: 'reanime', day: 0, anime: reanime, episode: 5 },
     { provider: 'miruro', day: 1, anime: miruro, episode: 6 }
   ], [catalog]);
-  assert.equal(multipleEpisodes.conflictCount, 0);
-  assert.equal(multipleEpisodes.multiDayUnresolvedCount, 1);
-  assert.equal(multipleEpisodes.unknown.length, 0);
+  assert.equal(differentEpisodes.conflictCount, 1);
+  assert.equal(differentEpisodes.conflicts[0].kind, 'providers-disagree-on-episode');
+  assert.equal(differentEpisodes.assignedCount, 0);
+  assert.equal(differentEpisodes.assignedCardCount, 0);
+  assert.equal(differentEpisodes.unknown.length, 0);
+});
+
+test('weekly-release eligibility excludes films, specials, unknown formats, inactive shows, and unnumbered rows', () => {
+  const baseAnime = { provider: 'reanime', id: 'series-a', mal_id: 'reanime:series-a', title: 'Series A',
+    anilistId: 410, year: 2026, season: 'FALL', type: 'TV', status: 'RELEASING' };
+  const event = { provider: 'reanime', day: 0, anime: baseAnime, episode: 1, airingStatus: 'Airing', currentWeek: true };
+  assert.equal(model.weeklyReleaseEligibility(event, baseAnime).eligible, true);
+  assert.equal(model.weeklyReleaseEligibility({ ...event, anime: { ...baseAnime, type: 'Movie' } }, baseAnime).reason, 'format-movie');
+  assert.equal(model.weeklyReleaseEligibility({ ...event, anime: { ...baseAnime, type: 'OVA' } }, baseAnime).reason, 'format-ova');
+  assert.equal(model.weeklyReleaseEligibility({ ...event, anime: { ...baseAnime, type: 'TV Special' } }, baseAnime).reason, 'format-special');
+  assert.equal(model.weeklyReleaseEligibility({ ...event, anime: { ...baseAnime, type: 'Anime' } }, { ...baseAnime, type: 'Anime' }).reason, 'format-unverified');
+  assert.equal(model.weeklyReleaseEligibility({ ...event, anime: { ...baseAnime, status: 'Finished Airing' } }, baseAnime).reason, 'not-currently-releasing');
+  assert.equal(model.weeklyReleaseEligibility({ ...event, episode: undefined }, baseAnime).reason, 'new-episode-unverified');
+  assert.equal(model.weeklyReleaseEligibility({ ...event, episode: 2.5 }, baseAnime).reason, 'new-episode-unverified');
+  assert.equal(model.weeklyReleaseEligibility({ ...event, cancelled: true }, baseAnime).reason, 'cancelled');
+
+  const ona = { ...baseAnime, type: 'ONA' };
+  assert.equal(model.weeklyReleaseEligibility({ ...event, anime: ona }, ona).eligible, true);
+  assert.equal(model.weeklyReleaseEligibility({ ...event, anime: { ...ona, status: '' }, airingStatus: '' }, { ...ona, status: '' }).reason,
+    'release-status-unverified');
+});
+
+test('a provider batch of multiple episodes is withheld, while eligible evidence from another week feed is still usable', () => {
+  const catalog = { provider: 'reanime', id: 'series-a', mal_id: 'reanime:series-a', title: 'Series A',
+    anilistId: 410, year: 2026, season: 'FALL', type: 'TV', status: 'RELEASING' };
+  const batched = model.reconcileProviderScheduleEvidence([
+    { provider: 'reanime', day: 0, anime: catalog, episode: 5 },
+    { provider: 'reanime', day: 0, anime: catalog, episode: 6 },
+    { provider: 'miruro', day: 2, anime: { ...catalog, provider: 'miruro', id: 'mirror-a', mal_id: 'miruro:mirror-a' }, episode: 6 }
+  ], [catalog]);
+  assert.equal(batched.excludedBatchRows.length, 2);
+  assert.equal(batched.assignedCount, 1);
+  assert.equal(batched.assignedCardCount, 1);
+  assert.equal(batched.assigned[2][0].item.events[0].episode, 6);
+});
+
+test('catalog keeps unverified series outside the seven weekdays and excludes non-series without adding calendar cards', () => {
+  const series = { provider: 'reanime', id: 'series-a', mal_id: 'reanime:series-a', title: 'Series A', type: 'TV', status: 'RELEASING' };
+  const movie = { provider: 'reanime', id: 'movie-a', mal_id: 'reanime:movie-a', title: 'Movie A', type: 'Movie', status: 'RELEASING' };
+  const finished = { provider: 'reanime', id: 'series-b', mal_id: 'reanime:series-b', title: 'Finished', type: 'TV', status: 'Finished Airing' };
+  const result = model.reconcileProviderScheduleEvidence([], [series, movie, finished]);
+  assert.deepEqual(Array.from(result.unknown, item => item.mal_id), [series.mal_id]);
+  assert.deepEqual(Array.from(result.excludedCatalog, item => item.reason).sort(), ['format-movie', 'not-currently-releasing']);
+  assert.equal(result.assignedCardCount, 0);
+});
+
+test('subtitle and dub entries for the same work, episode, and weekday render as one card with both sources', () => {
+  const catalog = { provider: 'reanime', id: 'series-a', mal_id: 'reanime:series-a', title: 'Series A',
+    anilistId: 410, year: 2026, season: 'FALL', type: 'TV', status: 'RELEASING' };
+  const result = model.reconcileProviderScheduleEvidence([
+    { provider: 'reanime', day: 0, anime: catalog, episode: 5, time: '21:00', track: 'sub' },
+    { provider: 'reanime', day: 0, anime: catalog, episode: 5, time: '21:00', track: 'dub' }
+  ], [catalog]);
+  assert.equal(result.assigned[0].length, 1);
+  assert.equal(result.assignedCardCount, 1);
+  assert.deepEqual(Array.from(result.assigned[0][0].item.events, event => event.track), ['sub', 'dub']);
+  assert.equal(result.duplicateRows, 0, 'different language tracks are preserved as events, not discarded duplicate rows');
+});
+
+test('same work and day from multiple providers remains one card with all episode evidence', () => {
+  const catalog = { provider: 'reanime', id: 'series-a', mal_id: 'reanime:series-a', title: 'Series A',
+    anilistId: 410, year: 2026, season: 'FALL', type: 'TV', status: 'RELEASING' };
+  const miruro = { provider: 'miruro', id: 'mirror-a', mal_id: 'miruro:mirror-a', title: 'Series A',
+    anilistId: 410, year: 2026, season: 'FALL', type: 'TV', status: 'RELEASING' };
+  const result = model.reconcileProviderScheduleEvidence([
+    { provider: 'reanime', day: 0, anime: catalog, episode: 5, time: '19:00' },
+    { provider: 'miruro', day: 0, anime: miruro, episode: 5, time: '22:00' }
+  ], [catalog]);
+  assert.equal(result.assigned[0].length, 1);
+  assert.equal(result.assignedCardCount, 1);
+  assert.deepEqual(Array.from(result.assigned[0][0].item.events, event => event.episode), [5, 5]);
+  assert.deepEqual(Array.from(result.assigned[0][0].item.events, event => event.provider), ['reanime', 'miruro']);
 });
 
 test('provider-site repeated evidence is deduplicated and unmatched schedule rows remain outside catalog counts', () => {
   const catalog = { provider: 'reanime', id: 'series-a', mal_id: 'reanime:series-a', title: 'Series A',
-    anilistId: 410, year: 2026, season: 'FALL', type: 'TV' };
+    anilistId: 410, year: 2026, season: 'FALL', type: 'TV', status: 'RELEASING' };
   const event = { provider: 'reanime', id: 'series-a', mal_id: 'reanime:series-a', title: 'Series A',
-    anilistId: 410, year: 2026, season: 'FALL', type: 'TV' };
+    anilistId: 410, year: 2026, season: 'FALL', type: 'TV', status: 'RELEASING' };
   const result = model.reconcileProviderScheduleEvidence([
     { provider: 'reanime', day: 0, anime: event, episode: 5 },
     { provider: 'reanime', day: 0, anime: event, episode: 5 },

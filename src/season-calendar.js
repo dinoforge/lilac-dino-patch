@@ -1,5 +1,4 @@
 (function (root) {
-  const PROVIDER_LABELS = { reanime: 'RE:Anime', miruro: 'Miruro', animenosub: 'Animenosub', ohli24: '애니24', linkkf: 'Linkkf' };
   const DAYS = ['월', '화', '수', '목', '금', '토', '일'];
   const key = value => String(value || '').normalize('NFKC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
   const positiveId = value => Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : null;
@@ -151,7 +150,37 @@
       actualTime: parts.time, dateOffset: 0, timeZone: TOKYO, sourceTimeZone, representation: 'zoned-local-time' } : null;
   }
   const PROVIDER_NAMES = { reanime: 'RE:Anime', miruro: 'Miruro', animenosub: 'Animenosub', ohli24: '애니24' };
+  const PROVIDER_LABELS = { ...PROVIDER_NAMES, linkkf: 'Linkkf', linkani: '링크애니', anissia: 'Anissia' };
   const SCHEDULE_PROVIDERS = Object.keys(PROVIDER_NAMES);
+  const WEEKLY_SERIES_FORMATS = new Set(['TV', 'TV SERIES', 'TV SHORT', 'ONA', 'WEB SERIES', 'SERIES']);
+  const normalizeStatus = value => String(value || '').normalize('NFKC').toLocaleLowerCase().replace(/[ _-]+/g, ' ').trim();
+  const statusIsInactive = value => /\bnot yet released\b|\bupcoming\b|\bfinished\b|\bcomplete(?:d)?\b|\bended\b|\bcancelled\b|\bcanceled\b|\bhiatus\b|방영예정|종영|완결|결방/.test(normalizeStatus(value));
+  const statusIsActive = value => /\breleasing\b|\bongoing\b|\bairing\b|\bbroadcast(?:ing)?\b|\bcurrently airing\b|\bon air\b|방영중|放送中/.test(normalizeStatus(value));
+  function weeklyFormatDecision(items = []) {
+    const values = items.flatMap(item => [item?.type, item?.format, item?.category]).map(value => String(value || '').normalize('NFKC').toLocaleUpperCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const excluded = values.find(value => /MOVIE|FILM|극장판/.test(value));
+    if (excluded) return { eligible: false, reason: 'format-movie' };
+    if (values.some(value => /OVA|OAD/.test(value))) return { eligible: false, reason: 'format-ova' };
+    if (values.some(value => /SPECIAL|\bSP\b|스페셜/.test(value))) return { eligible: false, reason: 'format-special' };
+    const knownSeries = values.find(value => WEEKLY_SERIES_FORMATS.has(value));
+    return knownSeries ? { eligible: true, format: knownSeries } : { eligible: false, reason: 'format-unverified' };
+  }
+  function weeklyReleaseEligibility(row = {}, candidate = row?.anime || row) {
+    const source = row?.anime || row || {};
+    if (row?.cancelled === true || /\bcancel(?:led|ed)\b|결방/.test(normalizeStatus(row?.airingStatus))) {
+      return { eligible: false, reason: 'cancelled' };
+    }
+    const type = weeklyFormatDecision([source, candidate]);
+    if (!type.eligible) return type;
+    const statuses = [row?.airingStatus, source.status, candidate?.status].map(normalizeStatus).filter(Boolean);
+    if (statuses.some(statusIsInactive)) return { eligible: false, reason: 'not-currently-releasing', format: type.format };
+    if (!statuses.some(statusIsActive)) return { eligible: false, reason: 'release-status-unverified', format: type.format };
+    const episode = Number(row?.episode);
+    if (!Number.isSafeInteger(episode) || episode <= 0) return { eligible: false, reason: 'new-episode-unverified', format: type.format };
+    const eventKind = normalizeStatus(row?.episodeType || row?.kind || row?.episodeKind);
+    if (/special|recap|movie|ova|스페셜|극장판|총집편/.test(eventKind)) return { eligible: false, reason: 'non-regular-episode', format: type.format };
+    return { eligible: true, reason: 'current-week-numbered-release', format: type.format, episode };
+  }
   const externalId = (item, camel, snake) => positiveId(item?.[camel] ?? item?.[snake]);
   function strictProviderScheduleMatch(scheduleItem, candidates = [], provider = '') {
     const source = scheduleItem?.anime || scheduleItem || {};
@@ -192,7 +221,7 @@
   }
 
   function reconcileProviderScheduleEvidence(evidence = [], candidates = []) {
-    const byWork = new Map(), unmatched = [], seen = new Set();
+    const byWork = new Map(), unmatched = [], excludedScheduleRows = [], seen = new Set(), matchedCatalogIds = new Set();
     let duplicateRows = 0;
     for (const row of evidence) {
       const provider = String(row?.provider || ''), day = Number(row?.day);
@@ -206,6 +235,19 @@
         continue;
       }
       const anime = match.anime, workKey = String(anime.mal_id ?? anime.id ?? '');
+      matchedCatalogIds.add(workKey);
+      const eligibility = weeklyReleaseEligibility(row, anime);
+      if (!eligibility.eligible) {
+        const source = row?.anime || row || {};
+        const exclusionKey = `${provider}|${workKey}|${day}|${Number(row.episode) || 0}|${eligibility.reason}`;
+        if (!seen.has(exclusionKey)) {
+          seen.add(exclusionKey);
+          excludedScheduleRows.push({ provider, day, catalogId: workKey, catalogTitle: anime.title || '', episode: Number(row.episode) || null,
+            sourceId: String(source.id ?? row?.id ?? ''), sourceType: source.type || source.format || source.category || '',
+            sourceStatus: source.status || '', airingStatus: row.airingStatus || '', reason: eligibility.reason });
+        }
+        continue;
+      }
       const episode = Number(row.episode) > 0 ? Number(row.episode) : 0;
       const time = String(row.time || ''), track = String(row.track || '');
       const key = `${provider}|${workKey}|${day}|${episode}|${time}|${track}`;
@@ -219,41 +261,131 @@
         sourceTitle: String(row?.anime?.title || row?.title || ''), sourceAniListId: externalId(row?.anime, 'anilistId', 'anilist_id'),
         sourceMalId: externalId(row?.anime, 'malId', 'mal_id'), catalogId: workKey,
         catalogTitle: String(anime.title || ''), catalogYear: year(anime), catalogSeason: String(anime.season || ''),
+        sourceType: String(row?.anime?.type || row?.anime?.format || row?.anime?.category || ''), sourceStatus: String(row?.anime?.status || ''),
+        airingStatus: String(row?.airingStatus || ''), scheduleDate: String(row?.scheduleDate || ''), eligibility: eligibility.reason,
         matchMethod: match.method });
     }
 
-    const assigned = Array.from({ length: 7 }, () => []), conflicts = [], multiDayUnresolved = [];
-    for (const work of byWork.values()) {
+    const excludedBatchRows = [], filteredByWork = new Map();
+    for (const [workKey, work] of byWork) {
+      const byProvider = new Map();
+      for (const event of work.events) {
+        if (!byProvider.has(event.provider)) byProvider.set(event.provider, []);
+        byProvider.get(event.provider).push(event);
+      }
+      const kept = [];
+      for (const [provider, events] of byProvider) {
+        const episodes = [...new Set(events.map(event => event.episode))];
+        if (episodes.length > 1) {
+          for (const event of events) excludedBatchRows.push({ ...event, reason: 'multiple-new-episodes-in-week' });
+        } else kept.push(...events);
+      }
+      if (kept.length) filteredByWork.set(workKey, { anime: work.anime, events: kept });
+    }
+
+    const assigned = Array.from({ length: 7 }, () => []), conflicts = [], multiDayUnresolved = [], assignedWorks = new Set(), conflictWorks = new Set();
+    for (const work of filteredByWork.values()) {
       work.events.sort((a, b) => SCHEDULE_PROVIDERS.indexOf(a.provider) - SCHEDULE_PROVIDERS.indexOf(b.provider)
         || a.episode - b.episode || a.time.localeCompare(b.time));
-      const days = [...work.days].sort((a, b) => a - b);
-      if (days.length === 1) assigned[days[0]].push({ anime: work.anime, item: { events: work.events } });
-      else {
-        const eventKeys = new Map();
-        for (const event of work.events) {
-          if (!event.episode) continue;
-          const eventKey = `ep:${event.episode}:${event.track || '*'}`;
-          if (!eventKeys.has(eventKey)) eventKeys.set(eventKey, new Set());
-          eventKeys.get(eventKey).add(event.day);
+      const episodeNumbers = [...new Set(work.events.map(event => event.episode))];
+      if (episodeNumbers.length > 1) {
+        const days = [...new Set(work.events.map(event => event.day))].sort((a, b) => a - b);
+        conflicts.push({ anime: work.anime, days, events: work.events, kind: 'providers-disagree-on-episode', episodes: episodeNumbers });
+        conflictWorks.add(String(work.anime.mal_id ?? work.anime.id ?? ''));
+        continue;
+      }
+      const eventsByDay = new Map();
+      const keepOnDay = (day, events) => {
+        if (!eventsByDay.has(day)) eventsByDay.set(day, []);
+        eventsByDay.get(day).push(...events);
+      };
+      const episodeGroups = new Map();
+      const unknownEpisodeEvents = [];
+      for (const event of work.events) {
+        if (!event.episode) { unknownEpisodeEvents.push(event); continue; }
+        const eventKey = `ep:${event.episode}`;
+        if (!episodeGroups.has(eventKey)) episodeGroups.set(eventKey, []);
+        episodeGroups.get(eventKey).push(event);
+      }
+      for (const [eventKey, events] of episodeGroups) {
+        const days = [...new Set(events.map(event => event.day))].sort((a, b) => a - b);
+        if (days.length > 1) {
+          conflicts.push({ anime: work.anime, days, events, kind: 'same-episode-different-day', episode: Number(eventKey.slice(3)) });
+          conflictWorks.add(String(work.anime.mal_id ?? work.anime.id ?? ''));
+          continue;
         }
-        const verifiedConflict = [...eventKeys.values()].some(eventDays => eventDays.size > 1);
-        (verifiedConflict ? conflicts : multiDayUnresolved).push({ anime: work.anime, days, events: work.events,
-          kind: verifiedConflict ? 'same-episode-different-day' : 'multiple-days-unresolved' });
+        keepOnDay(days[0], events);
+        assignedWorks.add(String(work.anime.mal_id ?? work.anime.id ?? ''));
+      }
+      if (unknownEpisodeEvents.length) {
+        const days = [...new Set(unknownEpisodeEvents.map(event => event.day))].sort((a, b) => a - b);
+        if (days.length > 1) {
+          multiDayUnresolved.push({ anime: work.anime, days, events: unknownEpisodeEvents, kind: 'multiple-days-unresolved' });
+          conflictWorks.add(String(work.anime.mal_id ?? work.anime.id ?? ''));
+        } else {
+          keepOnDay(days[0], unknownEpisodeEvents);
+          assignedWorks.add(String(work.anime.mal_id ?? work.anime.id ?? ''));
+        }
+      }
+      for (const [day, events] of eventsByDay) {
+        events.sort((a, b) => SCHEDULE_PROVIDERS.indexOf(a.provider) - SCHEDULE_PROVIDERS.indexOf(b.provider)
+          || a.episode - b.episode || a.time.localeCompare(b.time));
+        assigned[day].push({ anime: work.anime, item: { events } });
       }
     }
-    const matchedIds = new Set(byWork.keys());
-    const unknown = candidates.filter(anime => !matchedIds.has(String(anime?.mal_id ?? anime?.id ?? '')));
+    const excludedCatalog = [], unverifiedCatalog = [];
+    for (const anime of candidates) {
+      const workKey = String(anime?.mal_id ?? anime?.id ?? '');
+      if (!workKey || assignedWorks.has(workKey) || conflictWorks.has(workKey) || filteredByWork.has(workKey)) continue;
+      const type = weeklyFormatDecision([anime]);
+      if (!type.eligible) excludedCatalog.push({ catalogId: workKey, title: anime?.title || '', reason: type.reason });
+      else if ([anime?.status].filter(Boolean).some(statusIsInactive)) excludedCatalog.push({ catalogId: workKey, title: anime?.title || '', reason: 'not-currently-releasing' });
+      else unverifiedCatalog.push({ ...anime, weeklyStatusReason: matchedCatalogIds.has(workKey) ? 'schedule-evidence-insufficient' : 'no-current-week-release' });
+    }
+    const unknown = unverifiedCatalog;
     const matchedCount = byWork.size;
-    const scheduleEvidence = [...byWork.values()].flatMap(work => work.events);
-    return { assigned, conflicts, multiDayUnresolved, unknown, matchedCount, scheduleEvidence,
-      assignedCount: assigned.reduce((sum, day) => sum + day.length, 0),
+    const scheduleEvidence = [...filteredByWork.values()].flatMap(work => work.events);
+    const exclusionCounts = {};
+    for (const item of excludedCatalog) exclusionCounts[item.reason] = (exclusionCounts[item.reason] || 0) + 1;
+    for (const item of excludedScheduleRows) exclusionCounts[item.reason] = (exclusionCounts[item.reason] || 0) + 1;
+    for (const item of excludedBatchRows) exclusionCounts[item.reason] = (exclusionCounts[item.reason] || 0) + 1;
+    return { assigned, conflicts, multiDayUnresolved, unknown, matchedCount, scheduleEvidence, excludedScheduleRows, excludedBatchRows, excludedCatalog,
+      weeklyReleaseCount: filteredByWork.size, unverifiedWeeklyCount: unknown.length, excludedCatalogCount: excludedCatalog.length, exclusionCounts,
+      assignedCount: assignedWorks.size, assignedCardCount: assigned.reduce((sum, day) => sum + day.length, 0),
       conflictCount: conflicts.length, multiDayUnresolvedCount: multiDayUnresolved.length,
       unmatched, unmatchedCount: unmatched.length, identifierConflictCount: unmatched.filter(row => row.reason === 'identifier-conflict').length,
       metadataMismatchCount: unmatched.filter(row => row.reason === 'season-year-format-mismatch').length,
       duplicateRows };
   }
   root.LilacSeasonCalendarModel = { aliases, compatible, resolve, year, part, format, normalizeJapaneseAiring,
-    SCHEDULE_PROVIDERS, PROVIDER_NAMES, strictProviderScheduleMatch, reconcileProviderScheduleEvidence };
+    SCHEDULE_PROVIDERS, PROVIDER_NAMES, strictProviderScheduleMatch, weeklyFormatDecision, weeklyReleaseEligibility, reconcileProviderScheduleEvidence };
+
+  const providerScheduleCache = new Map(), providerSchedulePending = new Map();
+  const providerScheduleTtlMs = 5 * 60 * 1000;
+  const providerScheduleCounts = { requests: 0, cacheHits: 0, inFlightJoins: 0 };
+  function requestProviderSchedule(provider, day, dateKey, options = {}) {
+    const key = `${provider}|${dateKey}`;
+    const cached = providerScheduleCache.get(key);
+    if (!options.refresh && cached && Date.now() - cached.at < providerScheduleTtlMs) {
+      providerScheduleCounts.cacheHits++;
+      return Promise.resolve(cached.value);
+    }
+    if (providerSchedulePending.has(key)) {
+      providerScheduleCounts.inFlightJoins++;
+      return providerSchedulePending.get(key);
+    }
+    providerScheduleCounts.requests++;
+    const work = Promise.resolve().then(() => root.lilac.providerSchedule(provider, day)).then(value => {
+      if (value && Array.isArray(value.items)) providerScheduleCache.set(key, { at: Date.now(), value });
+      return value;
+    }).finally(() => providerSchedulePending.delete(key));
+    providerSchedulePending.set(key, work);
+    return work;
+  }
+  root.LilacProviderScheduleClient = {
+    get: requestProviderSchedule,
+    diagnostics: () => ({ ...providerScheduleCounts, cachedDays: providerScheduleCache.size, pendingDays: providerSchedulePending.size })
+  };
 
   const rootView = document.querySelector('#searchView'), container = document.querySelector('#seasonCalendarView');
   const grid = document.querySelector('#seasonCalendarGrid'), unknownGrid = document.querySelector('#seasonCalendarUnknown');
@@ -343,20 +475,24 @@
     const current = currentQuarter(), selectedYear = Number(selection?.year || current.year), selectedQuarter = Number(selection?.quarter || current.quarter);
     const isCurrentQuarter = selectedYear === current.year && selectedQuarter === current.quarter;
     const emptyAssignments = Array.from({ length: 7 }, () => []);
-    diagnostics = { provider: 'providerSchedule', preferredProvider: 'rean ime'.replace(' ', ''), catalogProvider,
+    diagnostics = { provider: 'providerSchedule', configuredProvider: catalogProvider,
       scheduleBasis: 'provider-site', weekTimeZone: 'Asia/Seoul', selectedYear, selectedQuarter, isCurrentQuarter,
-      catalogCount: shows.length, scheduleRowCount: 0, matchedCatalogCount: 0, assignedCount: 0, unknownCount: shows.length,
+      catalogCount: shows.length, scheduleRowCount: 0, matchedCatalogCount: 0, weeklyReleaseCount: 0, unverifiedWeeklyCount: shows.length,
+      excludedCatalogCount: 0, exclusionCounts: {}, assignedCount: 0, unknownCount: shows.length,
       conflictCount: 0, multiDayUnresolvedCount: 0, duplicateRows: 0, unmatchedScheduleCount: 0,
-      identifierConflictCount: 0, metadataMismatchCount: 0, sources: {}, dayResults: [] };
+      identifierConflictCount: 0, metadataMismatchCount: 0, sources: {}, dayResults: [],
+      requestClient: root.LilacProviderScheduleClient?.diagnostics?.() || null };
     document.querySelector('#seasonCalendarTitle').textContent = (label || '이번 시즌') + ' 주간 편성표';
-    document.querySelector('#seasonCalendarSubtitle').textContent = shows.length + '개 작품 · 공급 사이트 일정 기준';
+    document.querySelector('#seasonCalendarSubtitle').textContent = shows.length + '개 작품 · 공급 사이트 일정 기준 · RE:Anime·Miruro·Animenosub·애니24 일정 통합';
     document.querySelector('#seasonCalendarUnknownSection').classList.remove('hidden');
     document.querySelector('#seasonCalendarConflictSection').classList.add('hidden');
     if (!isCurrentQuarter) {
       document.querySelector('#seasonCalendarStatus').textContent = '공식 공급 사이트 일정 API는 현재 주간 일정만 제공해 선택한 분기의 요일을 배정하지 않았습니다.';
       showDays(dates, emptyAssignments, Array.from({ length: 7 }, () => ({ state: 'unsupported' })));
       showUnmatched(shows, 'historical-not-supported');
-      diagnostics.state = 'historical-not-supported'; window.LilacSeasonCalendarDiagnostics = diagnostics; return;
+      diagnostics.state = 'historical-not-supported';
+      diagnostics.requestClient = root.LilacProviderScheduleClient?.diagnostics?.() || null;
+      window.LilacSeasonCalendarDiagnostics = diagnostics; return;
     }
 
     const model = window.LilacSeasonCalendarModel;
@@ -392,10 +528,11 @@
       const successfulDays = dayResults.filter(result => result.state === 'success').length;
       const providerItems = dayResults.flatMap((result, day) => result.state === 'success'
         ? result.items.map(item => ({ provider, day, anime: item?.anime || item, episode: item?.episode,
+          airingStatus: String(item?.airingStatus || ''), scheduleDate: dates[day].toISOString().slice(0, 10), currentWeek: true,
           reportedTime: String(item?.time || ''),
           time: result.timed && result.note.includes('한국 시간') && /^\d{2}:\d{2}$/.test(String(item?.time || '')) ? String(item.time) : '',
           timed: result.timed === true && result.note.includes('한국 시간'),
-          timeBasis: result.timed && result.note.includes('한국 시간') ? '한국 시간' : '', track: item?.track,
+          timeBasis: result.timed && result.note.includes('한국 시간') ? '한국 시간' : '', track: item?.track, cancelled: item?.cancelled === true,
           sourceNote: result.note, sourceId: item?.id })) : []);
       evidence.push(...providerItems);
       const sourceMatchedCount = providerItems.reduce((count, row) => count + (model.strictProviderScheduleMatch(row, shows, provider).anime ? 1 : 0), 0);
@@ -428,7 +565,15 @@
         identifierConflicts: reasons['identifier-conflict'] || 0 }];
     }));
     diagnostics.matchedCatalogCount = reconciled.matchedCount;
+    diagnostics.weeklyReleaseCount = reconciled.weeklyReleaseCount;
+    diagnostics.unverifiedWeeklyCount = reconciled.unverifiedWeeklyCount;
+    diagnostics.excludedCatalogCount = reconciled.excludedCatalogCount;
+    diagnostics.exclusionCounts = reconciled.exclusionCounts;
+    diagnostics.excludedScheduleRows = reconciled.excludedScheduleRows;
+    diagnostics.excludedBatchRows = reconciled.excludedBatchRows;
+    diagnostics.excludedCatalog = reconciled.excludedCatalog;
     diagnostics.assignedCount = reconciled.assignedCount;
+    diagnostics.assignedCardCount = reconciled.assignedCardCount;
     diagnostics.unknownCount = reconciled.unknown.length;
     diagnostics.conflictCount = reconciled.conflictCount;
     diagnostics.multiDayUnresolvedCount = reconciled.multiDayUnresolvedCount;
@@ -441,12 +586,13 @@
     diagnostics.dayResults = dayStates;
     diagnostics.providerErrors = Object.fromEntries(providerResults.map(result => [result.provider,
       result.dayResults.map((day, index) => day.state === 'success' ? null : { day: index, state: day.state, code: day.errorCode }).filter(Boolean)]));
+    diagnostics.requestClient = root.LilacProviderScheduleClient?.diagnostics?.() || null;
     showDays(dates, reconciled.assigned, dayStates);
     showUnmatched(reconciled.unknown, overallState);
     showConflicts(reconciled.conflicts, reconciled.multiDayUnresolved);
     const sourceNote = providerResults.map(result => `${model.PROVIDER_NAMES[result.provider]} ${result.successfulDays}/7${result.sourceMatchedCount ? ` · ${result.sourceMatchedCount}행 연결` : ''}`)
       .join(' · ');
-    document.querySelector('#seasonCalendarStatus').textContent = `${overallState === 'complete' ? '공급 사이트 일정 응답 완료' : overallState === 'partial' ? '공급 사이트 일정 일부 확인 불가' : '공급 사이트 일정 확인 불가'} · ${sourceNote} · 요일 배정 ${diagnostics.assignedCount}개 · 미확인 ${diagnostics.unknownCount}개 · 회차 요일 충돌 ${diagnostics.conflictCount}개 · 복수 요일 확인 필요 ${diagnostics.multiDayUnresolvedCount}개 · 중복 ${diagnostics.duplicateRows}건 · 미매칭 ${diagnostics.unmatchedScheduleCount}행`;
+    document.querySelector('#seasonCalendarStatus').textContent = `${overallState === 'complete' ? '공급 사이트 일정 응답 완료' : overallState === 'partial' ? '공급 사이트 일정 일부 확인 불가' : '공급 사이트 일정 확인 불가'} · ${sourceNote} · 주간 회차 확인 ${diagnostics.weeklyReleaseCount}개 · 요일 배정 ${diagnostics.assignedCount}개 · 미확인 ${diagnostics.unverifiedWeeklyCount}개 · 제외 ${diagnostics.excludedCatalogCount}개 · 일정 충돌 ${diagnostics.conflictCount}개 · 중복 ${diagnostics.duplicateRows}건 · 미매칭 ${diagnostics.unmatchedScheduleCount}행`;
     diagnostics.state = overallState;
     window.LilacSeasonCalendarDiagnostics = diagnostics;
   }
