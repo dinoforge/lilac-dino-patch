@@ -449,23 +449,25 @@
   }
   function showUnmatched(items, scheduleState) {
     const heading = document.querySelector('#seasonCalendarUnknownTitle'), note = document.querySelector('#seasonCalendarUnknownNote');
-    heading.textContent = scheduleState === 'failed' ? '일정 확인 불가 작품' : '요일 미확인 작품';
+    heading.textContent = '일정 확인 불가 작품';
     document.querySelector('#seasonCalendarUnknownCount').textContent = `${items.length}개`;
     if (scheduleState === 'failed') note.textContent = '공급 사이트 일정 조회에 실패해 작품에 요일을 배정하지 않았습니다.';
     else if (scheduleState === 'partial') note.textContent = '일정 출처 일부에 응답이 없어 확인되지 않은 작품은 요일을 배정하지 않았습니다.';
     else if (scheduleState === 'historical-not-supported') note.textContent = '공식 공급 사이트 일정 API는 현재 주간 일정만 제공해 이 분기의 요일을 확인하지 않았습니다.';
-    else note.textContent = '선택한 공급 사이트 일정에서 확인되지 않은 작품입니다. 제공 사이트의 업로드 일정은 일본 TV 방송 요일을 뜻하지 않습니다.';
-    const badge = scheduleState === 'failed' ? '일정 확인 불가' : '요일 확인 안 됨';
+    else note.textContent = '공급원 공개 일정에서 선택 분기의 현재 주간 회차와 공개 요일을 확인하지 못했습니다. 이는 일본 TV 방송 요일이 없다는 뜻이 아닙니다.';
+    const badge = '일정 확인 불가';
     unknownGrid.replaceChildren(...items.map(anime => makeCard(anime, [anime.year, anime.type].filter(Boolean).join(' · '), badge)));
     document.querySelector('#seasonCalendarUnknownSection').classList.toggle('hidden', items.length === 0);
   }
   function showConflicts(items, unresolved = []) {
     const section = document.querySelector('#seasonCalendarConflictSection');
-    const rows = [...items.map(item => ({ ...item, badge: '회차 요일 충돌' })), ...unresolved.map(item => ({ ...item, badge: '복수 요일 · 회차 확인 불가' }))];
+    const rows = [...items.map(item => ({ ...item, badge: '일정 충돌' })),
+      ...unresolved.map(item => ({ ...item, badge: '일정 충돌' }))];
     document.querySelector('#seasonCalendarConflictCount').textContent = `${rows.length}개`;
     conflictGrid.replaceChildren(...rows.map(({ anime, events, badge }) => {
+      const trackLabels = { raw: '원어', sub: '자막', dub: '더빙' };
       const detail = events.map(event => [PROVIDER_NAMES[event.provider] || event.provider, DAYS[event.day], event.episode ? `${event.episode}화` : '',
-        event.timed && event.time && event.timeBasis ? `${event.time} · ${event.timeBasis}` : ''].filter(Boolean).join(' ')).join(' / ');
+        trackLabels[event.track] || '', event.timed && event.time && event.timeBasis ? `${event.time} · ${event.timeBasis}` : ''].filter(Boolean).join(' ')).join(' / ');
       const card = makeCard(anime, detail, badge); card.title = detail; return card;
     }));
     section.classList.toggle('hidden', rows.length === 0);
@@ -483,7 +485,7 @@
       identifierConflictCount: 0, metadataMismatchCount: 0, sources: {}, dayResults: [],
       requestClient: root.LilacProviderScheduleClient?.diagnostics?.() || null };
     document.querySelector('#seasonCalendarTitle').textContent = (label || '이번 시즌') + ' 주간 편성표';
-    document.querySelector('#seasonCalendarSubtitle').textContent = shows.length + '개 작품 · 공급 사이트 일정 기준 · RE:Anime·Miruro·Animenosub·애니24 일정 통합';
+    document.querySelector('#seasonCalendarSubtitle').textContent = shows.length + '개 작품 · 공급원 공개 일정 · RE:Anime·Miruro·Animenosub·애니24';
     document.querySelector('#seasonCalendarUnknownSection').classList.remove('hidden');
     document.querySelector('#seasonCalendarConflictSection').classList.add('hidden');
     if (!isCurrentQuarter) {

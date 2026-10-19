@@ -125,12 +125,16 @@ test('provider-site schedule matching prefers verified IDs and rejects conflicti
   assert.equal(rejected.reason, 'identifier-conflict');
 });
 
-test('the calendar queries providerSchedule directly and labels the supplier-site basis', () => {
+test('the calendar queries providerSchedule and labels public schedules without implying Japanese TV airtimes', () => {
   assert.deepEqual(Array.from(model.SCHEDULE_PROVIDERS, provider => model.PROVIDER_NAMES[provider]),
     ['RE:Anime', 'Miruro', 'Animenosub', '애니24']);
   assert.match(source, /window\.lilac\.providerSchedule\(provider, providerDay\)/);
   assert.doesNotMatch(source, /window\.lilac\.japaneseSeasonSchedule\(/);
-  assert.match(source, /공급 사이트 일정 기준/);
+  assert.match(source, /공급원 공개 일정/);
+  assert.match(source, /heading\.textContent = '일정 확인 불가 작품'/);
+  assert.match(source, /const badge = '일정 확인 불가'/);
+  assert.match(source, /badge: '일정 충돌'/);
+  assert.match(source, /trackLabels\[event\.track\]/);
   assert.doesNotMatch(source, /일본 방영 기준 · JST/);
 });
 
