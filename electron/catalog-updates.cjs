@@ -22,7 +22,7 @@ function decodeData(values) {
 
 function createCatalogUpdates(deps) {
   const cache = new Map();
-  const supported = ['reanime', 'miruro', 'animenosub', 'ohli24'];
+  const supported = ['reanime', 'miruro', 'animenosub', 'ohli24', 'linkani'];
 
   async function cached(key, load) {
     const previous = cache.get(key);
@@ -101,8 +101,11 @@ function createCatalogUpdates(deps) {
       if (provider === 'animenosub') {
         const $ = cheerio.load(await deps.animenosubFetch(`${deps.animenosubBase}/anime/?order=update&page=${number}`));
         data = deps.animenosubItems($('article.bs').map((_, node) => $.html(node)).get().join(''));
+      } else if (provider === 'linkani') {
+        const page = Math.max(1, number);
+        data = deps.linkaniItems(await deps.linkaniFetch(`${deps.linkaniBase}/list/2/${page > 1 ? `page/${page}/` : ''}`));
       } else {
-        data = deps.ohliItems(await deps.ohliFetch(`${deps.ohliBase}/ing`));
+        data = await deps.ohliAiring();
       }
       return {
         data,

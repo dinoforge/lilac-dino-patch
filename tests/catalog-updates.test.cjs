@@ -3,11 +3,32 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const cheerio = require('cheerio');
 const { createCatalogUpdates, decodeData } = require('../electron/catalog-updates.cjs');
 
 test('Svelte data references resolve without evaluating site scripts', () => {
   const payload = [{ latestAired: 1 }, [2, 4], { anime_id: 3 }, 'one', { anime_id: 5 }, 'two'];
   assert.deepEqual(decodeData(payload).latestAired.map(item => item.anime_id), ['one', 'two']);
+});
+
+test('LinkAni parser keeps provider-local IDs and only reads year and episode counts present on the card', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
+  const start = main.indexOf('function linkaniItems('), end = main.indexOf('\nasync function linkaniDetail', start);
+  assert.ok(start >= 0 && end > start, 'Missing LinkAni list parser');
+  const context = vm.createContext({
+    cheerio, LINKANI_WEB: 'https://linkani.test',
+    absoluteUrl: (value, base) => { try { return new URL(value, base).href; } catch { return ''; } }
+  });
+  vm.runInContext(`${main.slice(start, end)}\nglobalThis.parse = linkaniItems;`, context);
+  const html = '<div class="vod-item"><a href="/ani/7421/"><b class="vod-item-title">작품 제목</b>'
+    + '<span class="vod-item-desc">8 / 12 · 2026</span><i data-original="/poster.jpg"></i><span class="vod-item-score">8.4</span></a></div>'
+    + '<div class="vod-item"><a href="/ani/7422/"><b class="vod-item-title"></b></a></div>';
+  const items = context.parse(html);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].mal_id, 'linkani:7421');
+  assert.equal(items[0].year, '2026');
+  assert.equal(items[0].availableEpisodes, 8);
+  assert.equal(items[0].images.webp.large_image_url, 'https://linkani.test/poster.jpg');
 });
 
 test('Re:Anime update results sort newest first, paginate, and reuse one snapshot', async () => {
@@ -70,13 +91,17 @@ test('Animenosub and 애니24 use their update feeds, while unsupported sources 
     animenosubFetch: async url => { requests.push(url); return '<article class="bs"><a href="/anime/series-1">series-1</a></article>'; },
     animenosubItems: html => html.includes('series-1') ? [{ mal_id: 'series-1' }] : [],
     ohliBase: 'https://ohli.test',
-    ohliFetch: async url => { requests.push(url); return 'airing list'; },
-    ohliItems: html => html === 'airing list' ? [{ mal_id: 'ohli-1' }] : []
+    ohliAiring: async () => { requests.push('https://ohli.test/방영중'); return [{ mal_id: 'ohli-1' }]; },
+    linkaniBase: 'https://linkani.test',
+    linkaniFetch: async url => { requests.push(url); return `linkani page ${url}`; },
+    linkaniItems: html => [{ mal_id: html.includes('page/2') ? 'linkani-2' : 'linkani-1' }]
   });
 
   const first = await updates.page('animenosub', 0);
   const cached = await updates.page('animenosub', 0);
   const ohli = await updates.page('ohli24', 0);
+  const linkani = await updates.page('linkani', 0);
+  const linkaniNext = await updates.page('linkani', linkani.nextOffset);
   assert.equal(first.data[0].mal_id, 'series-1');
   assert.equal(first.nextOffset, 2);
   assert.equal(first.done, false);
@@ -84,9 +109,12 @@ test('Animenosub and 애니24 use their update feeds, while unsupported sources 
   assert.match(requests[0], /\/anime\/\?order=update&page=1$/);
   assert.equal(ohli.data[0].mal_id, 'ohli-1');
   assert.equal(ohli.done, true);
-  assert.equal(requests[1], 'https://ohli.test/ing');
-  assert.deepEqual(updates.supported, ['reanime', 'miruro', 'animenosub', 'ohli24']);
-  await assert.rejects(updates.page('linkani', 0), /최근 업데이트순/);
+  assert.equal(requests[1], 'https://ohli.test/방영중');
+  assert.deepEqual(updates.supported, ['reanime', 'miruro', 'animenosub', 'ohli24', 'linkani']);
+  assert.equal(linkani.data[0].mal_id, 'linkani-1');
+  assert.equal(linkaniNext.data[0].mal_id, 'linkani-2');
+  assert.equal(requests[2], 'https://linkani.test/list/2/');
+  assert.equal(requests[3], 'https://linkani.test/list/2/page/2/');
   await assert.rejects(updates.page('linkkf', 0), /최근 업데이트순/);
 });
 
@@ -105,15 +133,15 @@ test('recent update sort is wired only through the existing source catalog loade
   assert.ok(preload.includes("providerCatalog: (provider, query = '', offset = 0, sort = '')"));
 });
 
-test('the renderer update feed is connected through preload and IPC without adding LinkAni', () => {
+test('the renderer update feed exposes only supported sources and keeps Linkkf outside it', () => {
   const root = path.join(__dirname, '..');
   const main = fs.readFileSync(path.join(root, 'electron/main.cjs'), 'utf8');
   const preload = fs.readFileSync(path.join(root, 'electron/preload.cjs'), 'utf8');
   const ui = fs.readFileSync(path.join(root, 'src/catalog-updates.js'), 'utf8');
   assert.ok(main.includes("ipcMain.handle('catalog:updates', (_, provider, offset) => catalogUpdates.page(String(provider || ''), offset))"));
   assert.ok(preload.includes("catalogUpdates: (provider, offset = 0) => ipcRenderer.invoke('catalog:updates', provider, offset)"));
-  assert.match(ui, /const supported = \['reanime', 'miruro', 'animenosub', 'ohli24'\]/);
-  assert.doesNotMatch(ui, /linkani/i);
+  assert.match(ui, /const supported = \['reanime', 'miruro', 'animenosub', 'ohli24', 'linkani'\]/);
+  assert.match(ui, /const librarySupported = \[\.\.\.supported, 'linkkf'\]/);
 });
 
 test('Animenosub counts the newest uploaded episode across duplicate listing cards', () => {
