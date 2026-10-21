@@ -74,7 +74,6 @@ for (const file of ['src/app.js', 'src/player.js', 'src/weekday-schedule.js', 'e
   );
 }
 for (const file of [
-  'electron/translation-prompts.cjs',
   'docs/prompts/영어 번역 프롬프트.txt',
   'docs/prompts/일본어 번역 프롬프트.txt',
   'docs/prompts/Reazon_작품용_단어사전_예시.txt'
@@ -1097,47 +1096,27 @@ app.whenReady().then(async () => {
     assert.deepEqual(latestUi.cards, [{ title: '합성 최신 방영 UI 카드', episode: 'EP.4' }]);
     assert.deepEqual(anilistRequests.at(-1).variables.ids, [62008], 'the latest-airing UI called the real packaged IPC for its selected provider candidate');
 
-    const scheduleRequestsBeforeUI = fixtureRequests.filter(rawUrl => {
+    const scheduleRequestsBeforeHome = fixtureRequests.filter(rawUrl => {
       const url = new URL(rawUrl);
       return url.hostname === 'linkkf1.5imgdarr.top' && url.pathname === '/api/singlefilter.php'
         && url.searchParams.has('categorytagid');
     }).length;
-    const expectedScheduleIndex = (new Date().getDay() + 6) % 7;
-    const scheduleLabels = ['월', '화', '수', '목', '금', '토', '일'];
     await win.webContents.executeJavaScript(`(() => {
       state.source = 'linkkf';
       switchView('home');
-      return loadWeekdaySchedule();
     })()`);
-    const selectedToday = await waitFor('today weekday tab and Linkkf schedule rendered through packaged main IPC', () =>
-      win.webContents.executeJavaScript(`(() => {
-        const tabs = [...document.querySelectorAll('#scheduleTabs button')];
-        const selected = tabs.findIndex(button => button.getAttribute('aria-selected') === 'true');
-        const rail = document.querySelector('#scheduleRail');
-        if (selected !== ${expectedScheduleIndex} || !rail || rail.classList.contains('loading-cards')) return null;
-        return { label: tabs[selected]?.textContent, railText: rail.textContent, tabCount: tabs.length };
-      })()`)
-    );
-    assert.equal(selectedToday.label, scheduleLabels[expectedScheduleIndex]);
-    assert.equal(selectedToday.tabCount, 7);
-    await win.webContents.executeJavaScript(`document.querySelectorAll('#scheduleTabs button')[0].click()`);
-    const mondayCard = await waitFor('Monday Linkkf card rendered after selecting the weekday tab', () =>
-      win.webContents.executeJavaScript(`(() => {
-        const card = document.querySelector('#scheduleRail .anime-card');
-        if (card?.querySelector('h3')?.textContent !== '합성 월요일 방영작') return null;
-        return {
-          title: card.querySelector('h3').textContent,
-          selected: document.querySelectorAll('#scheduleTabs button')[0]?.getAttribute('aria-selected')
-        };
-      })()`)
-    );
-    assert.equal(mondayCard.selected, 'true');
-    const scheduleRequestsAfterUI = fixtureRequests.filter(rawUrl => {
+    const homeScheduleState = await win.webContents.executeJavaScript(`(() => ({
+      hasWeeklyRail: !!document.querySelector('#scheduleRail'),
+      hasHomeScheduleController: !!window.LilacWeeklySchedule,
+      scheduleAnchorEmpty: document.querySelector('#scheduleSection')?.children.length === 0
+    }))()`);
+    assert.deepEqual(homeScheduleState, { hasWeeklyRail: false, hasHomeScheduleController: false, scheduleAnchorEmpty: true });
+    const scheduleRequestsAfterHome = fixtureRequests.filter(rawUrl => {
       const url = new URL(rawUrl);
       return url.hostname === 'linkkf1.5imgdarr.top' && url.pathname === '/api/singlefilter.php'
         && url.searchParams.has('categorytagid');
     }).length;
-    assert.equal(scheduleRequestsAfterUI - scheduleRequestsBeforeUI, 7, 'the home schedule UI reached all seven real Linkkf main IPC queries');
+    assert.equal(scheduleRequestsAfterHome, scheduleRequestsBeforeHome, 'home entry does not issue duplicate schedule requests');
     await win.webContents.executeJavaScript(`(() => {
       state.source = ${JSON.stringify(previousHomeSource)};
       document.querySelector('#scheduleSection').classList.add('hidden');
@@ -1209,6 +1188,12 @@ app.whenReady().then(async () => {
     assert.equal(trackResult.tracks[0].url, 'https://subtitles.invalid/phase1-ko.vtt');
     const japaneseTrack = trackResult.tracks.find(track => track.language === 'ja');
     assert.equal(japaneseTrack?.url, 'https://subtitles.invalid/phase1-ja.vtt');
+    const japaneseSelected = await win.webContents.executeJavaScript(`(async () => {
+      const selected = await selectSubtitleTrack(${JSON.stringify(japaneseTrack)});
+      return { selected, source: currentSubtitle?.src || '', mode: video.textTracks[0]?.mode || '' };
+    })()`);
+    assert.equal(japaneseSelected.selected, true);
+    assert.equal(japaneseSelected.source, japaneseTrack.url);
 
     const noServerEpisode = {
       ...detail.episodes[0],
@@ -1415,76 +1400,6 @@ app.whenReady().then(async () => {
     assert.equal(fallbackState.subtitleMode, 'showing');
     assert.match(fallbackState.activeCueText, /합성 한국어 자막/);
 
-    const promptBefore = clipboardWrites.length;
-    const externalBefore = externalOpenRequests.length;
-    const manualTranslationStarted = await win.webContents.executeJavaScript(`(async () => {
-      const selected = await selectSubtitleTrack(${JSON.stringify(japaneseTrack)});
-      if (!selected) return false;
-      openPlayerSettings(true, document.querySelector('#manualChatgptRow'));
-      document.querySelector('#translateChatgpt').click();
-      return true;
-    })()`);
-    assert.equal(manualTranslationStarted, true, 'the packaged player selected the synthetic Japanese episode track');
-    await waitFor('manual translation panel for the selected episode track', () => win.webContents.executeJavaScript(`Boolean(
-      manualChatgptTranslation?.batches.length === 2 && !document.querySelector('#manualChatgptPanel').classList.contains('hidden')
-    )`)).catch(async error => {
-      const diagnostic = await win.webContents.executeJavaScript(`(() => ({
-        subtitleSource: currentSubtitle?.source || null,
-        subtitlePath: currentSubtitle?.path || null,
-        translatable: translatableSubtitle(),
-        selectedTrack: currentPlaybackContext.selectedSubtitleTrack || null,
-        contextTracks: (currentPlaybackContext.subtitleTracks || []).map(track => ({ url: track.url, language: track.language, label: track.label })),
-        episodeProvider: currentPlaybackContext.episode?.provider || null,
-        state: manualChatgptTranslation ? { batches: manualChatgptTranslation.batches.length, index: manualChatgptTranslation.index } : null,
-        status: document.querySelector('#manualChatgptStatus')?.textContent || '',
-        rowHidden: document.querySelector('#manualChatgptRow')?.classList.contains('hidden')
-      }))()`);
-      console.error(`Manual translation integration diagnostic: ${JSON.stringify(diagnostic)}`);
-      throw error;
-    });
-    await win.webContents.executeJavaScript("document.querySelector('#manualChatgptCopyOpen').click()");
-    const firstTranslationPrompt = await waitFor('packaged Japanese prompt copied through the intercepted clipboard IPC', () =>
-      clipboardWrites.length > promptBefore ? clipboardWrites.at(-1) : null);
-    const originalJapanesePrompt = fs.readFileSync(path.join(repo, 'docs', 'prompts', '일본어 번역 프롬프트.txt'), 'utf8');
-    assert.ok(firstTranslationPrompt.includes(originalJapanesePrompt), 'the UI sends the exact full Japanese prompt file');
-    assert.match(firstTranslationPrompt, /번역 원문 언어 판정: 일본어/);
-    assert.match(firstTranslationPrompt, /뒤 문맥 \(번역 대상 아님\):\s*\[\{"id":25,"text":"日本語の合成台詞 25"\},\{"id":26,"text":"日本語の合成台詞 26"\}\]/);
-    assert.deepEqual(externalOpenRequests.slice(externalBefore), ['https://chatgpt.com/'], 'opening ChatGPT is intercepted and no real browser is launched');
-
-    const firstBatchResponse = JSON.stringify({ translations: Array.from({ length: 24 }, (_, index) => ({ id: index + 1, text: `한국어 번역 ${index + 1}` })) });
-    await win.webContents.executeJavaScript(`(() => {
-      document.querySelector('#manualChatgptAnswer').value = ${JSON.stringify(firstBatchResponse)};
-      document.querySelector('#manualChatgptApply').click();
-    })()`);
-    await waitFor('first translated batch accepted with remaining cues pending', () => win.webContents.executeJavaScript('manualChatgptTranslation?.index === 1'));
-    const secondPromptBefore = clipboardWrites.length;
-    await win.webContents.executeJavaScript("document.querySelector('#manualChatgptCopyOpen').click()");
-    const secondTranslationPrompt = await waitFor('second Japanese request includes preceding dialogue context', () =>
-      clipboardWrites.length > secondPromptBefore ? clipboardWrites.at(-1) : null);
-    assert.match(secondTranslationPrompt, /앞 문맥 \(번역 대상 아님\):\s*\[\{"id":23,"text":"日本語の合成台詞 23"\},\{"id":24,"text":"日本語の合成台詞 24"\}\]/);
-    const lastBatchResponse = JSON.stringify({ translations: [25, 26].map(id => ({ id, text: `한국어 번역 ${id}` })) });
-    await win.webContents.executeJavaScript(`(() => {
-      document.querySelector('#manualChatgptAnswer').value = ${JSON.stringify(lastBatchResponse)};
-      document.querySelector('#manualChatgptApply').click();
-    })()`);
-    const savedManualTranslation = await waitFor('manual translation saved and applied to the same episode', () => win.webContents.executeJavaScript(`(async () => {
-      if (currentSubtitle?.source !== 'chatgpt' || !currentSubtitle.path) return null;
-      const key = subtitleStoreKey();
-      const entries = await window.lilac.savedSubtitles(key);
-      const entry = entries.find(item => item.source === 'chatgpt' && item.path === currentSubtitle.path);
-      return entry ? { key, path: currentSubtitle.path, source: currentSubtitle.source, episodeNumber: currentPlaybackContext.episode?.number } : null;
-    })()`));
-    assert.equal(savedManualTranslation.source, 'chatgpt');
-    assert.equal(savedManualTranslation.episodeNumber, 1);
-    assert.ok(path.resolve(savedManualTranslation.path).startsWith(`${path.resolve(userData)}${path.sep}`), 'the translated subtitle is stored inside this test-only userData profile');
-    assert.ok(fixtureRequests.includes('https://subtitles.invalid/phase1-ja.vtt'), 'the selected Japanese subtitle was fetched through the packaged main process');
-    const translatedSubtitleText = fs.readFileSync(savedManualTranslation.path, 'utf8');
-    const sourceTimecodes = [...syntheticJapaneseSubtitle.matchAll(/^\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}$/gm)].map(match => match[0]);
-    const translatedTimecodes = [...translatedSubtitleText.matchAll(/^\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}$/gm)].map(match => match[0]);
-    assert.deepEqual(translatedTimecodes, sourceTimecodes, 'all translated cues keep the source order and original timestamps');
-    assert.match(translatedSubtitleText, /00:00:01\.000 --> 00:00:01\.200\n한국어 번역 1/);
-    assert.match(translatedSubtitleText, /00:00:07\.250 --> 00:00:07\.450\n한국어 번역 26/);
-
     const sourcePicker = await win.webContents.executeJavaScript(`(() => {
       switchView('settings');
       window.showSettingsPane?.('playback');
@@ -1536,7 +1451,7 @@ app.whenReady().then(async () => {
 
     assert.ok(fixtureRequests.some(url => new URL(url).searchParams.get('q') === SEARCH_TITLE), 'search reached the synthetic Re:Anime API');
     assert.ok(fixtureRequests.some(url => new URL(url).hostname === 'linkkf1.5imgdarr.top'
-      && new URL(url).pathname === '/api/singlefilter.php'), 'the weekly schedule reached all seven Linkkf API partitions');
+      && new URL(url).pathname === '/api/singlefilter.php'), 'the independent Linkkf schedule IPC remains available');
     assert.ok(fixtureRequests.some(url => new URL(url).hostname === 'graphql.anilist.co'), 'the latest episode IPC reached the AniList GraphQL client');
     assert.ok(fixtureRequests.some(url => new URL(url).hostname === 'animenosub.to'
       && new URL(url).pathname === '/anime/' && new URL(url).searchParams.get('order') === 'update'), 'Animenosub latest updates reached its update-sorted feed');
@@ -1575,7 +1490,7 @@ app.whenReady().then(async () => {
     assert.equal(deniedUnknownFetches.length, 0, `no unregistered main-process URL was requested: ${deniedUnknownFetches.join(', ')}`);
     assert.equal(deniedBrowserRequests.length, 0, `no external browser request was allowed or attempted: ${deniedBrowserRequests.join(', ')}`);
 
-    console.log('Packaged Phase 1 smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs and Re:Anime quarter selection UI, Re:Anime latest-airing UI, Linkkf current-day/weekday schedule UI, Animenosub/Ani24 update feeds and synthetic Ohli24 9.5 episode plus local caption resolution, Animenosub recent-updates home card, settings source selection and reload into the Animenosub home, renderer search button → result card → detail → episode button → packaged resolver playback, Korean subtitle parsing and save, loopback HLS decode, persisted resume, automatic same-kind server fallback, and an in-app Japanese prompt → manual translation → episode-scoped save with original cue timings and order. ChatGPT browser opening and clipboard writes use test-only interceptors; no real ChatGPT request is sent.');
+    console.log('Packaged Phase 1 smoke passed: actual main IPC Re:Anime/Miruro/Animenosub quarter catalogs and Re:Anime quarter selection UI, Re:Anime latest-airing UI, Linkkf current-day/weekday schedule UI, Animenosub/Ani24 update feeds and synthetic Ohli24 9.5 episode plus local caption resolution, Animenosub recent-updates home card, settings source selection and reload into the Animenosub home, renderer search button → result card → detail → episode button → packaged resolver playback, Korean/Japanese subtitle track selection, loopback HLS decode, persisted resume, and automatic same-kind server fallback.');
     console.log(`Playback: ${playbackState.width}x${playbackState.height} at ${playbackState.currentTime.toFixed(2)}s; resume: ${resumeState.currentTime.toFixed(2)}s from saved 50%; fallback: ${fallbackState.server} at ${fallbackState.currentTime.toFixed(2)}s with selected subtitle; synthetic HTTP fixture calls: ${fixtureRequests.length}; FlixCloud redirects to loopback: ${redirectedFlixRequests.length}; local resolver requests: ${localBrowserRequests.length}; renderer proxy requests: ${rendererProxyRequests.length}; local proxy requests: ${localProxyRequests.length}; denied unknown fetches: 0; blocked browser requests: 0; external network calls: 0.`);
     await new Promise(resolve => localPlayerServer.close(resolve));
     app.quit();

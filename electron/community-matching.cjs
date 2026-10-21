@@ -22,6 +22,7 @@ function communityFileEpisode(file) {
     .replace(hasBitDepth ? /\b[1-9]\.[01]\b/g : /$^/, ' ')
     .replace(/\[[0-9a-f]{8}\]/gi, ' ')
     .replace(/(?<![a-z0-9])(?:\d{3,4}[pi]|[xh]\.?26[45]|(?:19|20)\d{2})(?![a-z0-9])/gi, ' ')
+    .replace(/\[\s*\]/g, ' ')
     .replace(/\d+\s*기/g, ' ').replace(/[ ._-]+$/g, '').trim();
   const season = name.match(/(?:^|[^a-z0-9])s(\d{1,2})[ ._-]*e(\d+(?:\.\d+)?)/i);
   if (season) return { episode: Number(season[2]), season: Number(season[1]) };

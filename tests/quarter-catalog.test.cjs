@@ -103,10 +103,12 @@ test('provider filters use explicit season and year fields only where supported'
 test('quarter selection is connected through the renderer, preload and IPC handler', () => {
   const root = path.join(__dirname, '..');
   const app = fs.readFileSync(path.join(root, 'src/app.js'), 'utf8');
+  const catalogUpdates = fs.readFileSync(path.join(root, 'src/catalog-updates.js'), 'utf8');
   const html = fs.readFileSync(path.join(root, 'src/index.html'), 'utf8');
   const preload = fs.readFileSync(path.join(root, 'electron/preload.cjs'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'electron/main.cjs'), 'utf8');
   const weekday = fs.readFileSync(path.join(root, 'src/weekday-schedule.js'), 'utf8');
+  const calendar = fs.readFileSync(path.join(root, 'src/season-calendar.js'), 'utf8');
   assert.match(html, /id="quarterYear"/);
   assert.match(html, /id="quarterTabs"/);
   assert.match(html, /id="quarterTabs"[^>]*role="group"/);
@@ -122,15 +124,33 @@ test('quarter selection is connected through the renderer, preload and IPC handl
   assert.match(app, /calendarWatcher\.check\(new Date\(\)\)/);
   assert.match(app, /window\.addEventListener\('focus',checkCalendarOnResume\)/);
   assert.match(app, /document\.addEventListener\('visibilitychange',checkCalendarOnResume\)/);
-  assert.match(app, /loadLinkkfSchedule\(today,\{force:true,refreshEpisodes:true,skipUpcoming:Boolean\(airingError\)\}\)/);
-  assert.match(app, /cacheKey!==scheduleCacheKey\(\)/, 'a late old-quarter schedule response must not populate the new-quarter cache');
+  assert.doesNotMatch(html, /id="scheduleRail"|이번 주 방영표|weekly-schedule\.js/, 'the home does not render or initialize a second weekly schedule UI');
+  assert.doesNotMatch(html, /weekly-schedule\.css/);
+  assert.doesNotMatch(app, /window\.LilacWeeklySchedule\?\./, 'home calendar changes do not trigger a removed weekly schedule renderer');
+  assert.match(catalogUpdates, /window\.LilacSeasonCalendar\.open\(homeItems\(\), label, state\.quarterSelection\)/, 'season see-all routes quarter providers into the Patch 01 calendar');
+  assert.doesNotMatch(app, /\$\('#seeAllSeason'\)\.onclick/, 'the season see-all button has one handler owned by catalog-updates.js');
+  assert.doesNotMatch(app, /loadLinkkfSchedule|linkkfSchedule|scheduleCacheKey/, 'the old duplicate Linkkf/AniList home schedule collector is removed');
   assert.match(app, /weekdayAvailabilityCache\.clear\(\)/);
   assert.match(weekday, /weekdaySchedule:v3:\$\{year\}:\$\{quarter\}/, 'weekday caches must be scoped to the calendar quarter');
   assert.match(app, /분기별 목록을 불러오지 못했습니다: \$\{e\.message\}.*quarterRetry/, 'Home-load failures must expose a quarter retry action');
   assert.match(preload, /providerQuarter: \(provider, year, quarter\) => ipcRenderer\.invoke\('provider:quarter'/);
   assert.match(preload, /providerWeekdayEpisodes: \(provider, candidates, refresh = false\).*refresh === true/);
+  assert.match(preload, /providerSchedule: \(provider, day\) => ipcRenderer\.invoke\('provider:schedule'/);
+  assert.match(preload, /weeklySchedule: day => ipcRenderer\.invoke\('anime:weekly-schedule'/);
   assert.match(main, /ipcMain\.handle\('provider:quarter'/);
   assert.match(main, /ipcMain\.handle\('provider:weekday-episodes'.*refresh: refresh === true/);
+  assert.match(main, /createProviderSchedule\(/);
+  assert.match(main, /ipcMain\.handle\('provider:schedule'/);
+  assert.match(main, /ipcMain\.handle\('anime:weekly-schedule'/);
+  assert.match(main, /ipcMain\.handle\('linkkf:schedule'/, 'the existing Linkkf handler remains available');
+  assert.match(html, /id="scheduleSection" class="hidden" aria-hidden="true"><\/div>/, 'retain only the hidden host integration anchor');
+  assert.match(calendar, /window\.LilacSeasonCalendar = \{ open, diagnostics: \(\) => diagnostics, renderDays:/);
+  assert.match(calendar, /root\.LilacProviderScheduleClient =/);
+  assert.match(calendar, /providerSchedulePending\.has\(key\)/, 'season calendar requests share in-flight provider-day results');
+  assert.match(html, /id="seasonCalendarGrid"/);
+  assert.match(html, /<section id="allView" class="view">[\s\S]*?id="catalogFilters"/);
+  assert.doesNotMatch(html, /weekly-schedule\.js/);
+  assert.match(html, /season-calendar\.js/);
 });
 
 test('quarter lists are reused from the 12-hour cache and stale data survives a failed refresh', async () => {

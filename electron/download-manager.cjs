@@ -2,7 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const { pathToFileURL, fileURLToPath } = require('url');
+const { downloadFile } = require('./download-transfer.cjs');
 const { hasFreshDownloadTitleMetadata, hasCompleteDownloadTitleMetadata, expireDownloadTitleMetadata } = require('./metadata-cache.cjs');
+const subtitleSource = require('../src/subtitle-source.js');
 
 function safeName(value = '') {
   return String(value).normalize('NFKC').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').trim().slice(0, 120) || 'episode';
@@ -14,16 +16,28 @@ function seconds(value = '') {
 }
 
 const MAX_CONCURRENT_DOWNLOADS = 2;
+const KOREAN_SOURCES = ['kairan', 'csora', 'anissia', 'gemini', 'linkkf', 'user'];
 const HLS_PARALLEL = 6;
 const HLS_USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome || '131.0.0.0'} Safari/537.36`;
 
 class DownloadManager {
   constructor({ app, resolveEpisode, resolveLinkkf, findSubtitle, findJimaku, translateJimaku, jimakuTranslates, findSkips, analyzeOpEd, resolveTitles, saveTrack, translateTrack, broadcast }) {
     // The folder new episodes go to: Videos\LilacAnime, or the one picked in 내 목록 > 다운로드 (an external drive).
-    this.defaultRoot = path.join(app.getPath('videos'), 'LilacAnime');
+    let videos;
+    try { videos = app.getPath('videos'); } catch { /* Windows Known Folder may be unavailable. */ }
+    this.defaultRoot = videos ? path.join(videos, 'LilacAnime') : null;
     this.settingsFile = path.join(app.getPath('userData'), 'download-settings.json');
     let saved = ''; try { saved = String(JSON.parse(fs.readFileSync(this.settingsFile, 'utf8')).root || ''); } catch { /* the default */ }
-    this.root = saved && fs.existsSync(saved) ? saved : this.defaultRoot;
+    this.root = null;
+    for (const root of [...new Set([saved, this.defaultRoot].filter(Boolean))]) {
+      try {
+        if (root === saved && !fs.existsSync(root)) continue;
+        fs.mkdirSync(root, { recursive: true });
+        if (!fs.statSync(root).isDirectory()) continue;
+        fs.accessSync(root, fs.constants.W_OK);
+        this.root = root; break;
+      } catch { /* try another available download folder without blocking startup */ }
+    }
     this.stateFile = path.join(app.getPath('userData'), 'downloads.json');
     this.resolveEpisode = resolveEpisode;
     this.resolveLinkkf = resolveLinkkf;
@@ -41,7 +55,6 @@ class DownloadManager {
     const recovered = this.read();
     expireDownloadTitleMetadata(recovered);
     this.jobs = recovered.map(job => ['downloading', 'resolving'].includes(job.status) ? {...job, status:'queued'} : job.stage ? {...job, stage:''} : job);
-    fs.mkdirSync(this.root, { recursive: true });
     this.relink();
     this.save();
     this.titleMetadataCleanupTimer = setInterval(() => {
@@ -60,6 +73,7 @@ class DownloadManager {
   // download folder by their series folder and file name; every file of the episode (subtitles, tracks, fonts, poster)
   // moves with its video. Returns how many were found again.
   relink() {
+    if (!this.root) return 0;
     let found = 0;
     for (const job of this.jobs) {
       if (job.status !== 'completed' || !job.filePath || fs.existsSync(job.filePath)) continue;
@@ -76,10 +90,11 @@ class DownloadManager {
   }
   // A new download folder: kept for the next start, and the episodes moved into it are found again.
   setRoot(dir) {
-    if (!dir || !fs.existsSync(dir)) throw new Error('폴더를 찾을 수 없습니다.');
+    if (!dir || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new Error('폴더를 찾을 수 없습니다.');
+    fs.accessSync(dir, fs.constants.W_OK);
     this.root = dir;
     fs.writeFileSync(this.settingsFile, JSON.stringify({ root: dir === this.defaultRoot ? '' : dir }));
-    const found = this.relink(); this.save();
+    const found = this.relink(); this.save(); this.pump();
     return { root: this.root, found, missing: this.list().filter(job => job.missing).length };
   }
   // 목록 비우기: every entry not downloading now leaves the list; its files stay on disk.
@@ -91,6 +106,7 @@ class DownloadManager {
   key(request) { return `${request.anime?.mal_id || request.anime?.id || request.title}:${request.episode?.provider || request.resolveKind}:${request.episode?.url || request.episode?.token || request.episode?.id || request.episodeNumber}`; }
 
   enqueue(request) {
+    if (!this.root) throw new Error('사용 가능한 다운로드 폴더가 없습니다. 다운로드 목록에서 저장 폴더를 선택해 주세요.');
     const key = this.key(request), existing = this.jobs.find(job => job.key === key);
     if (existing && existing.status === 'completed' && fs.existsSync(existing.filePath)) { if (!existing.subtitlePath) { existing.subtitleChecked = false; this.backfillSubtitles(); } return existing; }
     if (existing && ['queued','resolving','downloading'].includes(existing.status)) return existing;
@@ -101,59 +117,85 @@ class DownloadManager {
   }
 
   cancel(id) {
-    const job = this.jobs.find(item => item.id === id); if (!job) return false;
+    const job = this.jobs.find(item => item.id === id); if (!job || job.status === 'completed') return false;
+    clearTimeout(this.retryTimers?.get(id));
+    this.active.get(id)?.controller?.abort();
     this.active.get(id)?.process?.kill?.();
     job.status = 'paused'; job.updated = Date.now(); this.save(); return true;
   }
 
-  resume(id) { const job=this.jobs.find(item=>item.id===id); if(!job)return false; clearTimeout(this.retryTimers?.get(id)); job.status='queued';job.error='';job.retries=0;job.updated=Date.now();this.save();this.pump();return true; }
+  resume(id) { const job=this.jobs.find(item=>item.id===id); if(!job||!['paused','failed'].includes(job.status))return false; clearTimeout(this.retryTimers?.get(id)); job.status='queued';job.error='';job.retries=0;job.updated=Date.now();this.save();this.pump();return true; }
 
-  remove(id) {
+  shutdown() {
+    if (this.stopping) return;
+    this.stopping = true;
+    for (const timer of this.retryTimers?.values() || []) clearTimeout(timer);
+    for (const active of this.active.values()) {
+      active.controller?.abort();
+      active.process?.kill?.();
+      if (['downloading', 'resolving'].includes(active.job.status)) active.job.status = 'queued';
+    }
+    this.save();
+  }
+
+  async remove(id) {
     const job = this.jobs.find(item => item.id === id); if (!job) return false;
-    this.active.get(id)?.process?.kill?.();
+    clearTimeout(this.retryTimers?.get(id));
+    const active=this.active.get(id);active?.controller?.abort();active?.process?.kill?.();
+    this.jobs = this.jobs.filter(item => item.id !== id); this.save();
+    await active?.finished;
     for (const file of [job.filePath, job.subtitlePath, job.subtitleAssPath, job.partialPath, ...(job.subtitleOriginals || [])]) { if (file) try { fs.unlinkSync(file); } catch {} }
-    if (job.partialPath) try { fs.rmSync(`${job.partialPath}.hls`, { recursive: true, force: true }); } catch {} // mirrorHls copy
-    if (job.filePath && job.subtitleTracks) try { fs.rmSync(trackDir(job), { recursive: true, force: true }); } catch {}
-    this.jobs = this.jobs.filter(item => item.id !== id);
+    this.cleanTransfer(job);
+    if (job.filePath) try { removeOwnedFolder(trackDir(job),path.dirname(job.filePath)); } catch {}
     // The series poster goes with its last episode.
     if (job.posterPath && !this.jobs.some(item => item.posterPath === job.posterPath)) try { fs.unlinkSync(job.posterPath); } catch {}
     this.save(); return true;
   }
 
+  cleanTransfer(job) {
+    if(!job.filePath)return;
+    const partial=`${job.filePath}.part`;
+    try { removeOwnedFolder(`${partial}.hls`,path.dirname(job.filePath)); } catch {}
+    for(const file of [`${partial}.source`,`${partial}.source.json`,`${partial}.source.json.json`])try{fs.unlinkSync(file)}catch{}
+  }
+
   pump() {
+    if (this.stopping || !this.root) return;
     while (this.active.size < MAX_CONCURRENT_DOWNLOADS) {
       // A job resumed while its previous run is still winding down (or still resolving) is left to that run.
       const job = this.jobs.find(item => item.status === 'queued' && !this.active.has(item.id)); if (!job) return;
-      job.status='resolving';job.updated=Date.now();this.active.set(job.id,{job,process:null});this.save();
-      this.run(job);
+      job.status='resolving';job.updated=Date.now();const active={job,process:null,controller:new AbortController()};this.active.set(job.id,active);this.save();
+      active.finished=this.run(job,active);
     }
   }
 
-  async run(job) {
+  async run(job,active=this.active.get(job.id)) {
+    const stopped=()=>Boolean(active?.controller?.signal.aborted||this.stopping||!this.jobs.includes(job));
     try {
       // Stream resolution shares one browser session whose request hooks are swapped per call, so only the
       // ffmpeg transfers run in parallel.
-      const resolving = this.resolving.then(() => job.resolveKind === 'linkkf' ? this.resolveLinkkf(job.episode) : this.resolveEpisode(job.episode, job));
+      const resolving = this.resolving.then(() => stopped()?null:job.resolveKind === 'linkkf' ? this.resolveLinkkf(job.episode) : this.resolveEpisode(job.episode, job));
       this.resolving = resolving.catch(() => {});
       const stream = await resolving;
-      // Paused while resolving; a pause and resume in that time just carries on.
-      if(job.status==='paused'||!this.jobs.some(item=>item.id===job.id))return;
+      if(stopped())return;
       if(stream?.server)job.videoServer=stream.server; // Animenosub: which server the video came from
-      const animeDir=path.join(this.root,safeName(job.title)), base=`${String(job.episodeNumber).padStart(3,'0')}화`;
-      fs.mkdirSync(animeDir,{recursive:true});job.filePath=path.join(animeDir,`${base}.mp4`);job.partialPath=`${job.filePath}.part`;job.status='downloading';job.updated=Date.now();this.save();
-      const local=stream?.mirror?await this.mirrorHls(job,stream):null;
-      if(job.status==='paused')return;
+      const animeDir=path.join(this.root,safeName(job.title)), base=job.episodeLabel?safeName(job.episodeLabel):`${String(job.episodeNumber).padStart(3,'0')}화`;
+      fs.mkdirSync(animeDir,{recursive:true});job.filePath ||= path.join(animeDir,`${base}.mp4`);job.partialPath=`${job.filePath}.part`;fs.mkdirSync(path.dirname(job.filePath),{recursive:true});job.status='downloading';job.updated=Date.now();this.save();
+      const url=new URL(stream.url),hls=stream?.mirror||stream?.hls||/\.m3u8(?:$|\?)/i.test(stream.url)||url.pathname.startsWith('/__flix/');
+      const local=hls?await this.mirrorHls(job,stream):await this.mirrorFile(job,stream);
+      if(stopped())return;
       await this.runFfmpeg(job,stream,local);
-      if(job.status==='paused')return;
-      try{fs.unlinkSync(job.filePath)}catch{}fs.renameSync(job.partialPath,job.filePath);if(local)try{fs.rmSync(local.dir,{recursive:true,force:true})}catch{}job.partialPath='';job.status='completed';job.retries=0;job.progress=100;job.completed=Date.now();job.updated=Date.now();
+      if(stopped())return;
+      try{fs.unlinkSync(job.filePath)}catch{}fs.renameSync(job.partialPath,job.filePath);this.cleanTransfer(job);job.partialPath='';job.status='completed';job.retries=0;job.progress=100;job.completed=Date.now();job.updated=Date.now();
       job.stage='subtitle';this.save();await this.attachSubtitle(job,stream);job.stage='';job.updated=Date.now();this.save();
+      if(stopped())return;
       await this.attachSkips(job);
       await this.attachTitles(job);
       await this.attachPoster(job);
       this.queueTracks(job, stream);
     } catch (error) {
       // A job resumed while this run was stopping stays queued and starts again below.
-      if(!['paused','queued'].includes(job.status)){
+      if(!stopped()&&!['paused','queued'].includes(job.status)){
         job.status='failed';job.error=error?.message||String(error);job.updated=Date.now();
         // A server that did not answer or a dropped connection: tried again by itself twice (after half a minute, then
         // two minutes), keeping what was downloaded; then it waits for 다시 시작.
@@ -164,16 +206,16 @@ class DownloadManager {
         }
         this.save();
       }
-    } finally { this.active.delete(job.id); setImmediate(()=>this.pump()); }
+    } finally { if(this.active.get(job.id)===active)this.active.delete(job.id); setImmediate(()=>this.pump()); }
   }
 
   // local: playlists already fetched by mirrorHls, which FFmpeg only remuxes (the last few percent of the progress).
   runFfmpeg(job,stream,local=null) {
     return new Promise((resolve,reject)=>{
       let ffmpeg=require('ffmpeg-static');if(ffmpeg.includes('app.asar'))ffmpeg=ffmpeg.replace('app.asar','app.asar.unpacked');
-      const args=['-y'];
+      const args=['-y'],cwd=local?path.dirname(local.inputs[0]):undefined;
       if(local){
-        for(const input of local.inputs)args.push('-allowed_extensions','ALL','-i',input);
+        for(const input of local.inputs){args.push('-protocol_whitelist','file,crypto,data');if(input.endsWith('.m3u8'))args.push('-allowed_extensions','ALL');args.push('-i',path.relative(cwd,input))}
         args.push('-map','0:v?','-map',local.inputs.length>1?'1:a?':'0:a?');
       }else{
         const headers={...(stream?.headers||{})};if(stream?.referer&&!headers.Referer)headers.Referer=stream.referer;
@@ -185,7 +227,7 @@ class DownloadManager {
       }
       args.push('-c','copy','-movflags','+faststart','-f','mp4',job.partialPath);
       const [from,span]=local?[95,4]:[0,99];
-      const child=spawn(ffmpeg,args,{windowsHide:true});this.active.set(job.id,{job,process:child});let duration=0,stderr='';
+      const child=spawn(ffmpeg,args,{windowsHide:true,cwd}),active=this.active.get(job.id);if(active)active.process=child;let duration=0,stderr='';
       child.stderr.on('data',chunk=>{const text=chunk.toString();stderr=(stderr+text).slice(-12000);const d=text.match(/Duration:\s*([^,]+)/)?.[1];if(d){duration=seconds(d);job.duration=duration}const t=[...text.matchAll(/time=\s*([^\s]+)/g)].pop()?.[1];if(t&&duration){const progress=from+Math.max(0,Math.min(span,Math.round(seconds(t)/duration*span)));if(progress!==job.progress){job.progress=progress;this.save();}}});
       child.once('error',reject);child.once('close',code=>{if(job.status==='paused')return resolve();if(code===0&&fs.existsSync(job.partialPath))resolve();else reject(new Error((stderr.match(/([^\r\n]+)$/)?.[1]||`FFmpeg 종료 코드 ${code}`).trim()));});
     });
@@ -198,15 +240,21 @@ class DownloadManager {
   // paused download continues where it stopped.
   async mirrorHls(job,stream) {
     const dir=`${job.partialPath}.hls`,controller=new AbortController();fs.mkdirSync(dir,{recursive:true});
-    this.active.set(job.id,{job,process:{kill:()=>controller.abort()}});
+    const active=this.active.get(job.id);
+    active?.controller?.signal.addEventListener('abort',()=>controller.abort(),{once:true});
+    if(active)active.process={kill:()=>controller.abort()};
     const headers={'User-Agent':HLS_USER_AGENT,...(stream.headers||{})};if(stream.referer&&!headers.Referer)headers.Referer=stream.referer;
-    const get=async(url,binary=false)=>{
+    const signal=AbortSignal.any([controller.signal,active?.controller?.signal||new AbortController().signal]);
+    const get=async(url,binary=false,range=null)=>{
       for(let attempt=0;;attempt++){
         try{
-          const response=await fetch(url,{headers,signal:AbortSignal.any([controller.signal,AbortSignal.timeout(60000)])});
+          const response=await fetch(url,{headers:{...headers,...(range?{Range:'bytes='+range.start+'-'+(range.start+range.length-1)}:{})},signal:AbortSignal.any([signal,AbortSignal.timeout(60000)])});
           if(!response.ok)throw new Error(`HTTP ${response.status}`);
-          return binary?Buffer.from(await response.arrayBuffer()):await response.text();
-        }catch(error){if(controller.signal.aborted||attempt>=3)throw error;await new Promise(resolve=>setTimeout(resolve,1500*(attempt+1)))}
+          if(!binary)return await response.text();
+          const data=Buffer.from(await response.arrayBuffer());
+          if(range&&(response.status!==206||!response.headers.get('content-range')?.startsWith('bytes '+range.start+'-')||data.length!==range.length))throw new Error('영상 조각의 바이트 범위가 일치하지 않습니다.');
+          return data;
+        }catch(error){if(signal.aborted||attempt>=3)throw error;await new Promise((resolve,reject)=>{const abort=()=>{clearTimeout(timer);reject(signal.reason)};const timer=setTimeout(()=>{signal.removeEventListener('abort',abort);resolve()},1500*(attempt+1));signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort()})}
       }
     };
     const master=await get(stream.url),lists=[];
@@ -221,27 +269,53 @@ class DownloadManager {
     }else lists.push({name:'video',url:stream.url,text:master});
     // A resumed download can land on another server, whose segments must not be mixed with the kept ones (addresses
     // are compared without their per-request tokens).
-    const source=JSON.stringify(lists.map(list=>{const url=new URL(list.url);return url.origin+url.pathname})),sourceFile=path.join(dir,'source.json');
+    const source=JSON.stringify(lists.map(list=>({name:list.name,text:list.text.split(/\r?\n/).map(line=>line.startsWith('#')?line.replace(/URI="([^"]+)"/g,(_,uri)=>'URI="'+stableMediaUrl(new URL(uri,list.url).href)+'"'):line.trim()?stableMediaUrl(new URL(line.trim(),list.url).href):'')})));
+    const sourceFile=path.join(dir,'source.json');
     let kept='';try{kept=fs.readFileSync(sourceFile,'utf8')}catch{/* new folder */}
-    if(kept!==source){fs.rmSync(dir,{recursive:true,force:true});fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(sourceFile,source)}
+    if(kept!==source){removeOwnedFolder(dir,path.dirname(job.filePath));fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(sourceFile,source)}
     const files=new Map(),tasks=[];
     for(const list of lists){
       const fmp4=/#EXT-X-MAP/.test(list.text);
-      const local=(uri,ext)=>{const url=new URL(uri,list.url).href;if(!files.has(url)){const file=`${list.name}_${String(files.size).padStart(5,'0')}${ext}`;files.set(url,file);tasks.push({url,file:path.join(dir,file)})}return files.get(url)};
-      const text=list.text.split(/\r?\n/).map(line=>!line.trim()?line:line.startsWith('#')?line.replace(/URI="([^"]+)"/g,(_,uri)=>`URI="${local(uri,line.startsWith('#EXT-X-MAP')?'.mp4':'.key')}"`):local(line.trim(),fmp4?'.m4s':'.ts')).join('\n');
+      const encrypted=/#EXT-X-KEY:(?![^\n]*METHOD=NONE)/.test(list.text);
+      let pendingRange=null,lastEnd=0,lastUri='';
+      const local=(uri,ext,range=null)=>{const url=new URL(uri,list.url).href,key=url+':'+(range?range.start+':'+range.length:'');if(!files.has(key)){const file=list.name+'_'+String(files.size).padStart(5,'0')+ext;files.set(key,file);tasks.push({url,range,encrypted,file:path.join(dir,file)})}return files.get(key)};
+      const text=list.text.split(/\r?\n/).map(raw=>{
+        const line=raw.trim();if(!line)return '';
+        if(line.startsWith('#EXT-X-BYTERANGE:')){pendingRange=line.split(':')[1];return ''}
+        if(line.startsWith('#')){
+          const spec=line.startsWith('#EXT-X-MAP')?line.match(/BYTERANGE="(\d+)(?:@(\d+))?"/):null;
+          const range=spec?{length:Number(spec[1]),start:Number(spec[2]||0)}:null;
+          return line.replace(/,?BYTERANGE="[^"]+"/g,'').replace(/URI="([^"]+)"/g,(_,uri)=>'URI="'+local(uri,line.startsWith('#EXT-X-MAP')?'.mp4':'.key',range)+'"');
+        }
+        let range=null;
+        if(pendingRange){const [length,start]=pendingRange.split('@');if(start==null&&lastUri!==line)throw new Error('HLS 바이트 범위의 시작 위치가 없습니다.');range={length:Number(length),start:start==null?lastEnd:Number(start)};lastEnd=range.start+range.length;pendingRange=null}
+        lastUri=line;return local(line,fmp4?'.m4s':'.ts',range);
+      }).join('\n');
       fs.writeFileSync(path.join(dir,`${list.name}.m3u8`),text);
     }
-    let done=0,next=0;
+    let done=tasks.filter(task=>fs.existsSync(task.file)&&fs.statSync(task.file).size>0).length,next=0;
     if(!tasks.length)throw new Error('영상 재생목록이 비어 있습니다.');
     const report=()=>{const progress=Math.min(95,Math.floor(done/tasks.length*95));if(progress!==job.progress){job.progress=progress;this.save()}};
-    await Promise.all(Array.from({length:HLS_PARALLEL},async()=>{
-      while(next<tasks.length&&!controller.signal.aborted){
+    report();
+    const results=await Promise.allSettled(Array.from({length:HLS_PARALLEL},async()=>{
+      try{while(next<tasks.length&&!signal.aborted){
         const task=tasks[next++];
-        if(!(fs.existsSync(task.file)&&fs.statSync(task.file).size>0)){const data=await get(task.url,true);fs.writeFileSync(`${task.file}.tmp`,task.file.endsWith('.ts')?transportStream(data):data);fs.renameSync(`${task.file}.tmp`,task.file)}
-        done++;report();
-      }
-    })).catch(error=>{controller.abort();if(job.status!=='paused')throw error});
+        if(!(fs.existsSync(task.file)&&fs.statSync(task.file).size>0)){const data=await get(task.url,true,task.range);signal.throwIfAborted();fs.writeFileSync(task.file+'.tmp',task.file.endsWith('.ts')&&!task.encrypted?transportStream(data):data);fs.renameSync(task.file+'.tmp',task.file);done++;report()}
+      }}catch(error){controller.abort();throw error}
+    }));
+    const failure=results.find(result=>result.status==='rejected');if(failure)throw failure.reason;
+    signal.throwIfAborted();
     return {dir,inputs:lists.map(list=>path.join(dir,`${list.name}.m3u8`))};
+  }
+
+  async mirrorFile(job,stream) {
+    const file=job.partialPath+'.source',signal=this.active.get(job.id).controller.signal;
+    const headers={'User-Agent':HLS_USER_AGENT,...(stream.headers||{})};if(stream.referer&&!headers.Referer)headers.Referer=stream.referer;
+    await downloadFile({url:stream.url,file,headers,signal,identity:stableMediaUrl(stream.url),progress:(received,total)=>{
+      const progress=total?Math.min(95,Math.floor(received/total*95)):job.progress||0;
+      if(progress!==job.progress){job.progress=progress;this.save()}
+    }});
+    return {inputs:[file]};
   }
 
   // Subtitles are fetched right after the video so the episode also plays offline with them.
@@ -257,13 +331,14 @@ class DownloadManager {
     // episode's: no Jimaku file and no translation beside it (see attachTracks too).
     // Preserve subtitle handling for completed LinkAni downloads created before that online source was removed.
     job.siteKorean = Boolean(stream?.subtitleUrl) && (job.resolveKind === 'linkkf' || ['reanime', 'miruro', 'linkani', 'ohli24'].includes(job.episode?.provider));
+    job.koreanSubtitle = job.siteKorean || Boolean(found && !found.stream && KOREAN_SOURCES.includes(found.source));
     if (!found || found.stream) {
       await this.saveSubtitle(job, stream?.subtitleUrl); this.saveAssSubtitle(job, stream?.subtitleAss?.path);
-      if (!job.siteKorean) await this.attachJimaku(job, stream, !found && !job.subtitlePath);
+      if (!job.koreanSubtitle && !subtitleSource.track(stream?.subtitleTracks, 'ja')) await this.attachJimaku(job, stream, !found && !job.subtitlePath);
       return;
     }
     this.copySubtitle(job, found);
-    if (!job.siteKorean) await this.attachJimaku(job, stream, false);
+    if (!job.koreanSubtitle && !subtitleSource.track(stream?.subtitleTracks, 'ja')) await this.attachJimaku(job, stream, false);
   }
   copySubtitle(job, found) {
     const base = job.filePath.replace(/\.mp4$/i, '');
@@ -291,7 +366,7 @@ class DownloadManager {
     this.trackQueue = this.trackQueue.then(() => this.translateJimakuFor(job, file, primary && !burned)).catch(() => {});
   }
   async translateJimakuFor(job, file, primary) {
-    if (!this.jobs.includes(job) || !this.translateJimaku) return;
+    if (!this.jobs.includes(job) || !this.translateJimaku || job.koreanSubtitle) return;
     job.stage = 'translate'; job.translateProgress = 'Jimaku 자막'; this.save();
     try {
       // Not beside a Korean subtitle: the episode's own file is the Japanese one, or none (English burned into the video).
@@ -345,23 +420,26 @@ class DownloadManager {
     }
     if (!saved.length || !this.jobs.includes(job)) return;
     job.subtitleTracks = saved; job.updated = Date.now(); this.save();
-    // One machine translation is enough, made from the best source even beside a Kairan / Csora / Anissia subtitle (it
-    // may be another episode's): none from the tracks when the episode's Jimaku file is translated (설정 > 자막 자동 번역); otherwise the
-    // Japanese track (the original dialogue, translated once) or else the English dialogue one (not signs & songs alone,
-    // a written one before an AI dub transcript). Translating every track took one run per language, hours with the
-    // local AI.
-    // None either beside the site's own Korean track (attachSubtitle): the episode has its Korean subtitle.
-    if (job.siteKorean || (job.jimakuFound && this.jimakuTranslates?.())) return;
-    const text = track => `${track.label} ${track.language}`, code = (track, lang) => new RegExp(`^${lang}(?:[-_]|$)`, 'i').test(track.language || '');
-    const rank = track => /signs|songs|forced/i.test(track.label) ? 3 : /dubtitle|\(ai\)|\bai\b/i.test(track.label) ? 2 : /dialogue|full/i.test(track.label) ? 0 : 1;
-    const track = saved.find(item => /japanese|日本/i.test(text(item)) || code(item, 'ja')) || saved.filter(item => /english/i.test(text(item)) || code(item, 'en')).sort((a, b) => rank(a) - rank(b))[0];
+    // No translation beside Korean subtitles. Otherwise: site Japanese, Jimaku, site English.
+    if (job.koreanSubtitle) return;
+    const japanese = subtitleSource.track(saved, 'ja');
+    if (!japanese && job.jimakuFound && this.jimakuTranslates?.()) return;
+    if (!japanese && !job.jimakuFound && subtitleSource.track(stream.subtitleTracks,'ja')) {
+      await this.attachJimaku(job,stream,!job.subtitlePath);
+      if(job.jimakuFound&&this.jimakuTranslates?.())return;
+    }
+    const track = japanese || subtitleSource.track(saved, 'en');
     if (!track) return;
     const title = job.displayTitles?.ko || job.title;
     try {
       job.stage = 'translate'; job.translateProgress = track.label; this.save();
       const result = await this.translateTrack?.(track.path, title, job.anime).catch(() => null);
       if (!result || !this.jobs.includes(job)) return; // no key or model, translation of downloads turned off, or it failed
-      track.translatedPath = track.path.replace(/\.[^.]+$/, '.ko.vtt'); fs.copyFileSync(result.path, track.translatedPath);
+      if (!job.koreanSubtitle && fs.existsSync(job.filePath || '')) {
+        const out = job.filePath.replace(/\.mp4$/i, '.ko.vtt'); fs.copyFileSync(result.path, out); track.translatedPath = out;
+        job.subtitleOriginals = [...(job.subtitleOriginals || []), job.subtitlePath, job.subtitleAssPath].filter(item => item && item !== out);
+        Object.assign(job, { subtitlePath: out, subtitleAssPath: null, subtitleFonts: [], subtitleLabel: `${result.engine || 'AI'} 번역 (${track.label})` });
+      } else { track.translatedPath = track.path.replace(/\.[^.]+$/, '.ko.vtt'); fs.copyFileSync(result.path, track.translatedPath); }
       track.translatedFailed = result.failed || 0; this.save();
     } finally { job.stage = ''; delete job.translateProgress; job.updated = Date.now(); this.save(); }
   }
@@ -433,3 +511,17 @@ function offlineTracks(job) {
 function trackDir(job) { return job.filePath.replace(/\.mp4$/i, '_자막트랙'); }
 
 module.exports = { DownloadManager };
+
+function removeOwnedFolder(target,parent) {
+  const resolved=path.resolve(target),root=path.resolve(parent);
+  if(path.dirname(resolved)!==root||resolved===root)throw new Error('다운로드 임시 폴더 경로가 올바르지 않습니다.');
+  fs.rmSync(resolved,{recursive:true,force:true});
+}
+
+function stableMediaUrl(value) {
+  let url=new URL(value);
+  const proxy=url.hostname==='127.0.0.1'&&url.pathname.match(/^\/__flix\/[^/]+\/(.+)$/);
+  if(proxy&&proxy[1]!=='master.m3u8')url=new URL(Buffer.from(proxy[1],'base64url').toString());
+  for(const key of [...url.searchParams.keys()])if(/^(?:token|expires?|exp|signature|sig|auth|policy|key-pair-id|hdnts|hmac)$/i.test(key))url.searchParams.delete(key);
+  return url.href;
+}

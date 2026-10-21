@@ -23,7 +23,7 @@ const subtitleResult = sourceBetween(mainSource, 'function subtitleResult(',
 const subtitlePicker = sourceBetween(mainSource, "ipcMain.handle('file:subtitle', async () => {",
   '\n  // Default ASS font:', 'user subtitle picker IPC');
 const subtitleAttachment = sourceBetween(appSource,
-  'let currentSubtitle=null,subtitleFontPromise=null,manualChatgptTranslation=null,manualChatgptPanelOpen=false;',
+  'let currentSubtitle=null,subtitleFontPromise=null;',
   '// A series whose Korean subtitle (a fansub, the site\'s Korean track) the user set aside', 'renderer subtitle attachment');
 const openSubtitleClick = sourceBetween(appSource, "$('#openSubtitle').onclick=async()=>{",
   "\n$('#findSubtitle').onclick", 'open subtitle button handler');
@@ -107,7 +107,7 @@ test('user subtitle picker copies ASS, hands it to JASSUB, and ignores stale dia
       KOREAN_SOURCES: ['kairan', 'csora', 'anissia', 'linkkf'], translating: null,
       applyVttLayout() {}, toast: message => toasts.push(message),
       rememberSubtitle: subtitle => remembered.push(subtitle), renderSubtitleSheet() {},
-      renderDiscoveredFonts() {}, translatingNow: () => false, showTranslatedLines() {}
+      renderDiscoveredFonts() {}, translatingNow: () => false, showTranslatedLines() {}, checkSubtitleSync() {}
     });
     uiContext.beginSubtitleSelection = () => ++uiContext.subtitleSelectionRequestId;
     vm.runInContext(`${subtitleAttachment}\n${openSubtitleClick}\n`+

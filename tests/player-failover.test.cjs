@@ -8,6 +8,7 @@ const failover = require('../src/player-failover.js');
 const mainSource = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
 const appSource = fs.readFileSync(path.join(__dirname, '../src/app.js'), 'utf8');
 const indexSource = fs.readFileSync(path.join(__dirname, '../src/index.html'), 'utf8');
+const playerSource = fs.readFileSync(path.join(__dirname, '../src/player.js'), 'utf8');
 
 function appFunction(name,nextName){
   let start=appSource.indexOf(`function ${name}(`);const end=appSource.indexOf(`\nfunction ${nextName}(`,start);
@@ -46,6 +47,55 @@ test('failed, offline, unknown-provider, and incompatible candidates are not ret
   assert.equal(failover.createPlan({ provider: 'linkkf', servers, currentServer: 'RAW A' }), null);
   assert.equal(failover.createPlan({ provider: 'miruro', servers, currentServer: 'RAW A', offline: true }), null);
   assert.equal(failover.createPlan({ provider: 'miruro', servers, currentServer: 'missing' }), null);
+});
+
+test('Miruro stall tracking waits for 15 seconds and resets on progress or inactive playback', () => {
+  const tracker=failover.createMiruroStallTracker(),context={episode:{provider:'miruro'}},video={currentTime:12,readyState:2,paused:false,seeking:false,ended:false};
+  assert.equal(tracker.tick({context,video,active:true,now:1000}),false);
+  assert.equal(tracker.tick({context,video,active:true,now:15999}),false);
+  assert.equal(tracker.tick({context,video,active:true,now:16000}),true);
+  assert.equal(tracker.tick({context,video,active:true,now:30999}),false);
+  video.currentTime=12.2;
+  assert.equal(tracker.tick({context,video,active:true,now:31000}),false,'progress starts a fresh stall window');
+  assert.equal(tracker.tick({context,video,active:true,now:45999}),false);
+  video.paused=true;
+  assert.equal(tracker.tick({context,video,active:true,now:46000}),false,'a pause resets rather than recovers');
+  video.paused=false;
+  assert.equal(tracker.tick({context,video,active:true,now:61000}),false,'resume establishes a new baseline');
+  assert.equal(tracker.tick({context,video,active:true,now:76000}),true);
+});
+
+test('Miruro stall recovery reuses the bounded same-kind server failover and resume point', () => {
+  assert.match(playerSource,/createMiruroStallTracker\(\)/);
+  assert.match(playerSource,/startAutomaticVideoServerFallback\(hlsPlayer,\s*video\)/);
+  assert.match(appSource,/videoServers:Array\.isArray\(stream\.servers\)[\s\S]*videoServer:stream\.server/);
+  const calls=[],instance={},video={currentTime:123.5};
+  const context=vm.createContext({window:{LilacPlayerFailover:failover},hlsPlayer:instance,
+    currentPlaybackContext:{episode:{provider:'miruro',number:4},videoServers:[{label:'SOFT A',kind:'soft'},{label:'SOFT B',kind:'soft'},{label:'SOFT C',kind:'soft'}],videoServer:'SOFT A',subtitleTracks:[]},
+    currentSubtitle:null,playbackDuration:()=>600,$:()=>({value:'테스트 작품'}),resolveIntoPlayer:(...args)=>calls.push(args)});
+  vm.runInContext(appFunction('startAutomaticVideoServerFallback','bindHlsPlayerEvents'),context);
+  assert.equal(context.startAutomaticVideoServerFallback(instance,video),true);
+  assert.equal(calls.length,1);
+  assert.equal(calls[0][2].serverOverride,'SOFT B');
+  assert.equal(calls[0][2].resumeSeconds,123.5);
+  assert.deepEqual(calls[0][2].excludeVideoServers,['SOFT A']);
+});
+
+test('player seek controls share a clamped setting with the settings page', () => {
+  const start=playerSource.indexOf('function setSeekSeconds('),end=playerSource.indexOf('\n$$(',start);
+  assert.ok(start>=0&&end>start,'missing setSeekSeconds helper');
+  const values=new Map(),inputs={'#seekSeconds':{value:''}};let syncs=0;
+  const context=vm.createContext({localStorage:{setItem:(key,value)=>values.set(key,value)},$:selector=>inputs[selector]||null,
+    syncPlayerSettingsUI:()=>{syncs++}});
+  vm.runInContext(playerSource.slice(start,end),context);
+  context.setSeekSeconds('200');
+  assert.equal(values.get('seekSeconds'),'120');
+  assert.equal(inputs['#seekSeconds'].value,'120');
+  context.setSeekSeconds('-5');
+  assert.equal(values.get('seekSeconds'),'1');
+  assert.equal(syncs,2);
+  assert.match(indexSource,/id="psSeekSteps"/);
+  assert.match(indexSource,/id="psSeekSeconds"/);
 });
 
 test('resolution failures advance through at most two exact server picks and carry exact resume time', () => {
@@ -131,7 +181,7 @@ test('renderer resolve, exhausted HLS recovery, exact alternate resolve, and sub
   const context=vm.createContext({
     window:{LilacPlayerFailover:failover,lilac:{providerResolve:async episode=>{providerCalls.push({...episode});return episode.server==='HD-2'?streams.second:streams.first}}},
     Hls:FakeHls,playbackRequestId:0,currentPlaybackContext:{},hlsPlayer:null,currentSubtitle:null,pendingResumeProgress:0,pendingResumeSeconds:null,
-    subtitleSelectionRequestId:0,playerFailureHistory:[],video,playbackDuration:()=>600,
+    subtitleSelectionRequestId:0,playerFailureHistory:[],video,preparedStreams:new Map(),preparedNext:'',playbackDuration:()=>600,
     $:selector=>selector==='#video'?video:ui,onlineSubtitleFor:()=>Promise.resolve(null),episodeRef:episode=>episode.url,jobByRef:()=>null,downloadedSeries:()=>[],
     renderVideoServers:()=>{},renderSubtitleTracks:()=>{},loadMissingSubtitleTracks:()=>{},ensureSubtitle:async()=>false,
     attachSubtitle:(src,label,options)=>{subtitleApplications.push({src,label,options});context.currentSubtitle={src,label,...options}},

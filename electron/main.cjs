@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, session, net, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, session, net, clipboard, Tray, Menu, screen, nativeImage } = require('electron');
 const path = require('path');
 const zlib = require('zlib');
 const cheerio = require('cheerio');
@@ -8,27 +8,34 @@ const { pipeline } = require('stream/promises');
 const AdmZip = require('adm-zip');
 const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
-const { createFlixProxyUrl, createFlixAvProxyUrl, closeFlixProxy } = require('./flix-proxy.cjs');
+const { createFlixProxyUrl, createFlixAvProxyUrl, closeFlixProxy, primeFlix } = require('./flix-proxy.cjs');
 const { createPlayerStreamHeaders } = require('./player-stream-headers.cjs');
 const { communityFileEpisode, selectCommunityFile } = require('./community-matching.cjs');
 const { createTmdbClient } = require('./tmdb-client.cjs');
+const { DesktopState } = require('./desktop-state.cjs');
+const { DeviceSync } = require('./device-sync.cjs');
 const { detectOpEd } = require('./oped-fingerprint.cjs');
 const { requestAniListGraphQL } = require('./anilist-client.cjs');
+const { compareRelease } = require('../src/anime-metadata.js');
 const { DownloadManager } = require('./download-manager.cjs');
 const { Updater } = require('./updater.cjs');
 const { DAY_MS, TITLE_CANDIDATE_TTL_MS, DISPLAY_TITLE_TTL_MS, CATALOG_TITLE_TTL_MS, isFreshTimestamp, pruneTimestampedRecords, pruneKoreanTitleRecords } = require('./metadata-cache.cjs');
 const { SubtitleStore } = require('./subtitle-store.cjs');
-const { loadTranslationPrompt } = require('./translation-prompts.cjs');
 const { createTranslator } = require('./subtitle-translator.cjs');
+const subtitleSource = require('../src/subtitle-source.js');
+const { selectMiruroServer } = require('./miruro-playback.cjs');
+const { createSubtitleSync } = require('./subtitle-sync.cjs');
 const { QUARTER_PROVIDERS, quarterForDate, quarterPeriod, quarterQuery } = require('./quarter-catalog.cjs');
 const { fetchLatestEpisodes } = require('./latest-episodes.cjs');
 const { fetchWeekdayEpisodes } = require('./weekday-episodes.cjs');
+const { fetchJapaneseSeasonSchedule } = require('./season-jst-schedule.cjs');
 const { createWeeklySchedule } = require('./weekly-schedule.cjs');
 const { createProviderSchedule } = require('./provider-schedule.cjs');
 const { createCatalogBrowser } = require('./catalog-browser.cjs');
 const { createCatalogUpdates } = require('./catalog-updates.cjs');
 const { filterProviderServers } = require('../src/player-failover.js');
 let catalogUpdates;
+let desktopState;
 const tmdbRequest=createTmdbClient();
 let subtitleTranslator = null;
 const translator = () => subtitleTranslator ||= createTranslator(app.getPath('userData'));
@@ -39,6 +46,7 @@ app.commandLine.appendSwitch('disable-background-media-suspend');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.setAppUserModelId('com.lilac.anime.desktop');
 let mainWindow = null;
+let startupComplete = false;
 const singleInstanceLock = app.requestSingleInstanceLock();
 if (!singleInstanceLock) {
   app.quit();
@@ -46,7 +54,7 @@ if (!singleInstanceLock) {
   app.on('second-instance', () => {
     const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
     if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
-    else if (app.isReady()) createWindow();
+    else if (startupComplete) createWindow();
   });
 }
 
@@ -64,6 +72,7 @@ const playerStreamHeaders = createPlayerStreamHeaders();
 const malIdCache = new Map();
 let downloadManager;
 let updater;
+let subtitleSync=null;
 
 async function coverDataUrl(rawUrl){
   return String(rawUrl||'');
@@ -211,7 +220,14 @@ function reanimeItems(root) {
   }
   return (list || []).map(raw => {
     const a = raw.anime || raw;
-    const title = a.title?.english || a.title?.romaji || a.title?.native || a.title || a.name || raw.title || raw.name || '';
+    const titleData = a.title && typeof a.title === 'object' ? a.title : {};
+    const titleEnglish = titleData.english || a.title_english || a.english || '';
+    const titleJapanese = titleData.native || a.title_japanese || a.native_title || '';
+    const romaji = titleData.romaji || a.romaji || '';
+    const rawSynonyms = a.synonyms || a.title_synonyms || titleData.synonyms || [];
+    const synonyms = (Array.isArray(rawSynonyms) ? rawSynonyms : String(rawSynonyms || '').split(/[,|/]/)).map(value => String(value || '').trim()).filter(Boolean);
+    const scalarTitle = typeof a.title === 'string' ? a.title : '';
+    const title = titleEnglish || romaji || titleJapanese || scalarTitle || a.name || raw.title || raw.name || '';
     const link = a.detailUrl || a.detail_url || a.url || a.link || raw.url || raw.link || '';
     const rawSlug = a.anime_id || raw.anime_id || a.slug || a.anime_slug || raw.slug || '';
     const slug = String(link).match(/\/(?:anime|watch)\/([^/?#]+)/)?.[1] || String(rawSlug).replace(/^\/+|\/+$/g,'') || String(title).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
@@ -222,7 +238,7 @@ function reanimeItems(root) {
     const episodeCount=Number(a.episodes||0)||Math.max(Number(a.subbed||0),Number(a.dubbed||0))||0;
     const hasUploadedCounts=[a.subbed,a.dubbed].some(value=>value!=null&&value!==''&&Number.isFinite(Number(value)));
     const metadata={season:a.season||'',aired:a.start_date||a.started_on||'',totalEpisodes:Number(a.episodes)||null,availableEpisodes:hasUploadedCounts?Math.max(Number(a.subbed)||0,Number(a.dubbed)||0):null,updatedAt:a.episode?.aired||''};
-    return {...metadata,provider:'reanime',id:slug,mal_id:`reanime:${slug}`,title,title_english:'',images:{webp:{large_image_url:imageUrl}},score:Number(a.average_score||a.score||0)/10||null,year:a.season_year||a.year||'',type:a.format||'Anime',episodes:episodeCount||null,status:a.status||'',synopsis:a.description||a.synopsis||'',genres,studios:[],url:`${REANIME_WEB}/anime/${slug}`,anilistId:Number(a.anilist_id||a.anilistId||a.anilist||0)||null,malId:Number(a.mal_id||0)||null,canWatch:a.can_watch!==false,subbed:Number(a.subbed||0),dubbed:Number(a.dubbed||0)};
+    return {...metadata,provider:'reanime',id:slug,mal_id:`reanime:${slug}`,title,title_english:titleEnglish,title_japanese:titleJapanese,romaji,synonyms,images:{webp:{large_image_url:imageUrl}},score:Number(a.average_score||a.score||0)/10||null,year:a.season_year||a.year||'',type:a.format||'Anime',episodes:episodeCount||null,status:a.status||'',synopsis:a.description||a.synopsis||'',genres,studios:[],url:`${REANIME_WEB}/anime/${slug}`,anilistId:Number(a.anilist_id||a.anilistId||a.anilist||0)||null,malId:Number(a.mal_id||0)||null,canWatch:a.can_watch!==false,subbed:Number(a.subbed||0),dubbed:Number(a.dubbed||0)};
   }).filter(x => x.title && x.id);
 }
 
@@ -340,9 +356,10 @@ function reanimeMediaFromHtml(html,original){
     anilistId:Number(media.match(/anilist_id:(\d+)/)?.[1])||original.anilistId||null,malId:Number(media.match(/mal_id:(\d+)/)?.[1])||original.malId||null,
     related:reanimeRelated(related,original.id)};
 }
-async function reanimeDetail(anime,html){
+// page(): the series page, fetched only when a JSON route fails (it took a whole request before either went out).
+async function reanimeDetail(anime,page){
   try{const root=await providerFetch(`${REANIME_WEB}/api/v1/anime/${encodeURIComponent(anime.id)}`,{json:true,referer:anime.url});if(root&&typeof root==='object'&&root.anime_id)return reanimeMediaFromJson(root,anime)}catch{/* SSR payload fallback below. */}
-  return reanimeMediaFromHtml(html,anime);
+  return reanimeMediaFromHtml(await page(),anime);
 }
 function reanimeEpisode(raw,anime){
   const number=Number(raw.episode_number);if(!Number.isFinite(number)||number<=0)return null;
@@ -363,13 +380,15 @@ function reanimeSsrEpisodes(html,anime){
   }
   return episodes;
 }
-async function reanimeEpisodes(anime, detailHtml) {
+// listed: the episode route's answer when it was asked already (beside the series route, see provider:detail).
+async function reanimeEpisodes(anime, page, listed = null) {
   // The site's own episode route returns every page at once (the SSR payload only has 100).
   try{
-    const root=await providerFetch(`${REANIME_WEB}/api/v1/anime/${encodeURIComponent(anime.id)}/episodes?limit=2000`,{json:true,referer:anime.url});
+    const root=await (listed||providerFetch(`${REANIME_WEB}/api/v1/anime/${encodeURIComponent(anime.id)}/episodes?limit=2000`,{json:true,referer:anime.url}));
     const list=(Array.isArray(root?.data)?root.data:[]).map(raw=>reanimeEpisode(raw,anime)).filter(Boolean);
     if(list.length)return [...new Map(list.map(ep=>[ep.number,ep])).values()].sort((a,b)=>a.number-b.number);
   }catch{/* SSR payload fallback below. */}
+  const detailHtml=await page().catch(()=>'');
   const ssr=reanimeSsrEpisodes(detailHtml,anime);
   if(ssr.length)return [...new Map(ssr.map(ep=>[ep.number,ep])).values()].sort((a,b)=>a.number-b.number);
   let episodes=providerEpisodes(detailHtml,'reanime',anime);
@@ -384,15 +403,13 @@ async function reanimeEpisodes(anime, detailHtml) {
 
 async function reanimeServers(episode) {
   const parsed=new URL(episode.url),slug=parsed.pathname.split('/').filter(Boolean).pop(),number=Number(parsed.searchParams.get('ep')||episode.number||1);
-  let links=[];
-  try {
-    const root=await providerFetch(`${REANIME_WEB}/api/watch/${encodeURIComponent(slug)}/${number}`,{json:true,referer:`${REANIME_WEB}/`});
-    links=Array.isArray(root.episode_links)?root.episode_links:[];
-  } catch { /* Current API often serves streams only from /api/flix. */ }
-  if(!links.length&&episode.anilistId){
-    const flix=await providerFetch(`${REANIME_WEB}/api/flix/${Number(episode.anilistId)}/${number}`,{json:true,referer:`${REANIME_WEB}/`});
-    links=Array.isArray(flix.servers)?flix.servers:[];
-  }
+  // The current API often serves streams only from /api/flix: both are asked at once (one after the other, an empty
+  // /api/watch cost a whole request first), /api/watch's links used when it has any.
+  const watch=providerFetch(`${REANIME_WEB}/api/watch/${encodeURIComponent(slug)}/${number}`,{json:true,referer:`${REANIME_WEB}/`}).then(root=>Array.isArray(root?.episode_links)?root.episode_links:[],()=>[]);
+  const flix=episode.anilistId?providerFetch(`${REANIME_WEB}/api/flix/${Number(episode.anilistId)}/${number}`,{json:true,referer:`${REANIME_WEB}/`}).then(root=>Array.isArray(root?.servers)?root.servers:[]):null;
+  flix?.catch(()=>{});
+  let links=await watch;
+  if(!links.length&&flix)links=await flix;
   const candidates=links.map(item=>({name:String(item.serverName||''),url:String(item.dataLink||item.link||'')})).filter(item=>/^https:\/\/flixcloud\.cc\/e\//i.test(item.url));
   return [...candidates.filter(item=>/HD-?2/i.test(item.name)),...candidates.filter(item=>/HD-?1/i.test(item.name)),...candidates]
     .filter((item,index,array)=>array.findIndex(x=>x.url===item.url)===index);
@@ -408,10 +425,32 @@ async function reanimeSubtitleTracks(episode) {
   return {tracks:[],referer:''};
 }
 
+// The servers in their order of preference, each started `stagger` ms after the one before it unless that one has
+// answered (or at once when it fails): a host that does not answer no longer holds the next for its whole time limit.
+// The first answer is used and the pages still trying are closed.
+function firstAnswering(items,attempt,stagger){
+  return new Promise((resolve,reject)=>{
+    const controller=new AbortController();let started=0,failed=0,done=false,timer=null,lastError=null;
+    const finish=(error,value)=>{if(done)return;done=true;clearTimeout(timer);controller.abort();error?reject(error):resolve(value)};
+    const next=()=>{
+      clearTimeout(timer);if(done||started>=items.length)return;
+      const item=items[started++];
+      attempt(item,controller.signal).then(value=>finish(null,value),error=>{lastError=error;if(++failed>=items.length)finish(lastError||new Error('모든 영상 서버 연결에 실패했습니다.'));else if(failed>=started)next()});
+      if(started<items.length)timer=setTimeout(next,stagger);
+    };
+    next();
+  });
+}
+// A Linkkf episode's stream: the NR-HD player link from its API (the episode page when there is none).
+async function resolveLinkkfStream(episode) {
+  let playerUrl='';try{const root=await linkkfFetch(`https://emdlinkkf.5imgdarr.top/apilink2.php?data=${encodeURIComponent(episode.token)}`);const links=Array.isArray(root.data)?root.data:[];playerUrl=(links.find(x=>String(x.server).toUpperCase()==='NR-HD')||links[0]||{}).link||'';}catch{}
+  if(!playerUrl)playerUrl=`${LINKKF_WEB}/up/${encodeURIComponent(episode.postId)}/watch/?slug=${encodeURIComponent(episode.slug)}`;
+  return resolveStreamPage(playerUrl,`${LINKKF_WEB}/`,15000);
+}
 async function resolveProviderEpisode(episode) {
-  if(episode.provider==='linkani')return resolveLinkaniEpisode(episode);
   if(episode.provider==='miruro')return resolveMiruroEpisode(episode);
   if(episode.provider==='ohli24')return resolveOhliEpisode(episode);
+  if(episode.provider==='linkani')return resolveLinkaniEpisode(episode);
   if(episode.provider==='reanime') {
     const allServers=(await reanimeServers(episode)).map((server,index)=>({...server,label:String(server.name||'').trim()||`영상 서버 ${index+1}`,kind:'soft'}));
     let ordered=filterProviderServers(allServers,episode);
@@ -474,13 +513,21 @@ function animenosubServers(html,pageUrl){
 // 12 or 15 entries a page and are paged with a cursor.
 const MIRURO_KEY=Buffer.from('miruro/catalog');
 async function miruroApi(pathname,params={}){
-  const url=new URL(`/api/v1/${pathname}`,MIRURO_WEB);
-  for(const [key,value] of Object.entries(params))if(value!==undefined&&value!==null&&value!=='')url.searchParams.set(key,String(value));
-  const response=await fetch(url,{signal:AbortSignal.timeout(30000),headers:{'User-Agent':LINKKF_UA,Accept:'*/*',Referer:`${MIRURO_WEB}/`}});
-  const data=Buffer.from(await response.arrayBuffer());
-  if(!response.ok){let detail='';try{detail=JSON.parse(data.toString('utf8')).detail||''}catch{/* not JSON */}throw new Error(`Miruro HTTP ${response.status}${detail?` (${detail})`:''}`)}
-  for(let i=0;i<data.length;i++)data[i]^=MIRURO_KEY[i%MIRURO_KEY.length];
-  return JSON.parse(zlib.gunzipSync(data).toString('utf8'));
+  // These mirrors share catalog IDs and media providers. Keep .to primary; retry a
+  // compatible mirror only for connection/server failures, never a bad catalog query.
+  let lastError;
+  for(const origin of [MIRURO_WEB,'https://www.miruro.tv','https://www.miruro.cx','https://www.miruro.bz']){
+    const url=new URL(`/api/v1/${pathname}`,origin);
+    for(const [key,value] of Object.entries(params))if(value!==undefined&&value!==null&&value!=='')url.searchParams.set(key,String(value));
+    try{
+      const response=await fetch(url,{signal:AbortSignal.timeout(8000),headers:{'User-Agent':LINKKF_UA,Accept:'*/*',Referer:`${origin}/`}});
+      const data=Buffer.from(await response.arrayBuffer());
+      if(!response.ok){const error=new Error(`Miruro HTTP ${response.status}`);error.permanent=response.status>=400&&response.status<500&&![403,408,429].includes(response.status);throw error}
+      for(let i=0;i<data.length;i++)data[i]^=MIRURO_KEY[i%MIRURO_KEY.length];
+      return JSON.parse(zlib.gunzipSync(data).toString('utf8'));
+    }catch(error){if(error.permanent)throw error;lastError=error}
+  }
+  throw lastError;
 }
 function miruroText(html=''){return String(html||'').replace(/<br\s*\/?>/gi,'\n').replace(/<[^>]+>/g,'').replace(/&mdash;/g,'—').replace(/&ndash;/g,'–').replace(/&quot;/g,'"').replace(/&#0?39;|&apos;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').trim()}
 function miruroItem(raw={}){
@@ -575,46 +622,38 @@ async function resolveMiruroEpisode(episode){
   const kindRank=server=>korean(server)?0.5:episode.prefer==='raw'?(clean(server)?1:server.kind==='sub'?2:3):(english(server)?1:server.kind==='sub'?2:clean(server)?3:4);
   const rank=server=>(server.label===episode.server?0:kindRank(server)*100)+(server.provider===miruroWorkingProvider?0:10)+known(server.provider);
   const result=async(server,extra={})=>{
+    server.tracks.forEach(track=>miruroTrackHeaders.set(track.url,server.headers));
     const stream={url:server.url,headers:server.headers,referer:server.headers.Referer||'',servers:allServers.map(({label,kind})=>({label,kind})),server:server.label,subtitleTracks:server.tracks,...extra};
     // Only a Korean file is applied by itself, as with Re:Anime; other languages wait in the track list.
     const track=server.kind!=='soft'?null:server.tracks.find(isKoreanTrack);
     if(track)try{const file=subtitleResult(await saveRemoteSubtitle(track.url,remoteTrackOptions(track.url)));Object.assign(stream,{subtitleUrl:file.url,subtitlePath:file.path,subtitleAss:file.assUrl?{url:file.assUrl,path:file.assPath}:null,subtitleLabel:`Miruro ${track.label} 자막`,subtitleTrack:track.url})}catch{/* the track list still offers it */}
     return stream;
   };
-  // A download keeps one server for the whole episode, and the hosts' speed changes by the hour (one can crawl at a few
-  // KB/s while the others are fast): a segment of each is timed and the first fast one is used, else the fastest of
-  // up to six, and the download manager fetches its segments itself (mirror). The player can switch servers itself, so
-  // it only checks that the playlist answers.
-  let lastError=null;const slow=[];
-  for(const server of servers.slice().sort((a,b)=>rank(a)-rank(b))){
-    try{
-      if(episode.download){
-        const probe=await hlsProbe(server.url,server.headers);
-        if(probe.speed<MIRURO_MIN_SPEED){slow.push({server,probe});if(slow.length<6)continue;break}
-        miruroWorkingProvider=server.provider;return result(server,{program:probe.program,mirror:true});
-      }
-      const response=await fetch(server.url,{signal:AbortSignal.timeout(10000),headers:{'User-Agent':LINKKF_UA,...server.headers}}),text=response.ok?await response.text():'';
-      if(!text.startsWith('#EXTM3U'))throw new Error(`HTTP ${response.status}`);
-      miruroWorkingProvider=server.provider;
-      return result(server);
-    }catch(error){lastError=error}
-  }
-  const fastest=slow.sort((a,b)=>b.probe.speed-a.probe.speed)[0];if(fastest){miruroWorkingProvider=fastest.server.provider;return result(fastest.server,{program:fastest.probe.program,mirror:true})}
-  throw new Error(`모든 영상 서버 연결에 실패했습니다.${lastError?` (${lastError.message})`:''}`);
+  // Select a server by its preferred audio/subtitle kind and measured segment speed. The shared
+  // selector bounds concurrent probes and falls back only after every viable server was checked.
+  const selected=await selectMiruroServer(servers.slice().sort((a,b)=>rank(a)-rank(b)),{
+    preferred:episode.server||'',excluded:episode.failedServers||episode.miruroFailedServers||[],priority:kindRank,
+    probe:(server,signal)=>hlsProbe(server.url,server.headers,{signal})
+  });
+  miruroWorkingProvider=selected.server.provider;
+  return result(selected.server,episode.download?{program:selected.probe.program,mirror:true}:{hls:true});
 }
-// The best variant of an HLS playlist and the speed of one of its segments (KB/s). The variant is FFmpeg's program id
-// (variants in playlist order), so a download fetches one quality instead of all of them (Miruro masters list 1080p,
-// 720p and 360p).
-const MIRURO_MIN_SPEED=300;
-async function hlsProbe(url,headers={}){
-  const get=async(target,timeout)=>{const response=await fetch(target,{signal:AbortSignal.timeout(timeout),headers:{'User-Agent':LINKKF_UA,...headers}});if(!response.ok)throw new Error(`HTTP ${response.status}`);return response};
-  const master=await (await get(url,10000)).text();
+// The best variant of an HLS playlist and the speed of its sample segments (KB/s).
+async function hlsProbe(url,headers={},options={}){
+  const get=async(target,timeout)=>{const response=await fetch(target,{signal:options.signal?AbortSignal.any([options.signal,AbortSignal.timeout(timeout)]):AbortSignal.timeout(timeout),headers:{'User-Agent':LINKKF_UA,...headers}});if(!response.ok)throw new Error(`HTTP ${response.status}`);return response};
+  const response=await get(url,6000),master=await response.text();url=response.url||url;
+  if(!master.trimStart().startsWith('#EXTM3U'))throw new Error('올바른 HLS 재생목록이 아닙니다.');
   const variants=[...master.matchAll(/#EXT-X-STREAM-INF:([^\r\n]*)\r?\n\s*([^\r\n#][^\r\n]*)/g)].map(match=>({height:Number(match[1].match(/RESOLUTION=\d+x(\d+)/)?.[1])||0,bandwidth:Number(match[1].match(/BANDWIDTH=(\d+)/)?.[1])||0,uri:match[2].trim()}));
   const program=variants.length?variants.reduce((best,item,index)=>(item.height-variants[best].height||item.bandwidth-variants[best].bandwidth)>0?index:best,0):null;
-  const base=program==null?url:new URL(variants[program].uri,url).href,media=program==null?master:await (await get(base,10000)).text();
-  const segments=media.split(/\r?\n/).filter(line=>line.trim()&&!line.startsWith('#'));if(!segments.length)throw new Error('빈 재생목록');
-  const started=Date.now(),size=(await (await get(new URL(segments[Math.min(3,segments.length-1)].trim(),base).href,15000)).arrayBuffer()).byteLength;
-  return {program:variants.length>1?program:null,speed:size/1024/Math.max(.05,(Date.now()-started)/1000)};
+  let base=program==null?url:new URL(variants[program].uri,url).href,media=master;
+  if(program!=null){const response=await get(base,6000);base=response.url||base;media=await response.text();}
+  if(!media.trimStart().startsWith('#EXTM3U'))throw new Error('올바른 HLS 재생목록이 아닙니다.');
+  const segments=[...media.matchAll(/#EXTINF:([\d.]+)[^\r\n]*\r?\n(?:#[^\r\n]*\r?\n)*([^#\r\n]+)/g)].map(match=>({duration:Number(match[1]),uri:match[2].trim()}));
+  if(!segments.length)throw new Error('빈 재생목록');
+  const first=segments.length>4?3:0,samples=segments.slice(first,first+2),speeds=[];let size=0,duration=0;
+  for(const segment of samples){const started=Date.now(),bytes=(await(await get(new URL(segment.uri,base).href,6000)).arrayBuffer()).byteLength;if(!bytes)throw new Error('빈 영상 조각');size+=bytes;duration+=segment.duration;speeds.push(bytes/1024/Math.max(.05,(Date.now()-started)/1000));}
+  const bitrate=program==null?0:variants[program].bandwidth;
+  return {program:variants.length>1?program:null,speed:Math.min(...speeds),requiredSpeed:Math.max(bitrate/8/1024,duration?size/1024/duration:0)*1.5};
 }
 
 // --- Ohli24 (애니24) -------------------------------------------------------------------------------------------------
@@ -623,10 +662,10 @@ async function hlsProbe(url,headers={}){
 // Lists: the home page (recommended), /ing (airing, all on one page), /finished/N-1.html (finished, 25 a page), and
 // /search/keyword-…html. A series page has the original (Japanese) title, genres, air date, the story and its episodes
 // (newest first); an episode page embeds the cdndania (FirePlayer) player.
-const OHLI24_WEB='https://www.ohli24.net';
-// The current official provider schedule uses ani.ohli24.com. Keep this schedule-only
-// adapter separate from the legacy catalog/detail/playback path above.
-const OHLI24_SCHEDULE_WEB='https://ani.ohli24.com';
+const OHLI24_WEB='https://ani.ohli24.com';
+const OHLI24_LEGACY_WEB='https://www.ohli24.net';
+const OHLI24_OLD=/^https?:\/\/(?:www\.)?ohli24\.net\//i;
+const OHLI24_SCHEDULE_WEB=OHLI24_WEB;
 async function ohliSchedulePage(url){
   const response=await net.fetch(url,{signal:AbortSignal.timeout(13000),headers:{'User-Agent':LINKKF_UA,Accept:'text/html,application/xhtml+xml','Accept-Language':'ko-KR,ko;q=0.9',Referer:`${OHLI24_SCHEDULE_WEB}/`}});
   if(!response.ok)throw new Error(`애니24 일정 HTTP ${response.status}`);
@@ -976,6 +1015,19 @@ async function saveRemoteSubtitle(url,{referer='',userAgent=LINKKF_UA,headers={}
 // Android gives the player WebView 30 s (Re:Anime) or 15 s (Linkkf) to expose the stream.
 // options: partition (a session of its own, so several pages can be resolved at once without swapping each other's
 // request hooks), waitSubtitle (Linkkf pages carry a Korean subtitle requested after the video), signal (stops it).
+// A session has one request hook; a second one replaces the first. Player pages open side by side in one session
+// (Re:Anime's servers, each in the session that keeps FlixCloud's cookies), so the session's hook hands each request
+// to the page it came from.
+const resolverHooks=new Map();
+function hookResolver(ses,webContentsId,handler){
+  let handlers=resolverHooks.get(ses);
+  if(!handlers){
+    handlers=new Map();resolverHooks.set(ses,handlers);
+    ses.webRequest.onBeforeSendHeaders({urls:['*://*/*']},(details,callback)=>{const own=handlers.get(details.webContentsId);if(own)own(details,callback);else callback({requestHeaders:details.requestHeaders})});
+  }
+  handlers.set(webContentsId,handler);
+  return ()=>{handlers.delete(webContentsId);if(!handlers.size&&resolverHooks.get(ses)===handlers){resolverHooks.delete(ses);ses.webRequest.onBeforeSendHeaders(null)}};
+}
 async function resolveStreamPage(targetUrl, referer = '', timeoutMs = 30000, { partition: ownPartition = '', waitSubtitle = true, signal = null } = {}) {
   const isFlixCloud=/flixcloud\.cc/i.test(targetUrl);
   const partition=ownPartition||(isFlixCloud?'persist:lilac-android-webview-v2':'persist:lilac-provider');
@@ -983,8 +1035,7 @@ async function resolveStreamPage(targetUrl, referer = '', timeoutMs = 30000, { p
   const resolver=new BrowserWindow({show:false,width:960,height:640,webPreferences:{partition,contextIsolation:true,nodeIntegration:false,sandbox:true,autoplayPolicy:'no-user-gesture-required',backgroundThrottling:false}});
   resolver.webContents.setUserAgent(browserUa);
   const ses=resolver.webContents.session;let stream=null,subtitle=null,lastHeaders={},flixPk='',flixVideo='',flixAudio='';const streams=new Map();
-  const filter={urls:['*://*/*']};
-  ses.webRequest.onBeforeSendHeaders(filter,(details,callback)=>{const lower=details.url.toLowerCase(),headers=details.requestHeaders||{};if(isFlixCloud){headers['User-Agent']=ANDROID_WEBVIEW_UA;headers['sec-ch-ua']='"Chromium";v="131", "Not_A Brand";v="24"';headers['sec-ch-ua-mobile']='?1';headers['sec-ch-ua-platform']='"Android"';headers['Accept-Language']='en-US,en;q=0.9,ko;q=0.7'}const adMedia=/runative|magsrv|juneworewyjyna|pxltag/i.test(lower),media=lower.includes('.m3u8')||/\.(mp4|webm)(?:\?|$)/i.test(lower);if(media&&!adMedia&&!lower.includes('ad')){streams.set(details.url,{...headers});if(!stream){stream=details.url;lastHeaders={...headers}}}if(!isFlixCloud&&lower.includes('.vtt')&&!/thumbnail/i.test(lower))subtitle ||= details.url;callback({requestHeaders:headers});});
+  const unhook=hookResolver(ses,resolver.webContents.id,(details,callback)=>{const lower=details.url.toLowerCase(),headers=details.requestHeaders||{};if(isFlixCloud){headers['User-Agent']=ANDROID_WEBVIEW_UA;headers['sec-ch-ua']='"Chromium";v="131", "Not_A Brand";v="24"';headers['sec-ch-ua-mobile']='?1';headers['sec-ch-ua-platform']='"Android"';headers['Accept-Language']='en-US,en;q=0.9,ko;q=0.7'}const adMedia=/runative|magsrv|juneworewyjyna|pxltag/i.test(lower),media=lower.includes('.m3u8')||/\.(mp4|webm)(?:\?|$)/i.test(lower);if(media&&!adMedia&&!lower.includes('ad')){streams.set(details.url,{...headers});if(!stream){stream=details.url;lastHeaders={...headers}}}if(!isFlixCloud&&lower.includes('.vtt')&&!/thumbnail/i.test(lower))subtitle ||= details.url;callback({requestHeaders:headers});});
   const stop=()=>{if(!resolver.isDestroyed())resolver.destroy()};signal?.addEventListener('abort',stop);
   try {
     // The address is looked for while the page loads: a player page can keep loading ads for half a minute after the
@@ -1181,13 +1232,16 @@ function siblingTitle(main,other){
 // "…Bunny Girl Senpai"). When the English title matches a named season, that season's Korean name is used;
 // a ko-KR name that is only a subtitle ("시즌 2: 영주의 양녀") is appended to the series name. Seasons named
 // just "Season N" are left to the series name and the season number in the English title.
-async function tmdbSeasonTitle(id,original){
-  const [en,ko]=await Promise.all([tmdbFetch(`/tv/${id}`,{language:'en-US'}),tmdbFetch(`/tv/${id}`,{language:'ko-KR'})]);
+async function tmdbSeasonTitle(id,original,options={}){
+  // The ko-KR entry is only asked for when the title names one of the seasons.
+  const en=await tmdbFetch(`/tv/${id}`,{language:'en-US'},options);
   const key=titleCompareKey(original);
   // Season 1 is often named after the series, which every later title also contains: take the longest match.
   const season=(en.seasons||[]).filter(item=>!/^(?:season\s*\d+|specials)$/i.test(item.name||'')&&titleCompareKey(item.name).length>=6&&key.includes(titleCompareKey(item.name))).sort((a,b)=>titleCompareKey(b.name).length-titleCompareKey(a.name).length)[0];
+  if(!season)return '';
+  const ko=await tmdbFetch(`/tv/${id}`,{language:'ko-KR'},options);
   const name=String((ko.seasons||[]).find(item=>item.season_number===season?.season_number)?.name||'').replace(/^시즌\s*\d+\s*[:：]?\s*/,'').trim();
-  if(!season||!/[가-힣]{2}/.test(name))return '';
+  if(!/[가-힣]{2}/.test(name))return '';
   const series=String(ko.name||'').trim(),firstWord=simpleTitle(series).split(' ')[0]||'';
   return firstWord&&simpleTitle(name).includes(firstWord)?name:`${series.replace(/\s*[~〜～][^~〜～]*[~〜～]\s*/g,' ').trim()} ${name}`;
 }
@@ -1205,25 +1259,26 @@ function tmdbQueries(titles){
 // the work (TMDB can rank a spin-off such as "Attack on Titan: Junior High" first). An animation named exactly like the
 // query, otherwise TMDB's own ranking with Japanese works first: "Grand Blue" is listed as "Grand Blue Dreaming", and a
 // prefix match would pick the unrelated "Grand Blues!".
-async function tmdbPick(query,kind){
-  const [enRoot,koRoot]=await Promise.all([tmdbFetch(`/search/${kind}`,{query,language:'en-US',include_adult:'false'}),tmdbFetch(`/search/${kind}`,{query,language:'ko-KR',include_adult:'false'})]);
+async function tmdbPick(query,kind,options={}){
+  const [enRoot,koRoot]=await Promise.all([tmdbFetch(`/search/${kind}`,{query,language:'en-US',include_adult:'false'},options),tmdbFetch(`/search/${kind}`,{query,language:'ko-KR',include_adult:'false'},options)]);
   const japanese=item=>Number(item.origin_country?.includes?.('JP')||item.original_language==='ja');
   const animation=(enRoot?.results||[]).filter(item=>(item.genre_ids||[]).includes(16)),wantedKey=titleCompareKey(query),nameKey=item=>titleCompareKey(item.name||item.title||'');
   const pick=animation.find(item=>nameKey(item)===wantedKey)||animation.slice().sort((a,b)=>japanese(b)-japanese(a))[0];
   return pick?(koRoot?.results||[]).find(item=>item.id===pick.id)||pick:null;
 }
-async function tmdbKoreanTitles(titles,{light=false}={}){
+async function tmdbKoreanTitles(titles,{light=false,background=false}={}){
+  const options={background};
   const found=[];
   for(const query of tmdbQueries(titles)){
     for(const kind of ['tv','movie']){
-      const pick=await tmdbPick(query,kind),results=pick?[pick]:[];
+      const pick=await tmdbPick(query,kind,options),results=pick?[pick]:[];
       // Everything after the first title must not name another season of the same franchise.
       const add=name=>{name=String(name||'').trim();if(/[가-힣]{2}/.test(name)&&!found.includes(name)&&!siblingTitle(found[0],name))found.push(name)};
-      if(kind==='tv'&&results[0])add(await tmdbSeasonTitle(results[0].id,titles[0]).catch(()=>''));
+      if(kind==='tv'&&results[0])add(await tmdbSeasonTitle(results[0].id,titles[0],options).catch(()=>''));
       if(results[0]&&/[가-힣]/.test(results[0].name||results[0].title||''))add(results[0].name||results[0].title);
       // Fan subtitle blogs often use a different Korean title than the official one
       // ("봇치 더 록!" rather than "외톨이 THE ROCK!"); TMDB lists those as Korean alternative titles.
-      if(results[0]&&!light){const alt=await tmdbFetch(`/${kind}/${results[0].id}/alternative_titles`).catch(()=>null);for(const item of [...(alt?.results||[]),...(alt?.titles||[])])if(item.iso_3166_1==='KR')add(item.title)}
+      if(results[0]&&!light){const alt=await tmdbFetch(`/${kind}/${results[0].id}/alternative_titles`,{},options).catch(()=>null);for(const item of [...(alt?.results||[]),...(alt?.titles||[])])if(item.iso_3166_1==='KR')add(item.title)}
       if(found.length)return found;
     }
   }
@@ -1370,13 +1425,19 @@ async function displayKoreanTitle(title,anime){
   const malId=Number(anime.malId)||media?.idMal||null,anilistId=Number(anime.anilistId)||media?.id||null;
   return (await wikidataKoreanTitles(malId,anilistId).catch(()=>[])).map(clean).find(value=>/[가-힣]{2}/.test(value))||'';
 }
-async function resolveDisplayTitle(anime={}){
+const displayTitlePending=new Map();
+function resolveDisplayTitle(anime={}){
+  const key=`${anime.provider||'jikan'}:${anime.id??anime.mal_id}`;
+  if(displayTitlePending.has(key))return displayTitlePending.get(key);
+  const pending=resolveDisplayTitleUnshared(anime).finally(()=>displayTitlePending.delete(key));
+  displayTitlePending.set(key,pending);
+  return pending;
+}
+async function resolveDisplayTitleUnshared(anime={}){
   const key=`${anime.provider||'jikan'}:${anime.id??anime.mal_id}`,store=displayTitleStore(),cached=store[key];
   const title=String(anime.title||'').trim();
-  // Names are shown cleaned and with their season (see withSeason). TMDB's name comes first: one filled in from Wikidata
-  // by the catalog index, or kept from before names said where they came from, is looked up again once (with a TMDB key).
-  const stale=cached&&!hasHangul(title)&&tmdbKey()&&(!cached.src||cached.src==='wikidata');
-  if(cached&&!stale&&isFreshTimestamp(cached.time,displayTitleCacheTtl(cached)))return {key,ko:withSeason(cached.ko||'',title,anime.type),en:cached.en||''};
+  // Keep any unexpired saved title first; a slow TMDB refresh must not delay an already known Korean name.
+  if(cached&&isFreshTimestamp(cached.time,displayTitleCacheTtl(cached)))return {key,ko:withSeason(cached.ko||'',title,anime.type),en:cached.en||''};
   const ko=hasHangul(title)?title:await displayKoreanTitle(title,anime).catch(()=>'');
   const en=await englishTitleFor(anime).catch(()=>'');
   const merged={ko:ko||cached?.ko||'',en:en||cached?.en||''};
@@ -1423,11 +1484,15 @@ function sortedFromIndex(provider,sort){
   const index=catalogIndex(provider),key=`${provider}:${sort}`,cached=sortedLists.get(key);
   if(!index.items.length)return null;
   if(cached&&cached.items===index.items)return cached.list;
-  const number=value=>Number(value)||0,thisYear=new Date().getFullYear(),released=item=>!/not yet/i.test(String(item.status||''))&&number(item.year)<=thisYear;
+  const number=value=>Number(value)||0,thisYear=new Date().getFullYear(),released=item=>{
+    const hasPlayableEpisodes=[item.availableEpisodes,item.availableEpisodeCount,item.subbed,item.dubbed]
+      .some(value=>value!=null&&value!==''&&Number.isFinite(Number(value))&&Number(value)>0);
+    return (hasPlayableEpisodes||!/not yet/i.test(String(item.status||'')))&&number(item.year)<=thisYear;
+  };
   const order=index.items.map((item,at)=>({item,at})),by={
     popular:(a,b)=>number(b.item.popularity)-number(a.item.popularity)||a.at-b.at,
     score:(a,b)=>number(b.item.score)-number(a.item.score)||number(b.item.popularity)-number(a.item.popularity)||a.at-b.at,
-    year:(a,b)=>number(b.item.year)-number(a.item.year)||String(b.item.aired||'').localeCompare(String(a.item.aired||''))||number(b.item.popularity)-number(a.item.popularity)||a.at-b.at}[sort];
+    year:(a,b)=>compareRelease(a.item,b.item)||number(b.item.popularity)-number(a.item.popularity)||a.at-b.at}[sort];
   if(!by)return null;
   const list=order.filter(({item})=>sort!=='year'||released(item)).sort(by).map(({item})=>item);
   sortedLists.set(key,{items:index.items,list});return list;
@@ -1622,32 +1687,33 @@ async function findCommunitySubtitleByTitles(source,titles,episode,options){
 // Blogger feeds return at most 150 posts per request, so the whole blog is paged in. Like Android the index is
 // kept on disk for a day, a failed refresh falls back to the stale copy, and a miss refreshes once (below).
 const communityPostCache=new Map();
+const communityPostRequests=new Map(),communityPostRetryAt=new Map();
 async function communityPosts(blog,{force=false}={}){
+  blog=new URL(blog).origin;
   const file=path.join(app.getPath('userData'),`community-${new URL(blog).hostname.split('.')[0]}.json`);
   let cached=communityPostCache.get(blog);if(!cached){try{cached=JSON.parse(fs.readFileSync(file,'utf8'))}catch{cached=null}}
   const age=cached?.posts?.length?Date.now()-cached.time:Infinity;
-  if(age<(force?10*60*1000:24*60*60*1000)){communityPostCache.set(blog,cached);return cached.posts}
-  try{
+  if(age<(force?10*60*1000:24*60*60*1000)||cached?.posts?.length&&Date.now()<(communityPostRetryAt.get(blog)||0)){communityPostCache.set(blog,cached);return cached.posts}
+  if(communityPostRequests.has(blog))return communityPostRequests.get(blog);
+  const work=(async()=>{try{
     const page=start=>providerFetch(`${blog}/feeds/posts/default?alt=json&max-results=150&start-index=${start}`,{json:true,referer:`${blog}/`});
-    const first=await page(1),total=Number(first.feed?.openSearch$totalResults?.$t)||0,rest=[];
-    for(let start=151;start<=total;start+=150)rest.push(page(start).catch(()=>null));
-    const posts=[first,...await Promise.all(rest)].flatMap(root=>root?.feed?.entry||[]).map(entry=>({title:entry.title?.$t||'',url:(entry.link||[]).find(x=>x.rel==='alternate')?.href||'',html:entry.content?.$t||entry.summary?.$t||''}));
-    if(!posts.length)throw new Error('empty feed');
+    const first=await page(1),total=Number(first.feed?.openSearch$totalResults?.$t)||0,roots=[first],starts=[];
+    for(let start=151;start<=total;start+=150)starts.push(start);
+    let next=0,failure=null;
+    await Promise.all(Array.from({length:Math.min(3,starts.length)},async()=>{while(next<starts.length&&!failure){const at=next++;try{roots[at+1]=await page(starts[at])}catch(error){failure=error}}}));
+    if(failure)throw failure;
+    const seen=new Map();for(const entry of roots.flatMap(root=>root?.feed?.entry||[])){const url=(entry.link||[]).find(x=>x.rel==='alternate')?.href||'';if(url&&!seen.has(url))seen.set(url,{title:entry.title?.$t||'',url,html:entry.content?.$t||entry.summary?.$t||''})}
+    const posts=[...seen.values()];if(!posts.length||total&&posts.length<total)throw new Error('자막 게시물 목록을 다 받지 못했습니다.');
     const fresh={time:Date.now(),posts};communityPostCache.set(blog,fresh);try{fs.writeFileSync(file,JSON.stringify(fresh))}catch{}
+    communityPostRetryAt.delete(blog);
     return posts;
-  }catch(error){if(cached?.posts?.length){communityPostCache.set(blog,cached);return cached.posts}throw error}
-}
-// Episode numbers written as "12화", "9, 10화", "1 ~ 12화" or "EP 3". Bare digits ("2기", "무직전생3") are not episodes.
-function communityEpisodes(text=''){
-  const list=[],ranges=[];const value=String(text).normalize('NFKC');
-  for(const m of value.matchAll(/(\d+)\s*[~∼\-]\s*(\d+)\s*(?:화|회|편)/g))ranges.push([Number(m[1]),Number(m[2])]);
-  for(const m of value.replace(/(\d+)\s*[~∼\-]\s*(\d+)\s*(?:화|회|편)/g,' ').matchAll(/((?:\d+\s*,\s*)*\d+)\s*(?:화|회|편)/g))list.push(...m[1].split(',').map(Number));
-  for(const m of value.matchAll(/\bep(?:isode)?\s*\.?\s*(\d+)/gi))list.push(Number(m[1]));
-  return {list,ranges,has:ep=>list.includes(ep)||ranges.some(([a,b])=>ep>=a&&ep<=b),any:list.length+ranges.length>0};
+  }catch(error){communityPostRetryAt.set(blog,Date.now()+60000);if(cached?.posts?.length){communityPostCache.set(blog,cached);return cached.posts}throw error}})();
+  communityPostRequests.set(blog,work);try{return await work}finally{communityPostRequests.delete(blog)}
 }
 function communitySeason(text=''){
   const value=String(text).normalize('NFKC'),m=value.match(/(?:season|시즌)\s*(\d+)|(\d+)\s*기(?![가-힣])|(\d+)(?:st|nd|rd|th)(?:\s*season)?\b|[가-힣](\d)(?=\s|$)/i);
-  return m?Number(m[1]||m[2]||m[3]||m[4]):null;
+  if(m)return Number(m[1]||m[2]||m[3]||m[4]);
+  const roman=value.trim().match(/(?:^|\s)(II|III|IV|V|VI)\s*$/i);return roman?{II:2,III:3,IV:4,V:5,VI:6}[roman[1].toUpperCase()]:null;
 }
 // Provider (English) titles also number a later season with a bare digit or a roman numeral at the end
 // ("The Angel Next Door Spoils Me Rotten 2", Re:Anime's "…Rotten2", "Overlord IV"), but "Kaiju No. 8",
@@ -1711,10 +1777,10 @@ function communityScore(target,candidate){
   return best;
 }
 // Older Kairan titles end in a bare episode number ("히로아카7 20", "... 12(완)").
-const COMMUNITY_TRAILING_EPISODE=/(?<!season|시즌|part|파트|vol\.?|제)\s+(\d{1,3})\s*(?:\((?:끝|완)\))?\s*(?:자막)?\s*$/i;
+const COMMUNITY_TRAILING_EPISODE=/(?<!season|시즌|part|파트|vol\.?|제)\s+(\d{1,3}(?:\.\d+)?)\s*(?:\((?:끝|완)\))?\s*(?:자막)?\s*$/i;
 function communityPostEpisodes(title=''){const episodes=communityEpisodes(title);if(episodes.any)return episodes;const m=String(title).normalize('NFKC').match(COMMUNITY_TRAILING_EPISODE);return m?communityEpisodes(`${m[1]}화`):episodes}
 function communityPostTitle(title=''){return communityTitle(String(title).normalize('NFKC').replace(COMMUNITY_TRAILING_EPISODE,' '))}
-function communityTitle(text=''){return String(text).replace(/(\d+)\s*[~∼\-,]\s*(?=\d)/g,'').replace(/\d+\s*(?:화|회|편)|\((?:끝|완)\)|작업\s*중|블루레이판|자막/g,' ').trim()}
+function communityTitle(text=''){return String(text).replace(/(\d+)\s*[~∼\-,]\s*(?=\d)/g,'').replace(/\d+(?:\.\d+)?\s*(?:화|회|편)|\((?:끝|완)\)|작업\s*중|블루레이판|자막/g,' ').trim()}
 // Picks the post's download links for one episode: per-episode posts (Kairan) carry the number in the
 // title, series posts (Csora) label each link ("13화", "1 ~ 12화") and add a separate "폰트" link.
 function communityLinks(post,episode,{offsets=[],allowOffset=false}={}){
@@ -1734,10 +1800,10 @@ function communityLinks(post,episode,{offsets=[],allowOffset=false}={}){
   const labeled=subs.map(a=>({...a,episodes:communityEpisodes(a.label)})).filter(a=>a.episodes.any);
   // No numbers at all: a movie or a whole-season bundle, whose file has to be matched by episode.
   if(!labeled.length)return {links:withFonts(subs),episode,strict:true,bundle:false,episodeMatched:false};
-  const pick=number=>labeled.find(a=>a.episodes.list.includes(number))||labeled.find(a=>a.episodes.has(number));
   const direct=matchedEpisode({has:number=>labeled.some(a=>a.episodes.has(number))});
-  const chosen=direct==null?null:pick(direct),bundle=Boolean(chosen&&(chosen.episodes.ranges.length||chosen.episodes.list.length>1));
-  return {links:chosen?withFonts([chosen]):[],episode:direct??episode,strict:bundle,bundle,episodeMatched:direct!=null};
+  const chosen=direct==null?[]:labeled.filter(a=>a.episodes.has(direct));
+  const bundle=chosen.some(item=>item.episodes.ranges.length||item.episodes.list.length>1);
+  return {links:withFonts(chosen),episode:direct??episode,strict:bundle,bundle,episodeMatched:direct!=null};
 }
 // "S02E05" counts as episode 5 only, and a CRC tag ("[5A2B3C4D]") is not an episode number.
 function communityFileEpisodeNumbers(file){
@@ -1753,7 +1819,7 @@ function selectCommunitySubtitleCandidate(candidates,episode,strict=false,fileSi
   return candidates[0]||null;
 }
 const COMMUNITY_FILE=/\.(ass|ssa|srt|vtt|smi|ttf|otf|ttc)$/i;
-function communityFileName(name){return path.basename(String(name).replace(/\\/g,'/')).normalize('NFC').replace(/[^\p{L}\p{N}._ -]/gu,'_')}
+function communityFileName(name){return path.basename(String(name).replace(/\\/g,'/')).normalize('NFC').replace(/[^\p{L}\p{N}._ -]/gu,character=>'[]()'.includes(character)?character:'_')}
 // Large Drive files answer with a "virus scan warning" page (always when a foreign Referer is sent);
 // its form holds the real download URL.
 async function downloadDriveBuffer(url,referer){
@@ -1809,24 +1875,33 @@ function rankCommunityPosts(posts,title,episode,originalTitle='',{offsets=[]}={}
 }
 // Episodes of the previous seasons, from AniList's prequel chain (TV series only): the direct prequel alone and
 // the whole chain, since makers restart either per franchise or per season.
-const prequelEpisodeCache=new Map();
+const prequelEpisodeCache=new Map(),previousSeasonRequests=new Map();
 async function previousSeasonEpisodes(anime={},title=''){
   const season=searchSeason(title,anime.title||'')??1;if(season<2)return [];
   let id=Number(anime.anilistId)||null;
   if(!id&&anime.title&&!hasHangul(anime.title))id=(await anilistMedia(anime.title,anime).catch(()=>null))?.id||null;
   if(!id)return [];if(prequelEpisodeCache.has(id))return prequelEpisodeCache.get(id);
-  const counts=[];let current=id;
-  for(let depth=0;depth<8&&current;depth++){
-    const query=`query($id:Int){Media(id:$id,type:ANIME){relations{edges{relationType node{id format episodes}}}}}`;
-    let response=null;
-    try{response=await requestAniListGraphQL(query,{id:current},{timeoutMs:25000})}
-    catch(error){if(error?.code==='ANILIST_RATE_LIMITED')return [];}
-    const edges=response?.ok?(await response.json())?.data?.Media?.relations?.edges||[]:[];
-    const prequel=edges.find(edge=>edge.relationType==='PREQUEL'&&['TV','TV_SHORT','ONA'].includes(edge.node?.format)&&edge.node?.episodes);
-    if(!prequel)break;counts.push(prequel.node.episodes);current=prequel.node.id;
-  }
-  const offsets=[...new Set([counts[0],counts.reduce((sum,count)=>sum+count,0)].filter(value=>value>0))];
-  prequelEpisodeCache.set(id,offsets);return offsets;
+  if(previousSeasonRequests.has(id))return previousSeasonRequests.get(id);
+  const work=(async()=>{
+    const counts=[],visited=new Set();let current=id;
+    for(let depth=0;depth<8&&current&&!visited.has(current);depth++){
+      visited.add(current);
+      const query=`query($id:Int){Media(id:$id,type:ANIME){relations{edges{relationType node{id format episodes}}}}}`;
+      let response=null;
+      try{response=await requestAniListGraphQL(query,{id:current},{timeoutMs:25000})}
+      catch(error){if(error?.code==='ANILIST_RATE_LIMITED')return [];throw error;}
+      if(!response?.ok)throw new Error(`AniList 관계 조회 실패${response?.status?` (HTTP ${response.status})`:''}`);
+      const payload=await response.json();
+      if(Array.isArray(payload?.errors)&&payload.errors.length)throw new Error('AniList 관계 GraphQL 응답 오류');
+      const edges=payload?.data?.Media?.relations?.edges||[];
+      const prequel=edges.find(edge=>edge.relationType==='PREQUEL'&&['TV','TV_SHORT','ONA'].includes(edge.node?.format)&&Number(edge.node?.episodes)>0);
+      const next=Number(prequel?.node?.id)||null;
+      if(!prequel||!next||visited.has(next))break;counts.push(Number(prequel.node.episodes));current=next;
+    }
+    const offsets=[...new Set([counts[0],counts.reduce((sum,count)=>sum+count,0)].filter(value=>value>0))];
+    prequelEpisodeCache.set(id,offsets);return offsets;
+  })();
+  previousSeasonRequests.set(id,work);try{return await work}finally{previousSeasonRequests.delete(id)}
 }
 async function findCommunitySubtitle(source,title,episode,{originalTitle='',offsets=[]}={}){
   const blog=source==='kairan'?'https://kairan03.blogspot.com':'https://csora556.blogspot.com',label=source==='kairan'?'Kairan':'Csora';
@@ -2022,12 +2097,22 @@ async function translationContext(anime={},title=''){
 const ANISSIA_API='https://api.anissia.net';
 // Online subtitle sources in their default search order.
 const COMMUNITY_SOURCES=['kairan','csora','anissia'];
+// The saved subtitle sources a download counts as Korean (as download-manager's KOREAN_SOURCES).
+const DOWNLOAD_KOREAN_SOURCES=[...COMMUNITY_SOURCES,'gemini','linkkf','user'];
 function communitySubtitleLabel(source,result={}){return source==='anissia'?`Anissia${result.maker?` · ${result.maker}`:''} 자막`:`${source==='kairan'?'Kairan':'Csora'} 자막`}
+const anissiaResponseCache=new Map(),anissiaRequests=new Map();
 async function anissiaFetch(pathname){
-  const response=await fetch(`${ANISSIA_API}${pathname}`,{signal:AbortSignal.timeout(20000),headers:{Accept:'application/json','User-Agent':'LilacAnime/1.0'}});
-  if(!response.ok)throw new Error(`Anissia HTTP ${response.status}`);
-  const root=await response.json();if(root?.code&&root.code!=='ok')throw new Error(`Anissia ${root.code}`);
-  return root?.data;
+  const cached=anissiaResponseCache.get(pathname);if(cached&&Date.now()-cached.time<60000)return cached.data;
+  if(anissiaRequests.has(pathname))return anissiaRequests.get(pathname);
+  const work=(async()=>{
+    const response=await fetch(`${ANISSIA_API}${pathname}`,{signal:AbortSignal.timeout(20000),headers:{Accept:'application/json','User-Agent':'LilacAnime/1.0'}});
+    if(!response.ok)throw new Error(`Anissia HTTP ${response.status}`);
+    const root=await response.json();if(root?.code&&root.code!=='ok')throw new Error(`Anissia ${root.code}`);
+    if(root?.data==null)throw new Error('Anissia 응답을 읽지 못했습니다.');
+    anissiaResponseCache.set(pathname,{time:Date.now(),data:root.data});if(anissiaResponseCache.size>256)anissiaResponseCache.delete(anissiaResponseCache.keys().next().value);
+    return root.data;
+  })();
+  anissiaRequests.set(pathname,work);try{return await work}finally{anissiaRequests.delete(pathname)}
 }
 // The Anissia entry for a Korean title, with the season required to match ("2기", "Season 3").
 async function anissiaAnime(title,originalTitle=''){
@@ -2036,13 +2121,18 @@ async function anissiaAnime(title,originalTitle=''){
   // Anissia's search misses titles typed with their punctuation ("명탐정 프리큐어!").
   const plain=bare.replace(/[!?！？.,:;·'"“”‘’♡♥☆★]+/g,' ').replace(/\s+/g,' ').trim();
   const queries=[...new Set([bare,plain,plain.split(' ').slice(0,2).join(' ')])].filter(query=>query.length>=2);
-  const seen=new Map();
+  const seen=new Map();let best=null,lastError=null,answered=false;
   for(const query of queries){
-    for(const item of (await anissiaFetch(`/anime/list/0?q=${encodeURIComponent(query)}`).catch(()=>null))?.content||[])seen.set(item.animeNo,item);
-    const best=[...seen.values()].filter(item=>(communitySeason(item.subject)??1)===season).map(item=>({item,score:communityScore(wanted,item.subject)})).filter(x=>x.score>=.52).sort((a,b)=>b.score-a.score)[0];
-    if(best)return best.item;
+    for(let page=0;page<3;page++){
+      let result;try{result=await anissiaFetch(`/anime/list/${page}?q=${encodeURIComponent(query)}`);if(!Array.isArray(result?.content))throw new Error('Anissia 검색 응답을 읽지 못했습니다.');answered=true}catch(error){lastError=error;break}
+      for(const item of result.content)seen.set(item.animeNo,item);
+      best=[...seen.values()].filter(item=>(communitySeason(item.subject)??1)===season).map(item=>({item,score:communityScore(wanted,item.subject)})).filter(x=>x.score>=.52).sort((a,b)=>b.score-a.score)[0];
+      if(best?.score>=.98)return best.item;
+      if(result.last===true||page+1>=Number(result.totalPages||1)||!result.content.length)break;
+    }
   }
-  return null;
+  if(!answered&&lastError)throw lastError;
+  return best?.item||null;
 }
 // Tistory: the RSS feed carries the latest posts; the blog search finds older ones. Post pages are fetched
 // only for the few candidates whose title matches, since attachments are not in the listing.
@@ -2131,13 +2221,25 @@ async function findAnissiaSubtitle(title,episode,{originalTitle='',offsets=[],ma
       // ("후리렌 1기(完)" for 장송의 프리렌), so it is ranked under the Anissia title.
       const naver=naverBlogRef(caption.website);
       const linked=naver?(naver.logNo?await naverPost(naver.blogId,naver.logNo).then(post=>({...post,title:`${anime.subject} ${post.pageTitle}`.trim()})).catch(error=>{lastError=error;return null}):null):await anissiaLinkedPost(caption.website,anime.subject,origin);
+      const expectedSeason=communitySeason(anime.subject)??1,linkedPageSeason=communitySeason(linked?.pageTitle||'');
+      const linkedSeasonConflict=linkedPageSeason!=null&&linkedPageSeason!==expectedSeason;
+      const safeLinked=linkedSeasonConflict?null:linked;
       if(/\.blogspot\.com$/i.test(host)){
-        const posts=[...await communityPosts(origin),...(linked?[linked]:[])];
-        for(const name of [anime.subject,title])if(!match)match=rankCommunityPosts(posts,name,episode,originalTitle,{offsets})[0];
+        const attempted=new Set();
+        for(const force of [false,true]){
+          const posts=[...await communityPosts(origin,{force}),...(safeLinked?[safeLinked]:[])];
+          const matches=[];
+          for(const name of [anime.subject,title])matches.push(...rankCommunityPosts(posts,name,episode,originalTitle,{offsets}));
+          for(const candidate of matches){
+            const key=JSON.stringify([candidate.post.url,candidate.links]);if(attempted.has(key))continue;attempted.add(key);
+            try{return {...await downloadCommunityMatch(candidate,'anissia',anime.subject,episode),maker:caption.name,anissiaTitle:anime.subject}}
+            catch(error){lastError=error}
+          }
+        }
       }else if(/\.tistory\.com$/i.test(host)||naver){
         // Some makers use their own short name ("츠레카노 12"); the post Anissia links gives it away, so it is
         // searched too and its posts count as this anime's.
-        const nickname=anissiaNickname(linked?.pageTitle||'',anime.subject);
+        const nickname=anissiaNickname(safeLinked?.pageTitle||'',anime.subject);
         const nicknameEpisode=title=>{const at=title.indexOf(nickname),number=at<0?null:title.slice(at+nickname.length).match(/^\s*(\d{1,3})(?!\d)/)?.[1];return number?`${anime.subject} ${Number(number)}화`:null};
         const nicknames=nickname?[...new Set([nickname,nickname.replace(/\([^)]*\)/g,' ').replace(/\s+/g,' ').trim()])].filter(Boolean):[];
         const listed=(naver?await naverPosts(naver.blogId,anime.subject,nicknames):await tistoryPosts(origin,anime.subject,nicknames)).map(post=>{const renamed=nickname&&post.title.includes(nickname)&&communityScore(communityTitle(anime.subject),communityPostTitle(post.title))<.52?nicknameEpisode(post.title):null;return renamed?{...post,title:renamed}:post}),season=communitySeason(anime.subject)??1;
@@ -2146,13 +2248,13 @@ async function findAnissiaSubtitle(title,episode,{originalTitle='',offsets=[],ma
         const base=value=>communityTitle(value).replace(/\s*(?:\d+\s*기|season\s*\d+|시즌\s*\d+)\s*$/i,'');
         const likely=listed.filter(post=>numbered(post)&&Math.max(communityScore(base(anime.subject),communityPostTitle(post.title)),communityScore(base(title),communityPostTitle(post.title)))>=.52).slice(0,4);
         for(const post of likely){try{post.html=naver?(await naverPost(naver.blogId,post.logNo)).html:await providerFetch(post.url,{referer:`${origin}/`})}catch(error){post.html='';lastError=error}}
-        const posts=[...likely.filter(post=>post.html),...(linked&&!likely.some(post=>post.url===linked.url)?[linked]:[])];
+        const posts=[...likely.filter(post=>post.html),...(safeLinked&&!likely.some(post=>post.url===safeLinked.url)?[safeLinked]:[])];
         for(const name of [anime.subject,title])if(!match)match=rankCommunityPosts(posts,name,episode,originalTitle,{offsets})[0];
         // No download link: the files may be packed into the post's image (WinPNG). The episode's own posts first,
         // then the one Anissia links.
-        if(!match&&/\.tistory\.com$/i.test(host)){
+        if(!match&&!linkedSeasonConflict&&/\.tistory\.com$/i.test(host)){
           const episodePosts=new Set(likely.map(post=>post.url));
-          for(const url of [...new Set([...episodePosts,linked?.url||caption.website].filter(Boolean))].slice(0,3)){
+          for(const url of [...new Set([...episodePosts,safeLinked?.url||caption.website].filter(Boolean))].slice(0,3)){
             let result=null;try{result=await winPngSubtitle(url,anime.subject,episode,{matched:episodePosts.has(url)})}catch(error){lastError=error}
             if(result)return {...result,maker:caption.name,anissiaTitle:anime.subject};
           }
@@ -2169,15 +2271,16 @@ async function downloadHls(url,filePath,event){
   if(/#EXT-X-STREAM-INF/i.test(text)){const lines=text.split(/\r?\n/);const variants=[];for(let i=0;i<lines.length;i++)if(lines[i].startsWith('#EXT-X-STREAM-INF')){const bandwidth=Number(lines[i].match(/BANDWIDTH=(\d+)/i)?.[1]||0);const child=lines.slice(i+1).find(x=>x.trim()&&!x.startsWith('#'));if(child)variants.push({bandwidth,url:new URL(child.trim(),playlistUrl).href})}const best=variants.sort((a,b)=>b.bandwidth-a.bandwidth)[0];if(!best)throw new Error('HLS 화질 목록을 해석하지 못했습니다.');playlistUrl=best.url;text=await providerFetch(playlistUrl,{referer:url});}
   if(/#EXT-X-KEY:(?![^\n]*METHOD=NONE)/i.test(text))throw new Error('암호화된 HLS는 오프라인 저장을 지원하지 않습니다.');
   const segments=text.split(/\r?\n/).map(x=>x.trim()).filter(x=>x&&!x.startsWith('#')).map(x=>new URL(x,playlistUrl).href);if(!segments.length)throw new Error('HLS 세그먼트를 찾지 못했습니다.');
-  const output=fs.createWriteStream(filePath);try{for(let i=0;i<segments.length;i++){const response=await fetch(segments[i],{headers:{'User-Agent':LINKKF_UA,Referer:playlistUrl}});if(!response.ok)throw new Error(`세그먼트 ${i+1} HTTP ${response.status}`);const data=Buffer.from(await response.arrayBuffer());if(!output.write(data))await new Promise(resolve=>output.once('drain',resolve));event.sender.send('download:progress',{received:i+1,total:segments.length,percent:Math.round((i+1)/segments.length*100)});}}finally{await new Promise(resolve=>output.end(resolve));}
+  // Six segments are on their way at a time (one after another, each waited for, it took as long as the video); they
+  // are written in order, each as soon as it and the ones before it are in.
+  const segment=async i=>{const response=await fetch(segments[i],{headers:{'User-Agent':LINKKF_UA,Referer:playlistUrl}});if(!response.ok)throw new Error(`세그먼트 ${i+1} HTTP ${response.status}`);return Buffer.from(await response.arrayBuffer())};
+  const ahead=[];let asked=0;const fill=()=>{while(asked<segments.length&&ahead.length<6){const next=segment(asked++);next.catch(()=>{});ahead.push(next)}};
+  const output=fs.createWriteStream(filePath);try{for(let i=0;i<segments.length;i++){fill();const data=await ahead.shift();if(!output.write(data))await new Promise(resolve=>output.once('drain',resolve));event.sender.send('download:progress',{received:i+1,total:segments.length,percent:Math.round((i+1)/segments.length*100)});}}finally{await new Promise(resolve=>output.end(resolve));}
 }
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 980,
-    minHeight: 680,
+    ...desktopState.bounds(),
     icon: path.join(__dirname, '..', 'build', 'icon.png'),
     backgroundColor: '#121212',
     titleBarStyle: 'hidden',
@@ -2192,6 +2295,7 @@ function createWindow() {
     }
   });
   mainWindow = win;
+  desktopState?.attach(win);
   win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
   win.loadFile(path.join(__dirname, '..', 'src', 'index.html'));
 }
@@ -2202,22 +2306,37 @@ app.whenReady().then(async () => {
   tmdbOverviewDisk=readTmdbOverviewCache();
   displayTitleStore();
   const broadcast=(channel,value)=>BrowserWindow.getAllWindows().forEach(win=>{if(!win.isDestroyed())win.webContents.send(channel,value)});
+  desktopState = new DesktopState({
+    app, screen, Tray, Menu, nativeImage,
+    icon: path.join(__dirname, '..', 'build', 'icon.png'),
+    show: () => {
+      const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+      if (!win) return createWindow();
+      if (win.isMinimized()) win.restore();
+      win.show(); win.focus();
+    }
+  });
   const subtitleStore=new SubtitleStore({app,reconvert:reconvertSubtitle});
+  subtitleSync=createSubtitleSync({userData:app.getPath('userData'),ffmpegPath:require('ffmpeg-static').replace('app.asar','app.asar.unpacked'),managedRoot:subtitleStore.managedRoot});
   // Same order as the player's ensureSubtitle: the preferred source's saved file, the stream's own
   // subtitle, any saved file, then Kairan/Csora.
   const downloadSubtitleKey=job=>{const episode=job.episode||{};return encodeURIComponent(String(episode.url||episode.token||episode.id||episode.number||''))};
   const findDownloadSubtitle=async(job,stream)=>{
     const key=downloadSubtitleKey(job),saved=key?subtitleStore.list(key):[],preferred=job.subtitleSource||'reanime';
     const fromSaved=entry=>({source:entry.source,path:entry.path,assPath:entry.assPath,fonts:entry.fonts||[],label:entry.label});
-    // A machine translation stands for the Re:Anime subtitle it was made from when it was the last one put on.
-    const savedPreferred=(preferred==='reanime'&&saved[0]?.source==='gemini'&&saved[0])||saved.find(entry=>entry.source===preferred);if(savedPreferred)return fromSaved(savedPreferred);
+    // A Korean subtitle comes first: one saved for the episode (the preferred source's, a machine translation standing
+    // for the Re:Anime subtitle it was made from when it was the last one put on), the site's Korean track, then
+    // Kairan / Csora / Anissia. A saved subtitle in another language (a site's English track, Jimaku) is used only when
+    // none of them has one, so a Korean fansub keeps the episode from being translated (track and Jimaku translation).
+    const korean=entry=>DOWNLOAD_KOREAN_SOURCES.includes(entry?.source);
+    const savedPreferred=(preferred==='reanime'&&saved[0]?.source==='gemini'&&saved[0])||saved.find(entry=>entry.source===preferred);if(korean(savedPreferred))return fromSaved(savedPreferred);
     if(stream?.subtitleUrl)return {stream:true};
-    if(saved[0])return fromSaved(saved[0]);
+    const savedKorean=saved.find(korean);if(savedKorean)return fromSaved(savedKorean);
     const search=communitySearch(job);
     for(const source of COMMUNITY_SOURCES.includes(preferred)?[preferred,...COMMUNITY_SOURCES.filter(x=>x!==preferred)]:COMMUNITY_SOURCES){
       try{return await search(source)}catch{/* next source */}
     }
-    return null;
+    const other=savedPreferred||saved[0];return other?fromSaved(other):null;
   };
   // One online source's Korean subtitle for a download (the Korean titles are looked up once per download).
   const communitySearch=job=>{
@@ -2234,8 +2353,7 @@ app.whenReady().then(async () => {
     if(key)subtitleStore.save(key,{source:'jimaku',label:'Jimaku 자막',path:result.path,assPath:result.assPath,fonts:result.fonts});
     return {path:result.path,assPath:result.assPath,fonts:result.fonts,label:'Jimaku 일본어 자막'};
   };
-  // primary: nothing Korean was found; beside a Korean subtitle the translation goes to the end of the episode's list, as
-  // the player's translateAlongside does, so the Korean one is still what the episode opens with.
+  // Automatic downloads translate Jimaku only when no Korean subtitle was found.
   const translateDownloadJimaku=async(job,file,primary=true)=>{
     const provider=jimakuTranslation();if(!provider)return null;
     const title=job.displayTitles?.ko||job.title||'',result=await translator().translate({file,title,provider,context:await translationContext(job.anime||{},title)});
@@ -2331,12 +2449,13 @@ app.whenReady().then(async () => {
     const root = await linkkfFetch(`${LINKKF_EPISODE_API}/api2.php?epid=${encodeURIComponent(postId)}`);
     return (Array.isArray(root) ? root : []).map(server => ({
       id: server.id, name: server.server_name || `Server ${server.id}`,
-      episodes: (server.server_data || []).map(item => ({
+      episodes: numberTitledEpisodes((server.server_data || []).map(item => ({
         name: String(item.name || item.slug || ''), slug: String(item.slug || ''),
-        // The player's episode number (next episode, subtitles, OP/ED) from the name ("12", "12화", "12-13").
-        number: Number(String(item.name || item.slug || '').match(/\d+/)?.[0]) || null,
+        // The player's episode number (next episode, subtitles, OP/ED) from the name ("12", "12화", "12-13"); an
+        // episode named by its title ("80000대장경") is numbered by its place in the list instead.
+        number: episodeLabelNumber(item.name) || episodeLabelNumber(item.slug),
         token: String(item.link || `${postId}v${server.id}_${item.slug || ''}`), postId
-      }))
+      })))
     })).filter(server => server.episodes.length);
   });
   ipcMain.handle('linkkf:play', async (_, episode) => {
@@ -2356,9 +2475,10 @@ app.whenReady().then(async () => {
     return true;
   });
   ipcMain.handle('linkkf:resolve', async (_, episode) => {
-    const requestId=playerStreamHeaders.begin();let playerUrl='';try{const root=await linkkfFetch(`https://emdlinkkf.5imgdarr.top/apilink2.php?data=${encodeURIComponent(episode.token)}`);const links=Array.isArray(root.data)?root.data:[];playerUrl=(links.find(x=>String(x.server).toUpperCase()==='NR-HD')||links[0]||{}).link||'';}catch{}
-    if(!playerUrl)playerUrl=`${LINKKF_WEB}/up/${encodeURIComponent(episode.postId)}/watch/?slug=${encodeURIComponent(episode.slug)}`;
-    const stream=await resolveStreamPage(playerUrl,`${LINKKF_WEB}/`,15000);playerStreamHeaders.complete(requestId,'linkkf',stream);return stream;
+    const requestId=playerStreamHeaders.begin();
+    const stream=await resolveLinkkfStream(episode);
+    playerStreamHeaders.complete(requestId,'linkkf',stream);
+    return stream;
   });
   // Home rails, most popular first and only shows that already have episodes (early in a season most are still to
   // air): "2026 가을 신작" (this season; Re:Anime and Miruro filter their catalog by season and year, Animenosub its
@@ -2399,7 +2519,16 @@ app.whenReady().then(async () => {
       }
     } else if (provider === 'ohli24') {
       // 이번 시즌 신작: the airing list (updated first); it has no separate "airing" rail.
-      if(current)data.push(...ohliItems(await ohliFetch(`${OHLI24_WEB}/ing`)));
+      if(current)data.push(...await ohliAiring());
+    } else if (provider === 'linkani') {
+      // LinkAni exposes a year catalog, not a season catalog; keep the official source's scope explicit.
+      if(current){
+        const pages=await Promise.all([1,2].map(page=>linkaniFetch(`${LINKANI_WEB}/list/2/year/${year}/${page>1?`page/${page}/`:''}`)));
+        for(const html of pages)for(const item of linkaniItems(html))if(!data.some(known=>known.mal_id===item.mal_id))data.push(item);
+        return {data,label:`${year}년`};
+      }
+      const weekday='일월화수목금토'[new Date().getDay()];
+      data.push(...linkaniItems(await linkaniFetch(`${LINKANI_WEB}/list/2/class/${encodeURIComponent(weekday)}/`)));
     } else throw new Error('지원하지 않는 콘텐츠 소스입니다.');
     return {data,label:current?period.label:''};
   }
@@ -2408,6 +2537,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('provider:airing', (_, provider) => homeShows(provider,'airing'));
   ipcMain.handle('provider:latest-episodes', (_, provider, candidates) => fetchLatestEpisodes(provider, candidates));
   ipcMain.handle('provider:weekday-episodes', (_, provider, candidates, refresh) => fetchWeekdayEpisodes(provider, candidates, { refresh: refresh === true }));
+  ipcMain.handle('provider:japanese-season-schedule', (_, candidates, from, until, seasonYear, season) =>
+    fetchJapaneseSeasonSchedule(candidates, { from: Number(from), until: Number(until), seasonYear: Number(seasonYear), season: String(season || '') }));
   const weeklySchedule = createWeeklySchedule(day => anissiaFetch(`/anime/schedule/${day}`));
   const providerSchedule = createProviderSchedule({
     nativeTimeoutMs:15000, fallbackTimeoutMs:7000,
@@ -2416,6 +2547,7 @@ app.whenReady().then(async () => {
     miruroApi, miruroItem,
     animenosubBase:ANIMENOSUB_WEB, animenosubFetch:url=>providerFetch(url,{referer:`${ANIMENOSUB_WEB}/`}), animenosubItems:animenosubList,
     ohliBase:OHLI24_SCHEDULE_WEB, ohliPage:ohliSchedulePage, ohliAnime:ohliScheduleAnime,
+    linkaniBase:LINKANI_WEB, linkaniFetch, linkaniItems,
     linkkfBase:LINKKF_API, linkkfTags:LINKKF_SCHEDULE_TAGS, linkkfFetch:url=>linkkfFetch(url,7000), linkkfAnime
   });
   ipcMain.handle('anime:weekly-schedule', (_, day) => weeklySchedule(Number(day)));
@@ -2509,27 +2641,56 @@ app.whenReady().then(async () => {
     playerStreamHeaders.complete(requestId,episode?.provider,stream);
     return stream;
   });
+  ipcMain.handle('provider:prepare', (_, episode) => episode?.resolveKind === 'linkkf' || episode?.provider === 'linkkf' ? resolveLinkkfStream(episode) : resolveProviderEpisode(episode));
+  ipcMain.handle('stream:use', (_, episode, stream) => {
+    const requestId=playerStreamHeaders.begin();
+    playerStreamHeaders.complete(requestId,episode?.provider || (episode?.resolveKind === 'linkkf' ? 'linkkf' : ''),stream);
+    return true;
+  });
+  ipcMain.handle('stream:warm', async (_, url, at = 0) => {
+    if (!/^http:\/\/127\.0\.0\.1:\d+\/__flix\//i.test(url || '')) return 0;
+    const read = async address => { const response = await fetch(address, { headers: { 'x-lilac-hold': '1' }, signal: AbortSignal.timeout(15000) }); return response.ok ? response.text() : ''; };
+    const entries = (text, base) => { const out = [], maps = []; let duration = 0; for (const line of String(text).split(/\r?\n/)) { const t = line.trim(); if (!t) continue; if (t.startsWith('#')) { const inf = t.match(/^#EXTINF:([\d.]+)/i), uri = t.match(/URI="([^"]+)"/i); if (inf) duration = Number(inf[1]) || 0; if (uri && /^#EXT-X-MEDIA/i.test(t)) out.push({ url: new URL(uri[1], base).href, duration: 0 }); if (uri && /^#EXT-X-MAP/i.test(t)) maps.push(new URL(uri[1], base).href); continue; } out.push({ url: new URL(t, base).href, duration }); duration = 0; } return { out, maps }; };
+    try {
+      const master = await read(url), lists = /#EXT-X-STREAM-INF|#EXT-X-MEDIA/i.test(master) ? entries(master, url).out.map(item => item.url) : [url];
+      const segments = [], start = Math.min(Math.max(Number(at) || 0, 0), 1);
+      for (const list of lists.slice(0, 2)) {
+        const { out: items, maps } = entries(list === url ? master : await read(list), list), total = items.reduce((sum, item) => sum + item.duration, 0);
+        let index = 0;
+        for (let time = 0; index < items.length - 1 && time + items[index].duration <= total * start; index++) time += items[index].duration;
+        segments.push(...maps, items[0]?.url, ...items.slice(index, index + 3).map(item => item.url));
+      }
+      return primeFlix(segments.filter(Boolean));
+    } catch { return 0; }
+  });
+  ipcMain.handle('stream:alive', async (_, url, headers = {}) => {
+    if (!/^https?:/i.test(url || '')) return false;
+    try {
+      const response = await fetch(url, { headers: { ...(headers || {}), ...(/^http:\/\/127\.0\.0\.1:\d+\/__flix\//i.test(url) ? { 'x-lilac-hold': '1' } : {}), Range: 'bytes=0-1023' }, signal: AbortSignal.timeout(8000) });
+      response.body?.cancel?.();
+      return response.ok || response.status === 206;
+    } catch { return false; }
+  });
   ipcMain.handle('provider:subtitle-tracks', (_, episode) => reanimeSubtitleTracks(episode));
   ipcMain.handle('cover:data', (_, url) => coverDataUrl(url));
   updater=new Updater({app,broadcast});
+  const deviceSync=new DeviceSync({app});
+  ipcMain.handle('device-sync:status',()=>deviceSync.status());
+  ipcMain.handle('device-sync:connect',(_,server,password)=>deviceSync.connect(server,password));
+  ipcMain.handle('device-sync:disconnect',()=>deviceSync.disconnect());
+  ipcMain.handle('device-sync:request',(_,method,pathname,body)=>deviceSync.request(String(method||''),String(pathname||''),body));
   ipcMain.handle('subtitle-store:list',(_,key)=>subtitleStore.list(String(key||'')));
   ipcMain.handle('subtitle-store:save',(_,key,entry)=>subtitleStore.save(String(key||''),entry));
   ipcMain.handle('subtitle-store:remove',(_,key,id)=>subtitleStore.remove(String(key||''),String(id||'')));
-  ipcMain.handle('subtitle:translation-prompt',(_,language)=>loadTranslationPrompt(language));
+  ipcMain.handle('subtitle-sync:run',async(event,request={})=>{
+    const status=(message,progress=null)=>{if(!event.sender.isDestroyed())event.sender.send('subtitle-sync:status',{message,progress})};
+    try{return await subtitleSync.sync({...request,status})}catch(error){if(error.canceled)return {canceled:true};throw error}
+  });
+  ipcMain.handle('subtitle-sync:prepare',()=>{if(!subtitleSync.installed())subtitleSync.install().catch(()=>{});return true});
+  ipcMain.handle('subtitle-sync:retime',(_,request={})=>subtitleSync.retime({subtitlePath:String(request.subtitlePath||''),assPath:request.assPath?String(request.assPath):null,offset:Number(request.offset),scale:Number(request.scale)||1,segments:Array.isArray(request.segments)?request.segments.map(segment=>({from:Number(segment?.from),shift:Number(segment?.shift)})):null}));
+  ipcMain.handle('subtitle-sync:cancel',()=>{subtitleSync.cancel();return true});
   ipcMain.handle('clipboard:copy-text',(_,value)=>{const text=String(value??'');if(!text.trim()||text.length>2_000_000)throw new Error('복사할 내용이 비어 있거나 너무 큽니다.');clipboard.writeText(text);return true});
   ipcMain.handle('app:diagnostic-info',()=>({version:app.getVersion(),platform:process.platform,arch:process.arch}));
-  ipcMain.handle('subtitle:manual-save',(_,input={})=>{
-    const key=String(input.key||'').trim(),text=String(input.text||'');
-    if(key.length>1200)throw new Error('회차 식별 정보가 너무 깁니다.');
-    if(text.length>12_000_000||!/^WEBVTT(?:[ \t].*)?(?:\r?\n|$)/i.test(text))throw new Error('번역 결과가 유효한 WebVTT 자막이 아닙니다.');
-    const dir=path.join(app.getPath('userData'),'subtitles','translated');fs.mkdirSync(dir,{recursive:true});
-    const file=path.join(dir,`chatgpt_${Date.now()}_${Math.random().toString(36).slice(2,8)}.vtt`);
-    fs.writeFileSync(file,text,'utf8');
-    try{
-      const saved=key?subtitleStore.save(key,{source:'chatgpt',label:'ChatGPT 수동 번역',path:file,from:String(input.from||''),fromName:String(input.fromName||'원본 자막')}):null;
-      return saved||{source:'chatgpt',label:'ChatGPT 수동 번역',path:file,url:pathToFileURL(file).href};
-    }catch(error){try{fs.unlinkSync(file)}catch{}throw error}
-  });
   // 설정 > 자막 캐시: the subtitle files no saved subtitle uses (translations, downloads, partial results), removed by
   // hand, and by themselves a minute after start once a month old.
   ipcMain.handle('subtitle-cache:usage',()=>subtitleStore.usage());
@@ -2543,6 +2704,8 @@ app.whenReady().then(async () => {
   const setWindowButtons=(event,change)=>{const win=BrowserWindow.fromWebContents(event.sender);if(!win||win.isDestroyed())return;windowButtons.set(win,{...windowButtons.get(win),...change});paintWindowButtons(win)};
   ipcMain.handle('window:theme',(event,light)=>setWindowButtons(event,{light:Boolean(light)}));
   ipcMain.handle('window:buttons',(event,mode)=>setWindowButtons(event,{mode:['player','hidden'].includes(mode)?mode:'page'}));
+  ipcMain.handle('desktop:settings',()=>desktopState.settings());
+  ipcMain.handle('desktop:tray',(_,enabled)=>desktopState.setTray(Boolean(enabled)));
   ipcMain.handle('update:state',()=>updater.state);
   ipcMain.handle('update:notes',()=>updater.notes());
   ipcMain.handle('update:check',()=>updater.check());
@@ -2551,10 +2714,14 @@ app.whenReady().then(async () => {
   ipcMain.handle('downloads:list',()=>downloadManager.list());
   ipcMain.handle('downloads:add',(_,request)=>downloadManager.enqueue(request));
   ipcMain.handle('downloads:cancel',(_,id)=>downloadManager.cancel(id));
+  ipcMain.handle('downloads:group',(_,action,ids=[])=>{
+    if(!['cancel','resume'].includes(action))throw new Error('지원하지 않는 다운로드 작업입니다.');
+    return [...new Set(Array.isArray(ids)?ids:[])].map(id=>downloadManager[action](id));
+  });
   ipcMain.handle('downloads:resume',(_,id)=>downloadManager.resume(id));
   ipcMain.handle('downloads:remove',(_,id)=>downloadManager.remove(id));
   ipcMain.handle('downloads:play',(_,id)=>downloadManager.localPlayback(id));
-  ipcMain.handle('downloads:open-folder',()=>shell.openPath(downloadManager.root));
+  ipcMain.handle('downloads:open-folder',()=>{if(!downloadManager.root)throw new Error('먼저 다운로드 저장 폴더를 선택해 주세요.');return shell.openPath(downloadManager.root)});
   ipcMain.handle('downloads:root',()=>downloadManager.root);
   ipcMain.handle('downloads:choose-root',async event=>{
     const result=await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender),{title:'다운로드 저장 폴더 선택',defaultPath:downloadManager.root,properties:['openDirectory','createDirectory']});
@@ -2564,7 +2731,9 @@ app.whenReady().then(async () => {
   // Android OpEdSkipResolver: online playback uses AniSkip only; a downloaded episode uses the AniSkip
   // timestamps saved with the download, then the local audio analyzer over other downloaded episodes.
   ipcMain.handle('oped:get', async (event, request = {}) => {
-    let {title='',episode,duration,currentUrl,candidates=[],anilistId=null,malId=null,nativeTitle='',year='',audioAnalysis=true,offline=false,jobId=null}=request;if(!/^(https?|file):/i.test(currentUrl||'')||!Number.isFinite(Number(duration)))return [];
+    let {title='',episode,duration,currentUrl,candidates=[],anilistId=null,malId=null,nativeTitle='',year='',audioAnalysis=true,offline=false,jobId=null,special=false}=request;if(!/^(https?|file):/i.test(currentUrl||'')||!Number.isFinite(Number(duration)))return [];
+    // A special (OVA, SP) is not one of the series' numbered episodes, whose AniSkip times these would be.
+    if(special&&!offline)return [];
     // 애니24 has no AniList id of its own: it is found by the original title (see ohliAnilist).
     if(!anilistId&&!malId&&nativeTitle&&!hasHangul(nativeTitle))({anilistId=null,malId=null}=await ohliAnilist(String(nativeTitle),year)||{});
     const status=message=>event.sender.send('oped:status',message);
@@ -2605,26 +2774,36 @@ app.whenReady().then(async () => {
     const [titles, offsets] = await subtitleSearchTitles.get(lookupKey);
     return findCommunitySubtitleByTitles(source, titles, Number(episode), { originalTitle: anime?.title || '', offsets, maker: String(options?.maker || '') });
   }
-  // The next episode made ready while the current one plays (the player asks when the local AI has translated an
-  // episode, or the API with 번역 API로도 다음 화 미리 번역 on): the source its own playback would translate, its best
-  // Jimaku file (of the release picked for the series) or else its Re:Anime / Miruro
-  // Japanese track or English dialogue one (the player's translationSourceTrack), is fetched and translated by the
-  // local AI into the translation cache, so opening it shows the translation at once (also with a Korean fansub,
-  // beside which it is made anyway). One at a time, each episode once; the player leaving does not stop it (it is for
-  // the episode about to be watched).
+  // Prepare only episodes without Korean subtitles. Use the same source order as playback:
+  // site Japanese, Jimaku Japanese, then site English. One episode at a time.
   const preparedEpisodes = new Set(); let preparing = Promise.resolve();
-  const sourceTrack = tracks => {
-    const text = track => `${track.label} ${track.language || ''}`, code = (track, lang) => new RegExp(`^${lang}(?:[-_]|$)`, 'i').test(track.language || '');
-    const rank = track => /signs|songs|forced/i.test(track.label) ? 3 : /dubtitle|\(ai\)|\bai\b/i.test(track.label) ? 2 : /dialogue|full/i.test(track.label) ? 0 : 1;
-    return tracks.find(track => /japanese|日本/i.test(text(track)) || code(track, 'ja')) || tracks.filter(track => /english/i.test(text(track)) || code(track, 'en')).sort((a, b) => rank(a) - rank(b))[0] || null;
-  };
   async function episodeTracks(item) {
     // Re:Anime's tracks are on its player page; Miruro's come with the stream.
     if (item?.provider === 'reanime') return reanimeSubtitleTracks(item);
     if (item?.provider === 'miruro') { const stream = await resolveProviderEpisode(item); return { tracks: stream.subtitleTracks || [], referer: stream.referer || '' }; }
     return { tracks: [], referer: '' };
   }
-  ipcMain.handle('subtitle:prepare', (_, { anime = null, episode = 1, item = null, title = '', provider: asked = '', jimaku = '' } = {}) => {
+  // A subtitle made ready for another episode, synced with that episode's site tracks and kept for it ("<label> (<name>)
+  // · 자동 싱크"): what the episode puts on when it opens. Only by a site track (seconds, nothing downloaded) and after
+  // the player's own syncs (background), so the episode playing never waits behind it; without a track the episode
+  // is synced when it opens. Left as it is (and not kept) when the sync finds nothing better.
+  const syncPrepared=async({item,file,assPath=null,fonts=[],from=null,name='',label,source,tracks=[],referer=''})=>{
+    const usable=(tracks||[]).filter(track=>!/signs|songs|s&s|forced|dubtitle|\(ai\)|\bai\b|commentary/i.test(`${track.label||''} ${track.language||''}`))
+      .sort((a,b)=>Number(/full|dialog/i.test(`${b.label}`))-Number(/full|dialog/i.test(`${a.label}`))).slice(0,4);
+    const references=[];for(const track of usable){try{const saved=subtitleResult(await saveRemoteSubtitle(track.url,remoteTrackOptions(track.url,referer)));if(saved?.path)references.push({path:saved.path,assPath:saved.assPath||null})}catch{}}
+    if(!references.length||!file||!fs.existsSync(file))return null;
+    try{
+      const synced=await subtitleSync.sync({subtitlePath:file,assPath,timingPath:from,references,background:true});
+      if(synced.method!=='track')return null;
+      if(synced.unchanged||!synced.path)return null;
+      const key=encodeURIComponent(String(item?.url||item?.token||item?.id||item?.number||''));
+      return subtitleStore.save(key,{source,label:`${name?`${label} (${name})`:label} · 자동 싱크`,path:synced.path,assPath:synced.assPath||null,fonts:Array.isArray(fonts)?fonts:[],...(from?{from,fromName:name}:{})});
+    }catch{return null}
+  };
+  ipcMain.handle('subtitle:prepare-sync',(_,request={})=>syncPrepared(request||{}));
+  // sync: also sync the translation with the next episode's site track and keep it for that episode as "… · 자동 싱크",
+  // so the episode opens with it (다음 화 미리 준비 > 자막과 싱크).
+  ipcMain.handle('subtitle:prepare', (_, { anime = null, episode = 1, item = null, title = '', provider: asked = '', jimaku = '', sync = false } = {}) => {
     // Only while 설정 > 자막 자동 번역 is on, and by the side the next episode's own translation will use, or it would not
     // pick this one up: the side that translated this episode (asked: the player takes it for the series' next ones too),
     // the local AI when it is set up, the API when 번역 API로도 다음 화 미리 번역 is on. Without one asked, 설정's: the
@@ -2638,13 +2817,18 @@ app.whenReady().then(async () => {
     preparedEpisodes.add(key);
     preparing = preparing.then(async () => {
       if (!translator().ready(provider)) return;
-      const [file] = await jimakuEpisodeFiles(anime, Number(episode) || 1, String(jimaku || '')).catch(() => []);
-      let source = file ? (await jimakuDownload(file, anime, Number(episode) || 1)).path : '';
-      if (!source) {
-        const { tracks, referer } = await episodeTracks(item), track = sourceTrack(tracks || []); if (!track) return;
-        source = subtitleResult(await saveRemoteSubtitle(track.url, remoteTrackOptions(track.url, referer))).path;
-      }
-      await translator().translate({ file: source, title: String(title || ''), provider, anySide: true, context: await translationContext(anime, String(title || '')) });
+      const { tracks, referer } = await episodeTracks(item).catch(() => ({tracks:[],referer:''}));
+      if((tracks||[]).some(isKoreanTrack))return;
+      const korean=await findDownloadSubtitle({anime,title,episodeNumber:episode,episode:item||{}},null).catch(()=>null);
+      if(korean&&['kairan','csora','anissia','user','gemini','linkkf'].includes(korean.source))return;
+      const picked=await subtitleSource.resolve({tracks,
+        getJimaku:()=>jimakuEpisodeFiles(anime,Number(episode)||1,String(jimaku||'')),
+        readJimaku:file=>jimakuDownload(file,anime,Number(episode)||1),
+        readTrack:async track=>subtitleResult(await saveRemoteSubtitle(track.url,remoteTrackOptions(track.url,referer)))
+      });
+      if(!picked)return;
+      const result=await translator().translate({ file: picked.file.path, title: String(title || ''), provider, anySide: true, context: await translationContext(anime, String(title || '')) });
+      if(sync&&result?.path&&!result.failed)await syncPrepared({item,file:result.path,from:picked.file.path,name:picked.source==='jimaku'?'Jimaku':picked.value?.label||'자막',label:`${result.engine||'AI'} 번역`,source:'gemini',tracks,referer});
     }).catch(() => {});
     return true;
   });
@@ -2706,8 +2890,10 @@ app.whenReady().then(async () => {
     const id=translator().local.addFile(result.filePaths[0]);return translator().saveSettings({localModel:id});
   });
   ipcMain.handle('localai:cancel-install',(_,id)=>{translator().local.cancelInstall(String(id||''));return true});
+  ipcMain.handle('localai:model-options', (_, id, options) => { translator().local.setModelOptions(String(id || ''), options); return translator().settings(); });
   ipcMain.handle('localai:remove',(_,id)=>{translator().local.removeModel(String(id||''));return translator().settings()});
   ipcMain.handle('gemini:set',(_,value={})=>translator().saveSettings(value||{}));
+  ipcMain.handle('translation:default-rules',()=>translator().defaultRules());
   // The player's run leaves (its episode changed, or its button was pressed again); downloads keep theirs.
   ipcMain.handle('subtitle:cancel',(_,id)=>{translator().cancel(Number(id)||null);return true});
   // The player jumped while its subtitle is translated: the lines from there are translated next.
@@ -2742,7 +2928,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('catalog-index:state',()=>catalogIndexState());
   ipcMain.handle('tmdb:set',async(_,value='')=>{
     const key=String(value||'').trim();
-    if(key)await tmdbFetch('/configuration',{},key);
+    if(key)await tmdbFetch('/configuration',{},{key});
     fs.writeFileSync(tmdbSettingsFile(),JSON.stringify({key}),'utf8');koreanTitleCache.clear();for(const [name,entry] of Object.entries(displayTitleStore()))if(!entry.ko||!entry.en)delete displayTitleStore()[name];saveDisplayTitles();
     if(key)buildCatalogIndexes().catch(()=>{});
     return {key};
@@ -2773,6 +2959,21 @@ app.whenReady().then(async () => {
   ipcMain.handle('open:external', (_, url) => {
     if (/^https:\/\//i.test(url)) return shell.openExternal(url);
   });
+  // 스크린샷 (P): the frame on screen as a PNG in 사진\LilacAnime. The page hands over the frame at the video's own
+  // size; a video it cannot read (another site's file without CORS) is taken from the window instead (rect: where the
+  // picture is, the controls hidden by then).
+  ipcMain.handle('player:screenshot', async (event, { data = '', rect = null, name = '' } = {}) => {
+    let png = /^data:image\/png;base64,/.test(data) ? Buffer.from(data.slice(data.indexOf(',') + 1), 'base64') : null;
+    if (!png && rect) png = (await event.sender.capturePage({ x: Math.round(rect.x), y: Math.round(rect.y), width: Math.max(1, Math.round(rect.width)), height: Math.max(1, Math.round(rect.height)) })).toPNG();
+    if (!png?.length) throw new Error('화면을 찍지 못했습니다.');
+    const dir = path.join(app.getPath('pictures'), 'LilacAnime');
+    fs.mkdirSync(dir, { recursive: true });
+    const base = String(name || 'LilacAnime').normalize('NFKC').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').trim().slice(0, 150) || 'LilacAnime';
+    let file = path.join(dir, `${base}.png`);
+    for (let n = 2; fs.existsSync(file); n++) file = path.join(dir, `${base} (${n}).png`);
+    fs.writeFileSync(file, png);
+    return { path: file, folder: dir };
+  });
   if(process.env.LILAC_SMOKE_REANIME==='1'){
     try{
       const result=await resolveProviderEpisode({provider:'reanime',url:`${REANIME_WEB}/watch/attack-on-titan-p9y2p9?ep=1`,number:1,anilistId:16498});
@@ -2788,13 +2989,25 @@ app.whenReady().then(async () => {
     app.quit();return;
   }
   createWindow();
+  startupComplete = true;
   // Installed builds check GitHub releases shortly after launch; dev runs use the settings button.
   // At start and every 3 hours while the app stays open.
   // The selected source's catalog index refreshes in the background (started by the page, see catalog:activate).
   setInterval(()=>buildCatalogIndexes().catch(()=>{}),6*60*60*1000).unref?.();
   if(app.isPackaged){setTimeout(()=>updater.check(),5000);setInterval(()=>updater.check(),3*60*60*1000).unref?.()}
-  app.on('activate', () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow(); });
+  app.on('activate', () => desktopState.show());
+}).catch(error => {
+  startupComplete = false;
+  console.error('LilacAnime startup failed:', error);
+  let log = '';
+  try {
+    log = path.join(app.getPath('userData'), 'startup-error.log');
+    fs.mkdirSync(path.dirname(log), { recursive: true });
+    fs.appendFileSync(log, `${new Date().toISOString()}\n${error.stack || error}\n\n`, 'utf8');
+  } catch { /* the error dialog remains available if userData cannot be written */ }
+  dialog.showErrorBox('LilacAnime 시작 오류', `앱 초기화에 실패했습니다.\n${error.message || error}${log ? `\n\n오류 기록: ${log}` : ''}`);
+  app.quit();
 });
 
-app.on('before-quit', () => { closeFlixProxy(); subtitleTranslator?.local?.stop(); });
-app.on('window-all-closed', () => { if (process.env.LILAC_SMOKE_REANIME==='1')return;if (process.platform !== 'darwin') app.quit(); });
+app.on('before-quit', () => { desktopState?.beforeQuit();subtitleSync?.stop();downloadManager?.shutdown();closeFlixProxy(); subtitleTranslator?.local?.stop();updater?.installOnQuit(); });
+app.on('window-all-closed', () => { if (process.env.LILAC_SMOKE_REANIME==='1'||desktopState?.settings().trayEnabled&&!desktopState.quitting)return;if (process.platform !== 'darwin') app.quit(); });

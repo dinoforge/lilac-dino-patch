@@ -1,5 +1,67 @@
 # 작업 상태
 
+## 2026-10-21 실행 가능한 통합 상태 checkpoint
+
+- 기준 커밋은 `9166acf39a377811f23eef3e399ce727dab6479b`이며, 그 소스 기반은 v0.5.9다. 작업 트리 `package.json`은 v0.5.37로 표기하지만 공식 v0.5.27 또는 v0.5.37 전체 소스 통합을 완료·검증한 상태가 아니다.
+- 현재 실행 경로를 따라 `electron/main.cjs`, preload, 로컬 Electron 모듈, `src/index.html`의 renderer/CSS 참조를 확인했다. 변경된 실행 의존 파일 69개에서 미스테이징 의존 파일 및 누락된 상대 import는 0개다. `src/weekly-schedule.js`와 CSS는 현재 HTML에서 참조되지 않아 checkpoint에서 제외했다.
+- 검증 상태를 재현하는 통합 단위로 런타임 소스, package manifest/lock, 관련 단위 테스트와 `tests/season-schedule-live.electron.cjs`를 스테이징했다. `.recovery`, `.rej`, 임시 캡처, 문서 이미지, installer 설정, 미승인 workflow 및 별도 live harness는 스테이징하지 않고 보존한다.
+- 격리 Electron 38.8.6 실제 실행은 `C:\Users\공룡\AppData\Local\Temp\lilac-v0527-schedule-IMu4VS` 아래 새 `appData`, `userData`, `sessionData`를 사용했고 시작 전에 각 경로를 검증했다. 홈 시즌 레일/전체 보기와 홈의 중복 주간표 부재, 7열 편성표, 실제 providerSchedule 결과, 980px 가로 스크롤, 기존 상세·회차, 단일 공급원 선택기와 Miruro 회차 전환을 확인했다.
+- 실제 일정 응답에서 RE:Anime 165행(회차번호 165), Miruro 269행(회차번호 269), Animenosub 66행(회차번호 없음), 애니24 58행(회차번호 없음), 링크애니 210행(회차번호 없음)을 받았다. 회차번호가 없는 세 공급원의 행은 일정 투표에 넣지 않았다. AniList는 HTTP 403, Jikan은 네트워크 단계 `request-timeout`이어서 보조 방영 데이터는 실패 상태다.
+- 이번 동적 카탈로그는 72개였다. 실제 7열 결과는 월~일 11/6/5/5/5/7/21개 카드, 배정 작품 56개, 작품-요일 카드 60개, 일정 미확인 4개, 충돌 13개, 형식 제외 1개, 중복 행 0개였다. RE:Anime 기준 작품 상세에서 4개 회차를 확인하고 Miruro로 전환해 해당 공급원의 4개 회차가 로드되는 것, 기본 공급원 `reanime`가 유지되는 것을 확인했다. 이어 Miruro 영상이 실제 10초 이상 재생되고 1080p 출력과 일치했다.
+- `npm test`는 OS 샌드박스의 loopback/임시 파일 권한 제한으로 첫 실행이 실패했으나, 테스트 전용 loopback과 OS Temp 작업을 허용한 재실행에서 508/508 통과했다. 스테이징 JS/CJS/MJS 66개 `node --check` 통과, `git diff --cached --check` 통과. 실제 Electron 보고서는 `ok=true`이며 위 공급원 API 제한 때문에 AniList/Jikan 보조 일정은 검증되지 않았다.
+- Patch 02 제거는 미완료다. 이전 ChatGPT 웹 번역 경로 관련 테스트 삭제는 포함했으나 공식 번역 기능 및 공통 자막 코드와의 전체 사용처 정리는 완료·검증하지 않았다. Patch 03도 전체 공급원 카탈로그 검증이 아니다. 이번 실행에서 RE:Anime/Miruro 상세·회차 전환은 확인했고, Animenosub 검색 후보는 있었으나 해당 실행의 연결 성공으로 일반화하지 않는다. 애니24 선택지 및 링크애니의 상세·회차 연결은 미검증이다.
+- 이 checkpoint는 검증된 현재 통합 실행 상태를 보존하는 일반 커밋 단위이며, 완전한 공식 버전 통합이나 Patch 02/03 완료를 뜻하지 않는다.
+
+## 2026-10-21 Patch 01 최종 재검증 및 커밋 안전성
+
+- HEAD `9166acf39a377811f23eef3e399ce727dab6479b`는 보존했다. HEAD의 `package.json` 기준은 v0.5.9이고, 작업 트리는 v0.5.37로 변경되어 있으나 공식 v0.5.27/v0.5.37 전체 통합 완료 상태로 검증하지 않았다.
+- 실제 Electron 38.8.6 격리 실행은 OS Temp의 `C:\Users\공룡\AppData\Local\Temp\lilac-v0527-schedule-zeVbbY` 아래 별도 `appData`, `userData`, `sessionData`를 사용했다. 실제 실행 파일은 현재 작업 트리의 `node_modules\electron\dist\electron.exe`; 로그와 화면 캡처는 해당 임시 폴더에 남아 있다.
+- 실제 데이터 결과는 동적 카탈로그 72개, 요일 배정 67개, 작품-요일 카드 74개, 일정 충돌 1개, 일정 확인 불가 3개, 형식 제외 1개, 중복 카드 0개다. 월~일 카드는 11/6/6/6/10/13/22개다. 화면은 `공급 사이트 공개 일정 기준 · AniList/Jikan 별도 근거`로 표시했다. 공급 사이트 공개일을 일본 TV 방영일로 확정하지 않았다.
+- 실제 응답: RE:Anime 7일 164행/164 회차번호 확인 완료, Miruro 7일 267행/267 회차번호 확인 완료, Animenosub 66행 수신/회차번호 없음으로 투표 제외, 링크애니 210행 수신/회차번호 없음으로 투표 제외, 애니24 원본 일정 7일 모두 `ani.ohli24.com`의 `ERR_CONNECTION_RESET` 실패 후 Anissia 대체 응답 74행은 원본 일정 투표에서 제외했다. AniList는 HTTP 200, 2페이지 45행 완료(7.929초, 요청 본문 955바이트), Jikan은 6.013초 네트워크 단계 `request-timeout`으로 실패했다. 공식 방송 자료 13건은 보조 근거로 유지했다.
+- 실제 화면에서 홈의 중복 주간표가 없고, 시즌 전체 보기의 7열/가로 스크롤, 포스터 클릭 후 기존 상세 제목·회차, 단일 공급원 선택, Miruro 회차 전환, 전체 작품 탐색 복귀를 확인했다. 대표 Miruro 영상은 실제 10초 이상 재생됐고 실제 출력 1920×1080과 표시 화질이 일치했다. 이는 공급 사이트 일정 검증이며 일본 TV 편성표 실증으로 해석하지 않는다.
+- Patch 01 집중 테스트 55/55, 전체 `npm test` 508/508, 변경·미추적 JS/CJS/MJS 구문 검사 115개 통과, `git diff --check` 통과(줄바꿈 변환 경고만 있음).
+- Patch 01 커밋은 보류했다. 기준 HEAD가 v0.5.9인 반면 실제 Electron 검증은 v0.5.37로 변경된 작업 트리에서 했고, 실행 연결이 `src/app.js`, `src/index.html`, `electron/main.cjs`, `electron/preload.cjs`, `electron/provider-schedule.cjs`의 Patch 01·공식 통합·Patch 02 제거·Patch 03 변경이 섞인 미커밋 hunks에 의존한다. 전용 `src/season-calendar.js`/CSS와 데이터 모듈만 떼면 기준 커밋에서 재현 가능한 실행 경로가 보장되지 않는다. 변경은 스테이징하거나 커밋하지 않았다.
+- Patch 02 제거는 미커밋 상태다. ChatGPT 웹 UI/수동 번역 전용 코드 및 테스트 제거 변경이 `src/app.js`, `src/index.html`, `electron/main.cjs`, `electron/preload.cjs`, `src/manual-subtitle-translation.js`, 번역 관련 모듈·테스트에 남아 있으므로 완전 제거로 처리하지 않는다.
+- Patch 03의 기존 커밋 `9166acf39a377811f23eef3e399ce727dab6479b`는 그대로 보존했다. 실제 표본 상세/회차는 RE:Anime·Miruro, AnimenoSub 및 애니24에서 확인한 사례가 WORK_STATE 앞선 기록에 있다. LinkAni의 Patch 03 검색·상세 연결은 기존 `ERR_CONNECTION_RESET`/식별 미확인 상태를 유지하며 이번 Patch 01 검증으로 PASS 처리하지 않는다. 별도로 이번 일정 요청에서는 LinkAni 210행을 받았지만 회차 번호가 없어 일정 투표에 쓰지 않았다.
+- `.recovery`와 `.rej`는 전부 보존했다. 미커밋 변경도 초기화·삭제·스테이징하지 않았다.
+
+## 2026-10-21 Patch 03 애니24 연결 및 시작 오류 재검증
+
+- `src/app.js`의 오래된 `#dropCaptions` DOM 참조는 제거된 ChatGPT UI를 가리키는 잔여 코드가 아니며, 현재 부팅 경로에서 해당 요소를 찾거나 바인딩하지 않는다. `tests/drop-captions.test.cjs`와 격리 Electron 시작 검사에서 렌더러 JS 오류 0건을 확인했다. ChatGPT 웹 번역 기능은 되살리지 않았다.
+- Patch 03의 애니24 경로를 현재 공식 사이트 `ani.ohli24.com`에 맞췄다. 현재 검색 보드(`/방영중`, `/완결`, `/극장판`), Svelte 상세(`/c/<slug>`), 페이지네이션된 회차와 영상 페이지(`/e/<slug>`)를 파싱한다. 과거 저장된 `www.ohli24.net` 상세·회차 URL은 기존 파서로 계속 처리한다. 공급원 선택 결과는 기존 `#detailDialog` 단일 선택기에 연결된다.
+- 격리 Electron 38.8.6 실제 검색에서 「장송의 프리렌」 검색 결과 2건을 받았고, AniList 154587/MAL 52991과 시즌 1을 대조한 뒤 Ani24 상세 및 회차 1–28을 표시했다. RE:Anime/Miruro 결과와 같은 작품으로 묶였으며, 별도 시즌 2는 합치지 않았다. 실제 재생·스트림 주소·애니24 자막 회수는 이번 검증에서 하지 않았다.
+- Animenosub의 기존 실제 검증은 Season 3 표본에서 정확한 작품 매칭 후 1–4화가 선택기에 표시된 기록이 있다. 전체 카탈로그에 대한 검증으로 일반화하지 않는다. LinkAni는 이전 7일 요청에서 `ERR_CONNECTION_RESET`이 발생했으며 이번에도 재시도하지 않았다. 실패 단계는 외부 네트워크 연결이고, TCP와 TLS 중 어느 지점인지는 로그로 확정할 수 없다. LinkAni 및 원본 Linkkf 동작을 이번 수정에서 변경하지 않았다.
+- 집중 테스트 25/25, `node --check` 대상 5개 파일 통과. 최초 샌드박스 전체 테스트에서는 임시 경로의 `EPERM` rename/symlink 및 loopback `EACCES`가 발생했다. 테스트 격리 환경을 유지한 샌드박스 밖 재실행은 전체 508/508 통과했다. `git diff --check` 통과(줄바꿈 변환 경고만 있음).
+- 검증된 서버·검색 변경만 이번 로컬 커밋 대상으로 분리했다. `src/app.js`에는 앞선 통합 작업이 함께 남아 있어 작업 파일을 보존한 채 커밋 범위에서 제외했다. LinkAni의 실제 요청은 `ERR_CONNECTION_RESET`로 차단되어 복구를 주장하지 않는다.
+
+## 2026-10-20 Patch 01 공급원 공개 일정 투표 재검증
+
+- 공급원 공개 일정 기준으로 실제 격리 Electron을 재검증했다. 현재 응답 카탈로그는 동적 72개(고정 기준 아님): 고유 작품 68개에 일정 배정, 3개 미확인, 1개 형식 제외. 요일 카드 합계는 월~일 11/7/6/6/10/13/22(75 작품-요일 카드); 81개 정확한 작품·시즌·회차 결과에서 같은 작품의 서로 다른 회차는 보존했고 동일 작품·회차의 다른 요일 중복은 0건이다. 투표 동률·확정 충돌 0건이다.
+- RE:Anime는 실제 164행 중 108행 정확 매칭, 104 적격 원시 투표행이 동일 출처/회차 중복 정리 후 64표가 됐다. Miruro는 267행 중 160 정확 매칭, 148 적격 원시 투표행이 64표로 정리됐다. Animenosub 66행과 애니24 58행은 수신됐지만 회차 번호 및 정확한 작품 연결이 없어 투표하지 않았다. 링크애니는 7일 요청 모두 실패해 LinkAni 데이터로 취급하지 않았고 Anissia fallback 74행은 투표에서 제외했다.
+- AniList는 HTTP 200, 2페이지 52행, 7.974초 완료. Jikan은 네트워크 단계에서 6.004초 request-timeout, HTTP 응답 없음. 둘의 독립성이 검증되지 않아 한 공유 출처 그룹으로 계산한다. 실제 AniList 52표, RE:Anime 64표, Miruro 64표를 날짜별 다수결에 사용했다. 기존 공식 일본 방송 보조 기록 13개는 유지했으며 보조 근거로만 기록했다(동일 일정 5, 다른 일정 기준 8).
+- 현재 미확인 3개는 Cyberpunk: Edgerunners 2(카탈로그상 Finished; RE:Anime E10 및 Miruro E1–E10 행이 현재 연재 아님으로 제외), My Girlfriend's Friend Mini Anime(AniList ID 217782, 정확한 주간 회차 일정 없음), Delivery Kitten Unyan(AniList ID 207217, 정확한 주간 회차 일정 없음)이다. 근거 없이 0개로 줄이지 않았다. 이전 4개 미확인은 이번 동적 응답에서 3개로 바뀌었으며 카탈로그 변경을 정답 고정값으로 취급하지 않는다.
+- 실제 Electron은 `C:\Users\공룡\AppData\Local\Temp\lilac-v0527-schedule-QxWx6k`의 별도 appData/userData/sessionData로 실행했다. 실제 홈·7열 캡처, 시즌 카드 상세 진입, Miruro 선택 후 회차 4개 로드 및 기본 공급원 RE:Anime 유지 확인. 링크애니 실패와 `provider:catalog ERR_CONNECTION_RESET`은 별도 실패로 기록했다. 일정 전용 실행이라 재생은 의도적으로 건너뛰었다.
+- 측정기에서 같은 작품 ID가 다른 요일에 나타나는 서로 다른 회차를 중복으로 잘못 세던 오류만 `tests/season-schedule-live.electron.cjs`에서 고쳤다. 수정 후 실제 격리 Electron 보고서는 `ok=true`. 집중 테스트 40/40, 관련 JavaScript 구문 검사 6개 통과, `git diff --check`에는 공백 오류 없이 CRLF 변환 경고만 있었다. 커밋·push는 하지 않았다.
+
+## 2026-10-20 Patch 01 미확인 17개 일본 방송 일정 검증
+
+- 기존 2026년 Q4 카탈로그의 17개 미확인 항목을 검토했다. 격리 Electron에서 카탈로그 71개, 기존 AniList 실제 일정 53개, 1개 형식 제외를 확인했다. AniList는 HTTP 200, 2페이지/53행, 요청 본문 최대 962바이트, 총 7.8초로 완료했고 GraphQL 오류는 없었다. 과거 20초 지연은 재현되지 않아 원인을 확정하지 않았다. Jikan은 후보 71개(숫자 MAL ID 0개)에 대한 시즌 요청 1회가 네트워크 단계에서 약 6초 후 시간 초과됐고 HTTP 응답이 없어 DNS·연결 원인은 판별할 수 없다. 실패를 일정 없음으로 취급하지 않았다.
+- 공식 방송 페이지에서 13개 작품의 Tokyo MX 주간 편성을 확인해 기존 카탈로그 ID 및 AniList ID(있을 때)와 연도·분기까지 대조했다. 정확한 카탈로그/일본어 제목/시즌 근거로 연결한 3개 무-AniList 작품도 포함된다. 서로 다른 방송국의 시간은 보조 근거로 남기고 Tokyo MX의 주 슬롯만 편성했다. 검증된 공식 슬롯은 `src/season-calendar.js`에 URL·요일·시간·역할·증거 문구와 함께 기록하고, 기존 AniList와 일치하지 않는 슬롯은 덮어쓰지 않고 충돌 처리한다.
+- 실제 Electron의 격리 프로필은 `C:\Users\공룡\AppData\Local\Temp\lilac-v0527-schedule-4tngTs`였다. appData/userData/sessionData는 모두 이 새 Temp 경로로 설정·재확인했다. 13개 신규 슬롯을 추가 적용한 결과 월~일 배정은 4/7/7/5/10/11/22, 배정 66, 미확인 4, 형식 제외 1, 충돌·중복 0이다. 합계는 71이다. 신규 배정 작품인 「どうも、好きな人に惚れ薬を依頼された魔女です。」 상세 진입 및 Miruro 회차 3개 로드를 실제 화면에서 확인했다. 한국어 제목은 실시간 카탈로그에 없어 임의 번역하지 않았다.
+- 남은 4개는 JoJo SBR(넷플릭스 금요일 스트리밍, 일본 TV 일정 아님), Umayuru: Full Gate(공식 YouTube 주간 공개, TV 편성 아님), Kanojo no Tomodachi Mini Anime(별도 작품 ID의 AnimeFesta 공개, TV 편성 근거 없음), Delivery Kitten Unyan(검토한 공식 페이지에서 1화만 확인, 정기 방송 일정 미확인)이다. AniList 응답 성공은 이 4개별 일정 정보가 있었다는 뜻이 아니며, Jikan 시간 초과도 부재 증거가 아니다.
+- 집중 일정 테스트 30/30 통과, Electron 격리 검증 통과, 구문 검사 및 `git diff --check` 통과. 전체 `npm test`는 496개 중 487개 통과, 기존 비대상 `catalog-metadata.test.cjs` 3건과 `community-search.test.cjs` 6건 실패했다. 기존 작업 트리의 관련 소스·테스트 파일에 큰 미커밋 변경이 이미 있어 이번 변경만 안전하게 분리하지 못해 커밋하지 않았다. 브랜치·push·Actions·빌드는 수행하지 않았다.
+
+## 2026-10-17 v0.5.27·Patch 01/02/03 이어서 진행
+
+- 작업 폴더는 `D:\Codex-Coding-Folder\LilacAnime-Player`, 알려진 기준 HEAD는 `ee381baca259bd55c7b6e54da33d0f927eb32291`이다. `package.json`의 버전 문자열은 `0.5.27`이지만, 이는 공식 v0.5.27 전체 소스 통합 완료를 뜻하지 않는다. 기존 수정은 보존했고 이번 범위에서 커밋·push하지 않았다.
+- Patch 01은 공식 `providerSchedule` 경로를 사용하고 공식 `#scheduleSection`, `#scheduleTabs`, `#scheduleRail`, `#seasonRail`, `#allView`를 보존한다. `#seeAllSeason`은 중복 이벤트 연결을 없애고 `catalog-updates.js`가 유일하게 처리한다. 시즌 정렬 상태에서는 Patch 01 7열 캘린더를, 최근 업데이트 정렬에서는 기존 전체 목록을 연다.
+- 격리 Electron 38.8.6 실검증은 `C:\Users\공룡\AppData\Local\Temp\lilac-v0527-schedule-FYr4Di`에서 수행했다. 앱 시작 전 별도 `appData`·`userData`·`sessionData`를 지정했고 실행 중 `app.getPath()`와 프로세스 경로가 일치했다. 실제 공식 주간표 7개 탭과 Saturday 34건, 시즌 전체 보기 캘린더 7열, 가로 스크롤, 오늘 요일 강조, 기존 전체 탐색 필터를 확인했다. 선택한 2026 Q4 카탈로그 70개를 기준으로 7개 `providerSchedule` 일일 요청은 모두 응답 완료, 요일 배정 작품 67개(그중 일정 충돌 16개), 미확인 3개, 중복 행 제거 16건, 시즌 카탈로그와 연결되지 않은 일정 응답 행 64건이었다. 일별 원시 일정 행은 월~일 순으로 21/11/15/16/24/34/42건이다. 실패 공급원은 없었으며, 실제 데이터가 아닌 모의 결과는 사용하지 않았다.
+- 초기 실행에서는 앱 시작 직후 Re:Anime 전체 카탈로그 인덱싱이 동시에 시작되어 렌더러 응답이 지연되는 정황과 13.7 MB 인덱스 파일을 확인했다. 전체 인덱싱을 시작 시점에서 제거하고 Re:Anime/Animenosub의 한국어 검색 때 지연 시작하도록 바꿨다. 다음 격리 실행은 계속 응답했고 인덱스 파일도 생성되지 않았다. 이는 원인 가능성을 뒷받침하지만 단독 원인으로 확정하지 않는다.
+- 실화면에서 시즌 포스터 선택 후 `#detailDialog`는 열렸지만 제목과 회차가 표시되지 않았고, 상세/회차 연결은 미검증이다(정확한 상세 오류 로그는 확보하지 못함). 따라서 상세 경로의 PASS를 주장하지 않는다. 공급원별 라이브 검색·작품 매칭·회차 조회는 검증하지 않았다.
+- 이번 이어서 수정한 파일: `src/app.js`(전체 카탈로그 인덱싱 지연), `src/catalog-updates.js`(시즌 전체 보기 단일 경로), `src/integrated-search.js`(Patch 03 집계에서 Linkkf 제외), `tests/catalog-updates-ui.test.cjs`, `tests/integrated-search.test.cjs`, `tests/quarter-catalog.test.cjs`. Patch 03에는 Re:Anime, Miruro, Animenosub, 애니24의 네 어댑터만 등록되어 있고 링크애니 전용 어댑터가 없어 5개 공급원 요구는 미완료다. 원본 Linkkf 독립 IPC는 유지된다.
+- Patch 02의 ChatGPT 전용 웹 UI/IPC는 작업 트리에서 제거됐고 원본 번역·자막 처리 경로는 보존했다. 공통 번역 코드와 과거 저장 자막 호환 참조는 남아 있어 완전 삭제 여부는 별도 전체 의존성 검증이 필요하다. Patch 04는 새 통계 오버레이로 구현하지 않았으며 기존 오류 정보 복사 진단 UI만 확인된 상태다.
+- 관련 집중 테스트 36/36 및 전체 `npm test` 296/296 통과. `node --check` 3개 소스와 `git diff --check`도 통과했다. 공식 v0.5.27 전체 통합, 실제 상세/회차 연결, Patch 03의 네 공급원 라이브 검색·매칭, 링크애니 연결, 원본 번역 UI의 전체 실기능 검증은 미완료이므로 전체 통합 커밋을 만들지 않았다.
+
 ## 2026-10-11 런타임 실증 하네스 상태 검사 보강
 
 - 사후 코드 리뷰에서 `git status --porcelain`의 상태 코드를 버리고 경로만 허용하던 문제를 수정했다. 이제 새로 생성된 미추적 시각 증거만 허용하고, 추적 파일 수정·삭제, 기존 증거 변경, staged 파일과 무관한 미추적 파일은 거부한다.
@@ -726,3 +788,152 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 현재 지정 소스는 `package.json` 0.5.9이며 Patch 01의 7열 달력과 공식 v0.5.27 `provider:schedule` 경로는 포함하지 않는다. 대신 이 소스에 존재하는 Linkkf + AniList 주간 일정 호출의 직렬 대기를 확인했다. Linkkf 요청은 최대 3회·회당 30초까지 기다린 뒤에야 AniList 일정 요청이 시작될 수 있었다.
 - 기존 Linkkf main IPC와 `#scheduleSection/#scheduleTabs/#scheduleRail`은 유지했다. renderer에서 두 출처를 병렬 시작하고 Linkkf 12초, AniList 17초 UI 마감시간을 적용했다. 같은 출처의 진행 중 요청은 공유하고, 응답 실패·timeout·요청 제한·미요청 상태를 분리해 캐시 상태에도 남긴다.
 - `tests/weekday-schedule.test.cjs`, `tests/player-interactions.test.cjs`와 구문 검사를 통과했다. 두 테스트 파일 합계 52/52, `git diff --check` 통과. 검증은 합성 지연 요청이며 실제 공급원 응답과 공식 v0.5.27 Electron 실행·7열 배정은 미검증이다. 현재 작업 폴더만 사용했고 별도 source 폴더, userData, sessionData는 만들거나 실행하지 않았다.
+
+## 2026-10-17 Patch 01 달력 UI 및 상세 회차 표시
+
+- `src/season-calendar.js`에서 편성표 카드가 공식 홈의 `.anime-card`·`.poster`·배지·제목·메타 구조를 재사용하도록 맞췄다. `src/season-calendar.css`는 원본 토큰과 카드 타이포그래피를 상속하고, 미확인·충돌 섹션의 버튼 기본 배경을 제거해 홈 포스터 카드와 일관되게 했다. 좁은 창에서도 각 열 최소 너비를 유지하고 가로 스크롤한다.
+- 실제 격리 Electron에서 `openDetail()` 회차 행 렌더링 중 `episodeTitle is not defined` 예외를 재현했다. `src/app.js`에 회차 제목 fallback을 복구해 클릭한 RE:Anime 시즌 3 작품의 원본 `#detailDialog` 제목과 3개 회차가 보이도록 했다.
+- Electron 38.8.6, 앱 PID 23392 / renderer PID 5384, BrowserWindow 1 / webContents 1. `appData`, `userData`, `sessionData`는 모두 새 OS Temp 경로 아래였고 Electron runtime 경로 일치를 확인했다. 앱 경로는 현재 이 checkout의 `src/index.html`; 별도 깨끗한 공식 upstream 복사본과의 비교는 하지 않았다.
+- 실제 `providerSchedule` 7개 요일 요청은 모두 완료했다. 현재 분기 카탈로그 70개 중 배정된 작품 ID 67, 요일 미확인 3, 일정 충돌 16, 동일 요일 중복 응답 16건, 일정 응답과 카탈로그 간 매칭 실패 64건이었다. 요일 열에 표시된 단일 요일 작품은 월~일 9/6/5/5/5/5/16개이며, 충돌 작품은 별도 영역에 표시했다. 실패 UI 경로는 이번 호출에서 발생하지 않아 실제 실패 상태 화면은 미검증이다.
+- 홈 레일 → 기존 `#seeAllSeason` → 7열 편성표 → 실제 포스터 클릭 → 기존 상세 창 → 닫기/홈 복귀 → 기존 전체 목록/필터를 확인했다. 900px 창 요청에서 실제 viewport는 980px, 열 너비는 각각 162px, grid overflow는 808px 대 1198px였다. 제목은 홈과 같은 ellipsis 규칙을 적용한다. `capturePage()` 캡처: `C:\Users\공룡\AppData\Local\Temp\lilac-v0527-schedule-z1sUym` 아래 `app-season-rail.png`, `season-calendar.png`, `season-calendar-status-sections.png`, `season-calendar-narrow.png`, `season-calendar-detail.png`.
+- `tests/season-calendar.test.cjs`와 `tests/player-interactions.test.cjs` 합계 42/42, 대상 구문 검사 및 `git diff --check` 통과. 별도 `npm test`는 실행하지 않았다. 전체 미커밋 작업은 보존했으며 commit/push를 하지 않았다.
+
+## 2026-10-18 Patch 01 일본 방영 기준 정규화
+
+- 7열 편성표의 일정 조회를 AniList `airingAt` 기준으로 분리했다. 정확한 AniList ID와 JP·TV/TV_SHORT 메타데이터만 사용하고, epoch 시각을 `Asia/Tokyo`로 한 번 변환한다. 쿼리의 `notYetAired:false`는 미래 편성을 제외할 수 있어 제거했다. 개별 요청은 페이지네이션·요청 제한 공유를 유지하고 20초 전체 마감시간을 넘기면 실패/부분 결과로 종료하며 성공한 완전 응답만 캐시한다.
+- 명시적으로 일본 방송 기준과 시간대가 검증된 24:00–29:59 표기는 원래 방송 요일에 배치하고 실제 다음 날짜/시각을 별도 보존한다. AniList의 절대 epoch만으로 심야 방송의 명목상 전날 표기를 역산하지 않는다. 기존 RE:Anime/Miruro/Anissia 등의 일정 경로는 한국 시간으로 표시하거나 서비스별 요일만 제공하며 일본 TV 편성 의미가 검증되지 않아 이 Patch 01 분류에는 사용하지 않았다.
+- 격리 Electron 38.8.6 실행은 새 임시 `appData`·`userData`·`sessionData`로 두 차례 확인했다. 홈/원본 주간표/전체 탐색이 유지되고, 캘린더는 7열 및 JST 라벨을 보였다. 두 번째 실행은 AniList 요청이 20초 내 응답하지 않아 70개 카탈로그 작품을 `일정 확인 불가`로 두었으며, 요일 배정 0, 충돌 0, 중복 0, 응답 페이지 0이었다. 이는 실제 일정 배정 성공이 아니며 이전 16 충돌·64 미매칭의 일본 기준 재검증도 외부 응답 부재로 미완료다.
+- 시간대·자정·24:00/25:30/29:59·잘못된 30:00·미검증 메타데이터 및 요청 실패/페이지네이션/캐시/시간초과 focused tests 15/15, 관련 JS 구문 검사 통과. 실제 AniList 응답과 일본 방송의 명목상 심야 요일은 미검증이다. 기존 미커밋 작업은 그대로 보존했다.
+
+## 2026-10-18 Patch 01 일정 요청 우선순위와 실제 응답
+
+- 앞선 격리 실행의 AniList 첫 응답 지연은 DNS·연결·HTTP·GraphQL 단계가 아니라 공용 요청 큐에서의 대기였다. 당시 20초 뒤 `queue-timeout`, `requestStarted:false`, HTTP 상태 없음이 기록됐다. 요청 본문은 731바이트였다. 일정 요청에 우선순위를 주되 2.1초 간격과 공유 429 쿨다운은 유지하고, 마감된 대기 요청은 취소해 뒤늦게 전송되지 않도록 했다.
+- AniList ID 없는 작품도 제거하지 않도록 RE:Anime가 제공한 제목 별칭을 보존하고, Jikan seasonal broadcast는 MAL ID가 없을 때 정확한 별칭 + 확정 연도·분기 + TV 형식의 유일 후보만 연결하도록 했다. 모호한 별칭·시즌 불일치·충돌 ID는 미매칭으로 유지한다. 기존 JST 및 24~29시 변환 로직은 수정하지 않았다.
+- 실제 격리 Electron 38.8.6에서 AniList가 1페이지를 HTTP 200으로 반환했고 요청 시작은 약 4.4초, 요청 본문은 731바이트, GraphQL 오류는 없었다. 70개 카탈로그 중 요일 배정 30개(월 7, 화 7, 수 2, 목 0, 금 1, 토 0, 일 13), 미확인 40, 충돌 0, 중복 0이었다. 클릭한 彼方から 카드는 기존 상세 제목과 일치했고 2개 회차가 열렸다.
+- 같은 실행에서 Jikan은 6초 요청 제한으로 실패했고 HTTP 상태/응답 데이터는 없었다. 따라서 Jikan 일정은 실제 확인·배정되지 않았다. 진단 계측은 실제 fetch 시작과 요청 수를 기록하도록 보강했으나 그 계측 버전의 외부 재요청은 하지 않았다. RE:Anime `providerSchedule`의 일요일 42개는 원본 홈에서 보였지만 일본 TV 방송임이 확인되지 않아 일본 편성표에 사용하지 않았다.
+- 관련 포커스 테스트 31/31, 전체 `npm test` 319/319, JavaScript 구문 검사 및 `git diff --check` 통과. 실제 Electron 결과 보고서: `%TEMP%\lilac-v0527-schedule-EAZTiN\report.json`.
+- 검증된 공용 AniList 큐 우선순위 구현만 `electron/anilist-client.cjs`, `tests/anilist-client.test.cjs`에 커밋 `9c5fd0f`로 저장했다. 기존의 다른 미커밋 변경은 스테이징하거나 커밋하지 않았고 모두 보존했다. Jikan 매칭·캘린더 호출부 등 혼합된 미커밋 통합 변경은 로컬에 남아 있어 이 커밋만으로 전체 통합이 배포 가능한 상태는 아니다.
+
+## 2026-10-18 Patch 01 공급 사이트 일정 기준
+
+- 편성표의 데이터 경로를 공급원별 `providerSchedule`로 연결하고, RE:Anime를 우선 요청했다. 요일 매칭은 동일 공급원 ID, 일치하는 AniList/MAL ID, 또는 연도까지 검증된 정확한 별칭만 허용한다. 출처·원본 ID·제목·회차·보고 시간대 근거를 결과에 남기며, KST 근거가 명시된 RE:Anime/Miruro 시간만 표시한다. Anissia 대체 응답은 공급원 일정으로 세지 않는다.
+- 격리 Electron 실측: RE:Anime 7/7 요청 성공 163행(99 매칭, 64 미매칭), Miruro 7/7 성공 260행(147 매칭, 113 미매칭), Animenosub 7/7 성공 65행(0 매칭), 애니24 7/7 성공 58행(0 매칭). 네 공급원 실패·시간 초과 및 대체 응답은 없었다. LinkAni 일정 API는 현재 앱에서 지원되지 않아 요청하지 않았다.
+- 70개 시즌 카탈로그 중 50개가 단일 요일에 배정됨(월~일 8/6/5/5/5/5/16), 3개는 요일 미확인, 17개는 여러 요일 근거가 있으나 같은 회차인지 입증되지 않아 충돌 확정 대신 미해결로 분리했다. 같은 회차의 실제 요일 충돌 0, 중복 행 0, 일정 행 미매칭 300. 이 300은 카탈로그에서 빠진 작품 수가 아니라 공급원 일정 행의 정확 매칭 실패 수다.
+- 실제 `#detailDialog` 진입과 2개 회차, 홈 시즌 레일·공식 주간표·전체 보기, 7열 레이아웃 및 좁은 창 가로 스크롤을 새 OS Temp의 격리 `appData`/`userData`/`sessionData`로 확인했다. 테스트 당시 Electron 38.8.6, BrowserWindow 1 / webContents 1이었다.
+- focused provider/calendar/JST tests 36/36, 전체 `npm test` 324/324, 관련 `node --check` 및 `git diff --check` 통과. 실 API/Electron 실행은 마지막 진단 메타데이터와 시간 표시 제한 변경 직전 한 번 수행했으며, 그 소폭 후속 변경은 테스트로 확인하고 외부 요청은 반복하지 않았다.
+
+## 2026-10-18 Dino 통합 패치 상세 공급원 및 화질 검증
+
+- 직접 카탈로그 상세로 진입한 경우에도 현재 기본 공급원을 변경하지 않고, 기존 `#detailDialog` 안에서만 같은 작품 후보를 검색하도록 연결했다. 다른 공급원 검색은 작품 상세에 진입했을 때만 실행하며 stable ID/시즌·연도·형식 검증을 통과한 후보만 선택기에 추가한다. 같은 상세 그룹의 진행 중 요청은 공유하고 성공 캐시 10분, 일부 실패 캐시 1분을 둔다.
+- 실제 플레이어 화질 상태는 HLS 선택/자동 레벨과 디코딩된 `videoWidth`·`videoHeight`를 구분한다. 새 스트림으로 비디오가 비워질 때(`emptied`) 이전 화질 표시를 갱신한다. actual HLS playback에서는 `자동 · 현재 720p · 실제 1280 × 720 · 720p`를 확인했다.
+- 공식 v0.5.27 기반 격리 Electron 실행: `%TEMP%\lilac-v0527-schedule-TmvfbX`, Electron 38.8.6, BrowserWindow 1/webContents 1, `appData`·`userData`·`sessionData` 모두 해당 OS Temp 실행 폴더 아래였다. 공식 기본 공급원 RE:Anime에서 홈 → 시즌 전체 보기 → 7열 → 상세 → 동일 작품 Miruro 선택 → 회차 2개 → 회차 1의 실제 HLS 재생 10초 이상 → 플레이어 Auto 화질 표시를 확인했다. Miruro 선택 뒤에도 전역 기본 공급원은 RE:Anime였다.
+- 실제 `providerSchedule`: 분기 카탈로그 70개, 단일 요일 50(월~일 8/6/5/5/5/5/16), 미확인 3, 복수 요일 미해결 17, 확정 충돌 0, 중복 0, 매칭 안 된 공급원 일정 행 301. RE:Anime 7/7 성공 163행 중 99 매칭, Miruro 7/7 성공 260행 중 147 매칭, Animenosub 7/7 성공 66행 중 0 매칭, 애니24 7/7 성공 58행 중 0 매칭. 301은 카탈로그에서 누락된 작품 수가 아니라 정확한 식별 근거로 연결되지 않은 공급원 일정 행이다. LinkAni용 `providerSchedule` 경로는 없음.
+- 실제 상세 공급원 검색에서 Miruro 29개 결과 중 검증된 후보가 연결되어 2개 실제 회차가 열렸다. Animenosub 검색은 2개 결과지만 동일 작품으로 연결된 항목은 없었고, 애니24·링크애니는 결과 0이었다. 이들은 검색 성공과 작품/회차 매칭 성공을 분리해 기록한다.
+- 관련된 자동 테스트 332/332 통과, 구문 검사와 `git diff --check` 통과. 기존 ChatGPT 번역 helper는 Companion이 공유 사용하므로 유지했고, 메인 앱의 구형 저장 번역 `chatgpt` 라벨은 사용자 기존 결과 호환용으로 남겼다. Patch04는 미구현.
+- 공식 v0.5.36 기준 커밋 `8a07a40ee9aa445aff21c45998d1ec94dab40215`를 읽기 전용으로 비교했다. v0.5.27 이후 20개 커밋/31개 파일이 변경됐으며 현재 `package.json`은 0.5.27이다. v0.5.36 전용 `electron/subtitle-sync.cjs`, `electron/miruro-playback.cjs`, `src/subtitle-source.js` 등 전체 변경의 통합/회귀 검증은 끝나지 않았다. 따라서 현재 상태를 공식 v0.5.36 통합 완료로 표현하지 않는다.
+- 기존 dirty 변경은 그대로 보존했다. 전체 작업에는 범위가 다른 수정이 함께 있어 이번에는 커밋하지 않았다.
+
+## 2026-10-18 providerSchedule 7열 편성표 통합
+
+- 홈의 `이번 주 방영표`와 시즌 전체 보기의 7열 편성표가 `season-calendar.js`의 공통 카드/열 렌더러 및 요청 클라이언트를 사용한다. 홈은 원본 콘텐츠 공급원 설정의 현재 선택값으로 이번 주만 조회하고, 분기 전체 보기에서는 RE:Anime·Miruro·Animenosub·애니24의 분기 카탈로그 후보를 공급원별 `providerSchedule`로 집계한다. 두 화면의 범위와 출처를 각각 표시한다.
+- 중복 시작 렌더러를 제거해 홈 최초 진입에서 각 요일 요청은 7회, in-flight join 0회였다. 요청 캐시와 진행 중 요청 공유는 유지하며, 명시적 새로고침은 기존 `providerSchedule` IPC 경로를 다시 호출한다. 원본 providerSchedule IPC/핸들러는 변경하지 않았다.
+- 실제 Electron 38.8.6 격리 실행은 `C:\Users\공룡\AppData\Local\Temp\lilac-v0527-schedule-FvSThA`에서 했고 `appData`, `userData`, `sessionData`를 모두 해당 임시 루트로 분리했다. v0.5.27 실행본이며 v0.5.36은 공식 API 계약을 읽기 전용으로 비교한 것이라 v0.5.36 Electron 실행 검증은 아니다.
+- 홈 RE:Anime 일정은 7/7일 성공, 163행에서 146개 카드로 정리됨(월~일 19/11/14/14/21/33/34). 명시적 새로고침 후에도 완료 상태였고 pending=0이었다. 공급원 선택을 Miruro로 바꾸자 7/7일 성공, 260행·245개 카드(30/20/25/26/36/52/56)로 갱신됐다. initial home pass에는 중복 호출이 없었다.
+- 2026년 4분기 카탈로그 70개에서 일정 행 547개 중 67개 작품이 매칭됐고, 56개 고유 작품이 64개 카드로 배정됐다. 월~일 카드 수 13/6/5/6/5/7/22, 요일 미확인 3, 회차 요일 충돌 13, 미해결 복수 요일 0, 중복 행 0, 미매칭 일정 행 301이었다. 301은 카탈로그 누락 작품 수가 아니라 검증 ID/별칭으로 연결하지 못한 공급원 일정 행 수다. RE:Anime 163행 중 99 매칭, Miruro 260행 중 147 매칭, Animenosub 66행 중 0, 애니24 58행 중 0이었다. 13 충돌은 실제 증거에서 같은 작품의 같은 번호 회차가 다른 요일에 겹친 경우다.
+- 실제 화면 캡처: `C:\Users\공룡\AppData\Local\Temp\lilac-v0527-schedule-FvSThA\home-weekly-calendar.png`, `home-weekly-calendar-narrow.png`, `home-weekly-calendar-source-switch.png`, `season-calendar.png`, `season-calendar-loading.png`, `season-calendar-detail.png`. 좁은 창에서도 7열 폭을 유지하고 가로 스크롤이 동작했다. 작품 상세에서 Miruro 선택 후 실제 3개 회차가 로드됐고 전역 기본 공급원은 RE:Anime로 유지됐다. 회차 1은 10초 이상 실제 재생, 1920×1080 출력 및 HLS 1080p/5.5 Mbps가 확인됐다.
+- 홈 `providerSchedule` 및 분기 집계는 실제 완료됐고 공급원 일정 요청 실패는 없었다. 다만 실패 UI 상태를 실제 공급원 장애로 재현하지는 않았다. 앱 로그의 `provider:catalog ERR_CONNECTION_RESET`은 일정 API와 별개의 카탈로그 요청 오류였다.
+- 최종 전체 `npm test` 335/335 통과, 관련 JavaScript 구문 검사와 `git diff --check` 통과. 전체 변경 트리에는 이번 범위와 무관한 기존 수정·삭제·추가 파일이 함께 있어, 이를 섞지 않기 위해 커밋하지 않았다. 모든 기존 미커밋 변경은 보존했다.
+
+## 2026-10-18 홈 주간표 중복 제거·시즌 제목 비동기 보완
+
+- 이번 상태가 위 `providerSchedule 7열 편성표 통합` 기록의 홈 화면 부분을 갱신한다. 홈의 공급 사이트 전체 주간표 DOM/스타일/스크립트 연결과 홈 진입 시 일정 요청을 제거하고, 원본 `providerSchedule` IPC 및 공급원 설정은 보존했다. 홈 시즌 레일·분기 선택·정렬·시즌 전체 보기와 원본 전체 작품 탐색 필터는 유지된다.
+- 시즌 전체 보기는 선택한 분기 카탈로그만 7열에 렌더링한다. 2026년 4분기 카탈로그 70개에 실제 4개 공급원의 일정 응답을 대조했다. RE:Anime 7/7일 163행 중 99행, Miruro 7/7일 260행 중 147행이 연결됐고, Animenosub 7/7일 66행과 애니24 7/7일 58행은 이번 카탈로그에 정확히 연결된 행이 없었다. 일정 행이 있다는 이유만으로 다른 시즌 작품을 끌어오지 않았다.
+- 실제 집계는 요일별 카드 월~일 11/6/5/5/5/7/21, 요일 배정 고유 작품 56, 카드 60, 요일 미확인 3, 같은 회차의 요일 충돌 13, 중복 행 0, 선택 분기 카탈로그와 연결되지 않은 일정 행 301이다. 이전 측정과 공급원 응답량이 달랐으므로 전후 카드 수 차이를 코드 변경 단독 효과라고 해석하지 않는다. 일정 출처 원문, 미매칭 이유, 충돌 근거는 실행 보고서에 기록했다.
+- 한국어 제목은 공급원 한국어 표기를 우선하고, 이어 저장된 한국어 제목, 기존 보완 조회, 마지막으로 원제 순으로 사용한다. 카드 생성은 제목 조회를 기다리지 않는다. 화면에 들어온 제목만 조회하며 renderer 동시 요청을 4개로 제한하고 main 프로세스에서도 같은 작품의 진행 중 조회를 공유한다. 응답은 기존 제목 요소만 갱신한다.
+- 실제 Electron 38.8.6 격리 실행 결과 `C:\Users\공룡\AppData\Local\Temp\lilac-v0527-schedule-LGhDDy`를 사용했다. 앱 실행 전 `appData`, `userData`, `sessionData`를 모두 해당 임시 경로로 만들고 `app.getPath()` 일치를 검증했다. 앱은 788ms에 시즌 콘텐츠 준비 상태가 됐고, 홈 시즌 레일은 30개 원제 카드를 즉시 표시했다. 스크롤 후 제목 보완은 11개 시작, 동시 실행 4개, 대기 12개였으며 화면의 일본어 원제는 유지됐다.
+- 실제 시즌 전체 보기에서 7열·가로 스크롤·오늘 강조와 선택 분기만 표시되는 것을 확인했다. 7열 작품 클릭으로 기존 `#detailDialog` 및 3개 회차가 열렸고 Miruro 공급원 선택 후 Miruro 회차 3개가 로드됐다. 실제 회차 1 재생은 10초를 넘었고 1920×1080 영상과 1080p HLS 상태를 확인했다. 기존 전체 탐색 화면/필터도 열렸다.
+- 라이브 캡처와 보고서는 `C:\Users\공룡\AppData\Local\Temp\lilac-v0527-schedule-LGhDDy` 아래 `app-home.png`, `app-season-rail.png`, `season-calendar.png`, `season-calendar-narrow.png`, `season-calendar-detail.png`, `report.json`에 있다. 캡처는 실제 Electron 창에서 생성했다.
+- 새 격리 프로필에는 사용자의 TMDB 키와 기존 제목 캐시를 가져오지 않았다. 따라서 실제 키 기반 TMDB 응답·지연 시간과 한국어 제목 보완 성공 수는 미검증이며, 이번 실행에서 한국어 제목 0개·원제 fallback 30개가 관찰됐다. 별도 단위 테스트는 지연 resolver가 있어도 원제가 즉시 표시되고, 화면 진입 후에만 조회되며 결과가 기존 제목만 갱신하는지 검증한다. 응답 후 카드 순서/중복 생성은 발생하지 않는다.
+- `npm test` 336/336 통과, 이번 변경 관련 9개 JavaScript/CJS `node --check`와 `git diff --check` 통과. 저장소에는 이번 작업과 무관한 기존 미커밋 수정·삭제·미추적 파일이 함께 있고 같은 대상 파일에도 이전 수정이 섞여 있어, 검증된 부분만 안전하게 분리할 수 없어 커밋하지 않았다. 공식 v0.5.36 전체 통합은 완료됐다고 주장하지 않는다.
+
+## 2026-10-18 공식 v0.5.37 통합 계속 작업
+
+- 공식 태그 v0.5.37의 기준 커밋은 `2415d34a66a911c20b8677a2ad34c0ed8dea229d`다. 공식 스냅샷 파일 120개 모두 작업 폴더에 존재하며 누락 경로는 0개다. 53개는 바이트 단위 일치, 67개는 디노 기능을 포함한 로컬 병합 차이가 있어, 전체 원본과 동작이 완전히 동일하다는 뜻은 아니다. `package.json`과 lockfile은 0.5.37을 가리킨다.
+- 공식 Miruro 재생 안정화에서 빠진 stalled-playback 추적과 기존 서버 fallback 연결을 `src/player-failover.js`/`src/player.js`에 추가했다. 재생 설정의 탐색 간격 컨트롤은 `src/index.html`에 연결하고, 플레이어 되감기·앞으로 버튼은 기존 `seekPlayer()` 경로를 사용하게 했다. `resolveIntoPlayer`가 서버 목록을 재생 시작 전에 전달하도록 했다. 관련 회귀 테스트를 보완했다.
+- 테스트 실행을 위해 프로젝트 안에 임시 Electron bootstrap을 두었다가 제거했다. 실제 격리 실행은 PID 13880, Electron 38.8.6, BrowserWindow 1/webContents 1이었고 `appData`, `userData`, `sessionData`, temp/log/crash 경로는 모두 `C:\Users\공룡\AppData\Local\Temp\dino-lilac-v0537-calendar-3b0db4c1f14a416ab32e39d2f75bd77c` 아래 별도 지정·확인했다. 본창 `did-finish-load`, 1440×900 capturePage 홈 및 시즌 전체 보기 캡처가 확인됐다. 앱 패키지 메타데이터는 0.5.37이지만 이 직접 실행 harness에서 `app.getVersion()`은 38.8.6을 반환했다.
+- 실제 시즌 전체 보기에서 2026년 4분기 카탈로그 70개, 공급 일정 IPC 28/28 완료, RE:Anime·Miruro·Animenosub 각 7/7일 성공, 애니24 0/7일 `ERR_CONNECTION_RESET`을 관찰했다. 실제 UI 표시 집계는 요일 배정 고유 작품 56, 카드 60, 미확인 3, 회차 요일 충돌 13, 내부 중복 카운터 0, 미매칭 일정 행 243이다. 화면 캡처에는 같은 제목으로 보이는 카드가 월·일 양쪽에 보였으나 동일 작품 중복 여부는 추가 검증하지 않았다.
+- `npm test` 최종 결과는 483개 중 458 통과, 25 실패, 0 건너뜀이다. 이전 upstream 통합의 updater 종료 훅과 자막 sync 호출에 맞춰 낡은 테스트 전제/fixture를 수정해 해당 2개 실패는 해소했다. 남은 실패는 catalog/history 관련과 local-AI/자막 흐름 테스트이며 이번 작업에서 원인을 모두 분리하거나 해결하지 못했다. 전체 JS/CJS/MJS 구문 검사 152개 통과, `git diff --check` 통과.
+- 전체 공식 호환, 실제 공급원별 상세·회차·영상 재생, 해상도, Gemini 번역·자막 sync, 다음 화 미리 준비 동작은 완료 검증하지 않았다. 전체 테스트 실패와 통합 차이 미확인 때문에 커밋은 보류한다. 기존 변경 및 `.recovery` 백업을 유지한다.
+
+## 2026-10-18 v0.5.37 통합 최종 재검증
+
+- 전체 `npm test`를 픽스처 보완 후 다시 실행: 484개 중 475 통과, 9 실패, 0 건너뜀. 남은 실패는 `catalog-metadata.test.cjs` 3개와 `community-search.test.cjs` 6개다. 기준선 실행이 없어 이 실패들을 이번 통합이 새로 만들었다고 단정하지 않는다. 원인 세부 내용은 실행 출력에 있으며 전체 테스트는 PASS가 아니다.
+- v0.5.37 원본에 존재하는 `SPECIAL_EPISODE`, `episodeLabelNumber`, `episodeLabelInfo`, `numberTitledEpisodes`가 작업본 `electron/main.cjs`에서 누락된 것을 확인해 공식 구현을 복구했다. 이는 LinkAni/애니24 회차 라벨 처리 호출부가 사용할 함수들이다. `tests/episode-labels.test.cjs` 2/2 통과. `tests/subtitle-source.test.cjs`도 런타임 전역 의존성을 VM 픽스처에 보완해 11/11 통과했다.
+- 추가 확인: 공식 원본 v0.5.37의 애니24 구현은 `ani.ohli24.com` 기반이지만 현재 작업본 카탈로그·상세 경로에는 기존 `www.ohli24.net` 구현이 남아 있다. 일정 어댑터는 `ani.ohli24.com`을 사용한다. 이 공급원 경로는 공식 v0.5.37로 완전히 통합되지 않았으며, 실제 애니24 검색·상세·회차 검증도 하지 않았다.
+- 최종 정적 검사: JS/CJS/MJS 152개 `node --check` 통과, `git diff --check` 통과(LF→CRLF 경고만 있음). 격리 Electron 홈·시즌 전체 보기와 공급원 일정 집계는 앞 항목의 증거 범위만 확인했다. 전체 공식 기능 호환 및 실재생·공식 자막/번역·다음 화 준비는 미검증이다. 미커밋 작업과 `.recovery` 백업을 보존했고 테스트 실패 및 통합 미완료로 커밋하지 않았다.
+- 원본 교체 전 백업 `.recovery/pre-v0537-20261018-224802`를 읽기 전용으로 검사했다. manifest의 변경 파일 49개는 백업 경로·SHA-256이 모두 일치했고, 삭제된 tracked 테스트 파일 3개는 백업 폴더에는 없지만 현재 `HEAD`에서 모두 확인되어 복구 경로가 남아 있다. 백업 내용은 복원하지 않았다.
+
+## 2026-10-18 Dino 고유 기능 집중 검증
+
+- 이번 범위에서는 기존 코드만 검증했고 앱 소스는 수정하지 않았다. 홈에는 빈 `#scheduleSection` 자리표시자만 있고 주간표 모듈은 로드되지 않아 일정 UI나 요청이 중복되지 않았다. 시즌 전체 보기는 원본 `state.quarterShows`를 받아 선택 분기만 달력 입력으로 사용한다.
+- 실제 Electron 격리 실행: Electron 38.8.6, PID 5508 / renderer PID 29972, BrowserWindow 1 / webContents 1. `appData`, `userData`, `sessionData`를 `C:\Users\공룡\AppData\Local\Temp\lilac-v0527-schedule-fQaRo5` 아래로 지정하고 `app.getPath()` 일치를 시작 전에 확인했다. 보고서·캡처는 해당 폴더의 `report.json`, `app-home.png`, `season-calendar.png`, `season-calendar-status-sections.png`, `season-calendar-narrow.png`, `season-calendar-detail.png`에 있다.
+- 2026년 4분기 카탈로그 70개: 월~일 카드 11/6/5/5/5/7/21, 요일 배정 작품 56, 편성 카드 60, 미확인 3, 회차 요일 충돌 13, 복수 요일 확인 필요 0, 중복 행 0. 미매칭 공급 일정 243행은 카탈로그에 합치지 않았다.
+- 실제 providerSchedule: RE:Anime 7/7일·163행 중 99행 연결, Miruro 7/7일·260행 중 147행 연결, Animenosub 7/7일·66행 중 연결 0(연도 미확인 51, 정확한 식별 불가 15), 애니24 0/7일 `ERR_CONNECTION_RESET`(대체 응답 74행은 실제 일정으로 쓰지 않음). 실패 공급원 때문에 전체 렌더가 대기하지 않았다.
+- 실제 시즌 카드에서 기존 `#detailDialog`가 열리고 3개 회차가 표시됐다. Miruro 선택 후 같은 상세에서 Miruro 회차 3개가 로드됐으며 앱 기본 공급원은 RE:Anime로 유지됐다. 대표 Miruro 회차 실제 재생 10초 이상, 출력 1920×1080, HLS 1080p/5.5 Mbps가 확인됐다. 플레이어의 원본 품질 UI가 새 스트림의 실제 출력을 표시했다.
+- 달력은 원본 `titleOf`/`animeTitleKey` 경로를 사용하며 비동기 제목 응답은 기존 `[data-title-for]` 요소만 갱신한다. 단위 테스트에서 비동기 제목 갱신과 중복 조회 합치기를 검증했다. 격리 프로필에는 기존 사용자 TMDB 키·캐시가 없어 실환경 달력 76개 제목 중 한국어 확인 0, 원제 fallback 76을 관찰했고, 23개 조회 시작·동시 활성 4·대기 19 시점까지 확인했다. 한국어 응답 성공 수는 미검증이다.
+- 디노 관련 집중 테스트 93/93 통과. 전체 `npm test`는 실패했다. 범위 밖 기존 실패 파일 두 개를 집중 재실행해 `catalog-metadata.test.cjs` 3건과 `community-search.test.cjs` 6건, 합계 9건 실패(25개 중 16 통과)를 확인했고 수정하지 않았다. JavaScript/CJS/MJS 구문 검사 152/152, `git diff --check` 통과(LF→CRLF 경고만 있음).
+- 실제 좁은 창 검증은 Electron 창 크기 변경이 renderer viewport에 반영되지 않아 미확정이다. 기존 미커밋 트리가 광범위하고 이번에 분리 가능한 디노 소스 수정도 없어서 커밋하지 않았다. 기존 수정·삭제·미추적 파일과 `.recovery`는 그대로 보존했다.
+
+## 2026-10-19 Patch 01 주간 공개 필터 실검증
+
+- Patch 01의 시즌 7열 분류는 공급 사이트의 현재 주 `providerSchedule` 근거만 사용한다. 명시적 시리즈 형식, 진행 중 상태, 번호가 확인된 단일 회차를 요구하고, 영화·OVA/OAD·스페셜·알 수 없는 형식, 비활성 상태, 회차 미확인, 공급원 내 같은 주 복수 신규 회차를 요일 열에서 제외한다. 공급원별 여러 자막/더빙 행은 같은 작품·회차·요일 카드 하나에 근거로 보존하며, 서로 다른 요일의 같은 회차는 충돌 영역으로 남긴다.
+- 실제 격리 Electron 재검증은 Electron 38.8.6, PID 14772 / renderer 7648, BrowserWindow 1 / webContents 1에서 수행했다. `appData`, `userData`, `sessionData`는 모두 `C:\Users\공룡\AppData\Local\Temp\lilac-v0527-schedule-Tx7zQA` 아래로 분리·검증했다. 캡처: `season-calendar.png`, `season-calendar-narrow.png`, `season-calendar-detail.png` 등 같은 임시 폴더.
+- 최신 실응답 스냅샷은 2026년 4분기 카탈로그 71개였다(앞선 실응답은 70개라 변동 수치를 고정 기준으로 쓰지 않음). 주간 회차 근거 57개, 요일 배정 46개, 주간 여부 미확인 13개, 카탈로그 형식 제외 1개(스페셜)로 71개를 분류했다. 요일 카드는 월~일 7/6/5/3/5/5/15개, 같은 회차의 요일 충돌 11개(모두 같은 회차·서로 다른 요일), 복수 요일 미확정 0, 중복 행 0이다. 일요일 열 15개 카드에서 긴 제목은 최대 2줄로 표시됐고 980px viewport에서는 808px client / 1198px scroll width, 가로 스크롤이 실제 동작했다.
+- `providerSchedule` 실응답: RE:Anime 7/7일·163행·105행 연결·58 미매칭, Miruro 7/7일·257행·147 연결·110 미매칭, Animenosub 7/7일·66행·0 연결(51 연도 미확인, 15 식별 불가), 애니24 7/7일·58행·0 연결(정확 식별 불가 58). 총 미매칭 292행. 애니24 연결 실패는 요청 실패가 아니라 작품 매칭 불가였다. 동일 주 복수 회차 묶음은 48행/10개 카탈로그 작품에서 제외했으며, 별도 일정 제외 행은 RE:Anime Overgeared 5화 1건(`NOT YET RELEASED`/`unaired`)이다. 이는 회차/일정 행 수와 카탈로그 작품 수를 구분해 기록한다.
+- 실제 시즌 카드 `彼方から`에서 기존 상세 창을 열어 회차 3개를 확인했고, 작품별 Miruro 선택 후 Miruro 회차 3개가 로드됐다. 앱 기본 공급원 RE:Anime는 유지됐다. 실제 영상은 10.2초 재생, 출력 1920×1080, HLS 1080p/5.5 Mbps였다. 본 화면·가로 스크롤·두 줄 제목·상세 흐름을 Electron 캡처와 화면에서 확인했다.
+- 검증: `tests/season-calendar.test.cjs` 21/21 통과, 전체 `npm test` 487개 중 478 통과/9 실패(기존 `catalog-metadata.test.cjs` 3건, `community-search.test.cjs` 6건), 관련 JS/CJS 구문 검사 통과, `git diff --check` 통과(기존 LF→CRLF 알림만 있음). 현재 주간 `providerSchedule`만 제공되어 여러 주에 걸친 정기 간격 자체는 입증하지 못한다. 이번 실검증은 현재 주의 활성 시리즈·번호 회차·공급 일정 근거를 검증했다.
+- 기존 미커밋 변경 다수가 범위 밖 파일에 함께 있어 이번 수정만 안전하게 분리할 수 없어 커밋하지 않았다. 기존 파일 변경 및 `.recovery`를 보존했다.
+
+## 2026-10-19 Patch 01 편성표 UI 다듬기
+
+- `src/season-calendar.css`에서 7열 폭 계산을 균등화하고 포스터·제목·원제·메타 행의 높이, 2줄 제목, 원본 강조색 hover/focus, 충돌·미확인 카드의 배경·간격을 정돈했다. 일정·요일 분류 로직은 변경하지 않았다.
+- `src/season-calendar.js`에서 전체 제목·메타 툴팁을 연결하고 비동기 제목 변경에도 툴팁이 따라가게 했다. 재렌더 뒤 가로 스크롤 위치를 보존한다.
+- 실제 Electron 38.8.6 격리 실행은 OS 임시 경로 `C:\Users\공룡\AppData\Local\Temp\lilac-v0527-schedule-w8sC0P`의 독립 `appData/userData/sessionData`를 사용했다. 홈 시즌 레일, 7열, 오늘 강조, 충돌·미확인 카드, 980px 가로 스크롤, 상세·회차 3개, 홈 복귀·재진입 및 스크롤 유지, 툴팁 70/70을 확인했다. 캡처는 같은 폴더의 `app-season-rail.png`, `season-calendar.png`, `season-calendar-narrow.png`, `season-calendar-status-sections.png`, `season-calendar-detail.png`, `season-calendar-reentry-980.png`이다.
+- `tests/season-calendar.test.cjs` 21/21, 소스·Electron 하네스 `node --check`, `git diff --check` 통과. 전체 `npm test`는 487개 중 478 통과·9 실패(기존 `catalog-metadata.test.cjs` 3건, `community-search.test.cjs` 6건)로 이번 변경과 무관한 실패가 재현됐다.
+- 후속 격리 Electron 확인(`C:\Users\공룡\AppData\Local\Temp\lilac-v0527-schedule-i6zjJA`)에서 실제 hover와 키보드 focus 스타일도 통과했다. 해당 실행은 UI 확인을 위해 재생을 건너뛰었고, 앞선 격리 실행에서 10초 이상 재생은 이미 확인했다.
+- UI 코드가 기존 미커밋 `src/season-calendar.js`·`.css` 변경과 같은 diff에 얽혀 이번 변경만 안전하게 분리하기 어려워 커밋하지 않았다. 그 외 기존 미커밋·`.recovery`는 그대로 보존했다.
+
+## 2026-10-19 Patch 01 일본 방송 일정 IPC 실검증
+
+- 시즌 캘린더는 공급 사이트 업로드 요일을 일본 TV 일정처럼 사용하지 않고 `provider:japanese-season-schedule` 경로(AniList airing schedule + Jikan seasonal broadcast metadata)를 사용한다. 원본 `providerSchedule` IPC/핸들러는 유지했고 시즌 캘린더의 일본 방송 요일 근거로 사용하지 않는다. 기존 `normalizeJapaneseAiring` 및 24~29시 JST 변환 코드는 변경하지 않았다.
+- AniList 원인 구분: 이전 계측에서 20초 실패는 `queue-timeout`, `requestStarted=false`, HTTP 상태 없음, 요청 본문 731바이트였다. 해당 시도는 DNS/fetch/HTTP/GraphQL 단계에 진입하지 않은 공유 큐 대기 실패이며, 큐가 지연된 구체적 원인은 그 기록만으로 확정할 수 없다. 이번 Electron 실행에서는 AniList 68개 ID 후보를 페이지 2개로 요청했고, HTTP 200, GraphQL 오류 없음, 총 53행, 최대 요청 본문 962바이트, 약 7.9초에 완료했다.
+- 카탈로그 71개 중 AniList ID 보유 68개, AniList ID가 없는 3개도 후보 목록에서 제외하지 않았다. 71개 카탈로그 후보를 Jikan 요청 입력으로 전달했으나, 실제 Jikan 요청은 시작 후 약 6.0초 `request-timeout`/`failureStage=network`로 실패했고 HTTP 상태 및 transport code는 없었다. 요청 후 독립 DNS 조회는 성공했지만 당시 실패의 DNS/접속 단계는 확정하지 않았다.
+- 격리 Electron 38.8.6: PID 9792, renderer PID 20276, BrowserWindow/webContents 1. `appData`, `userData`, `sessionData`는 `C:\Users\공룡\AppData\Local\Temp\lilac-v0527-schedule-7hLw9o` 하위에서 앱 시작 전에 지정·검증했다. 실제 캡처는 같은 폴더의 `season-calendar.png`, `season-calendar-detail.png` 및 `report.json`에 있다. 홈 시즌 레일과 공식 주간표 영역은 그대로였고, 시즌 전체 보기 7열과 가로 스크롤, 오늘 강조를 확인했다.
+- 실제 AniList 일본 TV 일정 53행이 모두 정확한 AniList ID 및 2026 FALL/JP/TV 조건을 통과해 카드 53개로 연결됐다. 월~일 카드는 `0/7/6/5/9/8/18`; 카탈로그 71개는 배정 53, 일정 미확인 17, 스페셜 제외 1로 합계가 맞는다. 충돌 0, 중복 0, 일정 행 ID·메타데이터 거부 0. Jikan 실패로 독립 출처 간 교차확인 및 교차 출처 충돌 판정은 미검증이다. 확인 불가 작품은 임의 요일을 배정하지 않았다.
+- 실제 화요일 카드 `魔法少女育成計画 restart` 클릭으로 기존 `#detailDialog`가 열렸고 2개 회차를 표시했다. 같은 상세에서 Miruro를 선택해 2개 회차가 로드됐으며 앱 기본 공급원은 RE:Anime 그대로였다. 재생은 이번 범위에서 건너뛰었다.
+- 검증: 관련 집중 테스트 47/47 통과(기존 24~29시 표기 포함), 관련 구문 검사 통과, `git diff --check` 통과. 전체 `npm test`는 492개 중 483 통과/9 실패로, 같은 기존 `catalog-metadata.test.cjs` 3건과 `community-search.test.cjs` 6건이 재현됐다. 실행 중 `provider:catalog ERR_CONNECTION_RESET` 로그 3건은 시즌 일정의 AniList 성공/Jikan 시간 초과와 별도 카탈로그 IPC 오류다.
+- 기존 미커밋 트리에 Patch 01·03 외 변경과 `.recovery`가 넓게 섞여 있고 현재 일정 경로가 미커밋 IPC·모듈에 의존하므로 이번 검증분만 독립 커밋하면 HEAD에서 불완전한 경로가 된다. 파일/기능을 안전하게 분리할 수 없어 커밋하지 않았으며 모든 기존 변경을 보존했다.
+
+## 2026-10-20 남은 공급원 연결 및 회귀 테스트
+
+- 전체 `npm test`는 502/502 통과했다. 대상 회귀 묶음은 `catalog-metadata`, `community-search`, `provider-schedule` 32/32 통과했고, 변경된 JS/CJS 9개 `node --check` 및 `git diff --check`도 통과했다.
+- 실제 Electron 재검증은 Electron 38.8.6, PID 19148, BrowserWindow/webContents 1에서 OS Temp의 `C:\Users\공룡\AppData\Local\Temp\lilac-v0527-schedule-89DU2s`에 `appData`, `userData`, `sessionData`를 사전 분리·검증한 뒤 진행했다. 실제 앱 캡처와 `report.json`은 이 임시 폴더에 있다. 첫 계측 실행은 창 객체가 파괴되어 하네스가 중단됐고 원인은 확정하지 못했다. 종료 경로 계측을 추가한 다음 실행은 완료되어 7열 일정·상세 경로를 확인했다.
+- 실응답 카탈로그는 72개였고, 주간 공개 다수결로 68개 작품/75개 카드가 배정됐다. 월~일 카드 수는 11/7/6/6/10/13/22, 미확인 3, 형식 제외 1, 동률·미해결 충돌 0, 중복 행 0이다. 2026-10-19 기준 주간 응답이므로 고정값으로 해석하지 않는다.
+- 일정 출처별 실응답: RE:Anime 164행 중 108개 정확 매칭, 104개 투표 가능 행; Miruro 267행 중 160개 정확 매칭, 148개 투표 가능 행; Animenosub 66행 중 정확 회차 매칭 0(51행 연도 미검증, 15행 식별 근거 부족); 애니24 58행 모두 정확한 작품·시즌 식별 불가. 양쪽 사이트 모두 응답은 성공했으나 회차번호가 확인되지 않아 표를 만들지 않았다.
+- LinkAni는 `linkani.tv`의 7일 네이티브 요청이 모두 `ERR_CONNECTION_RESET`/network 단계로 실패했다. 이어진 Anissia 대체 일정은 74행 반환했지만 LinkAni 행·표로 계산하지 않았다. Patch 03 상세 검색도 LinkAni 3회 실패로 선택 항목이 없었다.
+- AniList는 2페이지, 52행, HTTP 200, 약 7.9초에 완료했다. Jikan은 72개 후보 전달 후 약 6초 네트워크 타임아웃으로 HTTP 응답이 없었다. AniList/Jikan 원자료 독립성은 검증되지 않아 한 `schedule-index` 투표 그룹으로만 처리했다.
+- 실제 Patch 03 상세에서는 RE:Anime와 정확 연결된 Miruro를 선택해 4개 회차를 다시 불러왔다. 앱 전역 기본 공급원은 RE:Anime로 유지됐다. 같은 검색에서 Animenosub 결과 1건은 작품 동일성 선택 기준을 충족하지 않아 통합 선택지로 승격하지 않았고, 애니24 검색은 0건이었다.
+- 별도 `provider:catalog` IPC에서 `ERR_CONNECTION_RESET` 3회가 기록됐다. 이는 7일 `providerSchedule` 결과와 분리되어 있으며 이 로그에는 실제 요청 호스트가 남지 않아 원인 서버를 더 특정하지 못했다. 앱 렌더러 콘솔에는 기존 `src/app.js`의 `#dropCaptions` null `onchange` 오류도 있었으나 이번 Patch 01·03 범위에서는 수정하지 않았다.
+- `electron/provider-schedule.cjs`의 실패 진단은 HTTP 상태 또는 네트워크 코드·단계·도메인만 보존하고 원본 URL/응답 본문은 기록하지 않는다. `src/season-calendar.js`가 네이티브 오류와 Anissia fallback을 따로 보존해 fallback 투표 오인을 막는다.
+- 이번 변경을 독립 커밋하지 않았다. `electron/main.cjs`(+504/-183)에는 LinkAni 어댑터·IPC와 카탈로그/회차 연결, 기존 자막 검색·다운로드 경로가 함께 변경되어 있으며, `src/season-calendar.js`(+834/-120)는 집계·ID/시즌 매칭·UI 진입을 포함한 미커밋 Patch 01 구현이다. 이 둘을 통째로 커밋하면 범위 밖 동작까지 포함되고, 부분 분리하면 현재 검증된 IPC/집계 연결이 빠져 커밋만으로 동작하지 않는다. 기존 `.recovery`, 미커밋 파일은 변경하지 않았다.
+
+## 2026-10-20 앱 초기화 및 Patch 03 공급원 안정화
+
+- 렌더러가 현재 HTML에 없는 `#dropCaptions`, `#promptExtra`, `#promptRules` 설정 컨트롤에 이벤트를 연결하던 잔여 참조를 제거했다. 공식 번역 컨트롤과 `electron/subtitle-translator.cjs`의 기존 설정 처리는 유지했다. 격리 Electron 첫 시작에서 홈과 시즌 레일이 렌더링되고 콘솔 JavaScript 오류가 없음을 확인했다.
+- Patch 03 제목 연결은 연도가 없는 결과를 자동 병합하지 않도록 유지하면서, 양쪽이 TV 시리즈이고 제목에 같은 명시적 시즌/Part가 포함되며 후보가 유일한 경우만 정확 별칭 연결을 허용했다. 여러 시즌 후보가 가능한 결과는 계속 분리한다.
+- 실제 격리 Electron 검색에서 AnimenoSub의 Season 3 결과는 자체 AniList/MAL ID·연도·일본어 제목이 없었지만, 고유한 영문 시즌 표기가 RE:Anime/Miruro의 AniList 185756, MAL 60601 작품과 일치했다. 기존 `#detailDialog`의 공급원 선택기 하나에서 AnimenoSub를 선택하고 실제 1–4화 목록을 불러왔다. 이는 응답 성공만이 아니라 상세 선택 및 회차 연결을 확인한 결과다.
+- 같은 실제 검색에서 애니24는 결과 0건이라 선택기 연결을 검증할 후보가 없었다. 과거 58개 일정 행도 정확한 작품·시즌·회차 키로 연결되지 않아 투표/선택 근거가 아니며, 임의로 합치지 않았다.
+- LinkAni는 이번 실시간 검색 하네스에서 외부 요청을 생략했다. 이전 실제 로그의 `https://linkani.tv/list/2/class/{weekday}/` 일정 요청은 7/7 `ERR_CONNECTION_RESET`으로 HTTP 응답 전 네트워크 단계에서 실패했다. 오류 코드만으로 TCP와 TLS의 세부 단계를 더 구분할 수 없어 재시도하지 않았다. Anissia 대체 일정은 LinkAni 데이터로 계산하지 않았다.
+- Electron 38.8.6 격리 실행: 시작 검증은 OS Temp 아래 별도 `appData/userData/sessionData`를 사용했고 앱의 실제 경로와 일치했다. 창/PID를 확인했으며 홈 시즌 카드 30개, 캘린더 진입/그리드, 전체 탐색이 준비됐고 시작 콘솔 오류는 0건이었다. 실제 검색·상세 검증도 별도 Temp 프로필에서 수행했다. Patch 01의 공급원 일정 호출은 이번 작업에서 다시 실행하지 않았다.
+- 검증: 집중 테스트 23/23, 전체 `npm test` 505/505 통과(이전 502개 기준에서 이번 추가 테스트 3개 포함), 변경 JavaScript 구문 검사 통과, `git diff --check` 통과. 실제 앱 검증과 테스트 하네스 결과를 별도로 기록했다.
+- 커밋은 보류했다. `src/app.js`의 초기화 수정은 미커밋 앱 통합 변경과 같은 파일에 섞였고, Patch 03 매칭 코드는 HEAD에 없는 통합 검색 기능이 포함된 `src/integrated-search.js`와 앱/IPC 연결에 의존한다. 이 파일을 통째로 스테이징하면 이번 범위를 넘고 일부만 분리하면 실행 가능한 공급원 선택 경로를 보장하지 못한다. 전체 미커밋 변경과 `.recovery`는 보존했다.

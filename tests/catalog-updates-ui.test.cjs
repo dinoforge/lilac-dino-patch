@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 
 function setup({ source = 'reanime', current = [], quarterShows = [], quarterSelection = null, library = [], history = [], feed = async () => ({ data: [], nextOffset: 36, done: true }), linkkfEpisodes = async () => [] } = {}) {
-  const elements = new Map(), calls = [], storage = new Map();
+  const elements = new Map(), calls = [], storage = new Map(), calendarOpens = [];
   function element(id) {
     const classes = new Set();
     return {
@@ -33,8 +33,8 @@ function setup({ source = 'reanime', current = [], quarterShows = [], quarterSel
   const context = vm.createContext({
     state,
     QUARTER_PROVIDERS: ['reanime', 'animenosub', 'miruro'],
-    SOURCE_LABELS: { reanime: 'RE:Anime', miruro: 'Miruro', animenosub: 'Animenosub', ohli24: '애니24', linkkf: 'Linkkf' },
-    window: { lilac: {
+    SOURCE_LABELS: { reanime: 'RE:Anime', miruro: 'Miruro', animenosub: 'Animenosub', ohli24: '애니24', linkani: '링크애니', linkkf: 'Linkkf' },
+    window: { LilacSeasonCalendar: { open: (...args) => calendarOpens.push(args) }, lilac: {
       catalogUpdates: (provider, offset) => { calls.push({ provider, offset }); return feed(provider, offset); },
       linkkfEpisodes: id => { calls.push({ provider: 'linkkf', id }); return linkkfEpisodes(id); }
     } },
@@ -51,7 +51,7 @@ function setup({ source = 'reanime', current = [], quarterShows = [], quarterSel
   });
   const moduleSource = fs.readFileSync(path.join(__dirname, '../src/catalog-updates.js'), 'utf8');
   vm.runInContext(moduleSource + '\nglobalThis.api = catalogUpdateUI;', context);
-  return { context, state, elements, homeButtons, libraryButtons, calls, storage, section };
+  return { context, state, elements, homeButtons, libraryButtons, calls, storage, section, calendarOpens };
 }
 
 function deferred() {
@@ -118,19 +118,21 @@ test('library NEW markers compare uploaded episode counts for every supported so
     { provider: 'reanime', mal_id: 'reanime:one', availableEpisodes: 6 },
     { provider: 'miruro', mal_id: 'miruro:two', availableEpisodeCount: 6 },
     { provider: 'animenosub', mal_id: 'animenosub:three', availableEpisodes: 6 },
-    { provider: 'ohli24', mal_id: 'ohli24:four', availableEpisodes: 6 }
+    { provider: 'ohli24', mal_id: 'ohli24:four', availableEpisodes: 6 },
+    { provider: 'linkani', mal_id: 'linkani:five', availableEpisodes: 6 }
   ];
   const updates = {
     reanime: { provider: 'reanime', mal_id: 'reanime:one', availableEpisodes: 7, subbed: 7, dubbed: 6 },
     miruro: { provider: 'miruro', mal_id: 'miruro:two', availableEpisodeCount: 7 },
     animenosub: { provider: 'animenosub', mal_id: 'animenosub:three', availableEpisodes: 7 },
-    ohli24: { provider: 'ohli24', mal_id: 'ohli24:four', availableEpisodes: 7 }
+    ohli24: { provider: 'ohli24', mal_id: 'ohli24:four', availableEpisodes: 7 },
+    linkani: { provider: 'linkani', mal_id: 'linkani:five', availableEpisodes: 7 }
   };
   const h = setup({ library: saved, feed: async provider => ({ data: [updates[provider]], nextOffset: 36, done: true }) });
 
   await h.context.api.renderLibrary();
 
-  assert.deepEqual(h.elements.get('libraryGrid').items.map(item => item.libraryUpdateNew), [true, true, true, true]);
+  assert.deepEqual(h.elements.get('libraryGrid').items.map(item => item.libraryUpdateNew), [true, true, true, true, true]);
   assert.deepEqual(h.state.library, saved);
 });
 
@@ -209,11 +211,11 @@ test('a watched latest episode suppresses NEW but another provider history does 
   assert.equal(h.elements.get('libraryGrid').items[0].libraryUpdateNew, undefined);
 });
 
-test('unsupported provider hides home update ordering and recent see-all opens the updated catalog', async () => {
+test('Linkkf has no home update ordering while LinkAni is supported and recent see-all opens the updated catalog', async () => {
   const h = setup({ source: 'linkkf' });
   h.context.api.renderHome();
   assert.equal(h.elements.get('homeOrder').classList.contains('hidden'), true);
-  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '../src/catalog-updates.js'), 'utf8'), /linkani/i);
+  assert.match(fs.readFileSync(path.join(__dirname, '../src/catalog-updates.js'), 'utf8'), /'linkani'/);
 
   const supported = setup({ feed: async () => ({ data: [{ mal_id: 'one' }], nextOffset: 36, done: true }) });
   await supported.homeButtons[1].onclick();
@@ -221,4 +223,22 @@ test('unsupported provider hides home update ordering and recent see-all opens t
   assert.equal(supported.storage.get('allSort:reanime'), 'updated');
   assert.equal(supported.elements.get('catalogFilterReset').clickCount, 1);
   assert.equal(supported.context.view, 'all');
+});
+
+test('season see-all uses the seven-column calendar for quarter providers only', () => {
+  const shows = [{ mal_id: 101, title: '확인된 시즌 작품' }];
+  const quarter = setup({ source: 'miruro', quarterShows: shows, quarterSelection: { year: 2026, quarter: 4, label: '2026년 4분기' } });
+  quarter.context.api.renderHome();
+  quarter.elements.get('seeAllSeason').onclick();
+  assert.equal(quarter.calendarOpens.length, 1);
+  assert.equal(quarter.calendarOpens[0][0], shows);
+  assert.equal(quarter.calendarOpens[0][1], '2026년 4분기');
+  assert.equal(quarter.calendarOpens[0][2], quarter.state.quarterSelection);
+  assert.equal(quarter.context.homeList, undefined);
+
+  const other = setup({ source: 'linkkf', current: [{ mal_id: 'linkkf:one', title: 'Linkkf 목록' }] });
+  other.context.api.renderHome();
+  other.elements.get('seeAllSeason').onclick();
+  assert.equal(other.calendarOpens.length, 0);
+  assert.equal(other.context.homeList.label, '이번 시즌 신작');
 });

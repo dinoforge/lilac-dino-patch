@@ -1,7 +1,7 @@
 const cheerio = require('cheerio');
 
-// Keep this list aligned with the providers selectable by this app. LinkAni is not an app source.
-const LABELS = { reanime: 'RE:Anime', miruro: 'Miruro', animenosub: 'Animenosub', ohli24: '애니24', linkkf: 'Linkkf' };
+// LinkAni is a separate adapter from the original Linkkf provider and IPC.
+const LABELS = { reanime: 'RE:Anime', miruro: 'Miruro', animenosub: 'Animenosub', ohli24: '애니24', linkani: '링크애니', linkkf: 'Linkkf' };
 const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 const koreaDate = value => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
 const koreaTime = value => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value));
@@ -19,6 +19,21 @@ function entry(anime, extra = {}) {
 
 function createProviderSchedule(deps) {
   const cache = new Map(), pending = new Map();
+  const failureDetails = (error, provider) => {
+    const base = { reanime: deps.reanimeBase, miruro: 'https://api.miruro.to', animenosub: deps.animenosubBase,
+      ohli24: deps.ohliBase, linkani: deps.linkaniBase, linkkf: deps.linkkfBase }[provider] || '';
+    const rawCode = String(error?.cause?.code || error?.code || error?.message?.match(/net::(ERR_[A-Z_]+)/)?.[1] || '').toUpperCase();
+    const status = Number(error?.status || rawCode.match(/^HTTP[_ ]?(\d{3})$/)?.[1] || error?.message?.match(/\bHTTP\s+(\d{3})\b/i)?.[1]) || null;
+    const timedOut = error?.failureStage === 'timeout' || error?.code === 'ETIMEDOUT'
+      || error?.name === 'TimeoutError' || error?.name === 'AbortError' || /timeout/i.test(rawCode);
+    let domain = '';
+    try { domain = new URL(base).hostname; } catch {}
+    return {
+      stage: error?.failureStage || (status ? 'http-response' : timedOut ? 'timeout' : 'network'),
+      code: status ? 'HTTP_' + status : rawCode || (error?.name === 'TypeError' ? 'FETCH_FAILED' : 'SOURCE_ERROR'),
+      httpStatus: status, domain
+    };
+  };
   const withTimeout = (operation, timeoutMs, label) => new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(Object.assign(new Error(`${label} 응답 시간이 초과되었습니다.`), { code: 'ETIMEDOUT' })), timeoutMs);
     Promise.resolve().then(operation).then(resolve, reject).finally(() => clearTimeout(timer));
@@ -98,6 +113,13 @@ function createProviderSchedule(deps) {
       return root.items.map(raw => entry(deps.ohliAnime(raw)));
     }
 
+    if (provider === 'linkani') {
+      const weekday = '일월화수목금토'[day];
+      const url = new URL(`/list/2/class/${encodeURIComponent(weekday)}/`, deps.linkaniBase);
+      const html = await cached(`linkani:weekday:${monday}:${day}`, () => deps.linkaniFetch(url.href));
+      return deps.linkaniItems(html).map(anime => entry(anime, { sourceNote: '링크애니 요일 분류 · 회차 번호 미확인' }));
+    }
+
     const tag = deps.linkkfTags[(day + 6) % 7];
     const root = await deps.linkkfFetch(`${deps.linkkfBase}/singlefilter.php?categorytagid=${tag}&limit=200`);
     if (!Array.isArray(root?.data)) throw new Error('Linkkf 요일 목록을 읽지 못했습니다.');
@@ -116,13 +138,16 @@ function createProviderSchedule(deps) {
       });
     } catch (error) {
       console.warn(`[schedule:${provider}] ${error.message}`);
+      const nativeFailure = failureDetails(error, provider);
       try {
         const items = await withTimeout(() => deps.fallback(day), deps.fallbackTimeoutMs || 7000, 'Anissia 대체 일정');
-        return { items, provider, native: false, timed: true, note: 'Anissia · 한국 시간', sourceError: error.code === 'ETIMEDOUT' ? 'timeout' : 'failed' };
+        return { items, provider, native: false, timed: true, note: 'Anissia · 한국 시간',
+          sourceError: nativeFailure.stage === 'timeout' ? 'timeout' : 'failed', nativeFailure };
       } catch (fallbackError) {
+        const fallbackFailure = failureDetails(fallbackError, 'anissia');
         return { items: [], provider, native: false, timed: false, failed: true,
-          sourceError: error.code === 'ETIMEDOUT' ? 'timeout' : 'failed', fallbackError: fallbackError.code === 'ETIMEDOUT' ? 'timeout' : 'failed',
-          error: fallbackError.message || error.message };
+          sourceError: nativeFailure.stage === 'timeout' ? 'timeout' : 'failed',
+          fallbackError: fallbackFailure.stage === 'timeout' ? 'timeout' : 'failed', nativeFailure, fallbackFailure };
       }
     }
   };

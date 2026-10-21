@@ -8,7 +8,7 @@ let playerLocked = false, unlockTimer = null, usingKeyboard = false;
 // Focus is only moved into menus for keyboard/remote users; mouse users would just see a stray focus ring.
 window.addEventListener('keydown', () => { usingKeyboard = true; }, true);
 window.addEventListener('pointerdown', () => { usingKeyboard = false; }, true);
-const autoSkipState = { enteredKey: null, enteredAt: 0, skippedKey: null };
+const autoSkipState = { enteredKey: null, enteredAt: 0, pausedAt: null, skippedKey: null, manualSeekTime: null };
 
 const PLAYER_ASPECTS = { original: 0, '16:9': 16 / 9, '21:9': 21 / 9, '4:3': 4 / 3, fill: 0 };
 function playerAspect() {
@@ -25,9 +25,13 @@ function applyPlayerAspect() {
   $('#video').style.objectFit = aspect === 'original' ? 'contain' : 'fill';
   $$('#psAspects button').forEach(button => { const selected = button.dataset.aspect === aspect; button.classList.toggle('selected', selected); button.setAttribute('aria-pressed', String(selected)); });
   window.LilacAss?.resize();
+  window.LilacAnime4K?.layout();
 }
 new ResizeObserver(applyPlayerAspect).observe($('#immersivePlayer'));
 $('#video').addEventListener('loadedmetadata', applyPlayerAspect);
+$('#video').addEventListener('loadedmetadata', renderQualityChoices);
+$('#video').addEventListener('resize', renderQualityChoices);
+$('#video').addEventListener('emptied', renderQualityChoices);
 
 function playerSettingsOpen() { return $('#playerSettings').classList.contains('open'); }
 // The sheet is split into 재생 / 자막 / 자막 모양; the tab used last opens next time.
@@ -75,7 +79,8 @@ function syncPlayerSettingsUI() {
   $('#psSpeedLabel').textContent = `${speed.toFixed(2)}x`;
   $$('#psSpeeds button').forEach(button => button.classList.toggle('selected', Number(button.dataset.speed) === speed));
   const seconds = Number(localStorage.getItem('seekSeconds') || 10);
-  $('#psSeekNote').textContent = `뒤로/앞으로 버튼 이동: ${seconds}초`;
+  $('#psSeekLabel').textContent = `${seconds}초`; $('#psSeekSeconds').value = String(seconds);
+  $$('#psSeekSteps button').forEach(button => button.classList.toggle('selected', Number(button.dataset.seek) === seconds));
   renderQualityChoices();
   renderVideoServers();
   renderDiscoveredFonts();
@@ -207,9 +212,12 @@ function applyVttLayout() {
   const track = $('#video').textTracks[0]; if (!track?.cues) return;
   flattenVttCues(track);
   const line = vttBaseline(), offset = Number(localStorage.getItem('subtitleSync') || 0) / 1000;
+  const fix = typeof currentSubtitle !== 'undefined' && currentSubtitle?.timeFix, segments = Array.isArray(fix?.segments) ? fix.segments : [];
+  const shiftFor = start => { let shift = Number(segments[0]?.shift) || 0; for (const segment of segments) { if (Number(segment.from) <= start + 1e-6) shift = Number(segment.shift) || 0; else break; } return shift; };
+  const at = (time, start) => !fix ? time : segments.length > 1 ? time + shiftFor(start) : time * fix.scale + fix.offset;
   for (const cue of track.cues) {
     if (cue.lilacStart === undefined) { cue.lilacStart = cue.startTime; cue.lilacEnd = cue.endTime; }
-    cue.startTime = Math.max(0, cue.lilacStart + offset); cue.endTime = Math.max(0, cue.lilacEnd + offset);
+    cue.startTime = Math.max(0, at(cue.lilacStart, cue.lilacStart) + offset); cue.endTime = Math.max(0, at(cue.lilacEnd, cue.lilacStart) + offset);
     // Top cues (captions, signs) keep a small margin from the top; the rest sit on the subtitle line.
     cue.snapToLines = false; cue.line = cue.lilacTop ? 5 : line; cue.lineAlign = cue.lilacTop ? 'start' : 'end';
     // Chromium shifts a percentage-positioned cue left again when size < 100. Keep the cue full-width;
@@ -333,9 +341,36 @@ function selectVideoServer(label) {
   resolveIntoPlayer(() => window.lilac.providerResolve(requestedEpisode), `${title} · ${episode.name || episode.number}화`, { ...keep, resumeProgress }, title, Number($('#skipEpisode').value) || episode.number || 1);
 }
 
+// Miruro can return a valid playlist whose segments later stop advancing. Reuse the normal
+// same-kind server failover path and saved resume point instead of adding a second resolver path.
+const miruroStallTracker = window.LilacPlayerFailover.createMiruroStallTracker();
+setInterval(() => {
+  const context = currentPlaybackContext, video = $('#video');
+  const stalled = miruroStallTracker.tick({ context, video, active: $('#playerView').classList.contains('active'), now: Date.now() });
+  if (stalled && startAutomaticVideoServerFallback(hlsPlayer, video)) {
+    $('#downloadStatus').textContent = '영상 서버가 느려 다른 서버로 연결하는 중...';
+  }
+}, 1000);
+
 function renderQualityChoices() {
-  const levels = hlsPlayer?.levels || [], box = $('#psQuality'), list = $('#psQualityList');
-  box.classList.toggle('hidden', levels.length < 2); if (levels.length < 2) { list.replaceChildren(); return; }
+  const levels = hlsPlayer?.levels || [], box = $('#psQuality'), list = $('#psQualityList'), actual = $('#psQualityActual'), video = $('#video');
+  box.classList.remove('hidden');
+  const width = Number(video.videoWidth) || 0, height = Number(video.videoHeight) || 0;
+  const currentLevel = hlsPlayer && hlsPlayer.currentLevel >= 0 ? levels[hlsPlayer.currentLevel] : null;
+  const automatic = Boolean(hlsPlayer?.autoLevelEnabled);
+  if (width && height) {
+    const output = `실제 영상 해상도 ${width} × ${height} · ${height}p`;
+    if (levels.length && automatic) actual.textContent = currentLevel?.height
+      ? `자동 · 현재 ${qualityLabel(currentLevel)} · ${output}` : `자동 · ${output}`;
+    else if (levels.length && currentLevel?.height && currentLevel.height !== height) actual.textContent = `선택 ${qualityLabel(currentLevel)} · ${output}`;
+    else actual.textContent = output;
+  } else if (currentLevel?.height) actual.textContent = automatic
+    ? `자동 · 현재 ${qualityLabel(currentLevel)} · 실제 출력 확인 중`
+    : `선택 ${qualityLabel(currentLevel)} · 실제 출력 확인 중`;
+  else if (levels.length === 1) actual.textContent = `HLS 단일 화질 ${qualityLabel(levels[0])} · 실제 출력 확인 중`;
+  else actual.textContent = '화질 확인 불가';
+  if (!levels.length) { list.replaceChildren(); return; }
+  if (levels.length < 2) { list.replaceChildren(); return; }
   const current = hlsPlayer.manualLevel ?? hlsPlayer.currentLevel;
   const options = [{ index: -1, label: 'Auto' }, ...levels.map((level, index) => ({ index, label: qualityLabel(level), height: level.height || 0 })).sort((a, b) => b.height - a.height)];
   list.replaceChildren(...options.map(option => {
@@ -371,17 +406,40 @@ async function playSiblingEpisode(episode) {
   if (!episode) return;
   const episodes = currentPlaybackContext.seriesEpisodes || [], title = currentPlaybackContext.subtitleTitle || $('#playerTitle').textContent.split(' · ')[0];
   const context = { episode, subtitleTitle: title, image: currentPlaybackContext.image || '', seriesEpisodes: episodes, comparisonEpisodes: nearbyEpisodes(episodes, episode), resolveKind: currentPlaybackContext.resolveKind, anime: currentPlaybackContext.anime };
-  $('#downloadStatus').textContent = `${episode.name || episode.number}화를 준비하는 중...`;
-  await resolveIntoPlayer(() => context.resolveKind === 'linkkf' ? window.lilac.linkkfResolve(episode) : window.lilac.providerResolve(episode), `${title} · ${episode.name || episode.number}화`, context, title, episodeNumberOf(episode) || 1);
+  $('#downloadStatus').textContent = `${episodeTitle(episode)}를 준비하는 중...`;
+  await resolveIntoPlayer(() => context.resolveKind === 'linkkf' ? window.lilac.linkkfResolve(episode) : window.lilac.providerResolve(episode), `${title} · ${episodeTitle(episode)}`, context, title, episodeNumberOf(episode) || 1);
 }
 
-// Android auto skip: the skip pill stays visible for 2.5 s before an OP/ED is skipped automatically.
+// Explicit seeks let the viewer watch the destination segment until they leave it.
+function seekPlayer(time) {
+  if (!Number.isFinite(time)) return;
+  autoSkipState.manualSeekTime = time;
+  $('#video').currentTime = time;
+}
+function resetAutoSkipState() {
+  Object.assign(autoSkipState, { enteredKey: null, enteredAt: 0, pausedAt: null, skippedKey: null, manualSeekTime: null });
+}
+
+function pauseAutoSkipClock() {
+  if (autoSkipState.enteredKey !== null && autoSkipState.pausedAt == null) autoSkipState.pausedAt = Date.now();
+}
+function resumeAutoSkipClock() {
+  if (autoSkipState.pausedAt != null) {
+    autoSkipState.enteredAt += Date.now() - autoSkipState.pausedAt;
+    autoSkipState.pausedAt = null;
+  }
+}
+
+// The skip pill stays visible for 2.5 s, excluding time spent paused.
 function updateSkipState(video) {
   const showButton = playerFlag('playerSkipButton');
   $('#skipNow').classList.toggle('hidden', !activeSkip || !showButton);
-  if (!activeSkip) { autoSkipState.enteredKey = null; autoSkipState.skippedKey = null; return; }
-  if (autoSkipState.enteredKey !== activeSkipKey) { autoSkipState.enteredKey = activeSkipKey; autoSkipState.enteredAt = Date.now(); autoSkipState.skippedKey = null; }
-  if (playerFlag('playerAutoSkip', false) && autoSkipState.skippedKey !== activeSkipKey && Date.now() - autoSkipState.enteredAt >= 2500 && activeSkip.endTime > video.currentTime) {
+  if (!activeSkip) { autoSkipState.enteredKey = null; autoSkipState.pausedAt = null; autoSkipState.skippedKey = null; autoSkipState.manualSeekTime = null; return; }
+  if (autoSkipState.enteredKey !== activeSkipKey) { autoSkipState.enteredKey = activeSkipKey; autoSkipState.enteredAt = Date.now(); autoSkipState.pausedAt = video.paused ? Date.now() : null; autoSkipState.skippedKey = null; }
+  const manualTime = autoSkipState.manualSeekTime;
+  const manuallyEntered = manualTime !== null && manualTime >= activeSkip.startTime && manualTime < activeSkip.endTime;
+  if (!manuallyEntered) autoSkipState.manualSeekTime = null;
+  if (!video.paused && !manuallyEntered && playerFlag('playerAutoSkip', false) && autoSkipState.skippedKey !== activeSkipKey && Date.now() - autoSkipState.enteredAt >= 2500 && activeSkip.endTime > video.currentTime) {
     autoSkipState.skippedKey = activeSkipKey; video.currentTime = activeSkip.endTime;
   }
 }
@@ -489,7 +547,7 @@ function drawPipFrame() {
   const width = Math.min(sourceWidth, 1280), height = Math.max(1, Math.round(width / ratio));
   if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, width, height);
-  if (video.readyState >= 2) ctx.drawImage(video, 0, 0, width, height);
+  if (video.readyState >= 2) ctx.drawImage(window.LilacAnime4K?.frame() || video, 0, 0, width, height);
   if (!$('#subtitleEnabled')?.checked) return;
   if (currentSubtitle?.assRendering) { const ass = window.LilacAss?.frame(video); if (ass?.width) ctx.drawImage(ass, 0, 0, width, height); }
   else drawPipCues(ctx, width, height, video);
@@ -529,7 +587,7 @@ function updateMediaSession() {
   if (!('mediaSession' in navigator)) return;
   const episode = currentPlaybackContext.episode, title = $('#playerTitle').textContent;
   const image = currentPlaybackContext.image || currentPlaybackContext.anime?.images?.webp?.large_image_url || '';
-  navigator.mediaSession.metadata = new MediaMetadata({ title: episode ? `${episode.name || episode.number}화` : title, artist: currentPlaybackContext.subtitleTitle || title.split(' · ')[0], album: 'LilacAnime', artwork: /^https?:/i.test(image) ? [{ src: image, sizes: '512x512' }] : [] });
+  navigator.mediaSession.metadata = new MediaMetadata({ title: episode ? `${episodeTitle(episode)}` : title, artist: currentPlaybackContext.subtitleTitle || title.split(' · ')[0], album: 'LilacAnime', artwork: /^https?:/i.test(image) ? [{ src: image, sizes: '512x512' }] : [] });
   navigator.mediaSession.setActionHandler('previoustrack', siblingEpisode(-1) ? () => playSiblingEpisode(siblingEpisode(-1)) : null);
   navigator.mediaSession.setActionHandler('nexttrack', siblingEpisode(1) ? () => playSiblingEpisode(siblingEpisode(1)) : null);
 }
@@ -543,9 +601,9 @@ if ('mediaSession' in navigator) {
   navigator.mediaSession.setActionHandler('play', () => video.play());
   navigator.mediaSession.setActionHandler('pause', () => video.pause());
   navigator.mediaSession.setActionHandler('stop', () => video.pause());
-  navigator.mediaSession.setActionHandler('seekbackward', details => { video.currentTime = Math.max(0, video.currentTime - (details.seekOffset || seconds())); });
-  navigator.mediaSession.setActionHandler('seekforward', details => { video.currentTime = Math.min(video.duration || Infinity, video.currentTime + (details.seekOffset || seconds())); });
-  navigator.mediaSession.setActionHandler('seekto', details => { if (Number.isFinite(details.seekTime)) video.currentTime = details.seekTime; });
+  navigator.mediaSession.setActionHandler('seekbackward', details => { seekPlayer(Math.max(0, video.currentTime - (details.seekOffset || seconds()))); });
+  navigator.mediaSession.setActionHandler('seekforward', details => { seekPlayer(Math.min(video.duration || Infinity, video.currentTime + (details.seekOffset || seconds()))); });
+  navigator.mediaSession.setActionHandler('seekto', details => { if (Number.isFinite(details.seekTime)) seekPlayer(details.seekTime); });
   video.addEventListener('playing', () => { navigator.mediaSession.playbackState = 'playing'; updateMediaSession(); updateMediaPosition(); });
   video.addEventListener('pause', () => { navigator.mediaSession.playbackState = 'paused'; updateMediaPosition(); });
   video.addEventListener('durationchange', updateMediaPosition);
@@ -673,7 +731,7 @@ function handlePlayerKey(event) {
   if (arrow === 'left' || arrow === 'right') {
     event.preventDefault();
     const seconds = Number(localStorage.getItem('seekSeconds') || 10) * (arrow === 'left' ? -1 : 1);
-    video.currentTime = Math.min(video.duration || Infinity, Math.max(0, video.currentTime + seconds)); showPlayerControls(); return;
+    seekPlayer(Math.min(video.duration || Infinity, Math.max(0, video.currentTime + seconds))); showPlayerControls(); return;
   }
   if (arrow) { event.preventDefault(); showPlayerControls(); $('#togglePlayer').focus(); return; }
   if (event.code === 'Space' || key === ' ') {
@@ -689,7 +747,7 @@ function handlePlayerKey(event) {
   if (letter === 'f') { $('#fullscreenPlayer').click(); showPlayerControls(); return; }
   if (letter === 'm') { $('#mutePlayer').click(); showPlayerControls(); return; }
   // C: subtitles on / off; Z / X: subtitles half a second earlier / later (the 자막 싱크 setting); S: skip the opening or
-  // ending on screen; 0-9: to that tenth of the episode; [ / ]: slower / faster. Each says what it did. (Up and down stay
+  // ending on screen; P: screenshot; 0-9: to that tenth of the episode; [ / ]: slower / faster. Each says what it did. (Up and down stay
   // for moving the focus with a remote.)
   if (letter === 'c') { const box = $('#subtitleEnabled'); box.checked = !box.checked; box.dispatchEvent(new Event('change')); toast(box.checked ? '자막을 켰어요' : '자막을 껐어요'); return; }
   if (letter === 'z' || letter === 'x') {
@@ -697,8 +755,9 @@ function handlePlayerKey(event) {
     setSubtitleSync(next);
     toast(`자막 싱크 ${next > 0 ? '+' : ''}${(next / 1000).toFixed(1)}초 (${next < 0 ? '자막이 빨리 나옴' : next > 0 ? '자막이 늦게 나옴' : '원래대로'})`); return;
   }
+  if (letter === 'p') { takeScreenshot(); return; }
   if (letter === 's') { const skip = $('#skipNow'); if (skip && !skip.classList.contains('hidden')) skip.click(); else toast('지금은 건너뛸 OP/ED 구간이 아니에요'); return; }
-  if (/^[0-9]$/.test(letter) && video.duration) { video.currentTime = video.duration * Number(letter) / 10; showPlayerControls(); return; }
+  if (/^[0-9]$/.test(letter) && video.duration) { seekPlayer(video.duration * Number(letter) / 10); showPlayerControls(); return; }
   if (letter === '[' || letter === ']') {
     finishSpaceHold(false);
     const at = SPEED_OPTIONS.indexOf(video.playbackRate), next = SPEED_OPTIONS[Math.max(0, Math.min(SPEED_OPTIONS.length - 1, (at < 0 ? SPEED_OPTIONS.indexOf(1) : at) + (letter === ']' ? 1 : -1)))];
@@ -708,6 +767,39 @@ function handlePlayerKey(event) {
   if (key === 'MediaTrackPrevious' || key === 'PageUp') { event.preventDefault(); playSiblingEpisode(siblingEpisode(-1)); return; }
   showPlayerControls();
 }
+
+// 스크린샷 (P, the camera button): the frame on screen at the video's own size (1920×1080 for a 1080p episode, not the
+// window's), without subtitles or controls, as a PNG in 사진\LilacAnime named after the episode and the time in it.
+// A video the page may not read (another site's file without CORS) is taken from the window instead, with the
+// controls and subtitles hidden for that moment: the picture as large as the player shows it.
+async function takeScreenshot() {
+  const video = $('#video');
+  if (!video.videoWidth || video.readyState < 2) { toast('영상이 나온 뒤에 찍을 수 있어요'); return; }
+  const time = typeof formatTime === 'function' ? formatTime(video.currentTime).replace(/:/g, '-') : String(Math.floor(video.currentTime));
+  const name = `${($('#playerTitle').textContent || 'LilacAnime').trim()} ${time}`;
+  let data = '';
+  try {
+    const source = window.LilacAnime4K?.frame() || video;
+    const canvas = document.createElement('canvas'); canvas.width = source.width || video.videoWidth; canvas.height = source.height || video.videoHeight;
+    canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height); data = canvas.toDataURL('image/png');
+  } catch { /* a tainted canvas: taken from the window below */ }
+  let rect = null; const player = $('#immersivePlayer'), shown = [];
+  if (!data) {
+    // Where the picture is inside the video box (letterboxed by object-fit: contain).
+    const box = video.getBoundingClientRect(), scale = video.style.objectFit === 'fill' ? null : Math.min(box.width / video.videoWidth, box.height / video.videoHeight);
+    const width = scale ? video.videoWidth * scale : box.width, height = scale ? video.videoHeight * scale : box.height;
+    rect = { x: box.left + (box.width - width) / 2, y: box.top + (box.height - height) / 2, width, height };
+    for (const track of video.textTracks) if (track.mode === 'showing') { shown.push(track); track.mode = 'hidden'; }
+    player.classList.add('capturing');
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }
+  try {
+    await window.lilac.saveScreenshot({ data, rect, name });
+    toast(`스크린샷을 저장했어요 (사진 > LilacAnime${data ? `, ${video.videoWidth}×${video.videoHeight}` : ''})`);
+  } catch (error) { toast(`스크린샷을 저장하지 못했어요: ${String(error?.message || error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`); }
+  finally { player.classList.remove('capturing'); for (const track of shown) track.mode = 'showing'; }
+}
+$('#screenshotPlayer')?.addEventListener('click', takeScreenshot);
 
 // Outside the player the same keys drive focus between cards, tabs and buttons.
 function handleAppKey(event) {
@@ -744,6 +836,15 @@ $('#playerSettingsButton').onclick = () => openPlayerSettings(!playerSettingsOpe
 $('#closePlayerSettings').onclick = () => { openPlayerSettings(false); $('#playerSettingsButton').focus(); };
 $('#psSkipButton').onchange = event => { localStorage.setItem('playerSkipButton', String(event.target.checked)); updateSkipState($('#video')); };
 $('#psAutoSkip').onchange = event => localStorage.setItem('playerAutoSkip', String(event.target.checked));
+// Keep the player controls and 설정 > 재생 on the same persisted seek interval (1–120 seconds).
+function setSeekSeconds(value) {
+  const seconds = Math.min(120, Math.max(1, Math.round(Number(value)) || 10));
+  localStorage.setItem('seekSeconds', String(seconds));
+  if ($('#seekSeconds')) $('#seekSeconds').value = String(seconds);
+  syncPlayerSettingsUI();
+}
+$$('#psSeekSteps button').forEach(button => button.onclick = () => setSeekSeconds(button.dataset.seek));
+$('#psSeekSeconds').onchange = event => setSeekSeconds(event.target.value);
 $$('#psSubtitleSources button').forEach(button => button.onclick = () => selectSubtitleSource(button.dataset.source));
 $('#resetSeriesSubtitleSource').onclick = () => {
   if (!resetSeriesSubtitleSource()) return;
@@ -784,5 +885,6 @@ $('#unlockPlayer').onclick = event => { event.stopPropagation(); setPlayerLocked
 // Settings stay open while the pointer is on them; a click on the video closes them (Android dropdown).
 $('#playerSettings').addEventListener('pointerdown', event => event.stopPropagation());
 $('#video').addEventListener('ratechange', () => { if (playerSettingsOpen()) syncPlayerSettingsUI(); });
+window.LilacAnime4K?.init({ getAspect: playerAspect, notify: toast });
 syncPlayerSettingsUI();
 applyPlayerAspect();

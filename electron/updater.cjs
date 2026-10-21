@@ -119,6 +119,10 @@ class Updater {
     if (relaunch) setTimeout(() => this.app.quit(), 300);
     return true;
   }
+
+  // Finish an already downloaded update when the application is closed. This does
+  // not contact the release feed and preserves the local updater's disabled feed.
+  installOnQuit() { if (!MAC && this.state.status === 'ready' && !this.installing) try { this.install(false); } catch { /* next start */ } }
 }
 
 // Release notes of this build: the ones saved when it was installed, else the GitHub release of its tag.

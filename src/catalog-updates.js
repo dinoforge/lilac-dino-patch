@@ -1,6 +1,6 @@
 // Update order uses each provider's own recent-episode feed. Saved library data is never reordered in storage.
 const catalogUpdateUI = (() => {
-  const supported = ['reanime', 'miruro', 'animenosub', 'ohli24'];
+  const supported = ['reanime', 'miruro', 'animenosub', 'ohli24', 'linkani'];
   const librarySupported = [...supported, 'linkkf'];
   const cache = new Map();
   const linkkfEpisodeCache = new Map();
@@ -23,7 +23,7 @@ const catalogUpdateUI = (() => {
   function availableEpisodes(item) {
     const values = item?.provider === 'reanime' ? [item.availableEpisodes, item.subbed, item.dubbed]
       : item?.provider === 'miruro' ? [item.availableEpisodes ?? (Number(item.availableEpisodeCount) > 0 ? item.availableEpisodeCount : null)]
-        : ['animenosub', 'ohli24', 'linkkf'].includes(item?.provider) ? [item.availableEpisodes] : [];
+      : ['animenosub', 'ohli24', 'linkani', 'linkkf'].includes(item?.provider) ? [item.availableEpisodes] : [];
     const numbers = values.filter(value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) && Number(value) >= 0).map(Number);
     return numbers.length ? Math.max(...numbers) : null;
   }

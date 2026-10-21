@@ -79,7 +79,7 @@ test('disabled update status is clear and cannot be manually started', () => {
   assert.equal(elements['#checkUpdate'].disabled, true);
   assert.equal(states.get('hidden'), true);
   assert.doesNotMatch(updaterSource, /whispelyn-byte\/LilacAnime-desktop\/releases/);
-  assert.doesNotMatch(mainSource, /updater\?\.installOnQuit/);
+  assert.match(mainSource, /updater\?\.installOnQuit/);
 });
 
 test('first start skips an empty changelog instead of showing an upstream release prompt', async () => {

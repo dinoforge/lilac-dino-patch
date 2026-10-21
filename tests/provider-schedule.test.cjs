@@ -41,6 +41,23 @@ test('parallel day requests share one native weekly fetch and keep verified epis
   assert.equal(tuesday.items[0].time, '21:00');
 });
 
+test('LinkAni is read as a supplemental weekday catalog and does not invent episode numbers', async () => {
+  let requestedUrl = '';
+  const schedule = createProviderSchedule(deps({
+    linkaniBase: 'https://linkani.example',
+    linkaniFetch: async url => { requestedUrl = url; return '<html>요일 목록</html>'; },
+    linkaniItems: () => [anime('linkani-show', 'LinkAni Show')]
+  }));
+  const result = await schedule('linkani', 0);
+
+  assert.match(requestedUrl, /\/list\/2\/class\/%EC%9D%BC\//);
+  assert.equal(result.provider, 'linkani');
+  assert.equal(result.native, true);
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].episode, undefined);
+  assert.match(result.items[0].sourceNote, /회차 번호 미확인/);
+});
+
 test('source failure returns a labeled Anissia fallback and does not cache the outage', async () => {
   let sourceCalls = 0, fallbackCalls = 0;
   const schedule = createProviderSchedule(deps({
@@ -51,10 +68,24 @@ test('source failure returns a labeled Anissia fallback and does not cache the o
   const second = await schedule('reanime', 1);
   assert.equal(first.native, false);
   assert.equal(first.sourceError, 'failed');
+  assert.equal(first.nativeFailure.stage, 'network');
+  assert.equal(first.nativeFailure.domain, 'reanime.example');
   assert.equal(first.note, 'Anissia · 한국 시간');
   assert.equal(second.sourceError, 'failed');
   assert.equal(sourceCalls, 2);
   assert.equal(fallbackCalls, 2);
+});
+
+test('provider failures retain only safe HTTP or network diagnostics', async () => {
+  const network = createProviderSchedule(deps({
+    linkaniBase: 'https://linkani.example',
+    linkaniFetch: async () => { throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } }); },
+    fallback: async () => []
+  }));
+  const result = await network('linkani', 0);
+  assert.deepEqual(result.nativeFailure, { stage: 'network', code: 'ECONNRESET', httpStatus: null, domain: 'linkani.example' });
+  assert.equal(result.items.length, 0);
+  assert.equal(JSON.stringify(result.nativeFailure).includes('linkani.example/list/'), false);
 });
 
 test('a stalled source times out independently and returns the fallback result', async () => {
