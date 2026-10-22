@@ -6,6 +6,7 @@ const vm = require('node:vm');
 const { PROVIDERS, groupResults, filterGroups, chooseSource, searchProviders, mergeSearchResults } = require('../src/integrated-search.js');
 const appSource = fs.readFileSync(path.join(__dirname, '../src/app.js'), 'utf8');
 const htmlSource = fs.readFileSync(path.join(__dirname, '../src/index.html'), 'utf8');
+const mainSource = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
 
 const item = (provider, id, values = {}) => ({ provider, mal_id: `${provider}:${id}`, title: '같은 제목', ...values });
 
@@ -248,6 +249,23 @@ test('merged query and title-variant runs deduplicate provider items and preserv
   ]);
 });
 
+test('Re:Anime detail and episode fallbacks share a lazy page loader', () => {
+  const start = mainSource.indexOf("ipcMain.handle('provider:detail'");
+  const end = mainSource.indexOf("ipcMain.handle('provider:play'", start);
+  assert.ok(start >= 0 && end > start, 'provider detail IPC handler is present');
+  const handler = mainSource.slice(start, end);
+  const reanimeStart = handler.indexOf("if (anime.provider === 'reanime')");
+  const genericPageStart = handler.indexOf('const html=await providerFetch(anime.url', reanimeStart);
+  assert.ok(reanimeStart >= 0 && genericPageStart > reanimeStart, 'Re:Anime handles its API routes before the generic page fetch');
+  const reanimeBranch = handler.slice(reanimeStart, genericPageStart);
+  assert.match(reanimeBranch, /let pagePromise = null/);
+  assert.match(reanimeBranch, /const page = \(\) => \{/);
+  assert.match(reanimeBranch, /pagePromise = providerFetch\(anime\.url/);
+  assert.match(reanimeBranch, /rean[i]meDetail\(anime, page\)/i);
+  assert.match(reanimeBranch, /rean[i]meEpisodes\(detail, page\)/i);
+  assert.match(reanimeBranch, /return \{ data: detail, episodes, unavailable: false \}/);
+});
+
 test('detail source picker identifies the active raw provider item and hides for a single source', () => {
   const start = appSource.indexOf('function detailSourcePickerMarkup(');
   const end = appSource.indexOf('\nasync function openDetail', start);
@@ -280,7 +298,7 @@ test('a source catalog detail starts one bounded cross-provider lookup without c
 
 test('detail source discovery keeps the matching season and never changes the global source', async () => {
   const start = appSource.indexOf('function detailSourceLookupKey(');
-  const end = appSource.indexOf('\nfunction setWeekdayAvailability', start);
+  const end = appSource.indexOf('\nfunction detailPlaybackInfoMarkup', start);
   assert.ok(start >= 0 && end > start, 'Missing detail source discovery');
   const current = item('reanime', 'final', { mal_id: 'reanime:final', title: 'Attack on Titan The Final Season', title_japanese: '進撃の巨人 The Final Season', anilistId: 110277, year: 2020, type: 'TV' });
   const sourceItems = [], searched = [];
@@ -320,28 +338,23 @@ test('detail source discovery keeps the matching season and never changes the gl
   assert.equal(group.sourceSearchPending, false);
 });
 
-test('weekday picker does not count unrelated search results as episode availability', () => {
+test('detail source picker does not show catalog episode estimates as loaded episodes', () => {
   const start = appSource.indexOf('function detailSourcePickerMarkup(');
-  const end = appSource.indexOf('\nasync function checkWeekdaySourceEpisodes', start);
-  assert.ok(start >= 0 && end > start, 'Missing weekday availability helpers');
-  const weekdays = require('../src/weekday-schedule.js');
+  const end = appSource.indexOf('\nfunction bindDetailSourcePicker', start);
+  assert.ok(start >= 0 && end > start, 'Missing detail source picker');
   const context = vm.createContext({
     SOURCE_LABELS: { reanime: 'RE:Anime', miruro: 'Miruro', animenosub: 'Animenosub', ohli24: '애니24', linkani: '링크애니' },
     LilacIntegratedSearch: { PROVIDERS },
-    LilacWeekdaySchedule: weekdays,
-    openDetail: { currentGroupKey: '', currentSourceId: '' },
-    $: () => null,
     escapeHtml: value => String(value)
   });
   vm.runInContext(`${appSource.slice(start, end)}\nthis.renderPicker = detailSourcePickerMarkup;`, context);
-  const group = {
-    weekdaySchedule: true, scheduleSearchReady: true, sourceItems: [], scheduleAvailability: {},
-    scheduleSearchStatuses: [{ provider: 'reanime', state: 'ready', resultCount: 7 }]
-  };
-  const markup = context.renderPicker(group, { mal_id: 'reanime:anchor' });
-  const reanimeRow = markup.match(/<div class="weekday-source-state" data-schedule-provider="reanime"[^>]*>(.*?)<\/div>/)?.[1] || '';
-  assert.match(reanimeRow, /미제공/);
-  assert.doesNotMatch(reanimeRow, /제공 확인/);
+  const markup = context.renderPicker({ sourceItems: [
+    { provider: 'reanime', mal_id: 'reanime:one', availableEpisodeCount: 24, episodes: 24 },
+    { provider: 'miruro', mal_id: 'miruro:one', availableEpisodes: 12 }
+  ] }, { mal_id: 'reanime:one' });
+  assert.match(markup, /RE:Anime/);
+  assert.match(markup, /Miruro/);
+  assert.doesNotMatch(markup, /최대|24화|12화|weekday-source-picker|data-schedule-provider/);
 });
 
 test('search UI loads the grouping model before app code and routes source changes through real item IDs', () => {

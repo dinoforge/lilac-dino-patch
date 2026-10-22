@@ -66,7 +66,7 @@ assert.deepEqual(
   fs.readFileSync(path.join(repo, 'electron', 'preload.cjs')),
   'the packaged preload matches the current source'
 );
-for (const file of ['src/app.js', 'src/player.js', 'src/weekday-schedule.js', 'electron/weekday-episodes.cjs']) {
+for (const file of ['src/app.js', 'src/player.js', 'src/weekday-schedule.js']) {
   assert.deepEqual(
     asar.extractFile(appAsar, file.replaceAll('/', '\\')),
     fs.readFileSync(path.join(repo, file)),
@@ -947,33 +947,6 @@ app.whenReady().then(async () => {
     assert.equal(anilistRequests.length, 2, 'Re:Anime and Miruro each issue one provider-scoped AniList request');
     assert.deepEqual(anilistRequests[1].variables.ids, [62004]);
     assert.ok(anilistRequests[1].query.includes('airingSchedules'));
-
-    const weekdayCandidates = [
-      { provider: 'reanime', anilistId: 62001, subbed: 2, title: '합성 요일표 방영작' },
-      { provider: 'miruro', anilistId: 62004, availableEpisodeCount: 4, title: '합성 Miruro 방영작' }
-    ];
-    const weekdayRequestStart = anilistRequests.length;
-    const weekdayResult = await win.webContents.executeJavaScript(
-      `window.lilac.providerWeekdayEpisodes('reanime', ${JSON.stringify(weekdayCandidates)})`
-    );
-    assert.equal(weekdayResult.supported, true);
-    assert.equal(weekdayResult.fromCache, false);
-    assert.equal(weekdayResult.data.length, 1);
-    assert.equal(weekdayResult.data[0].episode, 2, 'weekday schedule includes only the next seven days and exact candidate AniList IDs');
-    assert.deepEqual(weekdayResult.data[0].anime, weekdayCandidates[0]);
-    const exactWeekdayRequests = anilistRequests.slice(weekdayRequestStart).filter(request =>
-      JSON.stringify(request.variables.ids) === JSON.stringify([62001])
-    );
-    assert.ok(exactWeekdayRequests.length >= 1, 'weekday lookup uses the real packaged provider IPC');
-    assert.equal(exactWeekdayRequests[0].variables.until - exactWeekdayRequests[0].variables.after, 7 * 24 * 60 * 60);
-    const weekdayCached = await win.webContents.executeJavaScript(
-      `window.lilac.providerWeekdayEpisodes('reanime', ${JSON.stringify(weekdayCandidates)})`
-    );
-    assert.equal(weekdayCached.fromCache, true, 'weekday schedules reuse the provider-scoped cache');
-    const unsupportedWeekday = await win.webContents.executeJavaScript(
-      `window.lilac.providerWeekdayEpisodes('animenosub', ${JSON.stringify(weekdayCandidates)})`
-    );
-    assert.deepEqual(unsupportedWeekday, { supported: false, data: [] });
 
     const schedule = await win.webContents.executeJavaScript('window.lilac.linkkfSchedule()');
     assert.equal(schedule.days.length, 7, 'Linkkf main IPC returns Monday through Sunday');

@@ -115,6 +115,5 @@ test('wires Korean-first and original-title display into home, detail, continue,
   assert.match(app, /originalTitleMarkup\(job\.anime,'download-original'\)/);
   assert.match(html, /id="heroOriginalTitle"/);
   assert.match(html, /id="playerOriginalTitle"/);
-  const calendar = fs.readFileSync(path.join(__dirname, '../src/season-calendar.js'), 'utf8');
-  assert.match(calendar, /title\.dataset\.titleFor\s*=\s*animeTitleKey\(anime\)/, 'the 7-column poster title participates in the same enrichment path');
+  assert.doesNotMatch(html, /season-calendar\.js|id="seasonCalendarView"/, 'the removed Patch 01 calendar is no longer loaded by the app');
 });

@@ -27,8 +27,6 @@ const { selectMiruroServer } = require('./miruro-playback.cjs');
 const { createSubtitleSync } = require('./subtitle-sync.cjs');
 const { QUARTER_PROVIDERS, quarterForDate, quarterPeriod, quarterQuery } = require('./quarter-catalog.cjs');
 const { fetchLatestEpisodes } = require('./latest-episodes.cjs');
-const { fetchWeekdayEpisodes } = require('./weekday-episodes.cjs');
-const { fetchJapaneseSeasonSchedule } = require('./season-jst-schedule.cjs');
 const { createWeeklySchedule } = require('./weekly-schedule.cjs');
 const { createProviderSchedule } = require('./provider-schedule.cjs');
 const { createCatalogBrowser } = require('./catalog-browser.cjs');
@@ -2536,9 +2534,6 @@ app.whenReady().then(async () => {
   ipcMain.handle('provider:quarter', (_, provider, year, quarter) => homeShows(provider,'quarter',year,quarter));
   ipcMain.handle('provider:airing', (_, provider) => homeShows(provider,'airing'));
   ipcMain.handle('provider:latest-episodes', (_, provider, candidates) => fetchLatestEpisodes(provider, candidates));
-  ipcMain.handle('provider:weekday-episodes', (_, provider, candidates, refresh) => fetchWeekdayEpisodes(provider, candidates, { refresh: refresh === true }));
-  ipcMain.handle('provider:japanese-season-schedule', (_, candidates, from, until, seasonYear, season) =>
-    fetchJapaneseSeasonSchedule(candidates, { from: Number(from), until: Number(until), seasonYear: Number(seasonYear), season: String(season || '') }));
   const weeklySchedule = createWeeklySchedule(day => anissiaFetch(`/anime/schedule/${day}`));
   const providerSchedule = createProviderSchedule({
     nativeTimeoutMs:15000, fallbackTimeoutMs:7000,
@@ -2627,10 +2622,20 @@ app.whenReady().then(async () => {
     if (anime.provider === 'ohli24') return ohliDetail(anime);
     if (anime.provider === 'linkani') return linkaniDetail(anime);
     if (!['animenosub','reanime'].includes(anime?.provider)) throw new Error('지원하지 않는 콘텐츠 소스입니다.');
+    if (anime.provider === 'reanime') {
+      let pagePromise = null;
+      const page = () => {
+        if (!pagePromise) pagePromise = providerFetch(anime.url, { referer: new URL(anime.url).origin + '/' });
+        return pagePromise;
+      };
+      const detail = await reanimeDetail(anime, page);
+      const episodes = await reanimeEpisodes(detail, page);
+      return { data: detail, episodes, unavailable: false };
+    }
     const html=await providerFetch(anime.url,{referer:new URL(anime.url).origin+'/'});
-    const detail=anime.provider==='animenosub'?animenosubDetail(html,anime):anime.provider==='reanime'?await reanimeDetail(anime,html):{...anime,synopsis:cheerio.load(html)('meta[name=description]').attr('content')||anime.synopsis};
-    const episodes=anime.provider==='reanime'?await reanimeEpisodes(detail,html):providerEpisodes(html,anime.provider,detail);
-    const data=anime.provider==='animenosub'?{...detail,availableEpisodes:Math.max(0,...episodes.map(episode=>Number(episode.number)||0))||detail.availableEpisodes||null}:detail;
+    const detail=animenosubDetail(html,anime);
+    const episodes=providerEpisodes(html,anime.provider,detail);
+    const data={...detail,availableEpisodes:Math.max(0,...episodes.map(episode=>Number(episode.number)||0))||detail.availableEpisodes||null};
     return {data,episodes,unavailable:false};
   });
   ipcMain.handle('provider:play', (_, episode, title) => openProviderPlayer(episode,title).then(()=>true));

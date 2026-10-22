@@ -23,7 +23,6 @@
   <link rel="stylesheet" href="ott.css" />
   <link rel="stylesheet" href="mac.css" />
   <link rel="stylesheet" href="integrated-search.css" />
-  <link rel="stylesheet" href="season-calendar.css" />
 </head>
 <body>
   <div class="window-drag" aria-hidden="true"></div>
@@ -64,13 +63,6 @@
       </section>
 
       <section id="searchView" class="view">
-        <div id="seasonCalendarView" class="season-calendar-view hidden" aria-labelledby="seasonCalendarTitle">
-          <div class="season-calendar-head"><button id="seasonCalendarBack" class="text-btn" type="button">← 홈으로</button><div><h1 id="seasonCalendarTitle">이번 시즌 주간 편성표</h1><p id="seasonCalendarSubtitle"></p></div></div>
-          <p id="seasonCalendarStatus" class="season-calendar-status" role="status" aria-live="polite"></p>
-          <div id="seasonCalendarGrid" class="season-calendar-grid" aria-label="월요일부터 일요일까지 주간 편성표"></div>
-          <section id="seasonCalendarUnknownSection" class="season-calendar-unknown" aria-labelledby="seasonCalendarUnknownTitle"><div class="season-calendar-subhead"><h2 id="seasonCalendarUnknownTitle">요일 미확인 작품</h2><span id="seasonCalendarUnknownCount">0개</span></div><p id="seasonCalendarUnknownNote"></p><div id="seasonCalendarUnknown" class="season-calendar-unknown-grid"></div></section>
-          <section id="seasonCalendarConflictSection" class="season-calendar-unknown hidden" aria-labelledby="seasonCalendarConflictTitle"><div class="season-calendar-subhead"><h2 id="seasonCalendarConflictTitle">일정 충돌</h2><span id="seasonCalendarConflictCount">0개</span></div><div id="seasonCalendarConflicts" class="season-calendar-unknown-grid"></div></section>
-        </div>
         <div class="page-head"><h1>어떤 이야기를 찾고 있나요?</h1><p>제목을 검색해 작품 정보와 평점을 확인하세요.</p></div>
         <div class="big-search"><svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input id="pageSearch" placeholder="애니메이션 제목 입력" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="pageSearchSuggestions" autocomplete="off" /><button id="searchButton">검색</button><div class="search-suggestions hidden"><div id="pageSearchSuggestions" class="search-suggestion-list" role="listbox" aria-label="최근 검색 및 작품 제안"></div><div class="search-suggestion-footer"><button type="button" data-clear-search-history>최근 검색 기록 지우기</button></div></div></div>
         <div id="filterBar" class="filter-bar hidden"><button id="filterToggle" class="ghost filter-toggle" aria-expanded="false" aria-controls="filterPanel">태그 필터</button></div>
@@ -279,10 +271,9 @@
   <script src="player-failover.js"></script>
   <script src="integrated-search.js"></script>
   <script src="quarter-selection.js"></script>
-  <script src="weekday-schedule.js"></script>
   <script src="device-sync.js"></script>
+  <script src="detail-playback-info.js"></script>
   <script src="app.js"></script>
-  <script src="season-calendar.js"></script>
   <script src="catalog-updates.js"></script>
   <script src="anime4k.js"></script>
   <script src="player.js"></script>

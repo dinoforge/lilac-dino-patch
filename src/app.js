@@ -139,8 +139,6 @@ function switchView(name) {
   if(name!==current){cancelPendingPlaybackLookups();if(current==='search')invalidateIntegratedSearch()}
   if(name==='player'&&current&&current!=='player')viewBeforePlayer=current;
   document.body.classList.toggle('player-mode',name==='player');
-  $('#searchView').classList.remove('season-calendar-mode');
-  $('#seasonCalendarView')?.classList.add('hidden');
   $$('.view').forEach(v => v.classList.toggle('active', v.id === `${name}View`));
   $$('.nav').forEach(n => n.classList.toggle('active', n.dataset.view === name));
   if (name === 'library') renderLibrary();
@@ -156,12 +154,12 @@ function card(a) {
   const latestEpisode=Number(a.latestEpisodeNumber)||0,latestDate=Number(a.latestAiringAt)?new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric'}).format(new Date(Number(a.latestAiringAt)*1000)):'';
   const savedSource=a.sourceItems?.find(item=>state.library.some(savedItem=>String(savedItem.mal_id)===String(item.mal_id))),libraryNew=Boolean(a.libraryUpdateNew),libraryItem=savedSource||a.sourceItems?.find(item=>String(item.mal_id)===String(a.mal_id))||a,isCardSaved=Boolean(savedSource)||saved(a.mal_id);
   if(latestEpisode)el.classList.add('latest-episode-card');
-  const episodeMeta=LilacAnimeMeta.episodeLabel(a),regularMeta=[a.year,a.type,episodeMeta].filter(Boolean).map(value=>escapeHtml(String(value))).join(' · '),latestMeta=[latestDate?`방영 ${latestDate}`:'',episodeMeta].filter(Boolean).map(value=>escapeHtml(String(value))).join(' · '),weekdayDate=Number(a.weekdayAiringAt)?new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric'}).format(new Date(Number(a.weekdayAiringAt)*1000)):'',weekdayMeta=a.weekdayEpisodeNumber?[`EP.${Number(a.weekdayEpisodeNumber)}`,weekdayDate?`방영 ${weekdayDate}`:''].filter(Boolean).join(' · '):regularMeta;
-  el.innerHTML=`<div class="poster"><button class="heart ${isCardSaved?'saved':''}" title="내 목록">${heartIcon()}</button>${a.score?`<span class="score">★ ${escapeHtml(String(a.score))}</span>`:''}${libraryNew?'<span class="library-new-badge">NEW</span>':''}${latestEpisode?`<span class="latest-episode-badge">EP.${escapeHtml(String(latestEpisode))}</span>`:''}${a.sourceCount>1?`<span class="source-count-badge">${a.sourceCount}개 소스</span>`:''}</div><h3 ${titleAttr(a)}>${escapeHtml(titleOf(a))}</h3>${originalTitleMarkup(a,'anime-card-native')}<p>${a.weekdaySchedule?weekdayMeta:latestEpisode?latestMeta:regularMeta}</p>`;
+  const episodeMeta=LilacAnimeMeta.episodeLabel(a),regularMeta=[a.year,a.type,episodeMeta].filter(Boolean).map(value=>escapeHtml(String(value))).join(' · '),latestMeta=[latestDate?`방영 ${latestDate}`:'',episodeMeta].filter(Boolean).map(value=>escapeHtml(String(value))).join(' · ');
+  el.innerHTML=`<div class="poster"><button class="heart ${isCardSaved?'saved':''}" title="내 목록">${heartIcon()}</button>${a.score?`<span class="score">★ ${escapeHtml(String(a.score))}</span>`:''}${libraryNew?'<span class="library-new-badge">NEW</span>':''}${latestEpisode?`<span class="latest-episode-badge">EP.${escapeHtml(String(latestEpisode))}</span>`:''}${a.sourceCount>1?`<span class="source-count-badge">${a.sourceCount}개 소스</span>`:''}</div><h3 ${titleAttr(a)}>${escapeHtml(titleOf(a))}</h3>${originalTitleMarkup(a,'anime-card-native')}<p>${latestEpisode?latestMeta:regularMeta}</p>`;
   setBackgroundImage(el.querySelector('.poster'),imageOf(a));
   // The whole card opens the anime (its title and facts too, the row in 인기 순위), with Enter or Space as well.
   el.tabIndex=0;el.setAttribute('role','button');el.setAttribute('aria-label',[titleOf(a),originalTitleOf(a),latestEpisode?`${latestEpisode}화 ${a.latestEpisodeKind==='updated'?'최신 업데이트':'최신 방영'} 회차 재생`:'',libraryNew?'새 회차 있음':''].filter(Boolean).join(' '));
-  const open=()=>a.weekdaySchedule?openWeekdayScheduleAnime(a):a.groupKey?openDetail(a.mal_id,{groupKey:a.groupKey}):openDetail(a.mal_id);
+  const open=()=>a.groupKey?openDetail(a.mal_id,{groupKey:a.groupKey}):openDetail(a.mal_id);
   el.addEventListener('click', e => { if(e.target.closest('.heart'))return;if(latestEpisode)playLatestEpisode(a);else open(); });
   el.addEventListener('keydown', e => { if((e.key==='Enter'||e.key===' ')&&e.target===el){e.preventDefault();if(latestEpisode)playLatestEpisode(a);else open()} });
   el.querySelector('.heart').addEventListener('click', e => { e.stopPropagation(); toggleLibrary(libraryItem, e.currentTarget); });
@@ -444,29 +442,10 @@ function sourcePreferenceKeys(group){return [...new Set([...(Array.isArray(group
 function readWorkSourcePreference(group){try{const saved=JSON.parse(localStorage.getItem(WORK_SOURCE_PREFERENCES_KEY)||'{}'),keys=sourcePreferenceKeys(group);return keys.map(key=>saved[key]).filter(value=>value&&LilacIntegratedSearch.PROVIDERS.includes(value.provider)).sort((a,b)=>(Number(b.at)||0)-(Number(a.at)||0))[0]||null}catch{return null}}
 function saveWorkSourcePreference(group,item){if(!group||!item?.provider)return false;try{const saved=JSON.parse(localStorage.getItem(WORK_SOURCE_PREFERENCES_KEY)||'{}'),record={provider:item.provider,sourceId:String(item.mal_id||''),at:Date.now()};for(const key of sourcePreferenceKeys(group))saved[key]=record;const trimmed=Object.fromEntries(Object.entries(saved).sort((a,b)=>(Number(b[1]?.at)||0)-(Number(a[1]?.at)||0)).slice(0,200));localStorage.setItem(WORK_SOURCE_PREFERENCES_KEY,JSON.stringify(trimmed));return true}catch{return false}}
 function detailSourcePickerMarkup(group,activeSource){
-  if(group?.weekdaySchedule){
-    const names={reanime:'RE:Anime',animenosub:'Animenosub',miruro:'Miruro',ohli24:'애니24',linkani:'링크애니'};
-    const statusText=provider=>{const current=group.scheduleAvailability?.[provider];if(current)return weekdayAvailabilityLabel(current);if(!group.scheduleSearchReady)return '작품 확인 중';return weekdayAvailabilityLabel(weekdaySearchFallbackState(group,provider))};
-    const rows=LilacIntegratedSearch.PROVIDERS.map(provider=>{
-      const item=group.sourceItems?.find(source=>source.provider===provider),state=group.scheduleAvailability?.[provider]||(!group.scheduleSearchReady?'checking':weekdaySearchFallbackState(group,provider));
-      const label=`<span>${names[provider]}</span><small class="source-availability">${statusText(provider)}</small>`;
-      return item?`<button type="button" data-detail-source="${escapeHtml(String(item.mal_id))}" data-schedule-provider="${provider}" data-availability-state="${state}" aria-pressed="${String(item.mal_id)===String(activeSource.mal_id)}">${label}</button>`:`<div class="weekday-source-state" data-schedule-provider="${provider}" data-availability-state="${state}">${label}</div>`;
-    }).join('');
-    const target=Number(group.scheduleEpisodeNumber)||0,caption=target?`출처 · ${target}화 기준`:'공급원 · 회차 확인 후 연결';
-    return `<section class="detail-source-picker weekday-source-picker" aria-label="요일표 회차 공급원 상태"><b>${caption}</b><div role="group" aria-label="공급원별 회차 상태">${rows}</div></section>`;
-  }
   const items=group?.sourceItems||[],failed=(group?.sourceSearchStatuses||[]).filter(status=>status.state==='failed'||status.state==='partial');if(items.length<2&&!group?.sourceSearchPending&&!failed.length)return '';
   const providerCounts=new Map();items.forEach(item=>providerCounts.set(item.provider,(providerCounts.get(item.provider)||0)+1));
   const pending=group?.sourceSearchPending?'<small class="source-search-note">같은 작품의 다른 공급원을 확인 중입니다.</small>':'',failedNote=failed.length?`<small class="source-search-note">확인 실패: ${escapeHtml(failed.map(status=>SOURCE_LABELS[status.provider]||status.provider).join(', '))}</small>`:'';
-  return `<section class="detail-source-picker" aria-label="작품 공급원 선택"><b>공급원 · 회차 목록</b><div role="group" aria-label="공급원 선택">${items.map((item,index)=>{const id=String(item.mal_id),count=Number(item.availableEpisodeCount||item.availableEpisodes||item.episodes)||0,extra=providerCounts.get(item.provider)>1?` · ${item.year||`목록 ${index+1}`}`:'',episode=count?` · 최대 ${count}화`:'';return `<button type="button" data-detail-source="${escapeHtml(id)}" aria-pressed="${id===String(activeSource.mal_id)}">${escapeHtml(SOURCE_LABELS[item.provider]||item.provider)}${escapeHtml(extra)}${escapeHtml(episode)}</button>`}).join('')}</div>${pending||failedNote}</section>`;
-}
-function weekdayAvailabilityLabel(state){return ({checking:'확인 중',playable:'재생 가능',provided:'제공 확인',missing:'미제공',failed:'확인 실패'})[state]||'확인 중'}
-function refreshWeekdaySourcePicker(group){
-  if(openDetail.currentGroupKey!==group?.groupKey)return;
-  const active=group.sourceItems?.find(item=>String(item.mal_id)===String(openDetail.currentSourceId))||group.sourceItems?.[0],picker=$('#detailContent .detail-source-picker');
-  if(!picker||!active)return;
-  const box=document.createElement('div');box.innerHTML=detailSourcePickerMarkup(group,active);picker.replaceWith(box.firstElementChild);
-  bindDetailSourcePicker(group);
+  return `<section class="detail-source-picker" aria-label="작품 공급원 선택"><b>공급원 · 회차 목록</b><div role="group" aria-label="공급원 선택">${items.map((item,index)=>{const id=String(item.mal_id),extra=providerCounts.get(item.provider)>1?` · ${item.year||`목록 ${index+1}`}`:'';return `<button type="button" data-detail-source="${escapeHtml(id)}" aria-pressed="${id===String(activeSource.mal_id)}">${escapeHtml(SOURCE_LABELS[item.provider]||item.provider)}${escapeHtml(extra)}</button>`}).join('')}</div>${pending||failedNote}</section>`;
 }
 function bindDetailSourcePicker(group){
   if(!group)return;
@@ -534,60 +513,13 @@ async function discoverDetailSources(group,anime){
   group.sourceSearchPromise=promise;
   return promise;
 }
-function setWeekdayAvailability(group,provider,state,token){
-  group.scheduleAvailability={...(group.scheduleAvailability||{}),[provider]:state};
-  if(openDetail.currentGroupKey!==group.groupKey)return;
-  const row=$(`#detailContent [data-schedule-provider="${provider}"]`);if(!row)return;
-  row.dataset.availabilityState=state;const label=row.querySelector('.source-availability');if(label)label.textContent=weekdayAvailabilityLabel(state);
-  if(row.matches('button'))row.setAttribute('aria-label',`${SOURCE_LABELS[provider]||provider}, ${Number(group.scheduleEpisodeNumber)}화 ${weekdayAvailabilityLabel(state)}`);
-}
-function weekdaySearchFallbackState(group,provider){
-  const result=(group.scheduleSearchStatuses||[]).find(status=>status.provider===provider);
-  return LilacWeekdaySchedule.providerFallbackState(result,group.sourceItems?.some(item=>item.provider===provider));
-}
-async function checkWeekdaySourceEpisodes(group,linkkfServers,token){
-  if(!group?.weekdaySchedule||!group.scheduleSearchReady||openDetail.currentGroupKey!==group.groupKey)return;
-  const target=Number(group.scheduleEpisodeNumber);if(!Number.isInteger(target)||target<=0){for(const provider of LilacIntegratedSearch.PROVIDERS)setWeekdayAvailability(group,provider,'failed',token);return}
-  const anchor=group.sourceItems?.find(item=>item.provider==='linkkf')||group,cacheKey=`${anchor.mal_id||anchor.id}:${target}`,cached=weekdayAvailabilityCache.get(cacheKey);
-  if(cached&&Date.now()-cached.savedAt<30*60*1000){group.scheduleAvailability={...cached.values};for(const provider of LilacIntegratedSearch.PROVIDERS)setWeekdayAvailability(group,provider,cached.values[provider]||weekdaySearchFallbackState(group,provider),token);return}
-  const ongoing=group.scheduleAvailabilityCheck;if(ongoing?.target===target)return ongoing.promise;
-  const items=group.sourceItems||[],tasks=LilacIntegratedSearch.PROVIDERS.filter(provider=>items.some(item=>item.provider===provider));let next=0;
-  for(const provider of LilacIntegratedSearch.PROVIDERS)if(!tasks.includes(provider))setWeekdayAvailability(group,provider,weekdaySearchFallbackState(group,provider),token);
-  const values={};
-  const promise=(async()=>{await Promise.all(Array.from({length:Math.min(3,tasks.length)},async()=>{while(next<tasks.length){const provider=tasks[next++],item=items.find(source=>source.provider===provider);setWeekdayAvailability(group,provider,'checking',token);try{
-      let episodes=group.scheduleKnownEpisodes?.[provider];
-      if(!Array.isArray(episodes)){
-        if(provider==='linkkf')episodes=(linkkfServers||await window.lilac.linkkfEpisodes(item.id)).flatMap(server=>server.episodes||[]);
-        else{const result=await window.lilac.providerDetail(item);if(result?.unavailable||!Array.isArray(result?.episodes))throw new Error('Episode list unavailable');episodes=result.episodes}
-      }
-      values[provider]=LilacWeekdaySchedule.episodeAvailability(episodes,target);
-    }catch{values[provider]='failed'}
-    setWeekdayAvailability(group,provider,values[provider],token);
-  }}));weekdayAvailabilityCache.set(cacheKey,{savedAt:Date.now(),values});while(weekdayAvailabilityCache.size>100)weekdayAvailabilityCache.delete(weekdayAvailabilityCache.keys().next().value)})();
-  group.scheduleAvailabilityCheck={target,promise};try{await promise}finally{if(group.scheduleAvailabilityCheck?.promise===promise)group.scheduleAvailabilityCheck=null}
-}
-async function openWeekdayScheduleAnime(anime){
-  const initial=LilacIntegratedSearch.groupResults([anime],state.source)[0];if(!initial){openDetail(anime.mal_id);return}
-  const workIdentityKey=initial.groupKey,groupKey=`weekday:${anime.id||anime.mal_id}:${Date.now()}`;initial.workIdentityKey=workIdentityKey;initial.groupKey=groupKey;initial.weekdaySchedule=true;initial.scheduleEpisodeNumber=Number(anime.weekdayEpisodeNumber)||0;initial.scheduleEpisodeSourceLoaded=false;initial.scheduleSearchReady=false;initial.scheduleSearchStatuses=[];initial.scheduleAvailability={};initial.scheduleKnownEpisodes={};searchGroupsByKey.set(groupKey,initial);
-  openDetail(anime.mal_id,{groupKey,sourceId:anime.mal_id});
-  const request=++scheduleSearchRequest;
-  const aliases=[anime.title_japanese,anime.title_english,anime.romaji].filter(value=>value&&value!==anime.title).slice(0,2);
-  try{
-    const result=await LilacIntegratedSearch.searchProviders({providers:LilacIntegratedSearch.PROVIDERS,query:anime.title,terms:aliases,concurrency:3,
-      search:(provider,text)=>window.lilac.providerCatalog(provider,text),
-      localSearch:searchKoreanCatalog});
-    if(request!==scheduleSearchRequest||openDetail.currentGroupKey!==groupKey||!$('#detailDialog').open)return;
-    const sourceItems=LilacWeekdaySchedule.combineScheduledSources(anime,result.items);
-    initial.sourceItems=sourceItems;initial.sourceCount=new Set(sourceItems.map(item=>item.provider)).size;
-    initial.scheduleSearchStatuses=result.statuses;initial.scheduleSearchReady=true;
-    refreshWeekdaySourcePicker(initial);
-    if(initial.scheduleEpisodeNumber||initial.scheduleEpisodeSourceLoaded)checkWeekdaySourceEpisodes(initial,null,openDetail.currentToken).catch(()=>{});
-  }catch{
-    if(request!==scheduleSearchRequest||openDetail.currentGroupKey!==groupKey)return;
-    initial.scheduleSearchStatuses=LilacIntegratedSearch.PROVIDERS.map(provider=>({provider,state:'failed',resultCount:0}));initial.scheduleSearchReady=true;
-    refreshWeekdaySourcePicker(initial);
-    if(initial.scheduleEpisodeNumber||initial.scheduleEpisodeSourceLoaded)checkWeekdaySourceEpisodes(initial,null,openDetail.currentToken).catch(()=>{});
-  }
+function detailPlaybackInfoMarkup(anime,episodes){
+  if(!Array.isArray(episodes)||!window.LilacDetailPlaybackInfo)return '';
+  const summary=window.LilacDetailPlaybackInfo.summarize(anime,episodes,state.history);
+  if(!summary)return '';
+  const facts=[`회차 ${summary.episodeCount}개`,summary.resolution,summary.format].filter(Boolean);
+  const resume=summary.resume?`이어보기 ${summary.resume.episode}화${summary.resume.positionSeconds?` · ${window.LilacDetailPlaybackInfo.formatPosition(summary.resume.positionSeconds)}`:''}`:'';
+  return `<div class="detail-playback-info" aria-label="회차 및 재생 정보"><span>${facts.map(escapeHtml).join(' · ')}</span>${resume?`<small>${escapeHtml(resume)}</small>`:''}</div>`;
 }
 async function openDetail(id,{groupKey='',sourceId='',rememberSource=false}={}) {
   cancelPendingPlaybackLookups();
@@ -609,9 +541,9 @@ async function openDetail(id,{groupKey='',sourceId='',rememberSource=false}={}) 
     const isLinkkf=String(id).startsWith('linkkf:'); const isExternal=/^(animenosub|reanime|miruro|ohli24|linkani):/.test(String(id));
     const known=animeById(id);if(isExternal&&!known)throw new Error('작품 정보를 찾지 못했습니다. 목록에서 다시 선택해 주세요.');
     const providerResult=isExternal?await window.lilac.providerDetail(known):null;
-    const {data:a}=isLinkkf?await window.lilac.linkkfDetail(String(id).slice(7)):isExternal?providerResult:await window.lilac.detail(id);if(openDetail.token!==token)return;if(savedProviderUnavailable)toast(`이전 ${SOURCE_LABELS[savedPreference.provider]||savedPreference.provider} 선택을 찾지 못해 ${SOURCE_LABELS[a.provider]||a.provider}로 열었습니다.`);if(group?.sourceSearchPending){const base=group.sourceItems?.[0];if(base){const enriched={...base,...a,provider:group.sourceSearchBaseProvider||a.provider,id:group.sourceSearchBaseId||a.id,mal_id:base.mal_id};const enrichedGroup=LilacIntegratedSearch.groupResults([enriched],state.source)[0];group.sourceItems=[enriched];group.preferenceKeys=[...new Set([...(group.preferenceKeys||[]),...(enrichedGroup?.preferenceKeys||[])])];knownAnime.set(String(enriched.mal_id),enriched)}}if(group?.weekdaySchedule&&Array.isArray(providerResult?.episodes)){group.scheduleKnownEpisodes[groupSource?.provider||a.provider]=providerResult.episodes;if(group.scheduleSearchReady&&(group.scheduleEpisodeNumber||group.scheduleEpisodeSourceLoaded))checkWeekdaySourceEpisodes(group,null,token).catch(()=>{})}const savedSource=group?.sourceItems.find(item=>state.library.some(savedItem=>String(savedItem.mal_id)===String(item.mal_id))),isSaved=Boolean(savedSource)||saved(a.mal_id),libraryItem=savedSource||a,isReAnime=a.provider==='reanime';
+    const {data:a}=isLinkkf?await window.lilac.linkkfDetail(String(id).slice(7)):isExternal?providerResult:await window.lilac.detail(id);if(openDetail.token!==token)return;if(savedProviderUnavailable)toast(`이전 ${SOURCE_LABELS[savedPreference.provider]||savedPreference.provider} 선택을 찾지 못해 ${SOURCE_LABELS[a.provider]||a.provider}로 열었습니다.`);if(group?.sourceSearchPending){const base=group.sourceItems?.[0];if(base){const enriched={...base,...a,provider:group.sourceSearchBaseProvider||a.provider,id:group.sourceSearchBaseId||a.id,mal_id:base.mal_id};const enrichedGroup=LilacIntegratedSearch.groupResults([enriched],state.source)[0];group.sourceItems=[enriched];group.preferenceKeys=[...new Set([...(group.preferenceKeys||[]),...(enrichedGroup?.preferenceKeys||[])])];knownAnime.set(String(enriched.mal_id),enriched)}}const savedSource=group?.sourceItems.find(item=>state.library.some(savedItem=>String(savedItem.mal_id)===String(item.mal_id))),isSaved=Boolean(savedSource)||saved(a.mal_id),libraryItem=savedSource||a,isReAnime=a.provider==='reanime';
     const meta=[a.type,a.year,a.status,a.aired,LilacAnimeMeta.episodeLabel(a),(a.studios||[]).slice(0,2).map(x=>x.name).join(', ')].filter(Boolean).map(x=>escapeHtml(String(x))).join(' · ');
-    $('#detailContent').innerHTML=`<div class="detail-hero"></div><div class="detail-body"><img alt=""><div class="detail-info"><span class="eyebrow">${escapeHtml(a.type||'ANIME')} · ${a.score?`★ ${a.score}`:isLinkkf?'LINKKF':'평점 없음'}</span><h1 ${titleAttr(a)}>${escapeHtml(titleOf(a))}</h1>${originalTitleMarkup(a,'detail-native','p')}${group?detailSourcePickerMarkup(group,groupSource||a):''}${meta?`<p class="detail-meta">${meta}</p>`:''}<p class="detail-stats hidden"></p><div class="tags">${(a.genres||[]).slice(0,5).map(g=>`<span>${escapeHtml(g.name)}</span>`).join('')}</div><p class="detail-synopsis">${escapeHtml(a.synopsis||'등록된 줄거리가 없습니다.')}</p><div class="detail-actions"><button class="primary detail-play" ${providerResult?.unavailable?'disabled':''}>${providerResult?.unavailable?'현재 재생 불가':isLinkkf?'회차 불러오기':playLabel('플레이어 열기')}</button><button class="ghost detail-save library-toggle ${isSaved?'saved':''}">${heartIcon()}<span>내 목록</span></button>${a.url?'<button class="ghost detail-web"><svg class="external-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><span>작품 정보</span></button>':''}</div><div class="detail-tabs hidden" role="tablist"><button type="button" role="tab" data-detail-tab="episodes" class="selected" aria-selected="true">회차</button><button type="button" role="tab" data-detail-tab="related" aria-selected="false">관련 작품</button></div><div id="episodeBlock" class="episode-block">${providerResult?.unavailable?'<p class="episode-loading">현재 제공처에 영상이 없는 작품입니다. 설정에서 다른 콘텐츠 소스를 선택해 주세요.</p>':''}</div><div id="relatedBlock" class="related-block hidden"></div></div></div>`;
+    $('#detailContent').innerHTML=`<div class="detail-hero"></div><div class="detail-body"><img alt=""><div class="detail-info"><span class="eyebrow">${escapeHtml(a.type||'ANIME')} · ${a.score?`★ ${a.score}`:isLinkkf?'LINKKF':'평점 없음'}</span><h1 ${titleAttr(a)}>${escapeHtml(titleOf(a))}</h1>${originalTitleMarkup(a,'detail-native','p')}${group?detailSourcePickerMarkup(group,groupSource||a):''}${group?detailPlaybackInfoMarkup(a,providerResult?.episodes):''}${meta?`<p class="detail-meta">${meta}</p>`:''}<p class="detail-stats hidden"></p><div class="tags">${(a.genres||[]).slice(0,5).map(g=>`<span>${escapeHtml(g.name)}</span>`).join('')}</div><p class="detail-synopsis">${escapeHtml(a.synopsis||'등록된 줄거리가 없습니다.')}</p><div class="detail-actions"><button class="primary detail-play" ${providerResult?.unavailable?'disabled':''}>${providerResult?.unavailable?'현재 재생 불가':isLinkkf?'회차 불러오기':playLabel('플레이어 열기')}</button><button class="ghost detail-save library-toggle ${isSaved?'saved':''}">${heartIcon()}<span>내 목록</span></button>${a.url?'<button class="ghost detail-web"><svg class="external-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><span>작품 정보</span></button>':''}</div><div class="detail-tabs hidden" role="tablist"><button type="button" role="tab" data-detail-tab="episodes" class="selected" aria-selected="true">회차</button><button type="button" role="tab" data-detail-tab="related" aria-selected="false">관련 작품</button></div><div id="episodeBlock" class="episode-block">${providerResult?.unavailable?'<p class="episode-loading">현재 제공처에 영상이 없는 작품입니다. 설정에서 다른 콘텐츠 소스를 선택해 주세요.</p>':''}</div><div id="relatedBlock" class="related-block hidden"></div></div></div>`;
     setBackgroundImage($('#detailContent .detail-hero'),imageOf(a));koreanOverview(a).then(text=>{const p=$('#detailContent .detail-synopsis');if(text&&p&&openDetail.token===token){p.textContent=text;p.title='줄거리: TMDB'}});setImageSource($('#detailContent .detail-body img'),imageOf(a));
     bindDetailSourcePicker(group);
     if(group?.sourceSearchPending)discoverDetailSources(group,a).catch(()=>{});
@@ -635,11 +567,10 @@ async function openDetail(id,{groupKey='',sourceId='',rememberSource=false}={}) 
       const block=$('#episodeBlock'),playButton=$('.detail-play');playButton.disabled=true;playButton.innerHTML=playLabel('재생');block.innerHTML='<p class="episode-loading">Linkkf 회차 서버에 연결하는 중...</p>';
       window.lilac.linkkfEpisodes(a.id).then(servers=>{
         if(openDetail.token!==token)return;linkkfServers=servers;block.replaceChildren();
-        if(group?.weekdaySchedule){const episodes=servers.flatMap(server=>server.episodes||[]),numbers=episodes.map(episode=>Number(episode.number)).filter(number=>Number.isInteger(number)&&number>0);group.scheduleKnownEpisodes.linkkf=episodes;group.scheduleEpisodeSourceLoaded=true;if(!group.scheduleEpisodeNumber)group.scheduleEpisodeNumber=numbers.length?Math.max(...numbers):0;refreshWeekdaySourcePicker(group);if(group.scheduleSearchReady)checkWeekdaySourceEpisodes(group,servers,token).catch(()=>{})}
         if(!servers.length){block.innerHTML='<p class="episode-loading">등록된 회차가 없습니다.</p>';return}
         servers.forEach(server=>mountEpisodeList(block,{heading:server.name,episodes:server.episodes,anime:a,resolveKind:'linkkf',onPlay:ep=>playLinkkf(ep,server.episodes)}));
         const target=linkkfResumeTarget(a,servers);if(target.episode){playButton.disabled=false;updateResumeActions(target,(ep,options)=>playLinkkf(ep,target.episodes,options))}
-      }).catch(e=>{if(openDetail.token===token){block.innerHTML=`<p class="episode-loading">${escapeHtml(e.message)}</p>`;if(group?.weekdaySchedule){group.scheduleEpisodeSourceLoaded=true;if(group.scheduleSearchReady)checkWeekdaySourceEpisodes(group,null,token).catch(()=>{})}}});
+      }).catch(e=>{if(openDetail.token===token){block.innerHTML=`<p class="episode-loading">${escapeHtml(e.message)}</p>`}});
     }
     $('.detail-play').onclick=async()=>{
       if(isExternal){const target=resumeEpisode(a,providerResult.episodes||[]);if(target.episode)await playProvider(target.episode,resumeAction(target).options);else toast(providerResult.unavailable?'현재 제공처에 영상이 없는 작품입니다.':'회차 목록을 불러오지 못했습니다. 작품 정보 버튼으로 제공처 상태를 확인해 주세요.');return;}
@@ -808,7 +739,8 @@ async function resolveIntoPlayer(resolver,name,context={},subtitleTitle='',episo
     if(requestId!==playbackRequestId)return;
     if(context.serverOverride&&stream.server&&stream.server!==context.serverOverride)throw new Error('요청한 자동 대체 서버를 선택하지 못했습니다.');
     const offlineEpisodes=downloaded?.status==='completed'?downloadedSeries(downloaded):[];
-    play(stream.url,name,{...context,seriesEpisodes:offlineEpisodes.length?offlineEpisodes:context.seriesEpisodes,streamHeaders:stream.headers||{},offline:Boolean(downloaded?.status==='completed'),hls:Boolean(stream.hls),videoServers:Array.isArray(stream.servers)?stream.servers:context.videoServers||[],videoServer:stream.server||context.videoServer||''});
+    const streamUrl=String(stream.url||''),streamFormat=stream.hls===true||/\.m3u8(?:$|[?#])/i.test(streamUrl)?'HLS':stream.hls===false&&(/\.mp4(?:$|[?#])/i.test(streamUrl)||/^video\/mp4$/i.test(String(stream.mimeType||stream.contentType||'')))?'MP4':'';
+    play(stream.url,name,{...context,seriesEpisodes:offlineEpisodes.length?offlineEpisodes:context.seriesEpisodes,streamHeaders:stream.headers||{},offline:Boolean(downloaded?.status==='completed'),hls:Boolean(stream.hls),playbackFormat:streamFormat,videoServers:Array.isArray(stream.servers)?stream.servers:context.videoServers||[],videoServer:stream.server||context.videoServer||''});
     if(downloaded?.status==='completed')$('#downloadStatus').textContent='다운로드한 영상 재생 중';
     currentPlaybackContext.subtitleTracks=Array.isArray(stream.subtitleTracks)?stream.subtitleTracks:[];currentPlaybackContext.subtitleReferer=stream.referer||'';
     currentPlaybackContext.subtitleTrackStatus=currentPlaybackContext.episode?.provider==='reanime'&&!currentPlaybackContext.subtitleTracks.length?'idle':'loaded';
@@ -914,7 +846,7 @@ function play(src,name='직접 재생',context={}) {
     $('#downloadStatus').textContent='영상 재생목록을 불러오는 중...';
   }else video.src=src;
   $('#streamUrl').value=/^https?:/i.test(src)?src:'';$('#playerTitle').textContent=name;updatePlayerTitle();$('#playerMeta').textContent=context.episode?`${episodeNumberOf(context.episode)||1}화`:'LilacAnime';$('#playerEmpty p').textContent='영상을 준비하고 있어요';$('#skipTitle').value=context.subtitleTitle||((name==='직접 재생')?'':name.split(' · ')[0]);if(context.episode)$('#skipEpisode').value=episodeNumberOf(context.episode)||1;video.volume=Math.max(0,Math.min(1,Number(localStorage.getItem('playerVolume')??1)));video.muted=localStorage.getItem('playerMuted')==='true';syncVolumeUI();video.playbackRate=Number($('#speed').value);if(!isHls)video.play().catch(()=>{});loadJimakuList();
-  const historyKey=context.episode?`${context.episode.provider||context.resolveKind||'linkkf'}:${context.episode.url||context.episode.token||context.episode.id||context.episode.number}`:src;if(context.episode||!/^http:\/\/127\.0\.0\.1:\d+\/__flix\//i.test(src)){const previous=state.history.find(x=>(x.key||x.src)===historyKey),savedProgress=Number(context.resumeProgress??previous?.progress??0);pendingResumeProgress=resumePosition(savedProgress,context.resumeMode);state.history=state.history.filter(x=>(x.key||x.src)!==historyKey);state.history.unshift({key:historyKey,src:context.episode?'':src,name,episode:context.episode||null,subtitleTitle:context.subtitleTitle||name.split(' · ')[0],image:context.image||previous?.image||'',comparisonEpisodes:context.comparisonEpisodes||previous?.comparisonEpisodes||[],anime:context.anime||previous?.anime||null,resolveKind:context.resolveKind||previous?.resolveKind||null,progress:savedProgress,updated:Date.now()});state.history=state.history.slice(0,300);currentHistoryKey=historyKey;store.set('history',state.history);if(context.episode)catalogUpdateUI.markEpisodeSeen(context.anime,context.episode);renderContinue();applyPendingResume()}else{currentHistoryKey=null;pendingResumeProgress=0}
+  const historyKey=context.episode?`${context.episode.provider||context.resolveKind||'linkkf'}:${context.episode.url||context.episode.token||context.episode.id||context.episode.number}`:src;if(context.episode||!/^http:\/\/127\.0\.0\.1:\d+\/__flix\//i.test(src)){const previous=state.history.find(x=>(x.key||x.src)===historyKey),savedProgress=Number(context.resumeProgress??previous?.progress??0),savedPositionSeconds=context.resumeSeconds!=null&&Number.isFinite(Number(context.resumeSeconds))?Math.max(0,Math.floor(Number(context.resumeSeconds))):context.resumeProgress!=null&&Number(context.resumeProgress)===0?0:Math.max(0,Math.floor(Number(previous?.positionSeconds)||0));pendingResumeProgress=resumePosition(savedProgress,context.resumeMode);state.history=state.history.filter(x=>(x.key||x.src)!==historyKey);state.history.unshift({key:historyKey,src:context.episode?'':src,name,episode:context.episode||null,subtitleTitle:context.subtitleTitle||name.split(' · ')[0],image:context.image||previous?.image||'',comparisonEpisodes:context.comparisonEpisodes||previous?.comparisonEpisodes||[],anime:context.anime||previous?.anime||null,resolveKind:context.resolveKind||previous?.resolveKind||null,progress:savedProgress,positionSeconds:savedPositionSeconds,playbackInfo:null,updated:Date.now()});state.history=state.history.slice(0,300);currentHistoryKey=historyKey;store.set('history',state.history);if(context.episode)catalogUpdateUI.markEpisodeSeen(context.anime,context.episode);renderContinue();applyPendingResume()}else{currentHistoryKey=null;pendingResumeProgress=0}
 }
 function escapeHtml(v=''){const d=document.createElement('div');d.textContent=v;return d.innerHTML;}
 // Subtitle currently applied. ASS subtitles render through libass (ass-renderer.js) while
@@ -1471,8 +1403,7 @@ function syncSettingChoices(){[['themeChoices','themeSelect'],['sourceChoices','
 function applyTheme(value){const systemLight=matchMedia('(prefers-color-scheme: light)').matches,wantsLight=value==='light'||(value==='system'&&systemLight);document.body.classList.toggle('light',wantsLight);window.lilac?.setWindowTheme?.(wantsLight)}
 
 // The detail resolver keeps its own on-demand weekday/source state; the home schedule UI is owned by the official providerSchedule client.
-let scheduleSearchRequest=0;
-const weekdayAvailabilityCache=new Map();
+
 const calendarWatcher=LilacQuarterSelection.createCalendarWatcher();
 let homeCalendarReady=false,homeCalendarRefreshRequest=0;
 const catalogIndexActivationPending=new Set();
@@ -1489,7 +1420,7 @@ async function handleCalendarChange(change){
   const provider=state.source;let request;
   if(change.quarterChanged){
     request=++homeCalendarRefreshRequest;
-    weekdayAvailabilityCache.clear();
+
   }else{
     return;
   }
@@ -1770,7 +1701,7 @@ $('#skipNow').onclick=()=>{if(activeSkip){$('#video').currentTime=activeSkip.end
 $('#speed').onchange=e=>$('#video').playbackRate=Number(e.target.value);$('.dialog-close').onclick=()=>$('#detailDialog').close();$('#detailDialog').addEventListener('click',e=>{if(e.target===$('#detailDialog'))$('#detailDialog').close()});
 $('#contentSource').onchange=e=>{localStorage.setItem('contentSource',e.target.value);syncSettingChoices();toast('콘텐츠 소스를 바꿨어요. 목록을 다시 불러옵니다.');setTimeout(()=>location.reload(),600)};$('#themeSelect').onchange=e=>{localStorage.setItem('theme',e.target.value);applyTheme(e.target.value);syncSettingChoices()};$('#defaultSpeed').oninput=e=>{const value=SPEED_OPTIONS[Number(e.target.value)]||1;localStorage.setItem('defaultSpeed',String(value));$('#speed').value=String(value);$('#speedLabel').textContent=`${value.toFixed(2)}x`};
 ['defaultQuality','playerStart','subtitleSource'].forEach(id=>$(`#${id}`).onchange=e=>{localStorage.setItem(id,e.target.value);syncSettingChoices();if(id==='subtitleSource')renderSeriesSubtitlePreference()});[['themeChoices','themeSelect'],['sourceChoices','contentSource'],['qualityChoices','defaultQuality'],['playerStartChoices','playerStart'],['subtitleChoices','subtitleSource']].forEach(([group,select])=>$$(`#${group} button`).forEach(button=>button.onclick=()=>{const target=$(`#${select}`);target.value=button.dataset.value;target.dispatchEvent(new Event('change'))}));$('#subtitleSize').oninput=e=>{localStorage.setItem('subtitleSize',e.target.value);$('#subtitleSizeLabel').textContent=`${e.target.value}%`;applyCueStyle()};$('#subtitleSync').oninput=e=>{localStorage.setItem('subtitleSync',e.target.value);window.LilacAss?.setOffset(Number(e.target.value));applyVttLayout();$('#subtitleSyncLabel').textContent=`${e.target.value} ms`};$$('[data-sync]').forEach(button=>button.onclick=()=>{const current=Number($('#subtitleSync').value),delta=Number(button.dataset.sync),next=delta===0?0:Math.max(-5000,Math.min(5000,current+delta));$('#subtitleSync').value=String(next);$('#subtitleSync').dispatchEvent(new Event('input'))});$('#vttBold').onchange=e=>{localStorage.setItem('vttBold',String(e.target.checked));applyCueStyle()};$('#vttOutline').oninput=e=>{localStorage.setItem('vttOutline',e.target.value);applyCueStyle();$('#outlineLabel').textContent=Number(e.target.value).toFixed(1)};$('#subtitlePosition').oninput=e=>{localStorage.setItem('subtitlePosition',e.target.value);applyVttLayout();$('#positionLabel').textContent=`${e.target.value}%`};$('#seekSeconds').onchange=e=>localStorage.setItem('seekSeconds',String(Math.max(1,Number(e.target.value)||10)));['clearOpEdAnalysis','clearOpEdFingerprint','clearOpEdAll'].forEach(id=>$(`#${id}`).onclick=async()=>{await window.lilac.clearOpEd();opEdAnalysisKey=null;skipSegments=[];toast('OP/ED 분석 데이터를 삭제했습니다.')});
-$('#video').addEventListener('timeupdate',e=>{applyPendingResume();const v=e.currentTarget,duration=playbackDuration();$('#playerSeek').value=duration?Math.round(v.currentTime/duration*1000):0;$('#playerTime').textContent=`${formatTime(v.currentTime)} / ${formatTime(duration)}`;activeSkip=skipSegments.find(x=>v.currentTime>=x.startTime&&v.currentTime<x.endTime)||null;activeSkipKey=activeSkip?`${activeSkip.type}:${activeSkip.startTime}:${activeSkip.endTime}`:null;updateSkipState(v);if(activeSkip){const type=activeSkip.type.toLowerCase();$('#skipNow span').textContent=type==='recap'?'요약 스킵':type.includes('ed')?'ED 스킵':'OP 스킵'}if(!duration||!currentHistoryKey)return;const item=state.history.find(x=>(x.key||x.src)===currentHistoryKey);if(!item)return;item.progress=Math.max(0,Math.min(100,Math.round(v.currentTime/duration*100)));item.updated=Date.now();if(Date.now()-(saveHistorySoon.last||0)>5000)saveHistorySoon();const card=$$('.continue-card').find(x=>x.dataset.historyKey===currentHistoryKey);if(card){card.querySelector('.history-progress i').style.width=`${item.progress}%`;card.querySelector(':scope > span').textContent=`EP.${item.episode?.number||1} · ${item.progress}%`}});
+$('#video').addEventListener('timeupdate',e=>{applyPendingResume();const v=e.currentTarget,duration=playbackDuration();$('#playerSeek').value=duration?Math.round(v.currentTime/duration*1000):0;$('#playerTime').textContent=`${formatTime(v.currentTime)} / ${formatTime(duration)}`;activeSkip=skipSegments.find(x=>v.currentTime>=x.startTime&&v.currentTime<x.endTime)||null;activeSkipKey=activeSkip?`${activeSkip.type}:${activeSkip.startTime}:${activeSkip.endTime}`:null;updateSkipState(v);if(activeSkip){const type=activeSkip.type.toLowerCase();$('#skipNow span').textContent=type==='recap'?'요약 스킵':type.includes('ed')?'ED 스킵':'OP 스킵'}if(!duration||!currentHistoryKey)return;const item=state.history.find(x=>(x.key||x.src)===currentHistoryKey);if(!item)return;item.progress=Math.max(0,Math.min(100,Math.round(v.currentTime/duration*100)));item.positionSeconds=Math.max(0,Math.floor(v.currentTime));item.updated=Date.now();if(Date.now()-(saveHistorySoon.last||0)>5000)saveHistorySoon();const card=$$('.continue-card').find(x=>x.dataset.historyKey===currentHistoryKey);if(card){card.querySelector('.history-progress i').style.width=`${item.progress}%`;card.querySelector(':scope > span').textContent=`EP.${item.episode?.number||1} · ${item.progress}%`}});
 function handleDirectVideoError(){
   const video=$('#video'),error=video.error;
   if(hlsPlayer||!currentPlaybackContext.currentUrl||!error||error.code===1)return;
@@ -1779,8 +1710,17 @@ function handleDirectVideoError(){
 }
 $('#video').addEventListener('error',handleDirectVideoError);
 $('#video').addEventListener('playing',()=>{$('#immersivePlayer').classList.add('is-playing');$('#playerEmpty').classList.add('hidden');showPlayerControls();prepareNext().catch(()=>{})});
+function saveCurrentPlaybackFacts(){
+  const context=currentPlaybackContext,video=$('#video'),provider=context.episode?.provider||'',sourceId=context.anime?.id;
+  if(!currentHistoryKey||!provider||provider!==context.anime?.provider||sourceId==null)return;
+  const item=state.history.find(entry=>(entry.key||entry.src)===currentHistoryKey);if(!item)return;
+  const width=Number(video.videoWidth)||0,height=Number(video.videoHeight)||0,format=['HLS','MP4'].includes(context.playbackFormat)?context.playbackFormat:'';
+  if(!(width>0&&height>0)&&!format)return;
+  item.playbackInfo={provider:String(provider),sourceId:String(sourceId),width:width>0?width:0,height:height>0?height:0,format};
+  store.set('history',state.history);
+}
 // Persist the live media time too, so a close between periodic timeupdate writes does not lose progress.
-function saveHistorySoon(){const video=$('#video'),duration=playbackDuration();if(duration&&currentHistoryKey&&Number.isFinite(video.currentTime)){const item=state.history.find(x=>(x.key||x.src)===currentHistoryKey);if(item){item.progress=Math.max(0,Math.min(100,Math.round(video.currentTime/duration*100)));item.updated=Date.now()}}saveHistorySoon.last=Date.now();store.set('history',state.history)}
+function saveHistorySoon(){const video=$('#video'),duration=playbackDuration();if(duration&&currentHistoryKey&&Number.isFinite(video.currentTime)){const item=state.history.find(x=>(x.key||x.src)===currentHistoryKey);if(item){item.progress=Math.max(0,Math.min(100,Math.round(video.currentTime/duration*100)));item.positionSeconds=Math.max(0,Math.floor(video.currentTime));item.updated=Date.now()}}saveHistorySoon.last=Date.now();store.set('history',state.history)}
 function flushPlaybackHistory(){if(currentHistoryKey)saveHistorySoon()}
 window.addEventListener('beforeunload',flushPlaybackHistory);
 window.addEventListener('pagehide',flushPlaybackHistory);
@@ -1797,7 +1737,7 @@ function handleEpisodeEnded(){
   showPlayerControls();
 }
 $('#video').addEventListener('ended',handleEpisodeEnded);
-$('#video').addEventListener('loadedmetadata',()=>{applyPendingResume();scheduleOpEdAnalysis()});
+$('#video').addEventListener('loadedmetadata',()=>{saveCurrentPlaybackFacts();applyPendingResume();scheduleOpEdAnalysis()});$('#video').addEventListener('loadeddata',saveCurrentPlaybackFacts);$('#video').addEventListener('resize',saveCurrentPlaybackFacts);
 $('#video').addEventListener('durationchange',applyPendingResume);
 $('#filterToggle').onclick=toggleFilterPanel;$('#filterApply').onclick=()=>{$('#filterPanel').classList.add('hidden');$('#filterToggle').setAttribute('aria-expanded','false');runLinkkfFilter()};$('#filterReset').onclick=()=>{filterState.format=filterState.genre=filterState.year=null;$$('[data-filter-group] button').forEach(x=>x.classList.remove('selected'));$('#filterToggle').textContent='태그 필터'};$('#filterMore').onclick=()=>runLinkkfFilter(true);
 $('#opedAudioAnalysis').onchange=e=>localStorage.setItem('opedAudioAnalysis',String(e.target.checked));
