@@ -31,6 +31,36 @@ test('LinkAni parser keeps provider-local IDs and only reads year and episode co
   assert.equal(items[0].images.webp.large_image_url, 'https://linkani.test/poster.jpg');
 });
 
+test('Korean provider search fallback uses bounded title-confirmed fragments for Ani24 and LinkAni', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
+  const start = main.indexOf('const hasHangul=');
+  const end = main.indexOf('\nasync function englishTitleFor', start);
+  assert.ok(start >= 0 && end > start, 'Missing normalized Korean search helper');
+  const context = vm.createContext({});
+  vm.runInContext(`${main.slice(start, end)}\nglobalThis.search = searchIgnoringSpaces;`, context);
+
+  const queries = [];
+  const results = await context.search('장송의 프리렌', async query => {
+    queries.push(query);
+    return [
+      { mal_id: 'series-1', title: '장송의프리렌' },
+      { mal_id: 'series-1', title: '장송의 프리렌' },
+      { mal_id: 'different', title: '프리렌 외전' }
+    ];
+  }, item => [item.title]);
+
+  assert.equal(queries.length, 3);
+  assert.deepEqual(queries, ['장송의', '송의프', '프리렌']);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].mal_id, 'series-1');
+  assert.ok(main.includes('searchIgnoringSpaces(query,async keyword=>(await boards(keyword)).data,item=>[item.title])'));
+  assert.ok(main.includes('searchIgnoringSpaces(query,async text=>linkaniItems(await linkaniFetch(searchUrl(text))),item=>[item.title])'));
+
+  let latinCalls = 0;
+  assert.equal((await context.search('Frieren', async () => { latinCalls++; return []; }, item => [item.title])).length, 0);
+  assert.equal(latinCalls, 0);
+});
+
 test('Re:Anime update results sort newest first, paginate, and reuse one snapshot', async () => {
   const rows = Array.from({ length: 37 }, (_, index) => ({
     id: `series-${index + 1}`,

@@ -297,10 +297,37 @@ async function run() {
     fs.writeFileSync(path.join(tempRoot, 'detail-narrow.png'), (await mainWindow.capturePage()).toPNG());
   }
 
+  const standaloneDetails = [];
+  const detailSearch = searches.find(item => item.query === process.env.PATCH03_LIVE_QUERY) || searches[0];
+  const standaloneSourceId = String(process.env.PATCH03_VERIFY_STANDALONE_SOURCE_ID || '');
+  for (const provider of String(process.env.PATCH03_VERIFY_STANDALONE_PROVIDERS || '').split(',').map(value => value.trim()).filter(Boolean)) {
+    const candidate = detailSearch?.groups.flatMap(group => group.sources).find(item => item.provider === provider
+      && (!standaloneSourceId || item.sourceId === standaloneSourceId));
+    if (!candidate) { standaloneDetails.push({ provider, state: 'no-search-result' }); continue; }
+    try {
+      const detail = await evaluate(`window.lilac.providerDetail(animeById(${JSON.stringify(candidate.sourceId)}))`, `${provider} standalone real detail`);
+      standaloneDetails.push({
+        provider, state: detail?.unavailable ? 'unavailable' : Array.isArray(detail?.episodes) ? 'resolved' : 'no-episode-list',
+        searchIdentity: candidate,
+        detailIdentity: {
+          title: detail?.title || '', titleEnglish: detail?.title_english || '', titleJapanese: detail?.title_japanese || '',
+          year: detail?.year || '', type: detail?.type || '', anilistId: detail?.anilistId || null, malId: detail?.malId || null
+        },
+        episodeCount: Array.isArray(detail?.episodes) ? detail.episodes.length : 0,
+        episodeNumbers: (detail?.episodes || []).slice(0, 12).map(episode => episode.number),
+        unavailable: detail?.unavailable === true,
+        providerDetailCall: [...providerDetailIpcCalls].reverse().find(call => call.sourceId === candidate.sourceId) || null
+      });
+    } catch (error) {
+      standaloneDetails.push({ provider, state: 'failed', error: String(error?.message || error).split('\n')[0] });
+    }
+  }
+  liveEvidence.standaloneDetails = standaloneDetails;
+
   const report = {
     tempRoot, paths, electronVersion: process.versions.electron, executable: process.execPath,
     mainPid: process.pid, rendererPid: mainWindow.webContents.getOSProcessId(), windowIds: windows,
-    startup, startupConsoleErrors: consoleErrors, searches, identityChecks, detailLinkage,
+    startup, startupConsoleErrors: consoleErrors, searches, identityChecks, detailLinkage, standaloneDetails,
     linkAniExternalRequestSkipped: false, providerDetailIpcCalls
   };
   fs.writeFileSync(path.join(tempRoot, 'report.json'), JSON.stringify(report, null, 2));
@@ -316,7 +343,7 @@ async function run() {
       targetCandidates: search.groups.flatMap(group => group.sources.filter(item => ['animenosub', 'ohli24'].includes(item.provider))
         .map(item => ({ title: item.title, provider: item.provider, year: item.year, id: item.sourceId })))
     })),
-    identityChecks, detailLinkage, linkAniExternalRequestSkipped: false, providerDetailIpcCalls
+    identityChecks, detailLinkage, standaloneDetails, linkAniExternalRequestSkipped: false, providerDetailIpcCalls
   };
   console.log(`PATCH03_PROVIDER_LIVE_REPORT ${JSON.stringify(summary)}`);
   assert.equal(startup.homeVisible, true);

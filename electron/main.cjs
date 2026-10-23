@@ -714,11 +714,21 @@ async function ohliBrowse(page=1,format=''){
   return page<=1?{data:await ohliAiring(),done:false}:ohliBoard('완결',page-1);
 }
 async function ohliSearch(query){
-  const key=value=>String(value||'').normalize('NFKC').toLowerCase().replace(/\s+/g,''),wanted=key(query);
+  const wanted=spaceKey(query);
   if(!wanted)return [];
-  const [airing,finished,movies]=await Promise.all([ohliAiring().catch(()=>[]),ohliBoard('완결',1,query).then(result=>result.data,()=>[]),ohliBoard('극장판',1,query).then(result=>result.data,()=>[])]);
+  const boards=async keyword=>{
+    const responses=await Promise.all(['완결','극장판'].map(async board=>{
+      try{return {ok:true,data:(await ohliBoard(board,1,keyword)).data||[]}}
+      catch{return {ok:false,data:[]}}
+    }));
+    return {data:responses.flatMap(result=>result.data),complete:responses.every(result=>result.ok)};
+  };
+  const [airing,listed]=await Promise.all([ohliAiring().catch(()=>[]),boards(query)]);
+  const searched=listed.data.length?listed.data:listed.complete
+    ?await searchIgnoringSpaces(query,async keyword=>(await boards(keyword)).data,item=>[item.title])
+    :[];
   const found=new Map();
-  for(const item of [...airing.filter(item=>key(item.title).includes(wanted)),...finished,...movies])if(!found.has(item.mal_id))found.set(item.mal_id,item);
+  for(const item of [...airing.filter(item=>spaceKey(item.title).includes(wanted)),...searched])if(!found.has(item.mal_id))found.set(item.mal_id,item);
   return [...found.values()];
 }
 function ohliItems(html){
@@ -1399,6 +1409,16 @@ metadataCacheCleanupTimer.unref?.();
 let displayTitleSaveTimer=null;
 function saveDisplayTitles(){clearTimeout(displayTitleSaveTimer);displayTitleSaveTimer=setTimeout(()=>{try{fs.writeFileSync(displayTitleFile(),JSON.stringify(displayTitleStore()),'utf8')}catch{}},1000)}
 const hasHangul=value=>/[가-힣]/.test(String(value||''));
+const spaceKey=value=>String(value||'').normalize('NFKC').toLowerCase().replace(/\s+/g,'');
+async function searchIgnoringSpaces(query,search,titles){
+  const wanted=spaceKey(query),letters=[...wanted];if(!hasHangul(query)||letters.length<3)return [];
+  const size=letters.length>=5?3:2,piece=at=>letters.slice(at,at+size).join('');
+  const pieces=[...new Set([0,Math.floor((letters.length-size)/2),letters.length-size].map(piece))].filter(text=>text!==String(query).trim());
+  const found=new Map();
+  for(const list of await Promise.all(pieces.map(text=>search(text).catch(()=>[]))))
+    for(const item of list)if(!found.has(item.mal_id)&&titles(item).some(title=>title&&spaceKey(title).includes(wanted)))found.set(item.mal_id,item);
+  return [...found.values()];
+}
 async function englishTitleFor(anime){
   if(anime.title_english&&!hasHangul(anime.title_english))return anime.title_english;
   if(anime.title&&!hasHangul(anime.title))return anime.title;
@@ -2604,10 +2624,15 @@ app.whenReady().then(async () => {
     }
     if (provider === 'linkani') {
       const page=Math.max(1,Number(offset)||1);
+      const searchUrl=(text,at=1)=>`${LINKANI_WEB}/view/${at>1?`page/${at}/`:''}?wd=${encodeURIComponent(text)}`;
       const url=query
-        ?`${LINKANI_WEB}/view/${page>1?`page/${page}/`:''}?wd=${encodeURIComponent(query)}`
+        ?searchUrl(query,page)
         :`${LINKANI_WEB}/list/2/${page>1?`page/${page}/`:''}`;
       const data=linkaniItems(await linkaniFetch(url));
+      if(query&&page===1&&!data.length){
+        const spaced=await searchIgnoringSpaces(query,async text=>linkaniItems(await linkaniFetch(searchUrl(text))),item=>[item.title]);
+        return {data:spaced,offset:1,nextOffset:null,done:true};
+      }
       return {data,offset:page,nextOffset:page+1,done:!data.length||(Boolean(query)&&data.length<30)};
     }
     if (provider === 'miruro') {
