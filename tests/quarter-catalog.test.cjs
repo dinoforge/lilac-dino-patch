@@ -100,7 +100,7 @@ test('provider filters use explicit season and year fields only where supported'
   assert.equal(quarterQuery('ohli24', period), null);
 });
 
-test('quarter selection uses the existing list while official schedule interfaces remain', () => {
+test('quarter selection uses the existing list and the official schedule UI uses providerSchedule', () => {
   const root = path.join(__dirname, '..');
   const app = fs.readFileSync(path.join(root, 'src/app.js'), 'utf8');
   const catalogUpdates = fs.readFileSync(path.join(root, 'src/catalog-updates.js'), 'utf8');
@@ -138,13 +138,18 @@ test('quarter selection uses the existing list while official schedule interface
   assert.match(main, /ipcMain\.handle\('provider:schedule'/);
   assert.match(main, /ipcMain\.handle\('anime:weekly-schedule'/);
   assert.match(main, /ipcMain\.handle\('linkkf:schedule'/, 'the existing Linkkf handler remains available');
-  assert.match(html, /id="scheduleSection" class="hidden" aria-hidden="true"><\/div>/, 'retain only the hidden host integration anchor');
+  assert.match(html, /id="scheduleSection" class="content-section weekly-schedule hidden"/);
+  assert.match(html, /id="scheduleTabs" role="tablist"/);
+  assert.match(html, /id="scheduleRail" class="schedule-grid"/);
+  assert.match(html, /weekly-schedule\.css/);
+  assert.match(html, /<script src="app\.js"><\/script>\s*<script src="weekly-schedule\.js"><\/script>/);
   assert.equal(fs.existsSync(path.join(root, 'src/season-calendar.js')), false);
   assert.equal(fs.existsSync(path.join(root, 'electron/weekday-episodes.cjs')), false);
   assert.equal(fs.existsSync(path.join(root, 'electron/season-jst-schedule.cjs')), false);
   assert.equal(fs.existsSync(path.join(root, 'src/weekday-schedule.js')), true, 'shared Companion schedule helper stays intact');
   assert.match(html, /<section id="allView" class="view">[\s\S]*?id="catalogFilters"/);
-  assert.doesNotMatch(html, /weekly-schedule\.js/);
+  assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/weekly-schedule.js'), 'utf8'), /LilacSeasonCalendar/);
+  assert.match(fs.readFileSync(path.join(root, 'src/weekly-schedule.js'), 'utf8'), /window\.lilac\.providerSchedule\(state\.source, dates\[index\]\.getUTCDay\(\)\)/);
 });
 
 test('quarter lists are reused from the 12-hour cache and stale data survives a failed refresh', async () => {
