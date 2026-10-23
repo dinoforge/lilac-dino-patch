@@ -21,6 +21,7 @@ function createContext(respond) {
     AbortSignal,
     absoluteUrl: (value, base) => { try { return new URL(value, base).href; } catch { return ''; } },
     imageOfMain: () => '',
+    spaceKey: value => String(value || '').normalize('NFKC').toLowerCase().replace(/\s+/g, ''),
     titleCompareKey: value => String(value || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ''),
     hasHangul: value => /[\uac00-\ud7af]/.test(String(value || ''))
   });

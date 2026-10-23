@@ -361,11 +361,43 @@ test('search UI loads the grouping model before app code and routes source chang
   assert.match(htmlSource, /id="searchProviderFilters"[^>]*role="group"/);
   assert.ok(htmlSource.indexOf('src="integrated-search.js"') < htmlSource.indexOf('src="app.js"'));
   assert.match(appSource, /LilacIntegratedSearch\.searchProviders\(/);
+  assert.match(appSource, /providers:contentSearchProviders\(state\.contentSourceMode,state\.source\)/);
   assert.match(appSource, /const first=await LilacIntegratedSearch\.searchProviders\(\{\.\.\.searchOptions,query\}\)/);
   assert.match(appSource, /const extra=await LilacIntegratedSearch\.searchProviders\(\{\.\.\.searchOptions,query:'',terms:variants,localSearch:async\(\)=>null\}\)/);
   assert.match(appSource, /LilacIntegratedSearch\.chooseSource\(group,\{provider:sourceId\?'all':currentSearchFilter,preferredProvider:state\.source,sourceId:requestedSourceId,preferredSourceProvider:sourceId\?'':savedPreference\?\.provider\}\)/);
   assert.match(appSource, /function bindDetailSourcePicker\(group\)[\s\S]*?openDetail\(button\.dataset\.detailSource,\{groupKey:group\.groupKey,sourceId:button\.dataset\.detailSource,rememberSource:true\}\)/);
   assert.match(appSource, /function showHomeList\(list,label\)\{invalidateIntegratedSearch\(\);switchView\('search'\);hideIntegratedSearchFilters\(\);\$\('#filterBar'\)\.classList\.toggle\('hidden',state\.source!=='linkkf'\)/);
+});
+
+test('the integrated setting persists independently from the last individual provider', () => {
+  const start = appSource.indexOf('function migrateContentSource(');
+  const end = appSource.indexOf('\nconst savedContentSource=', start);
+  assert.ok(start >= 0 && end > start, 'Missing content source mode helpers');
+  const context = vm.createContext({ LilacIntegratedSearch: require('../src/integrated-search.js') });
+  vm.runInContext(`${appSource.slice(start, end)}\nthis.mode=contentSourceMode;this.provider=migrateContentSource;this.searchProviders=contentSearchProviders;`, context);
+
+  assert.equal(context.mode('integrated'), 'integrated');
+  assert.equal(context.provider('integrated', 'ohli24'), 'ohli24');
+  assert.equal(context.provider('integrated', 'unknown'), 'reanime');
+  assert.deepEqual(Array.from(context.searchProviders('integrated', 'ohli24')), PROVIDERS);
+  assert.deepEqual(Array.from(context.searchProviders('provider', 'miruro')), ['miruro']);
+  assert.deepEqual(Array.from(context.searchProviders('provider', 'linkkf')), []);
+  assert.match(htmlSource, /button data-value="integrated">통합<\/button>/);
+  assert.match(htmlSource, /<option value="integrated">통합<\/option>/);
+  for (const provider of ['linkkf', 'ohli24', 'linkani', 'animenosub', 'reanime', 'miruro']) {
+    assert.match(htmlSource, new RegExp(`data-value="${provider}"`), `${provider} remains in the original setting`);
+    assert.match(htmlSource, new RegExp(`<option value="${provider}"`), `${provider} remains in the native select`);
+  }
+  assert.match(appSource, /source: migrateContentSource\(savedContentSource,localStorage\.getItem\('contentSourceProvider'\)\), contentSourceMode: contentSourceMode\(savedContentSource\)/);
+  assert.match(appSource, /if\(selected==='integrated'\)\{if\(state\.contentSourceMode!=='integrated'\)localStorage\.setItem\('contentSourceProvider',state\.source\);state\.contentSourceMode='integrated'\}/);
+  assert.match(appSource, /localStorage\.setItem\('contentSource',selected\)/);
+});
+
+test('individual Linkkf search stays on the original Linkkf IPC and outside Patch 03 groups', () => {
+  assert.match(appSource, /if\(state\.contentSourceMode!=='integrated'&&state\.source==='linkkf'\)\{[\s\S]*?window\.lilac\.linkkfSearch\(query\)/);
+  assert.match(appSource, /LilacIntegratedSearch\.PROVIDERS\.slice\(\)/);
+  assert.deepEqual(PROVIDERS, ['reanime', 'miruro', 'animenosub', 'ohli24', 'linkani']);
+  assert.ok(!PROVIDERS.includes('linkkf'));
 });
 
 test('full catalog indexing starts on an active-source Korean search, not at app startup', async () => {
