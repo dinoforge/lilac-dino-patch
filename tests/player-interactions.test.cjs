@@ -747,7 +747,7 @@ test('automatic subtitle lookup yields when the user changes the subtitle source
 function koreanSubtitleOfferHarness() {
   let resolveSearch;
   const currentSubtitle = { source: 'provider', url: 'provider-subtitle.vtt' };
-  const box = { classList: classList('hidden') }, offerText = { textContent: '' }, applyButton = { textContent: '', onclick: null }, dismissButton = { onclick: null }, syncButton = { textContent: '', onclick: null }, syncCheck = { checked: true }, prepareNext = [{}, {}, {}], attached = [];
+  const box = { classList: classList('hidden') }, offerText = { textContent: '' }, applyButton = { textContent: '', onclick: null }, dismissButton = { onclick: null }, syncButton = { textContent: '', onclick: null }, syncCheck = { checked: true }, prepareNext = [{}, {}, {}], arrowVolume = {}, attached = [];
   const context = vm.createContext({
     playbackRequestId: 3, subtitleSelectionRequestId: 6, currentSubtitle,
     window: { lilac: { onSubtitleSyncStatus() {} } },
@@ -756,7 +756,7 @@ function koreanSubtitleOfferHarness() {
     subtitleSearchAnime: () => ({ provider: 'reanime', id: 'test' }),
     communityLabel: () => 'Kairan 자막',
     clearTimeout() {}, setTimeout: () => 1,
-    $: selector => ({ '#subtitleOffer': box, '#subtitleOfferText': offerText, '#subtitleOfferApply': applyButton, '#subtitleOfferDismiss': dismissButton, '#autoSyncSubtitle': syncButton, '#subtitleSyncCheck': syncCheck, '#subtitleState': { textContent: '' }, '#prepareNextVideo': prepareNext[0], '#prepareNextSubtitle': prepareNext[1], '#prepareNextTranslation': prepareNext[2] }[selector]),
+    $: selector => ({ '#subtitleOffer': box, '#subtitleOfferText': offerText, '#subtitleOfferApply': applyButton, '#subtitleOfferDismiss': dismissButton, '#autoSyncSubtitle': syncButton, '#subtitleSyncCheck': syncCheck, '#subtitleState': { textContent: '' }, '#prepareNextVideo': prepareNext[0], '#prepareNextSubtitle': prepareNext[1], '#prepareNextTranslation': prepareNext[2], '#arrowVolume': arrowVolume }[selector]),
     preferAiSubtitle() {}, attachOnlineSubtitle: result => attached.push(result)
   });
   vm.runInContext(appSection('async function offerKoreanSubtitle(', 'async function ensureSubtitle('), context);
