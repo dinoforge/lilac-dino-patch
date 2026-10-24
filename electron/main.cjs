@@ -26,6 +26,7 @@ const { SubtitleStore } = require('./subtitle-store.cjs');
 const { createTranslator } = require('./subtitle-translator.cjs');
 const subtitleSource = require('../src/subtitle-source.js');
 const { selectMiruroServer } = require('./miruro-playback.cjs');
+const { createMiruroSession } = require('./miruro-session.cjs');
 const { createSubtitleSync } = require('./subtitle-sync.cjs');
 const { QUARTER_PROVIDERS, quarterForDate, quarterPeriod, quarterQuery } = require('./quarter-catalog.cjs');
 const { fetchLatestEpisodes } = require('./latest-episodes.cjs');
@@ -513,6 +514,7 @@ function animenosubServers(html,pageUrl){
 // The site's own catalog API (AniList data under Miruro ids). Answers are gzip XORed with "miruro/catalog"; lists take
 // 12 or 15 entries a page and are paged with a cursor.
 const MIRURO_KEY=Buffer.from('miruro/catalog');
+const miruroRequest=createMiruroSession({session,BrowserWindow,parent:()=>mainWindow});
 async function miruroApi(pathname,params={}){
   // Keep .to primary and use compatible mirrors only for transport/server failures.
   // Do not route around HTTP access denials or rate limits by trying another host.
@@ -521,8 +523,8 @@ async function miruroApi(pathname,params={}){
     const url=new URL(`/api/v1/${pathname}`,origin);
     for(const [key,value] of Object.entries(params))if(value!==undefined&&value!==null&&value!=='')url.searchParams.set(key,String(value));
     try{
-      const response=await fetch(url,{signal:AbortSignal.timeout(8000),headers:{'User-Agent':LINKKF_UA,Accept:'*/*',Referer:`${origin}/`}});
-      const data=Buffer.from(await response.arrayBuffer());
+      const {response,body}=await miruroRequest(url.href);
+      const data=Buffer.from(body);
       if(!response.ok){const error=new Error(`Miruro HTTP ${response.status} at ${url.host}`);error.permanent=response.status>=400&&response.status<500&&response.status!==408;throw error}
       for(let i=0;i<data.length;i++)data[i]^=MIRURO_KEY[i%MIRURO_KEY.length];
       return JSON.parse(zlib.gunzipSync(data).toString('utf8'));
@@ -2317,7 +2319,7 @@ function createWindow() {
   });
   mainWindow = win;
   desktopState?.attach(win);
-  win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
+  win.on('closed', () => { if (mainWindow === win) { mainWindow = null; miruroRequest.close?.(); } });
   win.loadFile(path.join(__dirname, '..', 'src', 'index.html'));
 }
 
