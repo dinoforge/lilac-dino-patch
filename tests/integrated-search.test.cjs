@@ -283,7 +283,7 @@ test('title variants target only successfully checked providers with no results'
   }), ['장송의 프리렌', '葬送のフリーレン', 'Frieren']);
 });
 
-test('integrated search only asks ready-empty providers for original-title variants', async () => {
+test('integrated search only asks ready-empty providers for resolved title variants, not unrelated result titles', async () => {
   const calls = [], applied = [], searchSource = appSource.slice(
     appSource.indexOf('async function doSearch(query) {'),
     appSource.indexOf('\nfunction showPendingPlayer', appSource.indexOf('async function doSearch(query) {'))
@@ -293,7 +293,7 @@ test('integrated search only asks ready-empty providers for original-title varia
   const getElement = selector => { if (!elements.has(selector)) elements.set(selector, element()); return elements.get(selector); };
   let titleVariantCalls = 0;
   let run = 0;
-  const first = { items: [item('reanime', 'found', { displayTitle: '공식 표시 제목' })], statuses: [
+  const first = { items: [item('reanime', 'found', { displayTitle: '검색어와 무관한 첫 결과' })], statuses: [
     { provider: 'reanime', state: 'ready', attempts: 1, successes: 1, failures: 0, resultCount: 1 },
     { provider: 'miruro', state: 'ready', attempts: 1, successes: 1, failures: 0, resultCount: 0 },
     { provider: 'animenosub', state: 'failed', attempts: 1, successes: 0, failures: 1, resultCount: 0 }
@@ -326,7 +326,7 @@ test('integrated search only asks ready-empty providers for original-title varia
   await context.runSearch('typed title');
   assert.deepEqual(calls, [
     { providers: ['reanime', 'miruro', 'animenosub'], query: 'typed title', terms: [] },
-    { providers: ['miruro'], query: '', terms: ['공식 표시 제목', '원본 다국어 표기'] }
+    { providers: ['miruro'], query: '', terms: ['원본 다국어 표기'] }
   ]);
   assert.equal(titleVariantCalls, 1);
   assert.equal(applied.length, 2);
@@ -337,6 +337,40 @@ test('integrated search only asks ready-empty providers for original-title varia
   await context.runSearch('all found');
   assert.equal(calls.length, 1, 'a complete first pass must not invoke title lookup or supplementary search');
   assert.equal(titleVariantCalls, 1);
+});
+
+test('Ani24 search reports a failed catalog request instead of a successful zero when both search boards fail', async () => {
+  const start = mainSource.indexOf('async function ohliSearch(query){');
+  const end = mainSource.indexOf('\nfunction ohliItems', start);
+  assert.ok(start >= 0 && end > start, 'Ani24 search adapter is present');
+  let boardCalls = 0;
+  const networkError = new Error('net::ERR_CONNECTION_RESET');
+  const context = vm.createContext({
+    spaceKey: value => String(value || '').replace(/\s+/g, ''),
+    ohliAiring: async () => { throw networkError; },
+    ohliBoard: async () => { boardCalls++; throw networkError; },
+    searchIgnoringSpaces: async () => []
+  });
+  vm.runInContext(`${mainSource.slice(start, end)}\nthis.search=ohliSearch;`, context);
+
+  await assert.rejects(context.search('葬送のフリーレン 第2期'), /ERR_CONNECTION_RESET/);
+  assert.equal(boardCalls, 2, 'the initial completed and movie searches are isolated and both observed');
+});
+
+test('Ani24 keeps a genuine empty catalog result distinct when search boards responded', async () => {
+  const start = mainSource.indexOf('async function ohliSearch(query){');
+  const end = mainSource.indexOf('\nfunction ohliItems', start);
+  let spaceFallbacks = 0;
+  const context = vm.createContext({
+    spaceKey: value => String(value || '').replace(/\s+/g, ''),
+    ohliAiring: async () => { throw new Error('optional airing list unavailable'); },
+    ohliBoard: async () => ({ data: [] }),
+    searchIgnoringSpaces: async () => { spaceFallbacks++; return []; }
+  });
+  vm.runInContext(`${mainSource.slice(start, end)}\nthis.search=ohliSearch;`, context);
+
+  assert.deepEqual(Array.from(await context.search('葬送のフリーレン 第2期')), []);
+  assert.equal(spaceFallbacks, 1, 'successful empty board responses still allow the bounded existing spelling fallback');
 });
 
 test('Re:Anime detail and episode fallbacks share a lazy page loader', () => {

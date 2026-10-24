@@ -702,7 +702,7 @@ async function doSearch(query) {
     if(!missingProviders.length)return;
     $('#searchStatus').textContent+=' · 다른 제목 표기 준비 중';
     const variants=await window.lilac.titleVariants(query).then(values=>Array.isArray(values)?values:[]).catch(()=>[]);if(token!==doSearch.token)return;
-    const terms=LilacIntegratedSearch.titleVariantTerms({query,displayTitles:first.items.map(item=>titleOf(item)),variants,limit:3});
+    const terms=LilacIntegratedSearch.titleVariantTerms({query,variants,limit:3});
     if(!terms.length){$('#searchStatus').textContent=$('#searchStatus').textContent.replace(' · 다른 제목 표기 준비 중','');return}
     $('#searchStatus').textContent=$('#searchStatus').textContent.replace('다른 제목 표기 준비 중','다른 제목 표기도 찾는 중');
     const extra=await LilacIntegratedSearch.searchProviders({...searchOptions,providers:missingProviders,query:'',terms,localSearch:async()=>null});if(token!==doSearch.token)return;

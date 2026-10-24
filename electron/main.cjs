@@ -724,16 +724,20 @@ async function ohliSearch(query){
   const boards=async keyword=>{
     const responses=await Promise.all(['완결','극장판'].map(async board=>{
       try{return {ok:true,data:(await ohliBoard(board,1,keyword)).data||[]}}
-      catch{return {ok:false,data:[]}}
+      catch(error){return {ok:false,data:[],error}}
     }));
-    return {data:responses.flatMap(result=>result.data),complete:responses.every(result=>result.ok)};
+    return {data:responses.flatMap(result=>result.data),complete:responses.every(result=>result.ok),error:responses.find(result=>!result.ok)?.error};
   };
-  const [airing,listed]=await Promise.all([ohliAiring().catch(()=>[]),boards(query)]);
+  const [airingResult,listed]=await Promise.all([
+    ohliAiring().then(data=>({data,ok:true}),error=>({data:[],ok:false,error})),
+    boards(query)
+  ]);
   const searched=listed.data.length?listed.data:listed.complete
     ?await searchIgnoringSpaces(query,async keyword=>(await boards(keyword)).data,item=>[item.title])
     :[];
   const found=new Map();
-  for(const item of [...airing.filter(item=>spaceKey(item.title).includes(wanted)),...searched])if(!found.has(item.mal_id))found.set(item.mal_id,item);
+  for(const item of [...airingResult.data.filter(item=>spaceKey(item.title).includes(wanted)),...searched])if(!found.has(item.mal_id))found.set(item.mal_id,item);
+  if(!found.size&&!listed.complete)throw listed.error||airingResult.error||new Error('애니24 검색 응답을 확인하지 못했습니다.');
   return [...found.values()];
 }
 function ohliItems(html){
