@@ -3,7 +3,7 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { PROVIDERS, groupResults, filterGroups, chooseSource, searchProviders, mergeSearchResults } = require('../src/integrated-search.js');
+const { PROVIDERS, groupResults, filterGroups, chooseSource, searchProviders, mergeSearchResults, providersNeedingTitleVariants, titleVariantTerms } = require('../src/integrated-search.js');
 const appSource = fs.readFileSync(path.join(__dirname, '../src/app.js'), 'utf8');
 const htmlSource = fs.readFileSync(path.join(__dirname, '../src/index.html'), 'utf8');
 const mainSource = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
@@ -50,6 +50,23 @@ test('verified multilingual aliases bridge providers only with matching year and
     item('reanime', 'series', { title: 'Same Show', title_english: 'Same Show', year: 2013, type: 'TV' }),
     item('linkani', 'movie', { title: 'Same Show', title_english: 'Same Show', year: 2013, type: 'Movie' })
   ]).length, 2);
+});
+
+test('the original displayed localized title is a grouping alias without weakening season checks', () => {
+  const groups = groupResults([
+    item('reanime', 'jp', { title: 'Sousou no Frieren', displayTitle: '장송의 프리렌', year: 2023, type: 'TV' }),
+    item('ohli24', 'ko', { title: '葬送のフリーレン', displayTitle: '장송의 프리렌', year: 2023, type: 'TV' })
+  ]);
+  assert.equal(groups.length, 1);
+
+  assert.equal(groupResults([
+    item('reanime', 'season-one', { displayTitle: '장송의 프리렌', year: 2023, season: '1', type: 'TV' }),
+    item('ohli24', 'season-two', { displayTitle: '장송의 프리렌', year: 2026, season: '2', type: 'TV' })
+  ]).length, 2, 'a localized title cannot override different season metadata');
+  assert.equal(groupResults([
+    item('reanime', 'series', { displayTitle: '장송의 프리렌', year: 2023, type: 'TV' }),
+    item('ohli24', 'movie', { displayTitle: '장송의 프리렌', year: 2023, type: 'Movie' })
+  ]).length, 2, 'a localized title cannot merge a series and a movie');
 });
 
 test('exact season-qualified series aliases can bridge a provider item missing year when the match is unique', () => {
@@ -249,6 +266,79 @@ test('merged query and title-variant runs deduplicate provider items and preserv
   ]);
 });
 
+test('title variants target only successfully checked providers with no results', () => {
+  const result = { statuses: [
+    { provider: 'reanime', state: 'ready', resultCount: 2 },
+    { provider: 'miruro', state: 'ready', resultCount: 0 },
+    { provider: 'animenosub', state: 'failed', resultCount: 0 },
+    { provider: 'ohli24', state: 'partial', resultCount: 0 },
+    { provider: 'linkani', state: 'ready', resultCount: 0 }
+  ] };
+  assert.deepEqual(providersNeedingTitleVariants(result, PROVIDERS), ['miruro', 'linkani']);
+  assert.deepEqual(titleVariantTerms({
+    query: 'Sousou no Frieren',
+    displayTitles: ['장송의 프리렌', ' 장송의 프리렌 '],
+    variants: ['葬送のフリーレン', 'Sousou no Frieren', 'Frieren'],
+    limit: 3
+  }), ['장송의 프리렌', '葬送のフリーレン', 'Frieren']);
+});
+
+test('integrated search only asks ready-empty providers for original-title variants', async () => {
+  const calls = [], applied = [], searchSource = appSource.slice(
+    appSource.indexOf('async function doSearch(query) {'),
+    appSource.indexOf('\nfunction showPendingPlayer', appSource.indexOf('async function doSearch(query) {'))
+  );
+  const element = () => ({ textContent: '', replaceChildren() {}, classList: { add() {}, remove() {} } });
+  const elements = new Map();
+  const getElement = selector => { if (!elements.has(selector)) elements.set(selector, element()); return elements.get(selector); };
+  let titleVariantCalls = 0;
+  let run = 0;
+  const first = { items: [item('reanime', 'found', { displayTitle: '공식 표시 제목' })], statuses: [
+    { provider: 'reanime', state: 'ready', attempts: 1, successes: 1, failures: 0, resultCount: 1 },
+    { provider: 'miruro', state: 'ready', attempts: 1, successes: 1, failures: 0, resultCount: 0 },
+    { provider: 'animenosub', state: 'failed', attempts: 1, successes: 0, failures: 1, resultCount: 0 }
+  ] };
+  const extra = { items: [], statuses: [
+    { provider: 'miruro', state: 'ready', attempts: 1, successes: 1, failures: 0, resultCount: 0 }
+  ] };
+  const integratedApi = { ...require('../src/integrated-search.js') };
+  const context = vm.createContext({
+    state: { contentSourceMode: 'integrated', source: 'reanime' },
+    SOURCE_LABELS: {}, currentSearchStatuses: [], currentSearchGroups: [], currentSearchFilter: 'all', currentSearchQuery: '',
+    searchGroupsByKey: new Map(), LilacIntegratedSearch: integratedApi,
+    cancelPendingPlaybackLookups() {}, saveRecentSearch() {}, switchView() {},
+    contentSearchProviders: () => ['reanime', 'miruro', 'animenosub'], searchKoreanCatalog() {},
+    titleOf: anime => anime.displayTitle || anime.title,
+    applyIntegratedSearchResult: result => applied.push(result),
+    window: { lilac: {
+      providerCatalog() {}, titleVariants: async () => { titleVariantCalls++; return ['원본 다국어 표기']; }
+    } },
+    $: getElement
+  });
+  context.window.lilac.providerCatalog = () => {};
+  integratedApi.searchProviders = async options => {
+    calls.push({ providers: [...options.providers], query: options.query, terms: [...(options.terms || [])] });
+    run++;
+    return run === 1 ? first : extra;
+  };
+  vm.runInContext(`${searchSource}\nthis.runSearch=doSearch;`, context);
+
+  await context.runSearch('typed title');
+  assert.deepEqual(calls, [
+    { providers: ['reanime', 'miruro', 'animenosub'], query: 'typed title', terms: [] },
+    { providers: ['miruro'], query: '', terms: ['공식 표시 제목', '원본 다국어 표기'] }
+  ]);
+  assert.equal(titleVariantCalls, 1);
+  assert.equal(applied.length, 2);
+
+  calls.length = 0;
+  const allFound = { ...first, statuses: first.statuses.map(status => ({ ...status, state: 'ready', resultCount: 1 })) };
+  integratedApi.searchProviders = async options => { calls.push(options); return allFound; };
+  await context.runSearch('all found');
+  assert.equal(calls.length, 1, 'a complete first pass must not invoke title lookup or supplementary search');
+  assert.equal(titleVariantCalls, 1);
+});
+
 test('Re:Anime detail and episode fallbacks share a lazy page loader', () => {
   const start = mainSource.indexOf("ipcMain.handle('provider:detail'");
   const end = mainSource.indexOf("ipcMain.handle('provider:play'", start);
@@ -363,7 +453,9 @@ test('search UI loads the grouping model before app code and routes source chang
   assert.match(appSource, /LilacIntegratedSearch\.searchProviders\(/);
   assert.match(appSource, /providers:contentSearchProviders\(state\.contentSourceMode,state\.source\)/);
   assert.match(appSource, /const first=await LilacIntegratedSearch\.searchProviders\(\{\.\.\.searchOptions,query\}\)/);
-  assert.match(appSource, /const extra=await LilacIntegratedSearch\.searchProviders\(\{\.\.\.searchOptions,query:'',terms:variants,localSearch:async\(\)=>null\}\)/);
+  assert.match(appSource, /const missingProviders=LilacIntegratedSearch\.providersNeedingTitleVariants\(first,searchOptions\.providers\)/);
+  assert.match(appSource, /providers:missingProviders,query:'',terms,localSearch:async\(\)=>null/);
+  assert.match(appSource, /displayTitle:titleOf\(item\)/);
   assert.match(appSource, /LilacIntegratedSearch\.chooseSource\(group,\{provider:sourceId\?'all':currentSearchFilter,preferredProvider:state\.source,sourceId:requestedSourceId,preferredSourceProvider:sourceId\?'':savedPreference\?\.provider\}\)/);
   assert.match(appSource, /function bindDetailSourcePicker\(group\)[\s\S]*?openDetail\(button\.dataset\.detailSource,\{groupKey:group\.groupKey,sourceId:button\.dataset\.detailSource,rememberSource:true\}\)/);
   assert.match(appSource, /function showHomeList\(list,label\)\{invalidateIntegratedSearch\(\);switchView\('search'\);hideIntegratedSearchFilters\(\);\$\('#filterBar'\)\.classList\.toggle\('hidden',state\.source!=='linkkf'\)/);

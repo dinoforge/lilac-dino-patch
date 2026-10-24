@@ -9,7 +9,7 @@
 
   const titleKey = value => String(value || '').normalize('NFKC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
   function aliases(item = {}) {
-    const values = [item.title, item.title_english, item.title_japanese, item.title_native, item.title_original,
+    const values = [item.displayTitle, item.title, item.title_english, item.title_japanese, item.title_native, item.title_original,
       item.title_romaji, item.romaji, item.originalTitle, item.original_title];
     const synonyms = item.synonyms;
     if (Array.isArray(synonyms)) values.push(...synonyms);
@@ -24,7 +24,7 @@
   }
 
   function part(item = {}) {
-    const title = [item.title, item.title_english, item.title_japanese, item.title_native, item.title_original,
+    const title = [item.displayTitle, item.title, item.title_english, item.title_japanese, item.title_native, item.title_original,
       item.title_romaji, item.romaji].filter(Boolean).join(' ').normalize('NFKC');
     const value = String(item.season || item.part || item.seasonNumber || '').normalize('NFKC').toLowerCase();
     const titleMarker = title.match(/(?:part|season|cour|시즌|파트|第)\s*[-:]?\s*(\d+)|(\d+)\s*(?:기|期)(?=$|[^\p{L}\p{N}])|\bs(\d{1,2})\b/i);
@@ -273,8 +273,30 @@
     return { items: providers.flatMap(provider => [...records.get(provider).items.values()]), statuses };
   }
 
+  function providersNeedingTitleVariants(result, providers = PROVIDERS) {
+    const statuses = new Map((result?.statuses || []).map(status => [status.provider, status]));
+    return [...new Set(providers)].filter(provider => {
+      const status = statuses.get(provider);
+      return status?.state === 'ready' && Number(status.resultCount) === 0;
+    });
+  }
+
+  function titleVariantTerms({ query = '', displayTitles = [], variants = [], limit = 3 } = {}) {
+    const max = Number.isInteger(Number(limit)) ? Math.max(0, Math.min(5, Number(limit))) : 3;
+    if (!max) return [];
+    const queryKey = titleKey(query), seen = new Set(), terms = [];
+    for (const value of [...displayTitles, ...variants]) {
+      const term = String(value || '').trim(), key = titleKey(term);
+      if (!key || key === queryKey || seen.has(key)) continue;
+      seen.add(key);
+      terms.push(term);
+      if (terms.length >= max) break;
+    }
+    return terms;
+  }
+
   const api = { PROVIDERS, groupResults, filterGroups, chooseSource, searchProviders, mergeSearchResults,
-    aliases, year, part, format, metadataCompatible, identityMatch };
+    aliases, year, part, format, metadataCompatible, identityMatch, providersNeedingTitleVariants, titleVariantTerms };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.LilacIntegratedSearch = api;
 })(typeof window !== 'undefined' ? window : globalThis);

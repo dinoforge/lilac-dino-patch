@@ -605,7 +605,8 @@ function renderIntegratedSearchCards(){
 function hideIntegratedSearchFilters(){const container=$('#searchProviderFilters');container?.classList.add('hidden');container?.replaceChildren()}
 function applyIntegratedSearchResult(result){
   for(const item of result.items)rememberAnime(item);
-  currentSearchStatuses=result.statuses;currentSearchGroups=LilacIntegratedSearch.groupResults(result.items,state.source);searchGroupsByKey.clear();
+  const matchItems=result.items.map(item=>({...item,displayTitle:titleOf(item)}));
+  currentSearchStatuses=result.statuses;currentSearchGroups=LilacIntegratedSearch.groupResults(matchItems,state.source);searchGroupsByKey.clear();
   for(const group of currentSearchGroups)searchGroupsByKey.set(group.groupKey,group);
   renderIntegratedSearchFilters();renderIntegratedSearchCards();updateIntegratedSearchStatus();
 }
@@ -675,13 +676,16 @@ async function doSearch(query) {
       concurrency:6,
       search:(provider,text)=>provider==='linkkf'?window.lilac.linkkfSearch(text):window.lilac.providerCatalog(provider,text),
       localSearch:searchKoreanCatalog
-    },variantsPromise=window.lilac.titleVariants(query).then(values=>Array.isArray(values)?values.slice(0,3):[]).catch(()=>[]);
+    };
     const first=await LilacIntegratedSearch.searchProviders({...searchOptions,query});if(token!==doSearch.token)return;applyIntegratedSearchResult(first);
+    const missingProviders=LilacIntegratedSearch.providersNeedingTitleVariants(first,searchOptions.providers);
+    if(!missingProviders.length)return;
     $('#searchStatus').textContent+=' · 다른 제목 표기 준비 중';
-    const variants=await variantsPromise;if(token!==doSearch.token)return;
-    if(!variants.length){$('#searchStatus').textContent=$('#searchStatus').textContent.replace(' · 다른 제목 표기 준비 중','');return}
+    const variants=await window.lilac.titleVariants(query).then(values=>Array.isArray(values)?values:[]).catch(()=>[]);if(token!==doSearch.token)return;
+    const terms=LilacIntegratedSearch.titleVariantTerms({query,displayTitles:first.items.map(item=>titleOf(item)),variants,limit:3});
+    if(!terms.length){$('#searchStatus').textContent=$('#searchStatus').textContent.replace(' · 다른 제목 표기 준비 중','');return}
     $('#searchStatus').textContent=$('#searchStatus').textContent.replace('다른 제목 표기 준비 중','다른 제목 표기도 찾는 중');
-    const extra=await LilacIntegratedSearch.searchProviders({...searchOptions,query:'',terms:variants,localSearch:async()=>null});if(token!==doSearch.token)return;
+    const extra=await LilacIntegratedSearch.searchProviders({...searchOptions,providers:missingProviders,query:'',terms,localSearch:async()=>null});if(token!==doSearch.token)return;
     applyIntegratedSearchResult(LilacIntegratedSearch.mergeSearchResults(first,extra));
   }catch(error){if(token===doSearch.token)$('#searchStatus').textContent=`검색 준비 실패: ${String(error?.message||error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/,'')}`;}
 }
