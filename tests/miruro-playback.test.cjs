@@ -36,8 +36,11 @@ test('catalog connection failures retry compatible mirrors with the same query; 
   const api=isolate('miruroApi','\nfunction miruroText',async url=>{calls.push(String(url));if(calls.length===1)throw Error('offline');return new Response(encode({data:[{id:'same'}]}));});
   assert.equal((await api('anime',{limit:15,genre_all:'Action'})).data[0].id,'same');
   assert.equal(new URL(calls[1]).host,'www.miruro.tv');assert.equal(new URL(calls[1]).searchParams.get('genre_all'),'Action');
-  let count=0;const bad=isolate('miruroApi','\nfunction miruroText',async()=>{count++;return new Response('{}',{status:400})});
-  await assert.rejects(bad('anime'),/400/);assert.equal(count,1);
+  for(const status of [400,403,429]){
+    const deniedCalls=[];const bad=isolate('miruroApi','\nfunction miruroText',async url=>{deniedCalls.push(String(url));return new Response('{}',{status})});
+    await assert.rejects(bad('anime'),error=>error.message.includes(String(status))&&error.message.includes(new URL(deniedCalls[0]).host));
+    assert.equal(deniedCalls.length,1,'HTTP '+status+' must not retry another origin');
+  }
 });
 test('probe checks media segments even when the manifest responds; validates playlists and follows redirects',async()=>{
   const calls=[],manifest='#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=1920x1080\nmedia/list.m3u8';

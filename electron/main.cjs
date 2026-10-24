@@ -511,8 +511,8 @@ function animenosubServers(html,pageUrl){
 // 12 or 15 entries a page and are paged with a cursor.
 const MIRURO_KEY=Buffer.from('miruro/catalog');
 async function miruroApi(pathname,params={}){
-  // These mirrors share catalog IDs and media providers. Keep .to primary; retry a
-  // compatible mirror only for connection/server failures, never a bad catalog query.
+  // Keep .to primary and use compatible mirrors only for transport/server failures.
+  // Do not route around HTTP access denials or rate limits by trying another host.
   let lastError;
   for(const origin of [MIRURO_WEB,'https://www.miruro.tv','https://www.miruro.cx','https://www.miruro.bz']){
     const url=new URL(`/api/v1/${pathname}`,origin);
@@ -520,7 +520,7 @@ async function miruroApi(pathname,params={}){
     try{
       const response=await fetch(url,{signal:AbortSignal.timeout(8000),headers:{'User-Agent':LINKKF_UA,Accept:'*/*',Referer:`${origin}/`}});
       const data=Buffer.from(await response.arrayBuffer());
-      if(!response.ok){const error=new Error(`Miruro HTTP ${response.status}`);error.permanent=response.status>=400&&response.status<500&&![403,408,429].includes(response.status);throw error}
+      if(!response.ok){const error=new Error(`Miruro HTTP ${response.status} at ${url.host}`);error.permanent=response.status>=400&&response.status<500&&response.status!==408;throw error}
       for(let i=0;i<data.length;i++)data[i]^=MIRURO_KEY[i%MIRURO_KEY.length];
       return JSON.parse(zlib.gunzipSync(data).toString('utf8'));
     }catch(error){if(error.permanent)throw error;lastError=error}
