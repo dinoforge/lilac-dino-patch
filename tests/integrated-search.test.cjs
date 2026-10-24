@@ -393,6 +393,92 @@ test('the integrated setting persists independently from the last individual pro
   assert.match(appSource, /localStorage\.setItem\('contentSource',selected\)/);
 });
 
+test('a delayed provider detail cannot block integrated-mode reload or overwrite a newer detail', async () => {
+  const openStart = appSource.indexOf('async function openDetail(');
+  const guardText = 'if(openDetail.token!==token)return;';
+  const guardEnd = appSource.indexOf(guardText, openStart);
+  assert.ok(openStart >= 0 && guardEnd > openStart, 'openDetail must guard results after providerDetail resolves');
+  const openDetailPrefix = appSource.slice(openStart, guardEnd + guardText.length);
+  const settingSource = appSource.match(/\$\('#contentSource'\)\.onchange=e=>\{[\s\S]*?setTimeout\(\(\)=>location\.reload\(\),600\)\};/)?.[0];
+  assert.ok(settingSource, 'the original content-source setting handler is present');
+
+  const detailContent = { innerHTML: '', scrollTop: 0 };
+  const detailDialog = { open: false, showModal() { this.open = true; } };
+  const sourceControl = { onchange: null, value: 'ohli24' };
+  const local = new Map([['contentSource', 'ohli24']]);
+  const reloadTimers = [];
+  const pendingDetails = new Map();
+  const animeByKey = new Map();
+  const groups = new Map();
+  const rendered = [];
+  const state = { source: 'ohli24', contentSourceMode: 'provider', library: [] };
+  const context = vm.createContext({
+    state,
+    currentSearchFilter: 'all',
+    searchGroupsByKey: groups,
+    LilacIntegratedSearch: require('../src/integrated-search.js'),
+    cancelPendingPlaybackLookups() {},
+    animeById: id => animeByKey.get(String(id)),
+    readWorkSourcePreference: () => null,
+    saveWorkSourcePreference: () => true,
+    rememberAnime() {},
+    toast() {},
+    detailContent,
+    rendered,
+    $: selector => selector === '#detailDialog' ? detailDialog
+      : selector === '#detailContent' ? detailContent
+        : selector === '#contentSource' ? sourceControl : null,
+    localStorage: {
+      getItem: key => local.has(key) ? local.get(key) : null,
+      setItem: (key, value) => local.set(key, String(value))
+    },
+    syncSettingChoices() {},
+    setTimeout: (callback, delay) => { reloadTimers.push({ callback, delay }); return reloadTimers.length; },
+    location: { reloadCount: 0, reload() { this.reloadCount++; } },
+    window: { lilac: {
+      providerDetail: anime => new Promise(resolve => pendingDetails.set(anime.id, { anime, resolve }))
+    } }
+  });
+  vm.runInContext(`${openDetailPrefix}\nrendered.push(a.title); detailContent.innerHTML=a.title;\n} catch(error) { throw error; }\n}`, context);
+  vm.runInContext(settingSource, context);
+
+  const addSource = (id, title, groupKey) => {
+    const anime = { provider: 'ohli24', id, mal_id: `ohli24:${id}`, title, title_english: title, title_japanese: title, year: 2026, type: 'TV', url: `https://ani.ohli24.com/c/${id}` };
+    animeByKey.set(anime.mal_id, anime);
+    groups.set(groupKey, { groupKey, sourceItems: [anime], preferenceKeys: [], sourceSearchPending: false });
+    return anime;
+  };
+  const slow = addSource('slow', 'Slow detail', 'slow-group');
+  const fast = addSource('fast', 'Fast detail', 'fast-group');
+  const modeSlow = addSource('mode-slow', 'Mode transition pending detail', 'mode-slow-group');
+
+  const slowCall = context.openDetail(slow.mal_id, { groupKey: 'slow-group' });
+  assert.equal(pendingDetails.has(slow.id), true, 'the mock provider detail remains unresolved');
+  const fastCall = context.openDetail(fast.mal_id, { groupKey: 'fast-group' });
+  pendingDetails.get(fast.id).resolve({ data: fast, episodes: [], unavailable: false });
+  await fastCall;
+  assert.deepEqual(Array.from(rendered), ['Fast detail']);
+  pendingDetails.get(slow.id).resolve({ data: slow, episodes: [], unavailable: false });
+  await slowCall;
+  assert.deepEqual(Array.from(rendered), ['Fast detail'], 'a late provider response must not replace the newer detail');
+  assert.equal(detailContent.innerHTML, 'Fast detail');
+
+  const modeSlowCall = context.openDetail(modeSlow.mal_id, { groupKey: 'mode-slow-group' });
+  assert.equal(pendingDetails.has(modeSlow.id), true, 'a second mock provider detail is still pending during mode change');
+  sourceControl.onchange({ target: { value: 'integrated' } });
+  assert.equal(state.contentSourceMode, 'integrated');
+  assert.equal(local.get('contentSource'), 'integrated');
+  assert.equal(local.get('contentSourceProvider'), 'ohli24');
+  assert.equal(reloadTimers.at(-1).delay, 600);
+  reloadTimers.at(-1).callback();
+  assert.equal(context.location.reloadCount, 1, 'mode reload is scheduled before the provider request resolves');
+  context.openDetail.token = Symbol('new document');
+  detailContent.innerHTML = 'new document';
+  pendingDetails.get(modeSlow.id).resolve({ data: modeSlow, episodes: [], unavailable: false });
+  await modeSlowCall;
+  assert.equal(detailContent.innerHTML, 'new document', 'the old document response must not replace the reloaded screen');
+});
+
 test('individual Linkkf search stays on the original Linkkf IPC and outside Patch 03 groups', () => {
   assert.match(appSource, /if\(state\.contentSourceMode!=='integrated'&&state\.source==='linkkf'\)\{[\s\S]*?window\.lilac\.linkkfSearch\(query\)/);
   assert.match(appSource, /LilacIntegratedSearch\.PROVIDERS\.slice\(\)/);
