@@ -31,6 +31,7 @@ const { createWeeklySchedule } = require('./weekly-schedule.cjs');
 const { createProviderSchedule } = require('./provider-schedule.cjs');
 const { createCatalogBrowser } = require('./catalog-browser.cjs');
 const { createCatalogUpdates } = require('./catalog-updates.cjs');
+const { createProviderDetailHandler } = require('./provider-detail-cache.cjs');
 const { filterProviderServers } = require('../src/player-failover.js');
 let catalogUpdates;
 let desktopState;
@@ -2642,7 +2643,7 @@ app.whenReady().then(async () => {
     }
     throw new Error('지원하지 않는 콘텐츠 소스입니다.');
   });
-  ipcMain.handle('provider:detail', async (_, anime) => {
+  ipcMain.handle('provider:detail', createProviderDetailHandler(async anime => {
     if (anime.provider === 'miruro') return miruroDetail(anime);
     if (anime.provider === 'ohli24') return ohliDetail(anime);
     if (anime.provider === 'linkani') return linkaniDetail(anime);
@@ -2662,7 +2663,7 @@ app.whenReady().then(async () => {
     const episodes=providerEpisodes(html,anime.provider,detail);
     const data={...detail,availableEpisodes:Math.max(0,...episodes.map(episode=>Number(episode.number)||0))||detail.availableEpisodes||null};
     return {data,episodes,unavailable:false};
-  });
+  }));
   ipcMain.handle('provider:play', (_, episode, title) => openProviderPlayer(episode,title).then(()=>true));
   // The player's own resolves (downloads resolve in the background through resolveProviderEpisode directly).
   ipcMain.handle('provider:resolve', async (_, episode) => {
