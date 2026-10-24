@@ -84,6 +84,11 @@ async function waitFor(predicate, timeoutMs, label) {
   }
   throw new Error(`Timed out waiting for ${label}`);
 }
+function assertEpisodeInfo(text, count) {
+  assert.ok(String(text || '').startsWith(`회차 ${count}개`), 'the mini summary count must match the loaded provider episode list');
+  assert.match(String(text || ''), /재생 시 확인/, 'unplayed episodes must not imply playback success');
+  assert.doesNotMatch(String(text || ''), /\b(?:1080p|720p|HLS|MP4|이어보기)\b/, 'a fresh isolated profile has no verified playback facts');
+}
 async function evaluate(code, label) {
   assert.ok(mainWindow && !mainWindow.isDestroyed(), `main window required for ${label}`);
   recordStage('renderer-evaluate-start', { label, windowId: mainWindow.id, webContentsId: mainWindow.webContents.id });
@@ -302,7 +307,7 @@ async function run() {
     try {
       await waitFor(() => evaluate(`Boolean(document.querySelector('#detailDialog')?.open && (
         document.querySelector('#detailContent #episodeBlock .episode-section')
-        || document.querySelector('#detailContent .empty-state h3')?.textContent === '정보를 불러오지 못했어요'
+        || document.querySelector('#detailContent .detail-playback-info')?.textContent?.length > 0
       ))`, 'initial grouped detail settled'), 30000, 'initial grouped detail result');
     } catch (error) { initialWaitError = String(error?.message || error); }
     const before = await evaluate(`(() => {
@@ -348,7 +353,7 @@ async function run() {
     assert.equal(switched, true, `grouped detail must expose the live ${targetProvider} candidate`);
     await waitFor(() => evaluate(`Boolean(window.openDetail?.currentSourceId === ${JSON.stringify(target.sourceId)}
       && (document.querySelector('#detailContent #episodeBlock .episode-section')
-        || document.querySelector('#detailContent .empty-state h3')?.textContent === '정보를 불러오지 못했어요'))`, `${targetProvider} detail after source switch`), 30000, `${targetProvider} detail result`);
+        || document.querySelector('#detailContent .detail-playback-info')?.textContent?.length > 0))`, `${targetProvider} detail after source switch`), 30000, `${targetProvider} detail result`);
     const after = await evaluate(`(() => ({
       sourceId: window.openDetail?.currentSourceId || '',
       title: document.querySelector('#detailContent h1')?.textContent || '',
@@ -373,7 +378,7 @@ async function run() {
     assert.ok(after.episodeHeadingCount > 0, 'the selected provider must render its real episode count');
     assert.equal(after.episodeRows, after.episodeHeadingCount, 'the displayed rows and selected provider count must agree');
     assert.equal(after.providerDetailCall?.episodeCount, after.episodeHeadingCount, 'the displayed count must match the actual provider:detail IPC response');
-    assert.match(after.playbackInfoText, new RegExp(`^회차\\s+${after.episodeHeadingCount}개$`), 'the compact count must match the selected provider episode list; unverified playback facts stay hidden');
+    assertEpisodeInfo(after.playbackInfoText, after.episodeHeadingCount);
     assert.equal(after.detailError, '', 'the selected provider detail must not show an error');
 
     const sourceSwitchMatrix = [
@@ -391,7 +396,7 @@ async function run() {
       assert.equal(clickAccepted, true, `the existing selector must expose the matched ${provider} source`);
       await waitFor(() => evaluate(`Boolean(window.openDetail?.currentSourceId === ${JSON.stringify(candidate.sourceId)}
         && (document.querySelector('#episodeBlock .episode-section')
-          || document.querySelector('#detailContent .empty-state h3')?.textContent === '정보를 불러오지 못했어요'))`, `${provider} source settled`), 30000, `${provider} source result`);
+          || document.querySelector('#detailContent .detail-playback-info')?.textContent?.length > 0))`, `${provider} source settled`), 30000, `${provider} source result`);
       const result = await evaluate(`(() => ({
         sourceId: window.openDetail?.currentSourceId || '',
         activeSourceId: document.querySelector('#detailContent [data-detail-source][aria-pressed="true"]')?.dataset.detailSource || '',
@@ -408,7 +413,7 @@ async function run() {
       if (call?.state === 'resolved' && call.episodeCount > 0) {
         assert.equal(result.episodeRows, result.episodeCount, `${provider} rendered episodes must match the loaded list`);
         assert.equal(result.episodeCount, call.episodeCount, `${provider} mini count must match its detail IPC response`);
-        assert.match(result.playbackInfoText, new RegExp(`^회차\\s+${result.episodeCount}개$`));
+        assertEpisodeInfo(result.playbackInfoText, result.episodeCount);
       }
       sourceSwitchMatrix.push({ provider, sourceId: candidate.sourceId, state: call?.state || (result.error ? 'error-ui' : 'no-ipc'), episodeCount: result.episodeCount, episodeRows: result.episodeRows, pickerCount: result.pickerCount, playbackInfoText: result.playbackInfoText, error: result.error, detailCall: call });
     }
@@ -449,7 +454,7 @@ async function run() {
       if (lastCall?.state === 'resolved' && lastCall.episodeCount > 0) {
         assert.equal(finalState.episodeCount, lastCall.episodeCount);
         assert.equal(finalState.episodeRows, lastCall.episodeCount);
-        assert.match(finalState.playbackInfoText, new RegExp(`^회차\\s+${lastCall.episodeCount}개$`));
+        assertEpisodeInfo(finalState.playbackInfoText, lastCall.episodeCount);
       }
     }
     detailLinkage.sourceSwitchMatrix = sourceSwitchMatrix;
@@ -467,7 +472,7 @@ async function run() {
       assert.equal(returnButton, true, `the picker must allow returning to ${initialProvider}`);
       await waitFor(() => evaluate(`Boolean(window.openDetail?.currentSourceId === ${JSON.stringify(initialSource.id)}
         && (document.querySelector('#episodeBlock .episode-section')
-          || document.querySelector('#detailContent .empty-state h3')?.textContent === '정보를 불러오지 못했어요'))`, 'returned source detail result'), 30000, `${initialProvider} detail after return`);
+          || document.querySelector('#detailContent .detail-playback-info')?.textContent?.length > 0))`, 'returned source detail result'), 30000, `${initialProvider} detail after return`);
       const returned = await evaluate(`(() => ({
         sourceId: window.openDetail?.currentSourceId || '',
         activeSourceId: document.querySelector('#detailContent [data-detail-source][aria-pressed="true"]')?.dataset.detailSource || '',
@@ -487,7 +492,7 @@ async function run() {
       assert.ok(returned.episodeHeadingCount > 0);
       assert.equal(returned.episodeRows, returned.episodeHeadingCount);
       assert.equal(returned.providerDetailCall?.episodeCount, returned.episodeHeadingCount);
-      assert.match(returned.playbackInfoText, new RegExp(`^회차\\s+${returned.episodeHeadingCount}개$`));
+      assertEpisodeInfo(returned.playbackInfoText, returned.episodeHeadingCount);
       assert.equal(returned.detailError, '');
     }
 

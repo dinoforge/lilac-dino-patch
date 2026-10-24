@@ -180,6 +180,7 @@ test('renderer resolve, exhausted HLS recovery, exact alternate resolve, and sub
   const ui={textContent:'',value:'통합 테스트 작품'};
   const context=vm.createContext({
     window:{LilacPlayerFailover:failover,lilac:{providerResolve:async episode=>{providerCalls.push({...episode});return episode.server==='HD-2'?streams.second:streams.first}}},
+    trackProviderPlaybackAttempt:()=>{},
     Hls:FakeHls,playbackRequestId:0,currentPlaybackContext:{},hlsPlayer:null,currentSubtitle:null,pendingResumeProgress:0,pendingResumeSeconds:null,
     subtitleSelectionRequestId:0,playerFailureHistory:[],video,preparedStreams:new Map(),preparedNext:'',playbackDuration:()=>600,
     $:selector=>selector==='#video'?video:ui,onlineSubtitleFor:()=>Promise.resolve(null),episodeRef:episode=>episode.url,jobByRef:()=>null,downloadedSeries:()=>[],

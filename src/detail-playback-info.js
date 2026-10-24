@@ -31,16 +31,37 @@
     if (!episode || !savedEpisode) return false;
     const currentProvider = value(episode.provider), savedProvider = value(savedEpisode.provider);
     if (!currentProvider || !savedProvider || currentProvider !== savedProvider) return false;
-    const currentNumber = numberOf(episode), savedNumber = numberOf(savedEpisode);
-    if (currentNumber && savedNumber) return currentNumber === savedNumber && Boolean(episode.dub) === Boolean(savedEpisode.dub);
     const currentRef = value(episode.url || episode.token || episode.id);
     const savedRef = value(savedEpisode.url || savedEpisode.token || savedEpisode.id);
-    return Boolean(currentRef && savedRef && currentRef === savedRef);
+    if (currentRef && savedRef) return currentRef === savedRef;
+    const currentNumber = numberOf(episode), savedNumber = numberOf(savedEpisode);
+    return Boolean(currentNumber && savedNumber && currentNumber === savedNumber && Boolean(episode.dub) === Boolean(savedEpisode.dub));
   }
 
-  function summarize(anime, episodes, history) {
-    if (!anime || !Array.isArray(episodes)) return null;
-    const result = { episodeCount: episodes.length, resolution: '', format: '', resume: null };
+  function episodeLabel(episode) {
+    const number = numberOf(episode);
+    return number > 0 ? `${number}화` : value(episode?.name);
+  }
+
+  function summarize(anime, detail, history, attempts = []) {
+    if (!anime) return null;
+    const response = Array.isArray(detail) ? { episodes: detail } : (detail || {});
+    const episodes = Array.isArray(response.episodes) ? response.episodes : null;
+    const result = {
+      lookupStatus: response.error ? 'failed' : episodes ? 'loaded' : 'unqueried',
+      episodeCount: episodes?.length ?? null,
+      latestEpisodeNumber: null,
+      resolution: '',
+      format: '',
+      qualityEpisode: null,
+      resume: null,
+      playbackStatus: episodes?.length ? 'unchecked' : 'none',
+      playbackEpisode: null
+    };
+    if (!episodes) return result;
+    result.latestEpisodeNumber = episodes.reduce((latest, episode) => Math.max(latest, numberOf(episode)), 0) || null;
+    if (!episodes.length) return result;
+
     const records = (Array.isArray(history) ? history : [])
       .filter(item => sameWork(anime, item))
       .sort((a, b) => (Number(b.updated) || 0) - (Number(a.updated) || 0));
@@ -51,7 +72,7 @@
 
       const progress = Math.max(0, Math.min(100, Number(item.progress) || 0));
       const episodeNumber = numberOf(episode);
-      if (episodeNumber > 0 && progress > 0 && progress < 100) {
+      if (!result.resume && episodeNumber > 0 && progress > 0 && progress < 100) {
         const positionSeconds = Number(item.positionSeconds);
         result.resume = {
           episode: episodeNumber,
@@ -61,12 +82,25 @@
       }
 
       const info = item.playbackInfo;
-      if (info && info.provider === anime.provider && String(info.sourceId || '') === String(anime.id)) {
+      if (!result.qualityEpisode && info && info.provider === anime.provider && String(info.sourceId || '') === String(anime.id)) {
         const width = Number(info.width), height = Number(info.height);
         if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) result.resolution = `${height}p`;
         if (info.format === 'HLS' || info.format === 'MP4') result.format = info.format;
+        if (result.resolution || result.format) result.qualityEpisode = { number: episodeNumber || null, name: value(episode.name) };
       }
-      break;
+    }
+
+    const statusEntries = [
+      ...records.map(item => ({ anime: item.anime, episode: item.episode, status: item.playbackStatus, updated: item.updated })),
+      ...(Array.isArray(attempts) ? attempts : [])
+    ].filter(item => ['checking', 'confirmed', 'failed', 'restricted', 'unverified'].includes(item.status))
+      .filter(item => sameWork(anime, { anime: item.anime, episode: item.episode })
+        && episodes.some(candidate => candidate.playable !== false && sameEpisode(candidate, item.episode)))
+      .sort((a, b) => (Number(b.updated) || 0) - (Number(a.updated) || 0));
+    if (statusEntries.length) {
+      const current = statusEntries[0];
+      result.playbackStatus = current.status === 'unverified' ? 'unchecked' : current.status;
+      result.playbackEpisode = episodeLabel(current.episode);
     }
     return result;
   }
@@ -79,5 +113,5 @@
     return `${minutes}:${String(remainder).padStart(2, '0')}`;
   }
 
-  return { formatPosition, numberOf, sameEpisode, sameWork, summarize };
+  return { episodeLabel, formatPosition, numberOf, sameEpisode, sameWork, summarize };
 });
