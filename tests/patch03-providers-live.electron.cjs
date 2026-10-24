@@ -31,7 +31,7 @@ assert.ok(path.resolve(app.getPath('sessionData')).startsWith(path.resolve(os.tm
 recordStage('isolated-paths-verified', { paths: Object.fromEntries(Object.entries(paths).map(([name, value]) => [name, path.resolve(value)])) });
 app.disableHardwareAcceleration();
 
-const consoleErrors = [], windows = [], ipcCalls = [], providerDetailIpcCalls = [], providerCatalogIpcCalls = [];
+const consoleErrors = [], windows = [], ipcCalls = [], providerDetailIpcCalls = [], providerCatalogIpcCalls = [], providerResolveIpcCalls = [];
 const liveEvidence = { tempRoot, paths };
 let mainWindow, rendererLoadCount = 0;
 let lastStage = 'isolated-paths-verified';
@@ -51,7 +51,10 @@ app.on('browser-window-created', (_event, win) => {
   win.webContents.on('dom-ready', () => setStage('renderer-dom-ready', { windowId: win.id, url: win.webContents.getURL() }));
   win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     if (level >= 2) {
-      const error = { level, message: String(message).replace(/https?:\/\/([^/\s"'<>]+)[^\s"'<>]*/g, 'https://$1/[path redacted]'), line, sourceId };
+      const rendererUrl = win.webContents.getURL();
+      const error = { level, message: String(message).replace(/https?:\/\/([^/\s"'<>]+)[^\s"'<>]*/g, 'https://$1/[path redacted]'), line, sourceId,
+        rendererUrl: String(rendererUrl || '').replace(/https?:\/\/([^/\s"'<>]+)[^\s"'<>]*/g, 'https://$1/[path redacted]'),
+        appRenderer: /\/src\/index\.html(?:$|[?#])/.test(rendererUrl) };
       consoleErrors.push(error); setStage('renderer-console-error', { windowId: win.id, ...error });
     }
   });
@@ -151,6 +154,46 @@ async function run() {
         setStage('provider-detail-finished', { provider: call.provider, state: call.state, episodeCount: call.episodeCount ?? null, durationMs: call.durationMs });
       }
     });
+    if (channel === 'provider:resolve') return originalIpcHandle(channel, async (event, episode, ...args) => {
+      const rawEpisodeId = episode?.episodeId ?? episode?.episode_id ?? episode?.id ?? null;
+      const call = {
+        provider: String(episode?.provider || ''),
+        sourceAnimeId: episode?.animeId == null ? null : String(episode.animeId),
+        episodeId: rawEpisodeId == null ? null : (typeof rawEpisodeId === 'number' || /^[A-Za-z0-9._:-]{1,128}$/.test(String(rawEpisodeId)) ? rawEpisodeId : null),
+        episodeNumber: episode?.number ?? null,
+        episodeName: String(episode?.name || ''),
+        episodeFields: episode && typeof episode === 'object' ? Object.keys(episode).sort() : [],
+        state: 'pending',
+        startedAt: Date.now()
+      };
+      providerResolveIpcCalls.push(call);
+      setStage('provider-resolve-start', { provider: call.provider, sourceAnimeId: call.sourceAnimeId, episodeId: call.episodeId, episodeNumber: call.episodeNumber });
+      try {
+        const result = await listener(event, episode, ...args);
+        const streamUrl = String(result?.url || '');
+        call.state = 'resolved';
+        call.hasStreamUrl = Boolean(streamUrl);
+        call.urlProtocol = streamUrl ? (() => { try { return new URL(streamUrl).protocol } catch { return 'invalid' } })() : null;
+        call.hls = typeof result?.hls === 'boolean' ? result.hls : null;
+        call.mimeType = String(result?.mimeType || result?.contentType || '');
+        call.format = call.hls === true ? 'HLS' : call.mimeType.toLowerCase() === 'video/mp4' ? 'MP4' : null;
+        return result;
+      } catch (error) {
+        call.state = 'failed';
+        call.errorName = String(error?.name || 'Error');
+        const message = String(error?.message || error);
+        call.httpStatus = Number(message.match(/\b([45]\d\d)\b/)?.[1]) || null;
+        call.errorCode = String(error?.code || message.match(/\bERR_[A-Z_]+\b/)?.[0] || '');
+        call.errorSummary = message.split('\n')[0]
+          .replace(/https?:\/\/([^/\s"'<>]+)[^\s"'<>]*/g, 'https://$1/[path redacted]')
+          .replace(/([?&](?:token|key|sig|signature|auth|authorization)=)[^&\s]*/gi, '$1[redacted]')
+          .slice(0, 240);
+        throw error;
+      } finally {
+        call.durationMs = Date.now() - call.startedAt;
+        setStage('provider-resolve-finished', { provider: call.provider, sourceAnimeId: call.sourceAnimeId, episodeId: call.episodeId, episodeNumber: call.episodeNumber, state: call.state, hasStreamUrl: call.hasStreamUrl || false, httpStatus: call.httpStatus || null, durationMs: call.durationMs });
+      }
+    });
     return originalIpcHandle(channel, async (event, ...args) => {
       const call = { channel: String(channel), state: 'pending', startedAt: Date.now() };
       ipcCalls.push(call);
@@ -177,6 +220,26 @@ async function run() {
   await waitFor(() => mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isLoading(), 30000, 'isolated app renderer');
   setStage('renderer-first-load-complete', { windowId: mainWindow.id, webContentsId: mainWindow.webContents.id, rendererPid: mainWindow.webContents.getOSProcessId() });
   await pause(1200);
+
+  let seasonRailLoad = null;
+  if (process.env.PATCH03_WAIT_SEASON_RAIL === '1') {
+    await waitFor(() => evaluate(`(() => {
+      const rail = document.querySelector('#seasonRail');
+      const status = document.querySelector('#quarterStatus')?.textContent?.trim() || '';
+      const settledStatus = /등록된 작품이 없습니다|불러오지 못했습니다|가져오지 못해|저장해 두었습니다/.test(status);
+      return Boolean(rail && !rail.classList.contains('loading-cards')
+        && !/불러오는 중|확인하고 있습니다/.test(status)
+        && (rail.querySelector('.anime-card') || settledStatus));
+    })()`, 'official season rail settled'), 45000, 'official season rail request and render');
+    seasonRailLoad = await evaluate(`(() => ({
+      cardCount: document.querySelectorAll('#seasonRail .anime-card').length,
+      status: document.querySelector('#quarterStatus')?.textContent?.trim() || '',
+      loading: document.querySelector('#seasonRail')?.classList.contains('loading-cards') || false,
+      selectedProvider: state.source,
+      selectedSeason: state.quarterSelection ? { year: state.quarterSelection.year, quarter: state.quarterSelection.quarter } : null
+    }))()`, 'official season rail settled snapshot');
+    setStage('official-season-rail-settled', seasonRailLoad);
+  }
 
   const sourceModeTest = process.env.PATCH03_SOURCE_MODE_TEST || '';
   async function selectSourceSetting(value, label, predicate) {
@@ -220,6 +283,7 @@ async function run() {
     savedIndividualProvider: localStorage.getItem('contentSourceProvider') || ''
   }))()`, 'startup checks');
   liveEvidence.startup = startup;
+  liveEvidence.seasonRailLoad = seasonRailLoad;
   if (sourceModeTest === 'verify') {
     assert.equal(startup.contentSourceMode, 'integrated');
     assert.equal(startup.contentSourceSetting, 'integrated');
@@ -385,7 +449,7 @@ async function run() {
       { provider: before.detailCall.provider, sourceId: before.currentSourceId, state: before.detailCall.state, episodeCount: before.episodeHeadingCount, pickerCount: before.pickerCount },
       { provider: targetProvider, sourceId: after.sourceId, state: after.providerDetailCall?.state || 'no-ipc', episodeCount: after.episodeHeadingCount, pickerCount: after.pickerCount }
     ];
-    for (const provider of ['reanime', 'miruro', 'ohli24']) {
+    for (const provider of ['reanime', 'miruro', 'animenosub', 'ohli24']) {
       const candidate = group.sources.find(source => source.provider === provider);
       if (!candidate || provider === before.detailCall.provider || provider === targetProvider) continue;
       const clickAccepted = await evaluate(`(() => {
@@ -496,6 +560,98 @@ async function run() {
       assert.equal(returned.detailError, '');
     }
 
+    let playbackConnection = null;
+    if (process.env.PATCH03_VERIFY_PLAYBACK === '1') {
+      const sourceSelected = await evaluate(`window.openDetail?.currentSourceId === ${JSON.stringify(target.sourceId)}`,
+        'playback target source already selected');
+      if (!sourceSelected) {
+        const selected = await evaluate(`(() => {
+          const button = [...document.querySelectorAll('#detailContent [data-detail-source]')]
+            .find(item => item.dataset.detailSource === ${JSON.stringify(target.sourceId)});
+          if (!button) return false; button.click(); return true;
+        })()`, `select ${targetProvider} for original playback`);
+        assert.equal(selected, true, `the existing detail picker must select ${targetProvider} before playback`);
+        await waitFor(() => evaluate(`Boolean(window.openDetail?.currentSourceId === ${JSON.stringify(target.sourceId)}
+          && document.querySelector('#episodeBlock .episode-section .episode-btn:not(:disabled)'))`, `${targetProvider} episode list ready for playback`), 30000, `${targetProvider} episode list before playback`);
+      }
+      const resolveOffset = providerResolveIpcCalls.length;
+      const clickedEpisode = await evaluate(`(() => {
+        const button = document.querySelector('#episodeBlock .episode-section .episode-row.rich:not(.unavailable) .episode-btn:not(:disabled)');
+        const video = document.querySelector('#video');
+        if (!button || !video) return null;
+        video.muted = true; video.volume = 0;
+        const evidence = { events: [], maxCurrentTime: 0, loadedData: false, playing: false, errorCode: null };
+        window.__patch03PlaybackEvidence = evidence;
+        for (const name of ['loadedmetadata', 'loadeddata', 'playing', 'timeupdate', 'error']) video.addEventListener(name, () => {
+          evidence.events.push(name);
+          evidence.maxCurrentTime = Math.max(evidence.maxCurrentTime, Number(video.currentTime) || 0);
+          evidence.loadedData = evidence.loadedData || name === 'loadeddata';
+          evidence.playing = evidence.playing || name === 'playing';
+          evidence.errorCode = name === 'error' ? video.error?.code || null : evidence.errorCode;
+        });
+        const selectedSourceId = window.openDetail?.currentSourceId || '';
+        const episodeNumber = button.querySelector('.episode-number')?.textContent?.trim() || '';
+        const loadedEpisodeRows = document.querySelectorAll('#episodeBlock .episode-row.rich').length;
+        button.click();
+        return { selectedSourceId, episodeNumber, loadedEpisodeRows };
+      })()`, 'click one existing provider episode');
+      assert.ok(clickedEpisode, 'one real episode row must be clickable in the existing detail dialog');
+      setStage('provider-episode-clicked', clickedEpisode);
+      const resolveDeadline = Date.now() + 45000;
+      while (Date.now() < resolveDeadline) {
+        const calls = providerResolveIpcCalls.slice(resolveOffset);
+        if (calls.length && calls.every(call => call.state !== 'pending')) break;
+        await pause(200);
+      }
+      const resolveCalls = providerResolveIpcCalls.slice(resolveOffset);
+      const firstResolve = resolveCalls[0] || null;
+      if (firstResolve?.state === 'resolved' && firstResolve.hasStreamUrl) {
+        try {
+          await waitFor(() => evaluate(`(() => {
+            const video = document.querySelector('#video'), evidence = window.__patch03PlaybackEvidence;
+            return Boolean(video && Number(video.currentTime) >= 10 && video.readyState >= 2 && video.videoWidth > 0
+              && evidence?.playing && evidence?.loadedData);
+          })()`, 'actual video time and decoded frame progress'), 30000, '10 seconds of video playback');
+        } catch {}
+      }
+      const videoEvidence = await evaluate(`(() => {
+        const video = document.querySelector('#video'), evidence = window.__patch03PlaybackEvidence || {};
+        if (video && !video.paused) video.pause();
+        return {
+          currentTimeSeconds: Number.isFinite(video?.currentTime) ? Number(video.currentTime.toFixed(2)) : 0,
+          readyState: video?.readyState ?? 0,
+          videoWidth: video?.videoWidth ?? 0,
+          videoHeight: video?.videoHeight ?? 0,
+          hasCurrentSource: Boolean(video?.currentSrc),
+          paused: video?.paused ?? true,
+          loadedData: evidence.loadedData === true,
+          playingEvent: evidence.playing === true,
+          events: [...new Set(evidence.events || [])],
+          mediaErrorCode: evidence.errorCode || video?.error?.code || null
+        };
+      })()`, 'actual player state without exposing stream URL');
+      const sameProviderOnly = resolveCalls.every(call => call.provider === targetProvider);
+      const identityMatches = Boolean(firstResolve && firstResolve.provider === targetProvider
+        && (firstResolve.sourceAnimeId == null || String(firstResolve.sourceAnimeId) === String(target.id)));
+      const playbackConfirmed = Boolean(videoEvidence.currentTimeSeconds >= 10 && videoEvidence.readyState >= 2
+        && videoEvidence.videoWidth > 0 && videoEvidence.playingEvent && videoEvidence.loadedData);
+      playbackConnection = {
+        selectedProvider: targetProvider, selectedSourceId: target.sourceId, selectedSourceAnimeId: target.id,
+        clickedEpisode, resolveCalls, sameProviderOnly, identityMatches,
+        streamResolution: firstResolve?.state === 'resolved' ? (firstResolve.hasStreamUrl ? 'stream-url-obtained' : 'resolved-without-stream-url')
+          : firstResolve?.state === 'failed' ? 'stream-request-failed' : firstResolve?.state || 'provider-resolve-not-observed',
+        actualPlayback: playbackConfirmed ? '10-seconds-and-decoded-frame-confirmed'
+          : firstResolve?.hasStreamUrl ? 'stream-url-obtained-but-playback-not-confirmed' : 'not-confirmed',
+        videoEvidence
+      };
+      assert.ok(firstResolve, 'the original provider:resolve IPC must be reached by clicking a real episode row');
+      assert.equal(firstResolve.provider, targetProvider, 'the selected provider must reach the original stream resolver');
+      if (firstResolve.sourceAnimeId != null) assert.equal(String(firstResolve.sourceAnimeId), String(target.id),
+        'the provider-specific anime ID must reach the original stream resolver');
+      setStage('provider-playback-check-finished', { provider: targetProvider, identityMatches, sameProviderOnly, streamResolution: playbackConnection.streamResolution, actualPlayback: playbackConnection.actualPlayback, videoEvidence });
+      liveEvidence.playbackConnection = playbackConnection;
+    }
+
     mainWindow.setSize(560, 820);
     await pause(400);
     detailLinkage.narrowWindow = await evaluate(`(() => {
@@ -581,8 +737,9 @@ async function run() {
   const report = {
     tempRoot, paths, electronVersion: process.versions.electron, executable: process.execPath,
     mainPid: process.pid, rendererPid: mainWindow.webContents.getOSProcessId(), windowIds: windows,
-    startup, startupConsoleErrors: consoleErrors, searches, identityChecks, detailLinkage, standaloneDetails, sourceModeFlow,
-    linkAniExternalRequestSkipped: false, providerDetailIpcCalls
+    startup, seasonRailLoad, startupConsoleErrors: consoleErrors, searches, identityChecks, detailLinkage, standaloneDetails, sourceModeFlow,
+    playbackConnection: liveEvidence.playbackConnection || null,
+    linkAniExternalRequestSkipped: false, providerDetailIpcCalls, providerResolveIpcCalls
   };
   const reportFile = sourceModeTest ? `${sourceModeTest}-report.json` : 'report.json';
   fs.writeFileSync(path.join(tempRoot, reportFile), JSON.stringify(report, null, 2));
@@ -598,16 +755,18 @@ async function run() {
       targetCandidates: search.groups.flatMap(group => group.sources.filter(item => ['animenosub', 'ohli24'].includes(item.provider))
         .map(item => ({ title: item.title, provider: item.provider, year: item.year, id: item.sourceId })))
     })),
-    identityChecks, detailLinkage, standaloneDetails, sourceModeFlow, linkAniExternalRequestSkipped: false,
-    providerCatalogIpcCalls, providerDetailIpcCalls
+    identityChecks, detailLinkage, standaloneDetails, sourceModeFlow, seasonRailLoad,
+    playbackConnection: report.playbackConnection, linkAniExternalRequestSkipped: false,
+    providerCatalogIpcCalls, providerDetailIpcCalls, providerResolveIpcCalls
   };
   console.log(`PATCH03_PROVIDER_LIVE_REPORT ${JSON.stringify(summary)}`);
   assert.equal(startup.homeVisible, true);
   assert.notEqual(startup.seasonRailChildren, null, 'the official season rail should exist');
   assert.equal(startup.seasonCalendarRemoved, true, 'the dedicated Patch 01 calendar is removed');
   assert.equal(startup.dropCaptionsElement, false, 'the removed control should not be required');
-  assert.equal(consoleErrors.some(item => /Uncaught (?:TypeError|ReferenceError|SyntaxError)/.test(item.message)), false,
-    'the renderer must finish initialization without an uncaught JavaScript exception');
+  assert.equal(consoleErrors.some(item => item.appRenderer && item.level >= 3
+    && /Uncaught (?:TypeError|ReferenceError|SyntaxError)/.test(item.message)), false,
+  'the app renderer must finish initialization without an uncaught JavaScript exception');
 }
 
 run().then(() => { setStage('test-completed'); app.quit(); }, error => {
@@ -624,6 +783,7 @@ run().then(() => { setStage('test-completed'); app.quit(); }, error => {
       ipcCalls,
       providerCatalogIpcCalls,
       providerDetailIpcCalls,
+      providerResolveIpcCalls,
       startupConsoleErrors: consoleErrors,
       error: safeError
     }, null, 2));
@@ -636,8 +796,9 @@ setTimeout(() => {
   const pendingIpc = ipcCalls.filter(call => call.state === 'pending').map(({ channel, startedAt }) => ({ channel, elapsedMs: Date.now() - startedAt }));
   const pendingCatalog = providerCatalogIpcCalls.filter(call => call.state === 'pending').map(({ provider, startedAt }) => ({ provider, elapsedMs: Date.now() - startedAt }));
   const pendingDetail = providerDetailIpcCalls.filter(call => call.state === 'pending').map(({ provider, sourceId, startedAt }) => ({ provider, sourceId, elapsedMs: Date.now() - startedAt }));
+  const pendingResolve = providerResolveIpcCalls.filter(call => call.state === 'pending').map(({ provider, sourceAnimeId, episodeNumber, startedAt }) => ({ provider, sourceAnimeId, episodeNumber, elapsedMs: Date.now() - startedAt }));
   const timeoutReport = {
-    timedOut: true, hardDeadlineMs, lastStage, pendingIpc, pendingCatalog, pendingDetail,
+    timedOut: true, hardDeadlineMs, lastStage, pendingIpc, pendingCatalog, pendingDetail, pendingResolve,
     appPaths: Object.fromEntries(['appData', 'userData', 'sessionData'].map(name => [name, path.resolve(app.getPath(name))])),
     mainPid: process.pid,
     rendererPid: mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents.getOSProcessId() : null

@@ -35,3 +35,29 @@ test('failed page bootstrap is removed so the next attempt can reconnect',async(
  for(let i=0;i<2;i++)await assert.rejects(request('https://www.miruro.to/api/v1/anime'),/ERR_NAME_NOT_RESOLVED/);
  assert.equal(attempts,2);assert.equal(destroyed,2);
 });
+
+test('closing a Miruro window during page bootstrap does not access destroyed webContents',async()=>{
+ let destroyed=0;
+ class Window extends EventEmitter{
+  constructor(){
+   super();
+   this.dead=false;
+   this.contents=new EventEmitter();
+   this.contents.dead=false;
+   this.contents.isDestroyed=()=>this.contents.dead;
+   this.contents.setWindowOpenHandler=()=>{};
+   Object.defineProperty(this,'webContents',{get:()=>{
+    if(this.dead)throw new TypeError('Object has been destroyed');
+    return this.contents;
+   }});
+  }
+  isDestroyed(){return this.dead}
+  destroy(){this.dead=true;this.contents.dead=true;destroyed++;this.emit('closed')}
+  loadURL(){return new Promise(()=>{})}
+ }
+ const request=createMiruroBrowser({BrowserWindow:Window});
+ const pending=request('https://www.miruro.to/api/v1/anime');
+ request.close();
+ await assert.rejects(pending,/Miruro 요청 창이 닫혔습니다/);
+ assert.equal(destroyed,1);
+});
