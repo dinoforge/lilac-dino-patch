@@ -559,16 +559,20 @@ function detailPlaybackInfoMarkup(anime,providerDetail){
   const secondary=[playback,resume].filter(Boolean).join(' · ');
   return `<div class="detail-playback-info" aria-label="공급원 회차 및 확인된 재생 정보"><span>${facts.map(escapeHtml).join(' · ')}</span>${secondary?`<small>${escapeHtml(secondary)}</small>`:''}</div>`;
 }
-async function openDetail(id,{groupKey='',sourceId='',rememberSource=false}={}) {
-  cancelPendingPlaybackLookups();
+function detailGroupForOpen(id,groupKey=''){
   let group=groupKey?searchGroupsByKey.get(groupKey):null;
-  if(!group){
-    const catalogAnime=animeById(id);
-    if(catalogAnime&&LilacIntegratedSearch.PROVIDERS.includes(catalogAnime.provider)){
-      group=LilacIntegratedSearch.groupResults([catalogAnime],state.source)[0]||null;
-      if(group){group.workIdentityKey=group.groupKey;group.groupKey=`detail-source:${catalogAnime.mal_id||catalogAnime.id}:${Date.now()}`;group.sourceSearchBaseProvider=catalogAnime.provider;group.sourceSearchBaseId=catalogAnime.id;group.sourceSearchPending=true;group.sourceSearchResolved=false;group.sourceSearchStatuses=[];groupKey=group.groupKey;searchGroupsByKey.set(groupKey,group)}
+  if(!group&&state.contentSourceMode==='integrated'){
+    const anime=animeById(id);
+    if(anime&&LilacIntegratedSearch.PROVIDERS.includes(anime.provider)){
+      group=LilacIntegratedSearch.groupResults([anime],state.source)[0]||null;
+      if(group){group.workIdentityKey=group.groupKey;group.groupKey=`detail-source:${anime.mal_id||anime.id}:${Date.now()}`;group.sourceSearchBaseProvider=anime.provider;group.sourceSearchBaseId=anime.id;group.sourceSearchPending=true;group.sourceSearchResolved=false;group.sourceSearchStatuses=[];searchGroupsByKey.set(group.groupKey,group)}
     }
   }
+  return group;
+}
+async function openDetail(id,{groupKey='',sourceId='',rememberSource=false}={}) {
+  cancelPendingPlaybackLookups();
+  const group=detailGroupForOpen(id,groupKey);
   const savedPreference=group?readWorkSourcePreference(group):null,requestedSourceId=sourceId||savedPreference?.sourceId||'',groupSource=group?LilacIntegratedSearch.chooseSource(group,{provider:sourceId?'all':currentSearchFilter,preferredProvider:state.source,sourceId:requestedSourceId,preferredSourceProvider:sourceId?'':savedPreference?.provider}):null;
   if(group&&!groupSource){toast('이 검색 결과에서 선택할 수 있는 공급원을 찾지 못했습니다.');return;}
   const savedProviderUnavailable=Boolean(savedPreference&&!group.sourceSearchPending&&!group.sourceItems?.some(item=>item.provider===savedPreference.provider));
@@ -652,9 +656,17 @@ function renderIntegratedSearchCards(){
 }
 function hideIntegratedSearchFilters(){const container=$('#searchProviderFilters');container?.classList.add('hidden');container?.replaceChildren()}
 function applyIntegratedSearchResult(result){
-  for(const item of result.items)rememberAnime(item);
-  const matchItems=result.items.map(item=>({...item,displayTitle:titleOf(item)}));
-  currentSearchStatuses=result.statuses;currentSearchGroups=LilacIntegratedSearch.groupResults(matchItems,state.source);searchGroupsByKey.clear();
+  const items=Array.isArray(result?.items)?result.items:[];
+  for(const item of items)rememberAnime(item);
+  currentSearchStatuses=Array.isArray(result?.statuses)?result.statuses:[];searchGroupsByKey.clear();
+  if(state.contentSourceMode!=='integrated'){
+    currentSearchGroups=[];hideIntegratedSearchFilters();renderCards('#searchGrid',items);
+    const status=currentSearchStatuses.find(value=>value.provider===state.source),issue=status?.state==='failed'?' · 검색 실패':status?.state==='partial'?' · 일부 검색 실패':status?.state==='skipped'?' · 검색 생략':'';
+    $('#searchStatus').textContent=`“${currentSearchQuery}” 검색 결과 ${items.length}개 · ${SOURCE_LABELS[state.source]||state.source}${issue}`;
+    return;
+  }
+  const matchItems=items.map(item=>({...item,displayTitle:titleOf(item)}));
+  currentSearchGroups=LilacIntegratedSearch.groupResults(matchItems,state.source);
   for(const group of currentSearchGroups)searchGroupsByKey.set(group.groupKey,group);
   renderIntegratedSearchFilters();renderIntegratedSearchCards();updateIntegratedSearchStatus();
 }

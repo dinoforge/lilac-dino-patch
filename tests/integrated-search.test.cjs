@@ -7,6 +7,7 @@ const { PROVIDERS, groupResults, filterGroups, chooseSource, searchProviders, me
 const appSource = fs.readFileSync(path.join(__dirname, '../src/app.js'), 'utf8');
 const htmlSource = fs.readFileSync(path.join(__dirname, '../src/index.html'), 'utf8');
 const mainSource = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
+const preloadSource = fs.readFileSync(path.join(__dirname, '../electron/preload.cjs'), 'utf8');
 
 const item = (provider, id, values = {}) => ({ provider, mal_id: `${provider}:${id}`, title: '같은 제목', ...values });
 
@@ -351,6 +352,116 @@ test('integrated search only asks ready-empty providers for resolved title varia
   assert.equal(titleVariantCalls, 1);
 });
 
+test('search dispatch uses the original provider catalog bridge for integrated and individual modes', async () => {
+  const calls = [], applied = [], api = require('../src/integrated-search.js');
+  const modeSource = appSource.slice(appSource.indexOf('function migrateContentSource('), appSource.indexOf('\nconst savedContentSource='));
+  const searchSource = appSource.slice(appSource.indexOf('async function doSearch(query) {'), appSource.indexOf('\nfunction showPendingPlayer', appSource.indexOf('async function doSearch(query) {')));
+  const elements = new Map();
+  const getElement = selector => {
+    if (!elements.has(selector)) elements.set(selector, { textContent: '', value: '', replaceChildren() {}, classList: { add() {}, remove() {}, toggle() {} } });
+    return elements.get(selector);
+  };
+  const context = vm.createContext({
+    state: { contentSourceMode: 'integrated', source: 'reanime' },
+    SOURCE_LABELS: { reanime: 'RE:Anime', miruro: 'Miruro' },
+    LilacIntegratedSearch: api,
+    currentSearchStatuses: [], currentSearchGroups: [], currentSearchFilter: 'all', currentSearchQuery: '',
+    searchGroupsByKey: new Map(),
+    cancelPendingPlaybackLookups() {}, saveRecentSearch() {}, switchView() {},
+    searchKoreanCatalog: () => null,
+    applyIntegratedSearchResult: result => applied.push(result),
+    window: { lilac: {
+      providerCatalog: async (provider, query) => {
+        calls.push([provider, query]);
+        return { data: [item(provider, `${provider}-result`, { title: `${provider} result` })] };
+      },
+      titleVariants: async () => []
+    } },
+    $: getElement
+  });
+  vm.runInContext(modeSource, context);
+  vm.runInContext(`${searchSource}\nthis.runSearch=doSearch;`, context);
+
+  await context.runSearch('Frieren');
+  assert.deepEqual(calls.map(([provider]) => provider).sort(), [...PROVIDERS].sort());
+  assert.ok(calls.every(([, query]) => query === 'Frieren'));
+  assert.equal(applied.length, 1);
+  assert.deepEqual(Array.from(applied[0].items, value => value.provider).sort(), [...PROVIDERS].sort());
+
+  calls.length = 0; applied.length = 0;
+  context.state.contentSourceMode = 'provider'; context.state.source = 'miruro';
+  await context.runSearch('Frieren');
+  assert.deepEqual(calls, [['miruro', 'Frieren']]);
+  assert.equal(applied.length, 1);
+  assert.deepEqual(Array.from(applied[0].items, value => value.provider), ['miruro']);
+});
+
+test('individual provider results bypass Patch 03 grouping while integrated results still group', () => {
+  const start = appSource.indexOf('function applyIntegratedSearchResult(');
+  const end = appSource.indexOf('\nfunction updateIntegratedSearchStatus', start);
+  assert.ok(start >= 0 && end > start, 'Missing search-result renderer');
+  const api = require('../src/integrated-search.js'), grouped = [], rendered = [], remembered = [], hidden = [], uiCalls = [];
+  const searchStatus = { textContent: '' };
+  const context = vm.createContext({
+    state: { contentSourceMode: 'provider', source: 'miruro' },
+    SOURCE_LABELS: { reanime: 'RE:Anime', miruro: 'Miruro' },
+    currentSearchStatuses: [], currentSearchGroups: [], currentSearchFilter: 'all', currentSearchQuery: 'Frieren',
+    searchGroupsByKey: new Map(),
+    LilacIntegratedSearch: { ...api, groupResults(items, preferred) { grouped.push(items); return api.groupResults(items, preferred); } },
+    rememberAnime: anime => remembered.push(anime),
+    hideIntegratedSearchFilters: () => hidden.push(true),
+    renderCards: (target, items) => rendered.push([target, items]),
+    renderIntegratedSearchFilters: () => uiCalls.push('filters'),
+    renderIntegratedSearchCards: () => uiCalls.push('groups'),
+    updateIntegratedSearchStatus: () => uiCalls.push('status'),
+    titleOf: anime => anime.title,
+    $: () => searchStatus
+  });
+  vm.runInContext(`${appSource.slice(start, end)}\nthis.apply=applyIntegratedSearchResult;`, context);
+
+  const solo = item('miruro', 'solo');
+  context.apply({ items: [solo], statuses: [{ provider: 'miruro', state: 'ready', resultCount: 1 }] });
+  assert.equal(grouped.length, 0);
+  assert.equal(rendered[0][0], '#searchGrid');
+  assert.equal(rendered[0][1][0], solo);
+  assert.equal(context.currentSearchGroups.length, 0);
+  assert.equal(hidden.length, 1);
+  assert.deepEqual(uiCalls, []);
+
+  context.state.contentSourceMode = 'integrated';
+  const sameA = item('reanime', 'a', { anilistId: 510, title: 'Frieren', year: 2023, type: 'TV' });
+  const sameB = item('miruro', 'b', { anilistId: 510, title: 'Frieren', year: 2023, type: 'TV' });
+  context.apply({ items: [sameA, sameB], statuses: [] });
+  assert.equal(grouped.length, 1);
+  assert.equal(context.currentSearchGroups.length, 1);
+  assert.equal(context.currentSearchGroups[0].sourceCount, 2);
+  assert.deepEqual(uiCalls, ['filters', 'groups', 'status']);
+  assert.equal(remembered.length, 3);
+});
+
+test('direct detail opens start cross-provider discovery only in integrated mode', () => {
+  const start = appSource.indexOf('function detailGroupForOpen(');
+  const end = appSource.indexOf('\nasync function openDetail', start);
+  assert.ok(start >= 0 && end > start, 'Missing Patch 03 detail-group adapter');
+  const anime = item('reanime', 'home-card', { anilistId: 110277, year: 2020, type: 'TV' });
+  const groups = new Map();
+  const context = vm.createContext({
+    state: { contentSourceMode: 'provider', source: 'reanime' },
+    searchGroupsByKey: groups,
+    animeById: id => String(id) === anime.mal_id ? anime : null,
+    LilacIntegratedSearch: require('../src/integrated-search.js')
+  });
+  vm.runInContext(`${appSource.slice(start, end)}\nthis.openGroup=detailGroupForOpen;`, context);
+
+  assert.equal(context.openGroup(anime.mal_id), null);
+  assert.equal(groups.size, 0);
+  context.state.contentSourceMode = 'integrated';
+  const group = context.openGroup(anime.mal_id);
+  assert.equal(group.sourceSearchPending, true);
+  assert.equal(group.sourceSearchBaseProvider, 'reanime');
+  assert.equal(groups.get(group.groupKey), group);
+});
+
 test('Ani24 search reports a failed catalog request instead of a successful zero when both search boards fail', async () => {
   const start = mainSource.indexOf('async function ohliSearch(query){');
   const end = mainSource.indexOf('\nfunction ohliItems', start);
@@ -402,44 +513,68 @@ test('Re:Anime detail and episode fallbacks share a lazy page loader', () => {
   assert.match(reanimeBranch, /return \{ data: detail, episodes, unavailable: false \}/);
 });
 
-test('the app exposes only the original resolve path, not unused external player-window IPCs', () => {
-  const preloadSource = fs.readFileSync(path.join(__dirname, '../electron/preload.cjs'), 'utf8');
-  assert.doesNotMatch(mainSource, /ipcMain\.handle\(['"](?:provider|linkkf):play['"]/);
-  assert.doesNotMatch(preloadSource, /(?:providerPlay|linkkfPlay)\s*:/);
-  assert.match(mainSource, /ipcMain\.handle\(['"]provider:resolve['"]/);
-  assert.match(mainSource, /ipcMain\.handle\(['"]linkkf:resolve['"]/);
-  assert.match(preloadSource, /providerResolve\s*:/);
-  assert.match(preloadSource, /linkkfResolve\s*:/);
+test('Patch 03 uses the existing catalog, detail, and resolve preload contracts', async () => {
+  const calls = [];
+  let exposedName = '', lilac;
+  const ipcRenderer = {
+    invoke: (...args) => { calls.push(args); return Promise.resolve(args[0]); },
+    on() {}
+  };
+  const context = vm.createContext({
+    require: name => {
+      assert.equal(name, 'electron');
+      return { contextBridge: { exposeInMainWorld(name, api) { exposedName = name; lilac = api; } }, ipcRenderer };
+    },
+    process: { platform: 'win32' },
+    window: {},
+    document: {}
+  });
+  vm.runInContext(preloadSource, context, { filename: 'electron/preload.cjs' });
+
+  const anime = { provider: 'miruro', id: 'miruro-182255', mal_id: 'miruro:182255' };
+  const episode = { provider: 'miruro', animeId: anime.id, number: 1, name: '1' };
+  await lilac.providerCatalog('miruro', 'Frieren');
+  await lilac.providerDetail(anime);
+  await lilac.providerResolve(episode);
+  await lilac.linkkfResolve(episode);
+
+  assert.equal(exposedName, 'lilac');
+  assert.deepEqual(calls, [
+    ['provider:catalog', 'miruro', 'Frieren', 0, ''],
+    ['provider:detail', anime],
+    ['provider:resolve', episode],
+    ['linkkf:resolve', episode]
+  ]);
+  assert.equal(lilac.providerPlay, undefined);
+  assert.equal(lilac.linkkfPlay, undefined);
 });
 
 test('detail source picker identifies the active raw provider item and hides for a single source', () => {
   const start = appSource.indexOf('function detailSourcePickerMarkup(');
   const end = appSource.indexOf('\nasync function openDetail', start);
   assert.ok(start >= 0 && end > start, 'Missing detail source picker');
+  const opened = [], buttons = [{ dataset: { detailSource: 'miruro:two' }, onclick: null }];
   const context = vm.createContext({
     SOURCE_LABELS: { reanime: 'RE:Anime', miruro: 'Miruro', animenosub: 'Animenosub', ohli24: '애니24', linkani: '링크애니' },
     LilacIntegratedSearch: { PROVIDERS },
-    escapeHtml: value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character])
+    escapeHtml: value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]),
+    $$: selector => { assert.equal(selector, '#detailContent [data-detail-source]'); return buttons; },
+    openDetail: (...args) => opened.push(args)
   });
-  vm.runInContext(`${appSource.slice(start, end)}\nthis.renderPicker = detailSourcePickerMarkup;`, context);
-  const markup = context.renderPicker({ sourceItems: [item('reanime', 'one'), item('miruro', 'two')] }, item('miruro', 'two'));
+  vm.runInContext(`${appSource.slice(start, end)}\nthis.renderPicker = detailSourcePickerMarkup;this.bindPicker=bindDetailSourcePicker;`, context);
+  const group = { groupKey: 'verified-group', sourceItems: [item('reanime', 'one'), item('miruro', 'two')] };
+  const markup = context.renderPicker(group, item('miruro', 'two'));
   assert.match(markup, /RE:Anime/);
   assert.match(markup, /Miruro/);
   assert.match(markup, /data-detail-source="miruro:two" aria-pressed="true"/);
+  context.bindPicker(group);buttons[0].onclick();
+  assert.deepEqual(JSON.parse(JSON.stringify(opened)), [['miruro:two', { groupKey: 'verified-group', sourceId: 'miruro:two', rememberSource: true }]]);
   assert.equal(context.renderPicker({ sourceItems: [item('reanime', 'one')] }, item('reanime', 'one')), '');
   const pending = context.renderPicker({ sourceItems: [item('reanime', 'one')], sourceSearchPending: true }, item('reanime', 'one'));
   assert.match(pending, /같은 작품의 다른 공급원을 확인 중/);
   assert.equal((pending.match(/data-detail-source=/g) || []).length, 1);
   const failed = context.renderPicker({ sourceItems: [item('reanime', 'one')], sourceSearchStatuses: [{ provider: 'linkani', state: 'failed' }] }, item('reanime', 'one'));
   assert.match(failed, /확인 실패: 링크애니/);
-});
-
-test('a source catalog detail starts one bounded cross-provider lookup without changing the app default', () => {
-  assert.match(appSource, /if\(!group\)\{\s*const catalogAnime=animeById\(id\);\s*if\(catalogAnime&&LilacIntegratedSearch\.PROVIDERS\.includes\(catalogAnime\.provider\)\)/);
-  assert.match(appSource, /providers:LilacIntegratedSearch\.PROVIDERS\.filter\(provider=>provider!==baseItem\.provider\)/);
-  assert.match(appSource, /if\(group\?\.sourceSearchPending\)discoverDetailSources\(group,a\)\.catch\(\(\)=>\{\}\)/);
-  assert.match(appSource, /const savedProviderUnavailable=Boolean\(savedPreference&&!group\.sourceSearchPending/);
-  assert.match(appSource, /state\.source/);
 });
 
 test('detail source discovery keeps the matching season and never changes the global source', async () => {
@@ -503,18 +638,9 @@ test('detail source picker does not show catalog episode estimates as loaded epi
   assert.doesNotMatch(markup, /최대|24화|12화|weekday-source-picker|data-schedule-provider/);
 });
 
-test('search UI loads the grouping model before app code and routes source changes through real item IDs', () => {
+test('integrated search controls load before the renderer', () => {
   assert.match(htmlSource, /id="searchProviderFilters"[^>]*role="group"/);
   assert.ok(htmlSource.indexOf('src="integrated-search.js"') < htmlSource.indexOf('src="app.js"'));
-  assert.match(appSource, /LilacIntegratedSearch\.searchProviders\(/);
-  assert.match(appSource, /providers:contentSearchProviders\(state\.contentSourceMode,state\.source\)/);
-  assert.match(appSource, /const first=await LilacIntegratedSearch\.searchProviders\(\{\.\.\.searchOptions,query\}\)/);
-  assert.match(appSource, /const missingProviders=LilacIntegratedSearch\.providersNeedingTitleVariants\(first,searchOptions\.providers\)/);
-  assert.match(appSource, /providers:missingProviders,query:'',terms,localSearch:async\(\)=>null/);
-  assert.match(appSource, /displayTitle:titleOf\(item\)/);
-  assert.match(appSource, /LilacIntegratedSearch\.chooseSource\(group,\{provider:sourceId\?'all':currentSearchFilter,preferredProvider:state\.source,sourceId:requestedSourceId,preferredSourceProvider:sourceId\?'':savedPreference\?\.provider\}\)/);
-  assert.match(appSource, /function bindDetailSourcePicker\(group\)[\s\S]*?openDetail\(button\.dataset\.detailSource,\{groupKey:group\.groupKey,sourceId:button\.dataset\.detailSource,rememberSource:true\}\)/);
-  assert.match(appSource, /function showHomeList\(list,label\)\{invalidateIntegratedSearch\(\);switchView\('search'\);hideIntegratedSearchFilters\(\);\$\('#filterBar'\)\.classList\.toggle\('hidden',state\.source!=='linkkf'\)/);
 });
 
 test('the integrated setting persists independently from the last individual provider', () => {
@@ -542,6 +668,9 @@ test('the integrated setting persists independently from the last individual pro
 });
 
 test('a delayed provider detail cannot block integrated-mode reload or overwrite a newer detail', async () => {
+  const groupStart = appSource.indexOf('function detailGroupForOpen(');
+  const groupEnd = appSource.indexOf('\nasync function openDetail', groupStart);
+  assert.ok(groupStart >= 0 && groupEnd > groupStart, 'Missing detail group adapter');
   const openStart = appSource.indexOf('async function openDetail(');
   const guardText = 'if(openDetail.token!==token)return;';
   const guardEnd = appSource.indexOf(guardText, openStart);
@@ -587,6 +716,7 @@ test('a delayed provider detail cannot block integrated-mode reload or overwrite
       providerDetail: anime => new Promise(resolve => pendingDetails.set(anime.id, { anime, resolve }))
     } }
   });
+  vm.runInContext(appSource.slice(groupStart, groupEnd), context);
   vm.runInContext(`${openDetailPrefix}\nrendered.push(a.title); detailContent.innerHTML=a.title;\n} catch(error) { throw error; }\n}`, context);
   vm.runInContext(settingSource, context);
 

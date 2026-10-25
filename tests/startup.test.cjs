@@ -57,6 +57,9 @@ function boot(t, { brokenVideos = false, invalidRoot = false, brokenStore = fals
 test('startup registers catalog and TMDB handlers before opening the main window', async t => {
   const run = boot(t); await run.start();
   assert.equal(run.handlers.has('provider:catalog'), true);
+  assert.equal(run.handlers.has('provider:detail'), true);
+  assert.equal(run.handlers.has('provider:resolve'), true);
+  assert.equal(run.handlers.has('linkkf:resolve'), true);
   assert.equal(run.handlers.has('tmdb:set'), true);
   assert.equal(run.windows.length, 1);
 });
