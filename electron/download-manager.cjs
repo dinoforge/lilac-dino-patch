@@ -258,6 +258,7 @@ class DownloadManager {
       }
     };
     const master=await get(stream.url),lists=[];
+    if(!master.trimStart().startsWith('#EXTM3U'))throw new Error('HLS 재생목록이 올바르지 않습니다.');
     const variants=[...master.matchAll(/#EXT-X-STREAM-INF:([^\r\n]*)\r?\n\s*([^\r\n#][^\r\n]*)/g)].map(match=>({attrs:match[1],uri:match[2].trim(),height:Number(match[1].match(/RESOLUTION=\d+x(\d+)/)?.[1])||0,bandwidth:Number(match[1].match(/BANDWIDTH=(\d+)/)?.[1])||0}));
     if(variants.length){
       const pick=variants[Number.isInteger(stream.program)&&variants[stream.program]?stream.program:variants.reduce((best,item,index)=>(item.height-variants[best].height||item.bandwidth-variants[best].bandwidth)>0?index:best,0)];

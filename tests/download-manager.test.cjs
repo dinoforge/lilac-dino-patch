@@ -139,6 +139,16 @@ test('HLS byte ranges are cached separately and rewritten for local playback', a
   assert.equal(fs.readFileSync(path.join(result.dir, 'video_00002.m4s'), 'utf8'), '2222');
 });
 
+test('an invalid HLS response is rejected before it is cached or treated as a media playlist', async t => {
+  const { dir } = fixture(t), original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = async () => new Response('<html>upstream error</html>');
+  const job = { id: 'invalid-hls', filePath: path.join(dir, 'out.mp4'), partialPath: path.join(dir, 'out.mp4.part') };
+  const manager = Object.assign(Object.create(DownloadManager.prototype), { active: new Map([[job.id, { controller: new AbortController() }]]), save() {} });
+  await assert.rejects(manager.mirrorHls(job, { url: 'https://example/list.m3u8' }), /HLS 재생목록이 올바르지 않습니다/);
+  assert.equal(fs.existsSync(`${job.partialPath}.hls/video.m3u8`), false);
+});
+
 test('a new Flix proxy session reuses matching cached segments, while a changed segment layout starts fresh', async t => {
   const { dir } = fixture(t), original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
