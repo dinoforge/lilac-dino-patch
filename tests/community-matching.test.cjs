@@ -23,6 +23,10 @@ test('subtitle filenames match episode numbers without consuming resolution, yea
   assert.deepEqual(communityFileEpisode('Show_S02E05.ass'), { episode: 5, season: 2 });
 });
 
+test('codec bit depth and audio channel metadata are not treated as episode numbers', () => {
+  assert.equal(communityFileEpisode('Show.10bit.5.1.ass').episode, null);
+});
+
 test('a bundle never substitutes another episode or an unnumbered script', () => {
   for (const files of [['Show 03.ass'], ['Show 03.ass', 'main.ass'], ['main.ass']]) {
     assert.equal(selectCommunityFile(files, { episode: 1, strict: true, bundle: true }), null);

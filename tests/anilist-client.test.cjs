@@ -120,6 +120,6 @@ test('AniList uses HTTP-date Retry-After and a one-minute fallback', async t => 
 
 test('Electron AniList title, story, and prequel lookups all use the shared client', () => {
   const main = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
-  assert.equal((main.match(/requestAniListGraphQL\(/g) || []).length, 5);
+  assert.equal((main.match(/requestAniListGraphQL\(/g) || []).length, 6);
   assert.equal(main.includes("fetch('https://graphql.anilist.co'"), false);
 });

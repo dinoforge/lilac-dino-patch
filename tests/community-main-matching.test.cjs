@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
 const cheerio = require('cheerio');
-const { communityEpisodes, communityFileEpisode, selectCommunityFile } = require('../electron/community-matching.cjs');
+const { communityEpisodes, communityFileEpisode, communityLinkEpisodes, planCommunityLinks, pickCommunityFile, selectCommunityFile, COMMUNITY_FONT } = require('../electron/community-matching.cjs');
 
 const mainSource = fs.readFileSync(path.join(__dirname, '../electron/main.cjs'), 'utf8');
 
@@ -16,6 +16,10 @@ function communityLinkPicker() {
   const context = vm.createContext({
     cheerio,
     communityEpisodes,
+    communityLinkEpisodes,
+    communityLinkEpisodes,
+    planCommunityLinks,
+    pickCommunityFile,
     absoluteUrl: (href, base) => new URL(href, base).href
   });
   vm.runInContext(`${mainSource.slice(start, end)}\nthis.pickCommunityLinks = communityLinks;`, context);
@@ -30,11 +34,13 @@ function communityDownloader(userData) {
     app: { getPath: () => userData }, fs, path, Buffer, URL,
     simpleTitle: value => String(value).toLowerCase().replace(/[^a-z0-9]+/g, '_'),
     driveId: () => null,
+    driveFolderId: () => null,
+    driveFolderFiles: async () => [],
     downloadDriveBuffer: async url => Buffer.from(url),
     extractCommunityArchive: async () => null,
     communitySubtitleExt: () => '.ass',
     communityFileName: value => path.basename(String(value).replace(/\\/g, '/')).replace(/[^\p{L}\p{N}._ -]/gu, '_'),
-    communityFileEpisode, selectCommunityFile,
+    communityFileEpisode, pickCommunityFile, selectCommunityFile, COMMUNITY_FONT,
     subtitleNotFoundError: message => Object.assign(new Error(message), { code: 'SUBTITLE_NOT_FOUND' }),
     subtitleResult: file => ({ path: file, exists: fs.existsSync(file) })
   });
@@ -61,7 +67,7 @@ test('community links distinguish bundles and use only verified season offsets',
   assert.equal(range.episode, 7);
   assert.equal(range.strict, true);
   assert.equal(range.bundle, true);
-  assert.equal(range.episodeMatched, true);
+  assert.equal(range.linkInfo[0].tier, 0);
   assert.equal(range.links.length, 1);
 
   const shifted = pick({
@@ -70,11 +76,11 @@ test('community links distinguish bundles and use only verified season offsets',
   }, 1, { offsets: [12], allowOffset: true });
   assert.equal(shifted.episode, 13);
   assert.equal(shifted.bundle, false);
-  assert.equal(shifted.episodeMatched, true);
+  assert.equal(shifted.linkInfo[0].href.endsWith('/season'), true);
   assert.equal(shifted.links.length, 1);
   const unverified = pick({ title: 'My Series', url: base, html: '<a href="https://drive.google.com/file/d/season">13화</a>' }, 1);
   assert.equal(unverified.links.length, 0);
-  assert.equal(unverified.episodeMatched, false);
+  assert.equal(unverified.linkInfo, undefined);
 });
 
 test('community downloads preserve episode filenames and isolate concurrent extraction folders', async () => {

@@ -415,6 +415,34 @@ function linkkfResumeTarget(anime,servers){
 // A story the source gives in English (Re:Anime, Miruro, Animenosub) in Korean from TMDB, when a TMDB key is set and it
 // has one ('' otherwise, and the source's text stays).
 const koreanOverview=a=>/[가-힣]/.test(a?.synopsis||'')||!a?(Promise.resolve('')):window.lilac.animeOverview({provider:a.provider||'',id:a.id??null,mal_id:a.mal_id??null,title:a.title||'',title_english:a.title_english||'',title_japanese:a.title_japanese||'',romaji:a.romaji||''}).catch(()=>'');
+const detailArtworkCache=new Map();
+function detailArtworkFor(a){
+  if(typeof window.lilac?.animeArtwork!=='function')return Promise.resolve({banner:'',logo:null});
+  const provider=String(a?.provider||'jikan'),id=String(a?.id??a?.mal_id??''),theme=document.body.classList.contains('light')?'light':'dark';
+  const key=`${provider}:${id}:${theme}${a?.title_japanese?':ja':''}${a?.anilistId?':al':''}`;
+  if(!detailArtworkCache.has(key)){
+    const request=window.lilac.animeArtwork({provider,id:a?.id??null,mal_id:a?.mal_id??null,title:a?.title||'',title_english:a?.title_english||'',title_japanese:a?.title_japanese||'',romaji:a?.romaji||'',type:a?.type||'',anilistId:a?.anilistId||null,malId:a?.malId||null}).then(async({banner='',logos=[]}={})=>{
+      const light=theme==='light',logo=(Array.isArray(logos)?logos:[]).slice().sort((x,y)=>light?(x.light??0)-(y.light??0):(y.light??0)-(x.light??0))[0];
+      const load=url=>url?displayImage(url).then(src=>new Promise(resolve=>{const image=new Image();image.onload=()=>resolve(src);image.onerror=()=>resolve('');image.src=src})):Promise.resolve('');
+      const [bannerUrl,logoUrl]=await Promise.all([load(banner),load(logo?.url)]);
+      return {banner:bannerUrl,logo:logoUrl?{url:logoUrl,contrast:light?(logo.light??0)>.7:(logo.light??1)<.35}:null};
+    }).catch(()=>({banner:'',logo:null}));
+    detailArtworkCache.set(key,request);
+    if(detailArtworkCache.size>120)detailArtworkCache.delete(detailArtworkCache.keys().next().value);
+  }
+  return detailArtworkCache.get(key);
+}
+function applyDetailArtwork(art,token){
+  if(!art||openDetail.token!==token)return;
+  const hero=$('#detailContent .detail-hero'),title=$('#detailContent .detail-info h1');
+  if(art.banner&&hero){hero.style.backgroundImage=`url(${JSON.stringify(art.banner)})`;hero.classList.add('banner')}
+  if(art.logo&&title){
+    let logo=title.previousElementSibling?.classList.contains('detail-logo')?title.previousElementSibling:null;
+    if(!logo){logo=document.createElement('img');logo.className='detail-logo';logo.alt='';title.before(logo)}
+    logo.src=art.logo.url;logo.classList.toggle('contrast',art.logo.contrast);title.classList.add('under-logo');
+  }
+}
+
 // Home spotlight: up to five shows. The large poster is the one described; a smaller one switches to it, and the
 // bar under the large one moves on to the next when it fills (it waits while the pointer or focus is on the hero).
 let heroPicks=[],heroIndex=0;
@@ -554,7 +582,7 @@ async function openDetail(id,{groupKey='',sourceId='',rememberSource=false}={}) 
     const {data:a}=isLinkkf?await window.lilac.linkkfDetail(String(id).slice(7)):isExternal?providerResult:await window.lilac.detail(id);if(openDetail.token!==token)return;if(savedProviderUnavailable)toast(`이전 ${SOURCE_LABELS[savedPreference.provider]||savedPreference.provider} 선택을 찾지 못해 ${SOURCE_LABELS[a.provider]||a.provider}로 열었습니다.`);if(group?.sourceSearchPending){const base=group.sourceItems?.[0];if(base){const enriched={...base,...a,provider:group.sourceSearchBaseProvider||a.provider,id:group.sourceSearchBaseId||a.id,mal_id:base.mal_id};const enrichedGroup=LilacIntegratedSearch.groupResults([enriched],state.source)[0];group.sourceItems=[enriched];group.preferenceKeys=[...new Set([...(group.preferenceKeys||[]),...(enrichedGroup?.preferenceKeys||[])])];knownAnime.set(String(enriched.mal_id),enriched)}}const savedSource=group?.sourceItems.find(item=>state.library.some(savedItem=>String(savedItem.mal_id)===String(item.mal_id))),isSaved=Boolean(savedSource)||saved(a.mal_id),libraryItem=savedSource||a,isReAnime=a.provider==='reanime';
     const meta=[a.type,a.year,a.status,a.aired,LilacAnimeMeta.episodeLabel(a),(a.studios||[]).slice(0,2).map(x=>x.name).join(', ')].filter(Boolean).map(x=>escapeHtml(String(x))).join(' · ');
     $('#detailContent').innerHTML=`<div class="detail-hero"></div><div class="detail-body"><img alt=""><div class="detail-info"><span class="eyebrow">${escapeHtml(a.type||'ANIME')} · ${a.score?`★ ${a.score}`:isLinkkf?'LINKKF':'평점 없음'}</span><h1 ${titleAttr(a)}>${escapeHtml(titleOf(a))}</h1>${originalTitleMarkup(a,'detail-native','p')}${group?detailSourcePickerMarkup(group,groupSource||a):''}${group?detailPlaybackInfoMarkup(a,providerResult?.episodes):''}${meta?`<p class="detail-meta">${meta}</p>`:''}<p class="detail-stats hidden"></p><div class="tags">${(a.genres||[]).slice(0,5).map(g=>`<span>${escapeHtml(g.name)}</span>`).join('')}</div><p class="detail-synopsis">${escapeHtml(a.synopsis||'등록된 줄거리가 없습니다.')}</p><div class="detail-actions"><button class="primary detail-play" ${providerResult?.unavailable?'disabled':''}>${providerResult?.unavailable?'현재 재생 불가':isLinkkf?'회차 불러오기':playLabel('플레이어 열기')}</button><button class="ghost detail-save library-toggle ${isSaved?'saved':''}">${heartIcon()}<span>내 목록</span></button>${a.url?'<button class="ghost detail-web"><svg class="external-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><span>작품 정보</span></button>':''}</div><div class="detail-tabs hidden" role="tablist"><button type="button" role="tab" data-detail-tab="episodes" class="selected" aria-selected="true">회차</button><button type="button" role="tab" data-detail-tab="related" aria-selected="false">관련 작품</button></div><div id="episodeBlock" class="episode-block">${providerResult?.unavailable?'<p class="episode-loading">현재 제공처에 영상이 없는 작품입니다. 설정에서 다른 콘텐츠 소스를 선택해 주세요.</p>':''}</div><div id="relatedBlock" class="related-block hidden"></div></div></div>`;
-    setBackgroundImage($('#detailContent .detail-hero'),imageOf(a));koreanOverview(a).then(text=>{const p=$('#detailContent .detail-synopsis');if(text&&p&&openDetail.token===token){p.textContent=text;p.title='줄거리: TMDB'}});setImageSource($('#detailContent .detail-body img'),imageOf(a));
+    setBackgroundImage($('#detailContent .detail-hero'),imageOf(a));detailArtworkFor(a).then(art=>applyDetailArtwork(art,token));koreanOverview(a).then(text=>{const p=$('#detailContent .detail-synopsis');if(text&&p&&openDetail.token===token){p.textContent=text;p.title='줄거리: TMDB'}});setImageSource($('#detailContent .detail-body img'),imageOf(a));
     bindDetailSourcePicker(group);
     if(group){
       const infoMarkup=detailPlaybackInfoMarkup(a,providerResult),info=$('#detailContent .detail-playback-info');

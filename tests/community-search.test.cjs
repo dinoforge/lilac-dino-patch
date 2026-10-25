@@ -14,7 +14,8 @@ function setup(extra = {}) {
   class Clock extends Date { static now() { return now; } }
   const context = vm.createContext({ URL, AbortSignal, Buffer, TextDecoder, Date: Clock, path, cheerio, AdmZip, fs,
     ...matching, hasHangul: value => /[가-힣]/.test(value), absoluteUrl: (url, base) => new URL(url, base).href,
-    app: { getPath: () => '/stub-cache' }, ANISSIA_API: 'https://api.anissia.net',
+    app: { getPath: () => '/stub-cache' }, ANISSIA_API: 'https://api.anissia.net', driveFolderId: () => null,
+    driveFolderFiles: async () => [],
     subtitleNotFoundError: message => Object.assign(new Error(message), { code: 'SUBTITLE_NOT_FOUND' }), ...extra });
   for (const [start, end] of [
     ['function simpleTitle(', '// Same as Android KairanSubtitleService'],
