@@ -560,6 +560,82 @@ async function run() {
       assert.equal(returned.detailError, '');
     }
 
+    const originalWindowSize = mainWindow.getSize();
+    const originalViewportWidth = await evaluate('innerWidth', 'original detail viewport width');
+    const wasMaximized = mainWindow.isMaximized();
+    const wasFullScreen = mainWindow.isFullScreen();
+    if (wasFullScreen) mainWindow.setFullScreen(false);
+    if (wasMaximized) mainWindow.unmaximize();
+    // The official desktop window enforces minWidth: 980 via DesktopState.bounds().
+    // Measure at that supported narrow width instead of requesting an impossible 560px window.
+    mainWindow.setSize(980, 820);
+    await waitFor(() => evaluate(`(() => {
+      const dialog = document.querySelector('#detailDialog');
+      const rect = dialog?.getBoundingClientRect();
+      return Boolean(dialog?.open && innerWidth >= 900 && innerWidth <= 1000 && rect?.width > 0 && rect?.height > 0);
+    })()`, 'open detail at narrow viewport'), 12000, 'narrow viewport and open detail dialog');
+    await waitFor(() => evaluate(`(() => {
+      const dialog = document.querySelector('#detailDialog');
+      const title = document.querySelector('#detailContent .detail-info h1');
+      const picker = document.querySelector('#detailContent .detail-source-picker');
+      const row = document.querySelector('#episodeBlock .episode-section .episode-row.rich');
+      return Boolean(dialog?.open && title?.getBoundingClientRect().height > 0
+        && picker?.getBoundingClientRect().height > 0 && row?.getBoundingClientRect().height > 0
+        && getComputedStyle(title).visibility === 'visible'
+        && Number(getComputedStyle(title).opacity) > .98);
+    })()`, 'painted detail content at narrow viewport'), 5000, 'visible title, picker, and episode row');
+    await pause(450);
+    detailLinkage.narrowWindow = await evaluate(`(() => {
+      const dialog = document.querySelector('#detailDialog'), picker = document.querySelector('#detailContent .detail-source-picker');
+      if (!dialog || !picker) return null;
+      const d = dialog.getBoundingClientRect(), p = picker.getBoundingClientRect();
+      const content = document.querySelector('#detailContent');
+      const title = document.querySelector('#detailContent .detail-info h1');
+      const row = document.querySelector('#episodeBlock .episode-section .episode-row.rich');
+      const chain = []; for (let node = title; node && node !== dialog.parentElement; node = node.parentElement) {
+        const style = getComputedStyle(node); chain.push({ tag: node.tagName, className: String(node.className || ''), opacity: Number(style.opacity), visibility: style.visibility, display: style.display });
+        if (node === dialog) break;
+      }
+      return { dialogOpen: dialog.open, viewportWidth: innerWidth, viewportHeight: innerHeight,
+        dialogLeft: Math.round(d.left), dialogRight: Math.round(d.right), dialogWidth: Math.round(d.width),
+        dialogHeight: Math.round(d.height), pickerWidth: Math.round(p.width),
+        pickerClientWidth: picker.clientWidth, pickerScrollWidth: picker.scrollWidth,
+        title: title?.textContent?.trim() || '', titleRectHeight: title?.getBoundingClientRect().height || 0,
+        episodeRowRectHeight: row?.getBoundingClientRect().height || 0, visibilityChain: chain,
+        episodeRows: document.querySelectorAll('#episodeBlock .episode-section .episode-row.rich').length,
+        contentClientHeight: content?.clientHeight || 0, contentScrollHeight: content?.scrollHeight || 0,
+        contentOverflowY: getComputedStyle(content).overflowY,
+        pickerButtons: [...picker.querySelectorAll('button')].map(button => ({
+          left: Math.round(button.getBoundingClientRect().left - p.left), right: Math.round(button.getBoundingClientRect().right - p.left),
+          clipped: button.getBoundingClientRect().left < p.left || button.getBoundingClientRect().right > p.right
+        })) };
+    })()`, 'narrow detail layout');
+    liveEvidence.narrowWindow = detailLinkage.narrowWindow;
+    assert.ok(detailLinkage.narrowWindow?.dialogOpen, 'narrow layout must be measured while the original detail dialog is open');
+    assert.ok(detailLinkage.narrowWindow.viewportWidth >= 900 && detailLinkage.narrowWindow.viewportWidth <= 1000,
+      'the renderer viewport must be close to the supported 980px minimum width');
+    assert.ok(detailLinkage.narrowWindow.dialogWidth > 0 && detailLinkage.narrowWindow.dialogHeight > 0,
+      'the open detail dialog must have a non-zero measured rectangle');
+    assert.ok(detailLinkage.narrowWindow.dialogLeft >= -2
+      && detailLinkage.narrowWindow.dialogRight <= detailLinkage.narrowWindow.viewportWidth + 2,
+    'the detail dialog must stay within the narrow viewport');
+    assert.ok(detailLinkage.narrowWindow.pickerWidth > 0 && detailLinkage.narrowWindow.episodeRows > 0,
+      'the source picker and episode rows must remain visible at narrow width');
+    assert.ok(detailLinkage.narrowWindow.title && detailLinkage.narrowWindow.titleRectHeight > 0
+      && detailLinkage.narrowWindow.episodeRowRectHeight > 0
+      && detailLinkage.narrowWindow.visibilityChain.every(node => node.display !== 'none'
+        && node.visibility === 'visible' && node.opacity > .98),
+    'the detail title, picker, and episode content must be visibly painted before capture');
+    assert.ok(detailLinkage.narrowWindow.pickerButtons.length > 0
+      && detailLinkage.narrowWindow.pickerButtons.every(button => !button.clipped),
+    'the source picker controls must remain visible without clipping');
+    fs.writeFileSync(path.join(tempRoot, 'detail-narrow.png'), (await mainWindow.capturePage()).toPNG());
+    mainWindow.setSize(...originalWindowSize);
+    if (wasMaximized) mainWindow.maximize();
+    if (wasFullScreen) mainWindow.setFullScreen(true);
+    await waitFor(() => evaluate(`Math.abs(innerWidth - ${Number(originalViewportWidth)}) <= 4`, 'restore original detail viewport'),
+      12000, 'restore original window size');
+
     let playbackConnection = null;
     if (process.env.PATCH03_VERIFY_PLAYBACK === '1') {
       const sourceSelected = await evaluate(`window.openDetail?.currentSourceId === ${JSON.stringify(target.sourceId)}`,
@@ -652,27 +728,6 @@ async function run() {
       liveEvidence.playbackConnection = playbackConnection;
     }
 
-    mainWindow.setSize(560, 820);
-    await pause(400);
-    detailLinkage.narrowWindow = await evaluate(`(() => {
-      const dialog = document.querySelector('#detailDialog'), picker = document.querySelector('#detailContent .detail-source-picker');
-      if (!dialog || !picker) return null;
-      const d = dialog.getBoundingClientRect(), p = picker.getBoundingClientRect();
-      return { viewportWidth: innerWidth, dialogWidth: Math.round(d.width), pickerWidth: Math.round(p.width),
-        pickerClientWidth: picker.clientWidth, pickerScrollWidth: picker.scrollWidth,
-        pickerButtons: [...picker.querySelectorAll('button')].map(button => ({
-          left: Math.round(button.getBoundingClientRect().left - p.left), right: Math.round(button.getBoundingClientRect().right - p.left),
-          clipped: button.getBoundingClientRect().left < p.left || button.getBoundingClientRect().right > p.right
-        })) };
-    })()`, 'narrow detail layout');
-    liveEvidence.narrowWindow = detailLinkage.narrowWindow;
-    assert.ok(detailLinkage.narrowWindow, 'the detail source picker must remain present in a narrow window');
-    assert.ok(detailLinkage.narrowWindow.dialogWidth <= detailLinkage.narrowWindow.viewportWidth + 2,
-      'the detail dialog must stay within the narrow viewport');
-    assert.ok(detailLinkage.narrowWindow.pickerButtons.length > 0
-      && detailLinkage.narrowWindow.pickerButtons.every(button => !button.clipped),
-    'the source picker controls must remain visible without clipping');
-    fs.writeFileSync(path.join(tempRoot, 'detail-narrow.png'), (await mainWindow.capturePage()).toPNG());
   }
 
   let sourceModeFlow = null;
@@ -707,9 +762,11 @@ async function run() {
     let individualDetail = null, individualPlayback = null;
     if (process.env.PATCH03_VERIFY_INDIVIDUAL_DETAIL === '1') {
       const expectedAnilistId = Number(process.env.PATCH03_EXPECTED_ANILIST_ID) || 0;
+      const expectedSourceId = String(process.env.PATCH03_EXPECTED_SOURCE_ID || '');
       const candidate = individualSearch.cards.find(item => item.provider === individualProvider
-        && (!expectedAnilistId || Number(item.anilistId) === expectedAnilistId));
-      assert.ok(candidate, `individual ${individualProvider} search must return a candidate${expectedAnilistId ? ` with AniList ID ${expectedAnilistId}` : ''}`);
+        && (!expectedAnilistId || Number(item.anilistId) === expectedAnilistId)
+        && (!expectedSourceId || item.sourceId === expectedSourceId));
+      assert.ok(candidate, `individual ${individualProvider} search must return a candidate${expectedAnilistId ? ` with AniList ID ${expectedAnilistId}` : ''}${expectedSourceId ? ` with source ID ${expectedSourceId}` : ''}`);
       const catalogCallOffset = providerCatalogIpcCalls.length, detailCallOffset = providerDetailIpcCalls.length;
       await evaluate(`(() => {
         const card = [...document.querySelectorAll('#searchGrid .anime-card')]
