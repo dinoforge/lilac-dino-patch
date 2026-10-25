@@ -69,7 +69,7 @@ test('the original displayed localized title is a grouping alias without weakeni
   ]).length, 2, 'a localized title cannot merge a series and a movie');
 });
 
-test('exact season-qualified series aliases can bridge a provider item missing year when the match is unique', () => {
+test('season-qualified title alone does not bridge a provider item missing year and external IDs', () => {
   const groups = groupResults([
     item('reanime', 'season-three', {
       anilistId: 185756, malId: 60601,
@@ -82,9 +82,21 @@ test('exact season-qualified series aliases can bridge a provider item missing y
     })
   ]);
 
-  assert.equal(groups.length, 1);
-  assert.equal(groups[0].groupKey, 'anilist:185756');
-  assert.deepEqual(groups[0].sourceItems.map(source => source.provider), ['reanime', 'animenosub']);
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups.map(group => group.sourceItems.map(source => source.provider)), [['reanime'], ['animenosub']]);
+
+  const frieren = groupResults([
+    item('reanime', 'frieren-s2', {
+      anilistId: 182255, malId: 59978,
+      title: 'Frieren: Beyond Journey’s End Season 2', title_japanese: '葬送のフリーレン 第2期',
+      year: 2026, type: 'TV'
+    }),
+    item('animenosub', 'frieren-s2-candidate', {
+      title: 'Frieren: Beyond Journey’s End Season 2', title_japanese: '葬送のフリーレン 第2期', type: 'TV'
+    })
+  ]);
+  assert.equal(frieren.length, 2, 'exact title, season, and TV format without an ID/year must remain separate');
+  assert.ok(frieren.every(group => group.sourceItems.length === 1));
 });
 
 test('yearless season-qualified aliases remain separate when they could match multiple seasons', () => {

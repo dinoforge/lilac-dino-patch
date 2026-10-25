@@ -65,10 +65,7 @@
 
   function exactAliasMatch(a, b) {
     const aYear = year(a), bYear = year(b);
-    if (aYear && bYear && aYear !== bYear) return false;
-    const sameExplicitInstallment = Boolean(part(a) && part(a) === part(b)
-      && format(a) === 'series' && format(b) === 'series');
-    if ((!aYear || !bYear) && !sameExplicitInstallment) return false;
+    if (!aYear || !bYear || aYear !== bYear) return false;
     if (!metadataCompatible(a, b, { aliasMatch: true })) return false;
     const right = new Set(aliases(b));
     return aliases(a).some(alias => right.has(alias));
@@ -110,9 +107,9 @@
       unique.push({ ...result, mal_id: String(result.mal_id ?? `${result.provider}:${sourceId}`) });
     }
 
-    // Join only unique compatible identities. A shared ID wins. Otherwise require
-    // an exact alias and matching years, or a matching explicit season/part on two
-    // series when a provider omits its year. Ambiguous matches stay separate.
+    // Join only unique compatible identities. A shared external ID wins. Without
+    // one, require an exact alias, matching years, and compatible season/format.
+    // A title and season marker alone are not enough when a provider omits its year.
     const grouped = [];
     unique.forEach((item, index) => {
       const matches = grouped.filter(group => group.items.every(member => externalIdsCompatible(member, item)
