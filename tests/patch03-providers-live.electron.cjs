@@ -688,6 +688,13 @@ async function run() {
     const individualSearch = await evaluate(`(async () => {
       await doSearch(${JSON.stringify(process.env.PATCH03_LIVE_QUERY || '葬送のフリーレン')});
       return { query: currentSearchQuery, groupCount: currentSearchGroups.length,
+        cards: [...document.querySelectorAll('#searchGrid .anime-card')].map(card => {
+          const anime = animeById(card.dataset.id);
+          return { sourceId: card.dataset.id, providerAnimeId: anime?.id == null ? '' : String(anime.id),
+            provider: anime?.provider || '', title: anime?.title || '',
+            anilistId: anime?.anilistId || anime?.anilist_id || null, malId: anime?.malId || anime?.mal_id_external || null,
+            year: anime?.year || null, type: anime?.type || '' };
+        }),
         statuses: currentSearchStatuses.map(item => ({ provider: item.provider, resultCount: item.resultCount, error: item.error || '' })) };
     })()`, `individual ${individualProvider} search`);
     const individualCalls = providerCatalogIpcCalls.slice(individualCallOffset);
@@ -697,11 +704,108 @@ async function run() {
     assert.equal(individualCalls.some(call => call.provider === 'linkkf'), false,
       'Linkkf remains outside Patch 03 individual and integrated catalog calls');
 
+    let individualDetail = null, individualPlayback = null;
+    if (process.env.PATCH03_VERIFY_INDIVIDUAL_DETAIL === '1') {
+      const expectedAnilistId = Number(process.env.PATCH03_EXPECTED_ANILIST_ID) || 0;
+      const candidate = individualSearch.cards.find(item => item.provider === individualProvider
+        && (!expectedAnilistId || Number(item.anilistId) === expectedAnilistId));
+      assert.ok(candidate, `individual ${individualProvider} search must return a candidate${expectedAnilistId ? ` with AniList ID ${expectedAnilistId}` : ''}`);
+      const catalogCallOffset = providerCatalogIpcCalls.length, detailCallOffset = providerDetailIpcCalls.length;
+      await evaluate(`(() => {
+        const card = [...document.querySelectorAll('#searchGrid .anime-card')]
+          .find(item => item.dataset.id === ${JSON.stringify(candidate.sourceId)});
+        if (!card) return false; card.click(); return true;
+      })()`, `open individual ${individualProvider} search result`)
+        .then(opened => assert.equal(opened, true, 'the official search card must be clickable'));
+      await waitFor(() => evaluate(`Boolean(document.querySelector('#detailDialog')?.open
+        && document.querySelector('#episodeBlock .episode-section .episode-row.rich'))`,
+      'individual source detail and episode rows'), 30000, 'individual source detail and episode list');
+      const snapshot = await evaluate(`(() => ({
+        mode: state.contentSourceMode, provider: state.source,
+        sourceId: window.openDetail?.currentSourceId || '',
+        title: document.querySelector('#detailContent h1')?.textContent || '',
+        pickerCount: document.querySelectorAll('#detailContent .detail-source-picker').length,
+        episodeCount: Number.parseInt(document.querySelector('#episodeBlock .episode-block-head h3 small')?.textContent || '', 10) || 0,
+        episodeRows: document.querySelectorAll('#episodeBlock .episode-section .episode-row.rich').length,
+        detailError: document.querySelector('#detailContent .empty-state h3')?.textContent || ''
+      }))()`, 'individual provider detail snapshot');
+      const detailCall = providerDetailIpcCalls.slice(detailCallOffset).find(call => call.sourceId === candidate.sourceId) || null;
+      const catalogCallsAfterDetail = providerCatalogIpcCalls.slice(catalogCallOffset);
+      const crossProviderCatalogCallsAfterDetail = catalogCallsAfterDetail.filter(call => call.provider !== individualProvider);
+      individualDetail = { candidate, snapshot, detailCall, crossProviderCatalogCallsAfterDetail };
+      assert.equal(snapshot.mode, 'provider');
+      assert.equal(snapshot.provider, individualProvider);
+      assert.equal(snapshot.sourceId, candidate.sourceId, 'the source-specific ID must be retained in detail');
+      assert.equal(snapshot.pickerCount, 0, 'individual mode must not render the Patch 03 source picker');
+      assert.ok(snapshot.episodeCount > 0, 'the real provider detail must return episodes');
+      assert.equal(snapshot.episodeRows, snapshot.episodeCount, 'the official episode renderer must match the loaded list');
+      assert.equal(detailCall?.state, 'resolved', 'the official provider:detail IPC must resolve the selected source');
+      assert.equal(detailCall?.provider, individualProvider);
+      assert.equal(detailCall?.episodeCount, snapshot.episodeCount);
+      assert.equal(crossProviderCatalogCallsAfterDetail.length, 0, 'individual detail must not start Patch 03 cross-provider discovery');
+
+      if (process.env.PATCH03_VERIFY_INDIVIDUAL_PLAYBACK === '1') {
+        const resolveCallOffset = providerResolveIpcCalls.length;
+        const clickedEpisode = await evaluate(`(() => {
+          const button = document.querySelector('#episodeBlock .episode-section .episode-row.rich:not(.unavailable) .episode-btn:not(:disabled)');
+          const video = document.querySelector('#video');
+          if (!button || !video) return null;
+          video.muted = true; video.volume = 0;
+          const evidence = { events: [], maxCurrentTime: 0, loadedData: false, playing: false, errorCode: null };
+          window.__patch03IndividualPlaybackEvidence = evidence;
+          for (const name of ['loadedmetadata', 'loadeddata', 'playing', 'timeupdate', 'error']) video.addEventListener(name, () => {
+            evidence.events.push(name); evidence.maxCurrentTime = Math.max(evidence.maxCurrentTime, Number(video.currentTime) || 0);
+            evidence.loadedData = evidence.loadedData || name === 'loadeddata'; evidence.playing = evidence.playing || name === 'playing';
+            evidence.errorCode = name === 'error' ? video.error?.code || null : evidence.errorCode;
+          });
+          const row = button.closest('.episode-row');
+          const number = row?.querySelector('.episode-number')?.textContent?.trim() || '';
+          button.click(); return { number, loadedRows: document.querySelectorAll('#episodeBlock .episode-row.rich').length };
+        })()`, `resolve individual ${individualProvider} episode`);
+        assert.ok(clickedEpisode, 'an actual episode row must be selectable');
+        await waitFor(() => providerResolveIpcCalls.slice(resolveCallOffset).length > 0
+          && providerResolveIpcCalls.slice(resolveCallOffset).every(call => call.state !== 'pending'),
+        45000, 'individual provider:resolve completion');
+        const resolveCall = providerResolveIpcCalls.slice(resolveCallOffset)[0];
+        assert.equal(resolveCall.provider, individualProvider, 'the selected individual provider must reach provider:resolve');
+        if (resolveCall.sourceAnimeId != null) assert.equal(String(resolveCall.sourceAnimeId), String(candidate.providerAnimeId));
+        if (resolveCall.state === 'resolved' && resolveCall.hasStreamUrl) {
+          try {
+            await waitFor(() => evaluate(`(() => {
+              const video = document.querySelector('#video'), evidence = window.__patch03IndividualPlaybackEvidence;
+              return Boolean(video && Number(video.currentTime) >= 10 && video.readyState >= 2 && video.videoWidth > 0
+                && evidence?.playing && evidence?.loadedData);
+            })()`, 'individual actual video progress'), 30000, '10 seconds of individual playback');
+          } catch {}
+        }
+        const videoEvidence = await evaluate(`(() => {
+          const video = document.querySelector('#video'), evidence = window.__patch03IndividualPlaybackEvidence || {};
+          if (video && !video.paused) video.pause();
+          return { currentTimeSeconds: Number.isFinite(video?.currentTime) ? Number(video.currentTime.toFixed(2)) : 0,
+            readyState: video?.readyState ?? 0, videoWidth: video?.videoWidth ?? 0, videoHeight: video?.videoHeight ?? 0,
+            paused: video?.paused ?? true, loadedData: evidence.loadedData === true, playingEvent: evidence.playing === true,
+            events: [...new Set(evidence.events || [])], mediaErrorCode: evidence.errorCode || video?.error?.code || null };
+        })()`, 'individual player state without exposing stream URL');
+        individualPlayback = {
+          selectedProvider: individualProvider, selectedSourceId: candidate.sourceId,
+          selectedProviderAnimeId: candidate.providerAnimeId, clickedEpisode,
+          resolveCall: { provider: resolveCall.provider, sourceAnimeId: resolveCall.sourceAnimeId,
+            episodeId: resolveCall.episodeId, episodeNumber: resolveCall.episodeNumber, state: resolveCall.state,
+            hasStreamUrl: resolveCall.hasStreamUrl || false, httpStatus: resolveCall.httpStatus || null,
+            errorCode: resolveCall.errorCode || '', errorSummary: resolveCall.errorSummary || '' },
+          actualPlayback: videoEvidence.currentTimeSeconds >= 10 && videoEvidence.readyState >= 2 && videoEvidence.videoWidth > 0
+            && videoEvidence.playingEvent && videoEvidence.loadedData ? '10-seconds-and-decoded-frame-confirmed'
+            : resolveCall.hasStreamUrl ? 'stream-url-obtained-but-playback-not-confirmed' : 'not-confirmed',
+          videoEvidence
+        };
+      }
+    }
+
     await selectSourceSetting('integrated', 'restore integrated content source', `state.contentSourceMode === 'integrated'
       && localStorage.getItem('contentSource') === 'integrated'
       && document.querySelector('#contentSource')?.value === 'integrated'`);
     sourceModeFlow = { individualProvider, individualSearch, individualProviderCalls: individualCalls,
-      individualProviders, restoredMode: 'integrated', restoredProvider: await evaluate('state.source', 'preserved provider after returning to integrated') };
+      individualProviders, individualDetail, individualPlayback, restoredMode: 'integrated', restoredProvider: await evaluate('state.source', 'preserved provider after returning to integrated') };
     assert.equal(sourceModeFlow.restoredProvider, individualProvider, 'returning to integrated mode must retain the last individual provider');
     assert.equal(await evaluate("localStorage.getItem('contentSourceProvider')", 'stored individual provider after returning to integrated'), individualProvider);
     liveEvidence.sourceModeFlow = sourceModeFlow;
@@ -763,7 +867,7 @@ async function run() {
   assert.equal(startup.homeVisible, true);
   assert.notEqual(startup.seasonRailChildren, null, 'the official season rail should exist');
   assert.equal(startup.seasonCalendarRemoved, true, 'the dedicated Patch 01 calendar is removed');
-  assert.equal(startup.dropCaptionsElement, false, 'the removed control should not be required');
+  assert.equal(startup.dropCaptionsElement, true, 'the official subtitle translation setting must remain available');
   assert.equal(consoleErrors.some(item => item.appRenderer && item.level >= 3
     && /Uncaught (?:TypeError|ReferenceError|SyntaxError)/.test(item.message)), false,
   'the app renderer must finish initialization without an uncaught JavaScript exception');
