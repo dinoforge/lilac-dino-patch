@@ -405,14 +405,17 @@ async function reanimeEpisodes(anime, page, listed = null) {
 
 async function reanimeServers(episode) {
   const parsed=new URL(episode.url),slug=parsed.pathname.split('/').filter(Boolean).pop(),number=Number(parsed.searchParams.get('ep')||episode.number||1);
+  // Filter by the requested audio before ranking or deduplicating: the API may return DUB first,
+  // and SUB/DUB can share a URL. A missing SUB must not silently play DUB.
+  const candidatesFrom=links=>links.map(item=>({name:String(item.serverName||''),url:String(item.dataLink||item.link||''),dub:/^dub(?:bed)?$/i.test(String(item.dataType||''))||/\bdub(?:bed)?\b/i.test(String(item.serverName||''))}))
+    .filter(item=>item.dub===Boolean(episode.dub)&&/^https:\/\/flixcloud\.cc\/e\//i.test(item.url));
   // The current API often serves streams only from /api/flix: both are asked at once (one after the other, an empty
   // /api/watch cost a whole request first), /api/watch's links used when it has any.
   const watch=providerFetch(`${REANIME_WEB}/api/watch/${encodeURIComponent(slug)}/${number}`,{json:true,referer:`${REANIME_WEB}/`}).then(root=>Array.isArray(root?.episode_links)?root.episode_links:[],()=>[]);
   const flix=episode.anilistId?providerFetch(`${REANIME_WEB}/api/flix/${Number(episode.anilistId)}/${number}`,{json:true,referer:`${REANIME_WEB}/`}).then(root=>Array.isArray(root?.servers)?root.servers:[]):null;
   flix?.catch(()=>{});
-  let links=await watch;
-  if(!links.length&&flix)links=await flix;
-  const candidates=links.map(item=>({name:String(item.serverName||''),url:String(item.dataLink||item.link||'')})).filter(item=>/^https:\/\/flixcloud\.cc\/e\//i.test(item.url));
+  let candidates=candidatesFrom(await watch);
+  if(!candidates.length&&flix)candidates=candidatesFrom(await flix);
   return [...candidates.filter(item=>/HD-?2/i.test(item.name)),...candidates.filter(item=>/HD-?1/i.test(item.name)),...candidates]
     .filter((item,index,array)=>array.findIndex(x=>x.url===item.url)===index);
 }

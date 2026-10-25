@@ -834,6 +834,8 @@ makeRemoteFocusable();
 // --- wiring ------------------------------------------------------------------------------------
 $('#playerSettingsButton').onclick = () => openPlayerSettings(!playerSettingsOpen());
 $('#closePlayerSettings').onclick = () => { openPlayerSettings(false); $('#playerSettingsButton').focus(); };
+$('#video').addEventListener('pause', pauseAutoSkipClock);
+$('#video').addEventListener('play', resumeAutoSkipClock);
 $('#psSkipButton').onchange = event => { localStorage.setItem('playerSkipButton', String(event.target.checked)); updateSkipState($('#video')); };
 $('#psAutoSkip').onchange = event => localStorage.setItem('playerAutoSkip', String(event.target.checked));
 // Keep the player controls and 설정 > 재생 on the same persisted seek interval (1–120 seconds).
