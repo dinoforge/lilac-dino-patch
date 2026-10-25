@@ -1885,7 +1885,7 @@ const CLOUD_FIELDS={
 };
 function renderTranslationSettings(value,message,messageFor){
   translationSettings=value||translationSettings;renderLocalAi(value);if(!value)return;
-  $('#geminiDownloads').checked=value.translateDownloads===true;$('#prepareNextCloud').checked=value.prepareNextCloud===true;$$('#jimakuTranslateChoices button').forEach(button=>button.classList.toggle('selected',button.dataset.value===(value.jimakuTranslate||'off')));
+  $('#geminiDownloads').checked=value.translateDownloads===true;$('#prepareNextCloud').checked=value.prepareNextCloud===true;$('#dropCaptions').checked=value.dropCaptions===true;for(const id of ['promptExtra','promptRules']){const field=document.getElementById(id);if(!field.dataset.dirty)field.value=value[id]||''}if(value.promptRules)document.querySelector('.prompt-advanced').open=true;$$('#jimakuTranslateChoices button').forEach(button=>button.classList.toggle('selected',button.dataset.value===(value.jimakuTranslate||'off')));
   $$('#cloudChoices button').forEach(button=>button.classList.toggle('selected',button.dataset.value===value.cloud));$$('.cloud-block').forEach(block=>block.classList.toggle('hidden',block.dataset.cloud!==value.cloud));
   $$('#qwenRegionChoices button').forEach(button=>button.classList.toggle('selected',button.dataset.value===value.qwenRegion));
   for(const field of Object.values(CLOUD_FIELDS)){
@@ -1913,6 +1913,14 @@ $$('#cloudChoices button').forEach(button=>button.onclick=()=>saveTranslation({c
 $$('#qwenRegionChoices button').forEach(button=>button.onclick=()=>saveTranslation({qwenRegion:button.dataset.value}));
 $('#geminiDownloads').onchange=()=>saveTranslation({translateDownloads:$('#geminiDownloads').checked});
 $('#prepareNextCloud').onchange=()=>saveTranslation({prepareNextCloud:$('#prepareNextCloud').checked});
+$('#dropCaptions').onchange=()=>saveTranslation({dropCaptions:$('#dropCaptions').checked});
+for(const id of ['promptExtra','promptRules']){const field=document.getElementById(id);field.oninput=()=>{field.dataset.dirty='1'}}
+async function savePrompt(change,message){
+  try{const value=await window.lilac.setGeminiSettings(change);for(const id of ['promptExtra','promptRules'])delete document.getElementById(id).dataset.dirty;renderTranslationSettings(value);toast(message)}catch(error){toast('저장하지 못했습니다: '+ipcMessage(error))}
+}
+$('#savePrompt').onclick=()=>savePrompt({promptExtra:$('#promptExtra').value,promptRules:$('#promptRules').value},'번역 프롬프트를 저장했어요. 이후 번역부터 적용돼요.');
+$('#resetPrompt').onclick=async()=>{if(await askConfirm('번역 프롬프트를 지우고 앱의 기본 규칙으로 되돌릴까요?',{ok:'되돌리기'}))savePrompt({promptExtra:'',promptRules:''},'번역 프롬프트를 기본으로 되돌렸어요.')};
+$('#loadDefaultRules').onclick=async()=>{const box=$('#promptRules');if(box.value.trim()&&!await askConfirm('쓰던 규칙을 기본 규칙으로 바꿀까요?',{ok:'바꾸기'}))return;box.value=await window.lilac.defaultTranslationRules();box.dataset.dirty='1';box.focus()};
 // 자막 캐시: how much the subtitle files take, and how much of it no saved subtitle uses.
 const megabytes=bytes=>bytes>=1e9?`${(bytes/1e9).toFixed(1)}GB`:`${Math.max(bytes?0.1:0,bytes/1e6).toFixed(1)}MB`;
 async function renderSubtitleCache(message){try{const usage=await window.lilac.subtitleCacheUsage();$('#subtitleCacheState').textContent=`${message?`${message} `:''}자막 파일 ${megabytes(usage.total)} 중 ${megabytes(usage.removable)}를 지울 수 있어요.`;$('#cleanSubtitleCache').disabled=!usage.removable}catch{$('#subtitleCacheState').textContent='자막 파일 용량을 확인하지 못했습니다.'}}

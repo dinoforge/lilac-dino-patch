@@ -8,10 +8,10 @@ const app = fs.readFileSync(path.join(root, 'src/app.js'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'src/index.html'), 'utf8');
 const translator = fs.readFileSync(path.join(root, 'electron/subtitle-translator.cjs'), 'utf8');
 
-test('renderer does not bind removed subtitle controls during startup', () => {
+test('official subtitle translation controls are rendered and bound to saved settings', () => {
   for (const id of ['dropCaptions', 'promptExtra', 'promptRules', 'savePrompt', 'resetPrompt', 'loadDefaultRules']) {
-    assert.doesNotMatch(html, new RegExp(`id=["']${id}["']`), `${id} is not part of the current settings UI`);
-    assert.doesNotMatch(app, new RegExp(`#${id}(?![\\w-])`), `${id} must not be accessed by the renderer`);
+    assert.ok(html.includes('id="' + id + '"'), id + ' is part of the official translation settings UI');
+    assert.ok(app.includes('#' + id), id + ' is connected by the renderer');
   }
   assert.match(html, /id=["']prepareNextCloud["']/);
   assert.match(app, /#prepareNextCloud/);
@@ -20,4 +20,5 @@ test('renderer does not bind removed subtitle controls during startup', () => {
   assert.match(html, /id=["']jimakuTranslateChoices["']/);
   assert.match(app, /#jimakuTranslateChoices/);
   assert.match(translator, /if\s*\(settings\.dropCaptions\)/);
+  assert.ok(app.includes('window.lilac.defaultTranslationRules()'));
 });
