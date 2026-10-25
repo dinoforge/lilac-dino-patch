@@ -375,7 +375,7 @@ test('Ani24 keeps a genuine empty catalog result distinct when search boards res
 
 test('Re:Anime detail and episode fallbacks share a lazy page loader', () => {
   const start = mainSource.indexOf("ipcMain.handle('provider:detail'");
-  const end = mainSource.indexOf("ipcMain.handle('provider:play'", start);
+  const end = mainSource.indexOf("ipcMain.handle('provider:resolve'", start);
   assert.ok(start >= 0 && end > start, 'provider detail IPC handler is present');
   const handler = mainSource.slice(start, end);
   const reanimeStart = handler.indexOf("if (anime.provider === 'reanime')");
@@ -388,6 +388,16 @@ test('Re:Anime detail and episode fallbacks share a lazy page loader', () => {
   assert.match(reanimeBranch, /rean[i]meDetail\(anime, page\)/i);
   assert.match(reanimeBranch, /rean[i]meEpisodes\(detail, page\)/i);
   assert.match(reanimeBranch, /return \{ data: detail, episodes, unavailable: false \}/);
+});
+
+test('the app exposes only the original resolve path, not unused external player-window IPCs', () => {
+  const preloadSource = fs.readFileSync(path.join(__dirname, '../electron/preload.cjs'), 'utf8');
+  assert.doesNotMatch(mainSource, /ipcMain\.handle\(['"](?:provider|linkkf):play['"]/);
+  assert.doesNotMatch(preloadSource, /(?:providerPlay|linkkfPlay)\s*:/);
+  assert.match(mainSource, /ipcMain\.handle\(['"]provider:resolve['"]/);
+  assert.match(mainSource, /ipcMain\.handle\(['"]linkkf:resolve['"]/);
+  assert.match(preloadSource, /providerResolve\s*:/);
+  assert.match(preloadSource, /linkkfResolve\s*:/);
 });
 
 test('detail source picker identifies the active raw provider item and hides for a single source', () => {
