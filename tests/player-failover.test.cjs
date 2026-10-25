@@ -81,6 +81,41 @@ test('Miruro stall recovery reuses the bounded same-kind server failover and res
   assert.deepEqual(calls[0][2].excludeVideoServers,['SOFT A']);
 });
 
+test('saved and explicitly selected provider servers take precedence over automatic audio selection', async () => {
+  const saved = new Map([['miruroServer', 'RAW saved']]);
+  let savedSubtitleReads = 0;
+  const requests = [];
+  const context = vm.createContext({
+    window: { lilac: { savedSubtitles: async () => { savedSubtitleReads++; return []; } } },
+    localStorage: { getItem: key => saved.get(key) || null, setItem: (key, value) => saved.set(key, value) },
+    videoServerKey: provider => `${provider}Server`,
+    koreanShows: () => [],
+    episodeRef: episode => episode.key
+  });
+  vm.runInContext(appFunction('resolveWithVideoServer', 'recordPlayerFailure'), context);
+
+  const episode = { key: 'miruro-episode-1', provider: 'miruro' };
+  const anime = { id: 'work-1', provider: 'miruro' };
+  const savedChoice = await context.resolveWithVideoServer(episode, Promise.resolve(null), anime, {}, async request => {
+    requests.push(request);
+    return { server: request.server };
+  });
+  assert.equal(savedChoice.server, 'RAW saved');
+  assert.equal(requests[0].server, 'RAW saved');
+  assert.equal(savedSubtitleReads, 0, 'saved server selection bypasses automatic subtitle-based choice');
+
+  const explicitChoice = await context.resolveWithVideoServer(episode, Promise.resolve(null), anime,
+    { serverOverride: 'SUB explicit', onlyServerKind: 'sub', serverOnly: true }, async request => {
+      requests.push(request);
+      return { server: request.server };
+    });
+  assert.equal(explicitChoice.server, 'SUB explicit');
+  assert.equal(requests[1].server, 'SUB explicit');
+  assert.equal(requests[1].onlyServerKind, 'sub');
+  assert.equal(requests[1].serverOnly, true);
+  assert.equal(savedSubtitleReads, 0, 'explicit server selection bypasses automatic subtitle-based choice');
+});
+
 test('player seek controls share a clamped setting with the settings page', () => {
   const start=playerSource.indexOf('function setSeekSeconds('),end=playerSource.indexOf('\n$$(',start);
   assert.ok(start>=0&&end>start,'missing setSeekSeconds helper');
