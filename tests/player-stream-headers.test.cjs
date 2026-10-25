@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 const { test } = require('node:test');
 const { createPlayerStreamHeaders } = require('../electron/player-stream-headers.cjs');
 
@@ -48,6 +49,20 @@ test('local proxy URLs are not assigned remote credentials and resolver discover
   const start = mainSource.indexOf('async function resolveStreamPage('), end = mainSource.indexOf('\nfunction simpleTitle(', start);
   assert.ok(start >= 0 && end > start);
   assert.doesNotMatch(mainSource.slice(start, end), /playerStreamHeaders|resolvedStreamHeaders/);
+});
+
+test('resolver page probe keeps escaped media URL regex valid after template interpolation', () => {
+  const start = mainSource.indexOf('async function resolveStreamPage(');
+  const end = mainSource.indexOf('\nfunction simpleTitle(', start);
+  const resolver = mainSource.slice(start, end);
+  const call = resolver.indexOf('frame.executeJavaScript(`(()=>{document.querySelectorAll');
+  assert.ok(call >= 0, 'Missing resolver page probe');
+  const templateStart = resolver.indexOf('`', call) + 1;
+  const templateEnd = resolver.indexOf('`,true)', templateStart);
+  assert.ok(templateStart > 0 && templateEnd > templateStart, 'Missing resolver probe template');
+  const body = resolver.slice(templateStart, templateEnd);
+  const generatedScript = Function(`return \`${body}\``)();
+  assert.doesNotThrow(() => new vm.Script(generatedScript));
 });
 
 test('both main-player resolve handlers scope header state to the latest selected result', () => {
