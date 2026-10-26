@@ -63,6 +63,27 @@ function inventory(root) {
   return new Map(listFiles(root).map(relative => [relative, sha256(path.join(root, ...relative.split('/')))]));
 }
 
+function treeSha256(files) {
+  const hash = crypto.createHash('sha256');
+  const sorted = [...files.entries()].sort(([left], [right]) => Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8')));
+  for (const [relative, fileSha] of sorted) {
+    hash.update(relative, 'utf8');
+    hash.update(Buffer.from([0]));
+    hash.update(Buffer.from(fileSha, 'hex'));
+    hash.update(Buffer.from([10]));
+  }
+  return hash.digest('hex').toUpperCase();
+}
+
+function verifyOfficialTree(files) {
+  if (files.size !== MANIFEST.officialTreeFileCount) {
+    throw new Error(`Official source file count mismatch: expected ${MANIFEST.officialTreeFileCount}, received ${files.size}.`);
+  }
+  const actual = treeSha256(files);
+  if (actual !== MANIFEST.officialTreeSha256) throw new Error(`Official source tree SHA-256 mismatch: ${actual}`);
+  return actual;
+}
+
 function ensureOfficialIdentity(sourceRoot, archiveSha) {
   const packageJson = JSON.parse(fs.readFileSync(path.join(sourceRoot, 'package.json'), 'utf8'));
   if (packageJson.version !== MANIFEST.officialVersion) throw new Error(`Expected official package ${MANIFEST.officialVersion}, received ${packageJson.version}.`);
@@ -99,33 +120,11 @@ function applyPatch(sourceRoot) {
   ].filter(relative => original.has(relative));
   if (forbiddenExisting.length) throw new Error(`Patch files already exist in the official archive: ${forbiddenExisting.join(', ')}`);
 
-  const appPath = path.join(sourceRoot, 'src', 'app.js');
-  let app = fs.readFileSync(appPath, 'utf8');
-  app = replaceExactly(app,
-    "const state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: localStorage.getItem('contentSource') || 'reanime',",
-    "const savedContentSource = localStorage.getItem('contentSource');\nconst state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: savedContentSource === 'integrated' ? (localStorage.getItem('contentSourceProvider') || 'reanime') : (savedContentSource || 'reanime'),",
-    'src/app.js source-mode bootstrap');
-  fs.writeFileSync(appPath, app, 'utf8');
-
-  const htmlPath = path.join(sourceRoot, 'src', 'index.html');
-  let html = fs.readFileSync(htmlPath, 'utf8');
-  html = replaceExactly(html,
-    '<link rel="stylesheet" href="styles.css" />',
-    '<link rel="stylesheet" href="styles.css" />\n  <link rel="stylesheet" href="integrated-search.css" />',
-    'src/index.html Patch 03 stylesheet');
-  html = replaceExactly(html,
-    '<button data-value="miruro">Miruro</button></div><p>선택한 사이트의 애니 목록·제목·회차·영상 소스를 함께 사용합니다.</p>',
-    '<button data-value="miruro">Miruro</button><button data-value="integrated">통합</button></div><p>개별 공급원은 선택한 사이트만 사용하고, 통합은 RE:Anime·Miruro·Animenosub·애니24·링크애니 결과를 작품별로 묶습니다. Linkkf는 개별 모드로 유지됩니다.</p>',
-    'src/index.html integrated setting button');
-  html = replaceExactly(html,
-    '<option value="miruro">Miruro</option></select>',
-    '<option value="miruro">Miruro</option><option value="integrated">통합</option></select>',
-    'src/index.html integrated native option');
-  html = replaceExactly(html,
-    '<script src="app.js"></script>',
-    '<script src="integrated-search.js"></script>\n  <script src="app.js"></script>\n  <script src="patch03-bridge.js"></script>',
-    'src/index.html Patch 03 script order');
-  fs.writeFileSync(htmlPath, html, 'utf8');
+  for (const connection of MANIFEST.connections) {
+    const target = relativeSafe(sourceRoot, connection.file);
+    const content = fs.readFileSync(target, 'utf8');
+    fs.writeFileSync(target, replaceExactly(content, connection.before, connection.after, connection.description), 'utf8');
+  }
 
   for (const module of MANIFEST.runtimeModules) {
     const input = relativeSafe(PROJECT_ROOT, module.source);
@@ -312,6 +311,7 @@ function prepareOne({ archive, archiveSha, sessionRoot, label }) {
   const extraction = path.join(sessionRoot, `${label}-extracted`);
   const sourceRoot = extractArchive(archive, extraction);
   const packageJson = ensureOfficialIdentity(sourceRoot, archiveSha);
+  const officialTree = verifyOfficialTree(inventory(sourceRoot));
   const before = applyPatch(sourceRoot);
   const checked = verifyChangedFiles(sourceRoot, before);
   const officialContracts = verifyOfficialContracts(sourceRoot);
@@ -329,6 +329,7 @@ function prepareOne({ archive, archiveSha, sessionRoot, label }) {
     officialCommit: MANIFEST.officialCommit,
     archiveSha256: archiveSha,
     packageVersion: packageJson.version,
+    officialTreeSha256: officialTree,
     packageLockSha256: sha256(path.join(sourceRoot, 'package-lock.json')),
     createdAt: new Date().toISOString()
   }, null, 2), 'utf8');
@@ -358,7 +359,7 @@ function compareRuns(first, second) {
 }
 
 async function main(argv = process.argv.slice(2)) {
-  if (process.platform !== 'win32') throw new Error('This validator is Windows-only because it uses the pinned OS Temp and PowerShell archive extraction.');
+  if (process.platform !== 'win32') throw new Error('This validator is Windows-only because it uses the pinned OS Temp and Windows tar.exe archive extraction.');
   const project = safety.assertProjectWorkingDirectory(PROJECT_ROOT_EXPECTED, process.cwd());
   if (!safety.isSameOrWithin(PROJECT_ROOT, project) || !safety.isSameOrWithin(project, PROJECT_ROOT)) throw new Error('Validator script root does not match the required development project.');
   const options = parseArgs(argv);
@@ -400,6 +401,7 @@ async function main(argv = process.argv.slice(2)) {
     officialVersion: MANIFEST.officialVersion,
     officialCommit: MANIFEST.officialCommit,
     archiveSha256: archiveSha,
+    officialTreeSha256: first.officialTreeSha256,
     appRuntimeModifiedFiles: first.changedOfficialFiles,
     appRuntimeAddedFiles: first.addedRuntimeFiles,
     appRuntimeRemovedFiles: first.removedOfficialFiles,
@@ -434,4 +436,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { parseArgs, replaceExactly, listFiles, inventory, verifyChangedFiles, verifyOfficialContracts };
+module.exports = { parseArgs, replaceExactly, listFiles, inventory, treeSha256, verifyOfficialTree, applyPatch, verifyChangedFiles, verifyOfficialContracts };
