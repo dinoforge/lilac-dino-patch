@@ -1,0 +1,45 @@
+{
+  "officialRepository": "https://github.com/whispelyn-byte/LilacAnime-desktop",
+  "officialVersion": "0.5.54",
+  "officialCommit": "e4ac62214f5c4863eebae5052633e7f9f33dcbaa",
+  "officialArchiveSha256": "007B0141D416614829DACF5494CFC44FD2A1EA80AA58E7E50C856D0FCDBF27CD",
+  "officialConnectionFiles": [
+    "src/app.js",
+    "src/index.html"
+  ],
+  "runtimeModules": [
+    {
+      "source": "src/integrated-search.js",
+      "destination": "src/integrated-search.js",
+      "sha256": "60E2D484926549531933329751A3C16A582B507371762260B00753148C45527D"
+    },
+    {
+      "source": "src/integrated-search.css",
+      "destination": "src/integrated-search.css",
+      "sha256": "FA2513F3D8652395E4B6E5275F07C6789E0A2D49008BCED7AA708B6273A24899"
+    },
+    {
+      "source": "patches/patch03/patch03-bridge.js",
+      "destination": "src/patch03-bridge.js",
+      "sha256": "2874DBB5B6437EF417127727A195CE9911615F974116FB02229339F2A8E796CD"
+    }
+  ],
+  "officialRuntimeModifiedAllowlist": [
+    "src/app.js",
+    "src/index.html"
+  ],
+  "officialApis": [
+    {
+      "name": "providerCatalog",
+      "channel": "provider:catalog"
+    },
+    {
+      "name": "providerDetail",
+      "channel": "provider:detail"
+    },
+    {
+      "name": "providerResolve",
+      "channel": "provider:resolve"
+    }
+  ]
+}
