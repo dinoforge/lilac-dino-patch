@@ -8,6 +8,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { createLocalAi, LOCAL_AI_LICENSE_ERROR, promptVersion } = require('./local-ai.cjs');
 const { characterTerms } = require('./anime-glossary.cjs');
+const anthropic = require('./anthropic-api.cjs');
 
 const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta';
 const PROMPT_VERSION = 'prompt-3', LOCAL_PROMPT_VERSION = 'local-4';
@@ -58,12 +59,13 @@ function dropCaptions(text) {
 // The translation APIs (with the Korean particles their names take) and how each is fed: Gemini gets a whole episode
 // (a few hundred short lines) in one request where possible, since its free tier allows only a few requests a minute
 // and a few dozen a day; OpenAI and Qwen answer shorter batches faster and stay within their output limits; DeepL takes
-// at most 50 texts a request.
+// at most 50 texts a request; Claude takes long batches, but a new key's per-minute output allowance is small.
 const CLOUDS = {
   gemini: { name: 'Gemini', eul: '를', ro: '로', lines: 600, chars: 30000, parallel: 2 },
   openai: { name: 'OpenAI', eul: '를', ro: '로', lines: 150, chars: 9000, parallel: 4 },
   deepl: { name: 'DeepL', eul: '을', ro: '로', lines: 50, chars: 20000, parallel: 2 },
-  qwen: { name: 'Qwen', eul: '을', ro: '으로', lines: 100, chars: 6000, parallel: 4 }
+  qwen: { name: 'Qwen', eul: '을', ro: '으로', lines: 100, chars: 6000, parallel: 4 },
+  claude: { name: 'Claude', eul: '를', ro: '로', lines: 200, chars: 12000, parallel: 3 }
 };
 const LOCAL_ENGINE = { name: '로컬 AI', eul: '를', ro: '로' };
 const QWEN_API = { international: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', china: 'https://dashscope.aliyuncs.com/compatible-mode/v1' };
@@ -90,11 +92,12 @@ function createTranslator(userData) {
     let value = {}; try { value = JSON.parse(fs.readFileSync(fs.existsSync(settingsFile) ? settingsFile : oldSettingsFile, 'utf8')) || {}; } catch { /* defaults */ }
     const text = name => String(value[name] || '').trim(), list = name => Array.isArray(value[name]) ? value[name] : [];
     return { key: text('key'), model: text('model'), models: list('models'), translateDownloads: value.translateDownloadsChosen ? value.translateDownloads === true : true, translateDownloadsChosen: Boolean(value.translateDownloadsChosen),
-      // The API the 번역 API buttons use, and each API's key (and model, for OpenAI and Qwen; Qwen's region too).
+      // The API the 번역 API buttons use, and each API's key (and model, for OpenAI, Qwen and Claude; Qwen's region too).
       cloud: Object.hasOwn(CLOUDS, value.cloud) ? value.cloud : 'gemini',
       openaiKey: text('openaiKey'), openaiModel: text('openaiModel'), openaiModels: list('openaiModels'),
       deeplKey: text('deeplKey'),
       qwenKey: text('qwenKey'), qwenModel: text('qwenModel'), qwenModels: list('qwenModels'), qwenRegion: value.qwenRegion === 'china' ? 'china' : 'international',
+      claudeKey: text('claudeKey'), claudeModel: text('claudeModel'), claudeModels: list('claudeModels'),
       localModel: installedModel(String(value.localModel || 'gemma-4-e4b')),
       // The next episode is made ready ahead by the local AI when it translates; by the API only when this is on (it
       // spends the API's allowance on an episode that may not be watched).
@@ -109,7 +112,7 @@ function createTranslator(userData) {
       // older settings still: on = whichever is set up).
       jimakuTranslate: value.jimakuTranslate === 'gemini' ? 'cloud' : ['off', 'cloud', 'local'].includes(value.jimakuTranslate) ? value.jimakuTranslate : value.autoJimaku === false ? 'off' : 'cloud' };
   };
-  const keyOf = (value, api) => ({ gemini: value.key, openai: value.openaiKey, deepl: value.deeplKey, qwen: value.qwenKey })[api];
+  const keyOf = (value, api) => ({ gemini: value.key, openai: value.openaiKey, deepl: value.deeplKey, qwen: value.qwenKey, claude: value.claudeKey })[api];
   // The API side is ready when any API has a key: the picked one is asked first, the others take over.
   const cloudKey = value => keyOf(value, value.cloud) || Object.keys(CLOUDS).map(api => keyOf(value, api)).find(Boolean);
   // With the local AI the installed model list is part of the settings the page shows, and the player needs to know
@@ -203,7 +206,8 @@ function createTranslator(userData) {
     if ('qwenRegion' in change && ['international', 'china'].includes(change.qwenRegion)) next.qwenRegion = change.qwenRegion;
     if ('openaiModel' in change && next.openaiModels.includes(change.openaiModel)) next.openaiModel = change.openaiModel;
     if ('qwenModel' in change && (next.qwenModels.includes(change.qwenModel) || !next.qwenModels.length)) next.qwenModel = String(change.qwenModel || '').trim();
-    // A new key is checked before it is kept: OpenAI and Qwen by listing the models it can use, DeepL by its usage.
+    if ('claudeModel' in change && next.claudeModels.includes(change.claudeModel)) next.claudeModel = change.claudeModel;
+    // A new key is checked before it is kept: OpenAI, Qwen and Claude by listing usable models, DeepL by its usage.
     if ('openaiKey' in change && String(change.openaiKey || '').trim() !== current.openaiKey) {
       next.openaiKey = String(change.openaiKey || '').trim(); next.openaiModels = []; next.openaiModel = '';
       if (next.openaiKey) {
@@ -228,6 +232,14 @@ function createTranslator(userData) {
         }
         if (!models.length) throw new Error('이 키로 쓸 수 있는 Qwen 모델이 없습니다.');
         Object.assign(next, { qwenModels: models, qwenModel: models.includes('qwen-plus') ? 'qwen-plus' : models.find(id => /plus/.test(id)) || models[0] || 'qwen-plus' });
+      }
+    }
+    if ('claudeKey' in change && String(change.claudeKey || '').trim() !== current.claudeKey) {
+      next.claudeKey = String(change.claudeKey || '').trim(); next.claudeModels = []; next.claudeModel = '';
+      if (next.claudeKey) {
+        const models = await anthropic.listModels(next.claudeKey, fetch);
+        if (!models.length) throw new Error('이 키로 쓸 수 있는 Claude 모델이 없습니다.');
+        Object.assign(next, { claudeModels: models, claudeModel: models.includes(change.claudeModel) ? change.claudeModel : anthropic.defaultModel(models) });
       }
     }
     if ('localModel' in change) {
@@ -352,11 +364,18 @@ function createTranslator(userData) {
       return root.choices?.[0]?.message?.content || '';
     }, signal);
   }
+  // Claude uses the official SDK adapter. Ask for structured output with low effort first, then
+  // fall back to a schema-only or plain request for models that do not support those options.
+  async function askClaude(settings, model, instructions, input, signal) {
+    const schema = { type: 'object', properties: { lines: { type: 'array', items: { type: 'object', properties: { i: { type: 'integer' }, t: { type: 'string' } }, required: ['i', 't'], additionalProperties: false } } }, required: ['lines'], additionalProperties: false };
+    const shapes = [{ effort: 'low', schema, fallback: true }, { schema }, {}];
+    return askWithShapes(`claude:${model}`, shapes, shape => anthropic.translate({ key: settings.claudeKey, model, instructions, input, shape, signal, fetch }), signal);
+  }
   async function askWithShapes(id, shapes, run, signal) {
     let last = null;
     for (let index = workingRequest.get(id) || 0; index < shapes.length; index++) {
       try { const text = await retried(() => run(shapes[index]), signal); if (text) { workingRequest.set(id, index); return text; } last = new Error('API가 빈 응답을 보냈습니다.'); }
-      catch (error) { last = error; if (error.name === 'AbortError' || error.status !== 400) throw error; }
+      catch (error) { last = error; if (error.name === 'AbortError' || error.status !== 400 || error.billing) throw error; }
     }
     throw last;
   }
@@ -376,12 +395,12 @@ function createTranslator(userData) {
   // model left, so the next API or the local AI takes over as before. A used-up model is passed over until Gemini's
   // allowance resets (midnight Pacific time; a per-minute limit that asks for a long wait, five minutes), or for an hour
   // on the others. A model the API is too busy to answer (503, "high demand", seen on Gemini's free tier) hands over too,
-  // and is passed over for five minutes.
+  // Claude rate limits are passed over for five minutes; other exhausted providers are passed over for an hour.
   const spent = new Map(); // `${api}:${model}` -> until
   const usedUp = (api, error) => error.status === 404 || (error.status === 429 && !(api === 'openai' && /insufficient_quota|billing|exceeded your current quota/i.test(error.message))) || (api === 'qwen' && error.status === 403 && /quota|free ?tier/i.test(error.message));
   const busy = error => error.status >= 500 || error.name === 'TimeoutError';
   const spentUntil = (api, error) => {
-    if (busy(error) || (api === 'gemini' && error.status === 429 && !error.daily)) return Date.now() + 300000;
+    if (busy(error) || (api === 'gemini' && error.status === 429 && !error.daily) || (api === 'claude' && error.status === 429)) return Date.now() + 300000;
     if (api !== 'gemini') return Date.now() + 3600000;
     const pacific = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
     return Date.now() + (86400 - (pacific.getHours() * 3600 + pacific.getMinutes() * 60 + pacific.getSeconds())) * 1000;
@@ -392,6 +411,7 @@ function createTranslator(userData) {
     const others = api === 'gemini' ? ranked(settings.models, name => !/flash/.test(name) || /transcribe|customtools|image|tts|live|audio/.test(name) ? -1 : (/lite/.test(name) ? 2 : 0) + (/preview/.test(name) ? 1 : 0))
       : api === 'openai' ? ranked(settings.openaiModels, name => /mini/.test(name) ? 0 : /nano/.test(name) ? 1 : -1)
       : api === 'qwen' ? ranked(settings.qwenModels, name => { const kind = /plus/.test(name) ? 0 : /flash/.test(name) ? 2 : /turbo/.test(name) ? 4 : -1; return kind < 0 ? -1 : kind + (/\d{4}-?\d{2}-?\d{2}|\d{4}$/.test(name) ? 1 : 0); })
+      : api === 'claude' ? ranked(settings.claudeModels, name => anthropic.familyOf(name) === anthropic.familyOf(model) ? 0 : -1)
       : [];
     const chain = [model, ...others.filter(name => name !== model)].filter(name => !isSpent(api, name));
     return chain.length ? chain : [model];
@@ -426,7 +446,7 @@ function createTranslator(userData) {
       if (api === 'deepl') { const texts = await askDeepl(settings, group.map(line => line.text), context, signal); return group.map((line, index) => ({ i: line.i, t: texts[index] })); }
       if (api === 'gemini') return answerItems(await generate(settings.key, model, system(context), JSON.stringify(group.map(line => ({ i: line.i, t: line.text }))), signal));
       const input = JSON.stringify({ lines: group.map(line => ({ i: line.i, t: line.text })) }), instructions = system(context, true);
-      return answerItems(api === 'openai' ? await askOpenai(settings, model, instructions, input, signal) : await askQwen(settings, model, instructions, input, signal));
+      return answerItems(api === 'openai' ? await askOpenai(settings, model, instructions, input, signal) : api === 'claude' ? await askClaude(settings, model, instructions, input, signal) : await askQwen(settings, model, instructions, input, signal));
     };
     let fatal = null, active = 0;
     progress(0, lines.length);
@@ -538,7 +558,10 @@ function createTranslator(userData) {
   // (the cue's text in the file, the translated cue's), a few at a time, so the player can show them before the rest is
   // done; control.done() gives all of them. fresh: made again (다시 번역), the saved translation and the lines kept from an
   // earlier run passed over; the new one takes the saved one's place.
-  async function translateOnce({ file, title = '', provider = '', context = {}, signal = null, progress = () => {}, status = () => {}, playing = 0, onLines = () => {}, control = {}, fresh = false, only = false, anySide = false }) {
+  // linesKey keeps partial subtitles (Whisper's still-growing VTT) keyed to the
+  // same subtitle source; partial runs keep line translations but never write a
+  // playable result until the source is complete.
+  async function translateOnce({ file, title = '', provider = '', context = {}, signal = null, progress = () => {}, status = () => {}, playing = 0, onLines = () => {}, control = {}, fresh = false, only = false, anySide = false, linesKey = '', partial = false }) {
     const settings = read(), wanted = provider || autoProvider() || 'cloud';
     // The engines in the order they are tried: an API's name, or 'local'.
     const apis = [settings.cloud, ...Object.keys(CLOUDS).filter(api => api !== settings.cloud)].filter(api => keyOf(settings, api));
@@ -547,7 +570,7 @@ function createTranslator(userData) {
     if (!order.length) throw new Error(wanted === 'local' ? '설정 > 자막 자동 번역에서 로컬 AI 모델을 먼저 받아 주세요.' : `설정 > 자막 자동 번역에서 ${CLOUDS[settings.cloud].name} API 키를 넣어 주세요.`);
     const localModel = local.models().find(item => item.id === settings.localModel);
     // A Gemini model is named as before (so translations made then are still found); the other APIs by their name.
-    const modelFor = api => ({ gemini: settings.model || defaultModel(settings.models) || 'gemini-flash-latest', openai: settings.openaiModel, deepl: '', qwen: settings.qwenModel || 'qwen-plus' })[api];
+    const modelFor = api => ({ gemini: settings.model || defaultModel(settings.models) || 'gemini-flash-latest', openai: settings.openaiModel, deepl: '', qwen: settings.qwenModel || 'qwen-plus', claude: settings.claudeModel || anthropic.defaultModel(settings.claudeModels) || anthropic.DEFAULT_MODEL })[api];
     const modelOf = name => name === 'local' ? `local:${localModel.file || localModel.label}` : name === 'gemini' ? modelFor(name) : `${name}${modelFor(name) ? `:${modelFor(name)}` : ''}`;
     const engineOf = name => name === 'local' ? LOCAL_ENGINE : CLOUDS[name];
     // The prompt version is part of the cache key, so a better prompt is not hidden behind older results.
@@ -562,7 +585,7 @@ function createTranslator(userData) {
     // anySide (a translation made by itself, not a button pressed): with none on its own side, a finished one the other
     // side made is taken too (the next episode made ready by the local AI when the API's allowance ran out, opened on
     // the API's side).
-    for (const name of fresh ? [] : [...order.filter(sameSide), ...(anySide ? order.filter(name => !sameSide(name)) : [])]) {
+    for (const name of fresh || partial ? [] : [...order.filter(sameSide), ...(anySide ? order.filter(name => !sameSide(name)) : [])]) {
       const out = path.join(cacheDir, `${hashOf(name)}.vtt`);
       if (!fs.existsSync(out)) continue;
       const models = modelsIn(out);
@@ -604,7 +627,8 @@ function createTranslator(userData) {
     // (lines that failed, the episode or the app closed, the allowance gone) goes on from where it was: only the
     // missing lines are translated again.
     // by: the engine of each line; lineModel: the model that translated it (kept lines: the engine's picked model).
-    const translated = new Map(), by = new Map(), lineModel = new Map(), linesFile = name => path.join(cacheDir, `${hashOf(name)}.lines.json`);
+    const keptName = name => linesKey ? crypto.createHash('sha1').update(`${modelOf(name)}\n${name === 'local' ? LOCAL_PROMPT_VERSION + promptVersion(localModel) : PROMPT_VERSION}\nlines:${linesKey}`).digest('hex').slice(0, 20) : hashOf(name);
+    const translated = new Map(), by = new Map(), lineModel = new Map(), linesFile = name => path.join(cacheDir, `${keptName(name)}.lines.json`);
     for (const name of fresh ? [] : order.filter(sameSide)) {
       let kept = {}; try { kept = JSON.parse(fs.readFileSync(linesFile(name), 'utf8')) || {}; } catch { continue; }
       for (const line of unique) if (!translated.has(line.i) && typeof kept[line.text] === 'string') { translated.set(line.i, kept[line.text]); by.set(line.i, name); lineModel.set(line.i, modelOf(name)); }
@@ -660,6 +684,7 @@ function createTranslator(userData) {
     const models = {};
     for (const i of translated.keys()) { if (silent.has(i)) continue; const model = lineModel.get(i) || modelOf(by.get(i) || main); models[model] = (models[model] || 0) + 1; }
     const ranked = Object.fromEntries(Object.entries(models).sort((a, b) => b[1] - a[1]));
+    if (partial) return { partial: true, engine: engineOf(main).name, failed: unique.length - translated.size, lines: translated.size };
     const written = writeResult(cues, unique, translated, hashOf(main), ranked, new Set([...silent].map(i => unique[i].raw)));
     if (!written.failed) for (const name of used) try { fs.unlinkSync(linesFile(name)); } catch { /* none kept */ }
     const result = { ...written, engine: engineOf(main).name };

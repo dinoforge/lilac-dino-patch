@@ -4,7 +4,7 @@ cd /d "%~dp0..\.."
 
 where python >nul 2>nul
 if errorlevel 1 (
-  echo Python 3 is required. No packages will be installed by this launcher.
+  echo Python is required only for developer source mode. End users should run the packaged DinoPatchManager EXE.
   pause
   exit /b 1
 )

@@ -29,13 +29,52 @@ app.on('browser-window-created', (_event, win) => {
     loaded = true;
     try {
       await new Promise(resolve => setTimeout(resolve, 1500));
-      const state = await win.webContents.executeJavaScript(`({ready:document.readyState, schedule:!!document.querySelector('#scheduleSection'), tabs:document.querySelectorAll('#scheduleTabs [role="tab"]').length, seasonRail:!!document.querySelector('#seasonRail'), detailDialog:!!document.querySelector('#detailDialog')})`);
+      const state = await win.webContents.executeJavaScript(`(async()=>{
+        const claudeChoice=document.querySelector('#cloudChoices [data-value="claude"]');
+        const claudeBlock=document.querySelector('.cloud-block[data-cloud="claude"]');
+        const claudeInput=claudeBlock?.querySelector('#claudeKey');
+        claudeChoice?.click();
+        const dropCaptions=document.querySelector('#dropCaptions');
+        dropCaptions?.click();
+        let cloud='';
+        let dropCaptionsSaved=false;
+        for(let i=0;i<40;i++){
+          const settings=await window.lilac.geminiSettings();
+          cloud=settings.cloud;
+          if(settings.dropCaptions===dropCaptions?.checked)dropCaptionsSaved=true;
+          if(cloud==='claude'&&dropCaptionsSaved)break;
+          await new Promise(resolve=>setTimeout(resolve,50));
+        }
+        const promptExtra=document.querySelector('#promptExtra');
+        const promptRules=document.querySelector('#promptRules');
+        promptExtra.value='isolated smoke extra rule';
+        promptRules.value='isolated smoke replacement rule';
+        promptExtra.dispatchEvent(new Event('input',{bubbles:true}));
+        promptRules.dispatchEvent(new Event('input',{bubbles:true}));
+        document.querySelector('#savePrompt')?.click();
+        let promptSaved=false;
+        for(let i=0;i<40;i++){
+          const settings=await window.lilac.geminiSettings();
+          if(settings.promptExtra==='isolated smoke extra rule'&&settings.promptRules==='isolated smoke replacement rule')promptSaved=true;
+          if(promptSaved)break;
+          await new Promise(resolve=>setTimeout(resolve,50));
+        }
+        return {ready:document.readyState, schedule:!!document.querySelector('#scheduleSection'), tabs:document.querySelectorAll('#scheduleTabs [role="tab"]').length, seasonRail:!!document.querySelector('#seasonRail'), detailDialog:!!document.querySelector('#detailDialog'), claudeOption:Boolean(claudeChoice), claudeInput:Boolean(claudeInput), claudeSelected:claudeChoice?.classList.contains('selected')===true, claudeCloud:cloud, dropCaptionsVisible:Boolean(dropCaptions), dropCaptionsSaved, promptFieldsVisible:Boolean(promptExtra&&promptRules), promptSaved};
+      })()`);
       stage.renderer = state;
       assert.equal(state.ready, 'complete');
       assert.equal(state.schedule, true);
       assert.equal(state.tabs, 7);
       assert.equal(state.seasonRail, true);
       assert.equal(state.detailDialog, true);
+      assert.equal(state.claudeOption, true);
+      assert.equal(state.claudeInput, true);
+      assert.equal(state.claudeSelected, true);
+      assert.equal(state.claudeCloud, 'claude');
+      assert.equal(state.dropCaptionsVisible, true);
+      assert.equal(state.dropCaptionsSaved, true);
+      assert.equal(state.promptFieldsVisible, true);
+      assert.equal(state.promptSaved, true);
       assert.equal(errors.some(message => /Uncaught (?:TypeError|ReferenceError|SyntaxError)/.test(message)), false);
       stage.result = 'PASS';
       stage.appPathsMatch = Object.fromEntries(Object.keys(isolated).map(name => [name, path.resolve(app.getPath(name)) === path.resolve(isolated[name])]));

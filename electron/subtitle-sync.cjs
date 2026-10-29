@@ -163,6 +163,72 @@ function fitScore(cues, speech, move = time => time) {
   }
   return total ? hit / total : 0;
 }
+// Two-piece offset candidate from the shifts already found by ffsubsync.
+function twoParts(lines, speech, a, b) {
+  const cues = lines.slice().sort((x, y) => x[0] - y[0]);
+  const hits = shift => cues.map(cue => fitScore([cue], speech, time => time + shift) * (cue[1] - cue[0]));
+  const before = hits(a), after = hits(b);
+  let head = 0, tail = after.reduce((sum, hit) => sum + hit, 0), end = -Infinity, best = null;
+  for (let k = 1; k < cues.length; k++) {
+    head += before[k - 1]; tail -= after[k - 1]; end = Math.max(end, cues[k - 1][1]);
+    if (cues[k][0] + b < end + a - 1) continue;
+    if (head + tail > (best?.hit ?? Math.max(before.reduce((s, h) => s + h, 0), after.reduce((s, h) => s + h, 0)))) best = { hit: head + tail, k };
+  }
+  return best ? [{ from: cues[0][0], shift: a }, { from: cues[best.k][0], shift: b }] : null;
+}
+// Share of moved subtitle line starts within 300 ms of a reference line start.
+function startScore(lines, starts, move = time => time) {
+  let hit = 0;
+  for (const [start] of lines) {
+    const time = move(start, start); let low = 0, high = starts.length;
+    while (low < high) { const mid = (low + high) >> 1; if (starts[mid] < time - 0.3) low = mid + 1; else high = mid; }
+    if (low < starts.length && starts[low] <= time + 0.3) hit++;
+  }
+  return lines.length ? hit / lines.length : 0;
+}
+function speechHit(speech, from, to) {
+  let low = 0, high = speech.length, hit = 0;
+  while (low < high) { const mid = (low + high) >> 1; if (speech[mid][1] <= from) low = mid + 1; else high = mid; }
+  for (let i = low; i < speech.length && speech[i][0] < to; i++) hit += Math.max(0, Math.min(to, speech[i][1]) - Math.max(from, speech[i][0]));
+  return hit;
+}
+// Find multiple ordered timing parts against a site subtitle track. Each change must win back speech coverage.
+function alignedParts(lines, speech, { reach = 300, penalties = [3, 6, 12] } = {}) {
+  const cues = lines.slice().sort((x, y) => x[0] - y[0]).filter(([start, end]) => end > start), n = cues.length, step = 0.1;
+  if (n < 2 || !speech.length || !(reach > 0)) return [];
+  const count = Math.round(2 * reach / step) + 1, shiftOf = j => Math.round((j * step - reach) * 100) / 100;
+  const hits = new Float32Array(n * count);
+  for (let i = 0; i < n; i++) for (let j = 0; j < count; j++) hits[i * count + j] = speechHit(speech, cues[i][0] + shiftOf(j), cues[i][1] + shiftOf(j));
+  const linesHit = (from, to, shift) => { let hit = 0; for (let i = from; i < to; i++) hit += speechHit(speech, cues[i][0] + shift, cues[i][1] + shift); return hit; };
+  return penalties.filter(penalty => Number.isFinite(penalty) && penalty >= 0).map(penalty => {
+    let prev = new Float64Array(count), next = new Float64Array(count);
+    const switched = new Uint8Array(n * count), source = new Uint16Array(n * count), best = new Float64Array(count), arg = new Uint16Array(count);
+    for (let j = 0; j < count; j++) prev[j] = hits[j];
+    let end = cues[0][1];
+    for (let i = 1; i < n; i++) {
+      for (let j = 0; j < count; j++) if (!j || prev[j] > best[j - 1]) { best[j] = prev[j]; arg[j] = j; } else { best[j] = best[j - 1]; arg[j] = arg[j - 1]; }
+      const gap = cues[i][0] - end;
+      for (let j = 0; j < count; j++) {
+        const limit = Math.min(count - 1, Math.floor((shiftOf(j) + gap + 1 + reach) / step + 1e-6));
+        let value = prev[j];
+        if (limit >= 0 && best[limit] - penalty > value) { value = best[limit] - penalty; switched[i * count + j] = 1; source[i * count + j] = arg[limit]; }
+        next[j] = value + hits[i * count + j];
+      }
+      end = Math.max(end, cues[i][1]); [prev, next] = [next, prev];
+    }
+    let j = 0; for (let k = 1; k < count; k++) if (prev[k] > prev[j]) j = k;
+    const taken = new Array(n);
+    for (let i = n - 1; i >= 0; i--) { taken[i] = j; if (i && switched[i * count + j]) j = source[i * count + j]; }
+    const parts = [];
+    for (let i = 0; i < n; i++) if (!i || taken[i] !== taken[i - 1]) parts.push({ index: i, shift: shiftOf(taken[i]) });
+    return parts.map((part, k) => {
+      const to = k + 1 < parts.length ? parts[k + 1].index : n;
+      let shift = part.shift, top = -1;
+      for (let d = -10; d <= 10; d++) { const value = Math.round((part.shift + d / 100) * 100) / 100, hit = linesHit(part.index, to, value); if (hit > top) { top = hit; shift = value; } }
+      return { from: cues[part.index][0], shift };
+    });
+  });
+}
 // Segments a candidate may keep: each with 8 lines and 45 s of the subtitle at least, never moving a line before the
 // end of the segment before it (lines stay in order), and, against the audio, each new segment starting at an opening
 // or ending (chapters: AniSkip times in the video) within 20 s, as the audio alone split Oshi no Ko 1 at -102 s and
@@ -221,7 +287,8 @@ function parseResult(output) {
   return offset ? { offset: Number(offset[1]), scale: scale ? Number(scale[1]) : 1, score: score ? Number(score[1]) : null } : null;
 }
 
-function createSubtitleSync({ userData, ffmpegPath, managedRoot }) {
+// proxy(url, headers): an FFmpeg-readable address for remote HLS that disguises its media segments.
+function createSubtitleSync({ userData, ffmpegPath, managedRoot, proxy = url => Promise.resolve(url) }) {
   const root = path.join(userData, 'tools', 'ffsubsync'), marker = path.join(root, 'installed.json');
   const venv = path.join(root, 'venv'), exe = path.join(venv, WIN ? 'Scripts' : 'bin', WIN ? 'ffsubsync.exe' : 'ffsubsync');
   const uvEnv = () => ({ ...process.env, UV_CACHE_DIR: path.join(root, 'cache'), UV_PYTHON_INSTALL_DIR: path.join(root, 'python'), UV_NO_PROGRESS: '1' });
@@ -298,7 +365,8 @@ function createSubtitleSync({ userData, ffmpegPath, managedRoot }) {
   // The episode's audio as 16 kHz stereo WAV (the centre is taken from it, see sync); progress from FFmpeg's time=
   // against the duration.
   async function extractAudio(videoUrl, headers, duration, target, status, signal) {
-    const { input, args } = ffmpegInput(videoUrl, headers);
+    const remoteHls = /^https?:\/\//i.test(videoUrl || '') && !/^https?:\/\/127\.0\.0\.1[:/]/i.test(videoUrl || '') && /\.m3u8(?:$|\?)/i.test(videoUrl || '');
+    const { input, args } = ffmpegInput(remoteHls ? await proxy(videoUrl, headers) : videoUrl, headers);
     await run(ffmpegPath, ['-hide_banner', '-nostdin', '-y', ...args, '-i', input, '-map', '0:a:0', '-vn', '-ac', '2', '-ar', '16000', '-c:a', 'pcm_s16le', target], {
       signal, quiet: 90000, onOutput: text => { const time = text.match(/time=(\d+:\d{2}:\d{2}(?:\.\d+)?)/g)?.pop(); if (time && duration > 0) status('영상 음성 읽는 중', Math.min(1, seconds(time.slice(5)) / duration)); },
     });
@@ -357,7 +425,7 @@ function createSubtitleSync({ userData, ffmpegPath, managedRoot }) {
   //   between -1.3 and +44 s.
   // Thresholds from 8 episodes against their site tracks: a right shift raised the score by 0.06 to 0.17 (to 0.89 and
   // over), a subtitle already right by under 0.003.
-  const FIT = { track: { margin: 0.03, floor: 0.6 }, audio: { margin: 0.03, floor: 0.3 } };
+  const FIT = { track: { margin: 0.03, floor: 0.6, split: 0.06 }, audio: { margin: 0.03, floor: 0.3, split: 0.06 } };
   async function sync({ videoUrl, headers = {}, subtitlePath, assPath = null, timingPath = null, references = [], referencePath = null, referenceAssPath = null, chapters = [], duration = 0, background = false, status = () => {} }) {
     if (!subtitlePath || !fs.existsSync(subtitlePath)) throw new Error('자막 파일이 없습니다.');
     const tracks = [...(references || []), ...(referencePath ? [{ path: referencePath, assPath: referenceAssPath }] : [])].filter(track => track?.path && fs.existsSync(track.path));
@@ -420,14 +488,35 @@ function createSubtitleSync({ userData, ffmpegPath, managedRoot }) {
         if (found) candidates.push({ kind: request.split ? 'segments' : request.frameRate ? 'frame-rate' : 'shift', ...found });
         stopped();
       }
+      if (byTrack) for (const parts of alignedParts(cues, speech, { reach: Math.min(300, length) })) {
+        if (parts.length === 1) { candidates.push({ kind: 'aligned', offset: parts[0].shift, scale: 1, segments: null }); continue; }
+        const kept = keptSegments(parts, cues, null, option => fitScore(cues, speech, mover(0, 1, option)));
+        if (kept?.length > 1) candidates.push({ kind: 'aligned', offset: kept[0].shift, scale: 1, segments: kept });
+        else if (kept?.length === 1) candidates.push({ kind: 'aligned', offset: kept[0].shift, scale: 1, segments: null });
+      }
+      const shifts = [...new Set(candidates.filter(candidate => !candidate.segments && candidate.scale === 1).map(candidate => candidate.offset))];
+      for (const a of shifts) for (const b of shifts) {
+        const parts = a !== b ? twoParts(cues, speech, a, b) : null;
+        const kept = parts && keptSegments(parts, cues, byTrack ? null : chapters || []);
+        if (kept?.length > 1) candidates.push({ kind: 'two-part', offset: b, scale: 1, segments: kept });
+      }
       for (const candidate of candidates) candidate.score = fitScore(cues, speech, mover(candidate.offset, candidate.scale, candidate.segments));
       const none = candidates[0], ranked = candidates.slice(1).sort((a, b) => b.score - a.score);
-      // Segments only when they fit clearly better than the best single shift (which is the more precise).
-      let chosen = ranked[0];
       const single = ranked.find(candidate => !candidate.segments);
-      if (chosen?.segments && single && chosen.score - single.score < 0.02) chosen = single;
       const fit = FIT[byTrack ? 'track' : 'audio'], method = byTrack ? 'track' : 'audio';
-      const summary = { none: Math.round(none.score * 1000) / 1000, chosen: chosen ? Math.round(chosen.score * 1000) / 1000 : null, tried: candidates.map(c => ({ kind: c.kind, offset: c.offset, scale: c.scale, segments: c.segments, score: Math.round(c.score * 1000) / 1000 })) };
+      const move = candidate => mover(candidate.offset, candidate.scale, candidate.segments);
+      const starts = byTrack ? [...new Set(vttCues(best.vtt).map(([start]) => start))].sort((a, b) => a - b) : null;
+      for (const candidate of single ? ranked.filter(item => item.segments) : []) {
+        const gains = candidate.segments.map((part, i) => {
+          const lines = cues.filter(([start]) => start >= (i ? part.from : -Infinity) && (i + 1 >= candidate.segments.length || start < candidate.segments[i + 1].from));
+          if (!lines.length || lines.every(([start]) => Math.abs(move(candidate)(start, start) - move(single)(start, start)) <= 0.3)) return null;
+          const overlap = fitScore(lines, speech, move(candidate)) - fitScore(lines, speech, move(single));
+          return starts ? Math.min(overlap, startScore(lines, starts, move(candidate)) - startScore(lines, starts, move(single))) : overlap;
+        }).filter(gain => gain != null);
+        candidate.gain = gains.length ? Math.min(...gains) : 0;
+      }
+      const chosen = ranked.find(candidate => !candidate.segments || candidate.gain >= fit.split);
+      const summary = { none: Math.round(none.score * 1000) / 1000, chosen: chosen ? Math.round(chosen.score * 1000) / 1000 : null, tried: candidates.map(c => ({ kind: c.kind, offset: c.offset, scale: c.scale, segments: c.segments, score: Math.round(c.score * 1000) / 1000, ...(c.gain != null ? { gain: Math.round(c.gain * 1000) / 1000 } : {}) })) };
       if (!chosen || chosen.score < fit.floor) {
         if (none.score >= fit.floor) return { offset: 0, scale: 1, segments: null, method, scores: summary, unchanged: true };
         throw Object.assign(new Error('이 자막이 영상과 맞는 위치를 찾지 못해 그대로 뒀어요 (다른 판본이나 다른 회차의 자막일 수 있어요).'), { uncertain: true, scores: summary });
@@ -463,4 +552,4 @@ function createSubtitleSync({ userData, ffmpegPath, managedRoot }) {
   return { installed, install, sync, retime, cancel, stop, running: () => Boolean(running) };
 }
 
-module.exports = { createSubtitleSync, retimeVtt, retimeAss, parseResult, vttCues, dialogueVtt, assDialogueVtt, assSpeech, segmentsOf, keptSegments, shiftAt, mover, merged, fitScore, spokenVtt };
+module.exports = { createSubtitleSync, retimeVtt, retimeAss, parseResult, vttCues, dialogueVtt, assDialogueVtt, assSpeech, segmentsOf, keptSegments, shiftAt, mover, merged, fitScore, twoParts, startScore, alignedParts, spokenVtt };

@@ -8,6 +8,9 @@ let playerLocked = false, unlockTimer = null, usingKeyboard = false;
 // Focus is only moved into menus for keyboard/remote users; mouse users would just see a stray focus ring.
 window.addEventListener('keydown', () => { usingKeyboard = true; }, true);
 window.addEventListener('pointerdown', () => { usingKeyboard = false; }, true);
+// A control focused by a click keeps arrow keys from being treated as remote navigation.
+let focusByPointer = false;
+window.addEventListener('focusin', () => { focusByPointer = !usingKeyboard; }, true);
 const autoSkipState = { enteredKey: null, enteredAt: 0, pausedAt: null, skippedKey: null, manualSeekTime: null };
 
 const PLAYER_ASPECTS = { original: 0, '16:9': 16 / 9, '21:9': 21 / 9, '4:3': 4 / 3, fill: 0 };
@@ -25,7 +28,7 @@ function applyPlayerAspect() {
   $('#video').style.objectFit = aspect === 'original' ? 'contain' : 'fill';
   $$('#psAspects button').forEach(button => { const selected = button.dataset.aspect === aspect; button.classList.toggle('selected', selected); button.setAttribute('aria-pressed', String(selected)); });
   window.LilacAss?.resize();
-  window.LilacAnime4K?.layout();
+  window.LilacAnime4K?.layout(); window.LilacCleanup?.layout();
 }
 new ResizeObserver(applyPlayerAspect).observe($('#immersivePlayer'));
 $('#video').addEventListener('loadedmetadata', applyPlayerAspect);
@@ -60,6 +63,8 @@ function openPlayerSettings(open, focusSection = null) {
 
 // Mirrors the settings page so both edit the same stored values.
 function syncPlayerSettingsUI() {
+  window.LilacAnime4K?.syncUI(); window.LilacCleanup?.syncUI();
+  $('#arrowVolume').checked = playerFlag('arrowVolume');
   $('#psSkipButton').checked = playerFlag('playerSkipButton');
   $('#psAutoSkip').checked = playerFlag('playerAutoSkip', false);
   $('#assEffectsHint').textContent = assEffectsEnabled() ? '노래 가사·간판 번역 등의 위치·색·움직임을 그대로 보여 줍니다' : '효과를 줄여 가볍게 보여 줍니다 (영상이 버벅일 때)';
@@ -241,6 +246,8 @@ async function switchSubtitleSource(source, selectionRequestId, requestId) {
   const isCurrentSelection = () => requestId === playbackRequestId && selectionRequestId === subtitleSelectionRequestId;
   // Jimaku is picked by hand per episode (a list of files), so it is not kept as the default source.
   if (source === 'jimaku') { openJimaku(); return; }
+  // Whisper recognizes this episode's speech on this PC; pressing its source chip again stops recognition.
+  if (source === 'whisper') { currentPlaybackContext.sheetSource = null; startWhisper(true); return; }
   // AI 번역: the episode's machine translation, else one made now from the best source (Jimaku, then the site's Japanese
   // and English tracks), with the side 자막 자동 번역 picks or whichever is set up; the series goes on in it. Not kept as
   // the default source (each episode's translation is looked for first anyway).
@@ -416,6 +423,17 @@ function seekPlayer(time) {
   autoSkipState.manualSeekTime = time;
   $('#video').currentTime = time;
 }
+// Keyboard seeks show their destination without covering the episode with the full control bar.
+let seekHint = null;
+function showSeekHint(seconds, time) {
+  const el = $('#playerSeekHint'); if (!el) return;
+  const now = Date.now(), side = seconds == null ? 'jump' : seconds < 0 ? 'back' : 'forward';
+  const total = side !== 'jump' && seekHint?.side === side && now - seekHint.at < 1000 ? seekHint.total + seconds : seconds;
+  clearTimeout(seekHint?.timer);
+  el.replaceChildren(...(side === 'jump' ? [] : [Object.assign(document.createElement('b'), { textContent: `${total > 0 ? '+' : '−'}${Math.abs(total)}초` })]), Object.assign(document.createElement('span'), { textContent: formatTime(time) }));
+  el.className = `player-seek-hint ${side}`; void el.offsetWidth; el.classList.add('show');
+  seekHint = { side, total, at: now, timer: setTimeout(() => { el.classList.remove('show'); seekHint = null; }, 800) };
+}
 function resetAutoSkipState() {
   Object.assign(autoSkipState, { enteredKey: null, enteredAt: 0, pausedAt: null, skippedKey: null, manualSeekTime: null });
 }
@@ -547,7 +565,7 @@ function drawPipFrame() {
   const width = Math.min(sourceWidth, 1280), height = Math.max(1, Math.round(width / ratio));
   if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, width, height);
-  if (video.readyState >= 2) ctx.drawImage(window.LilacAnime4K?.frame() || video, 0, 0, width, height);
+  if (video.readyState >= 2) ctx.drawImage(window.LilacAnime4K?.frame() || window.LilacCleanup?.frame() || video, 0, 0, width, height);
   if (!$('#subtitleEnabled')?.checked) return;
   if (currentSubtitle?.assRendering) { const ass = window.LilacAss?.frame(video); if (ass?.width) ctx.drawImage(ass, 0, 0, width, height); }
   else drawPipCues(ctx, width, height, video);
@@ -707,7 +725,7 @@ for (const name of ['pause', 'ended', 'emptied', 'loadstart']) $('#video').addEv
 function handlePlayerKey(event) {
   const video = $('#video'), key = event.key, player = $('#immersivePlayer');
   if (playerLocked) { event.preventDefault(); flashUnlockButton(); return; }
-  const focusInPlayer = player.contains(document.activeElement) && document.activeElement !== video;
+  const focusInPlayer = player.contains(document.activeElement) && document.activeElement !== video && !focusByPointer;
   const typing = document.activeElement?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) && !['checkbox', 'range'].includes(document.activeElement?.type);
   if (key === 'Escape' || key === 'BrowserBack' || key === 'GoBack') {
     finishSpaceHold(false);
@@ -731,7 +749,14 @@ function handlePlayerKey(event) {
   if (arrow === 'left' || arrow === 'right') {
     event.preventDefault();
     const seconds = Number(localStorage.getItem('seekSeconds') || 10) * (arrow === 'left' ? -1 : 1);
-    seekPlayer(Math.min(video.duration || Infinity, Math.max(0, video.currentTime + seconds))); showPlayerControls(); return;
+    const target = Math.min(video.duration || Infinity, Math.max(0, video.currentTime + seconds));
+    seekPlayer(target); showSeekHint(seconds, target); return;
+  }
+  if (arrow && playerFlag('arrowVolume')) {
+    event.preventDefault();
+    const level = Math.round(Math.max(0, Math.min(1, (video.muted ? 0 : video.volume) + (arrow === 'up' ? .05 : -.05))) * 100);
+    const slider = $('#playerVolume'); slider.value = String(level); slider.dispatchEvent(new Event('input'));
+    toast(level ? `볼륨 ${level}%` : '음소거'); return;
   }
   if (arrow) { event.preventDefault(); showPlayerControls(); $('#togglePlayer').focus(); return; }
   if (event.code === 'Space' || key === ' ') {
@@ -757,7 +782,7 @@ function handlePlayerKey(event) {
   }
   if (letter === 'p') { takeScreenshot(); return; }
   if (letter === 's') { const skip = $('#skipNow'); if (skip && !skip.classList.contains('hidden')) skip.click(); else toast('지금은 건너뛸 OP/ED 구간이 아니에요'); return; }
-  if (/^[0-9]$/.test(letter) && video.duration) { seekPlayer(video.duration * Number(letter) / 10); showPlayerControls(); return; }
+  if (/^[0-9]$/.test(letter) && video.duration) { const target = video.duration * Number(letter) / 10; seekPlayer(target); showSeekHint(null, target); return; }
   if (letter === '[' || letter === ']') {
     finishSpaceHold(false);
     const at = SPEED_OPTIONS.indexOf(video.playbackRate), next = SPEED_OPTIONS[Math.max(0, Math.min(SPEED_OPTIONS.length - 1, (at < 0 ? SPEED_OPTIONS.indexOf(1) : at) + (letter === ']' ? 1 : -1)))];
@@ -779,7 +804,7 @@ async function takeScreenshot() {
   const name = `${($('#playerTitle').textContent || 'LilacAnime').trim()} ${time}`;
   let data = '';
   try {
-    const source = window.LilacAnime4K?.frame() || video;
+    const source = window.LilacAnime4K?.frame() || window.LilacCleanup?.frame() || video;
     const canvas = document.createElement('canvas'); canvas.width = source.width || video.videoWidth; canvas.height = source.height || video.videoHeight;
     canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height); data = canvas.toDataURL('image/png');
   } catch { /* a tainted canvas: taken from the window below */ }
@@ -887,6 +912,7 @@ $('#unlockPlayer').onclick = event => { event.stopPropagation(); setPlayerLocked
 // Settings stay open while the pointer is on them; a click on the video closes them (Android dropdown).
 $('#playerSettings').addEventListener('pointerdown', event => event.stopPropagation());
 $('#video').addEventListener('ratechange', () => { if (playerSettingsOpen()) syncPlayerSettingsUI(); });
+window.LilacCleanup?.init({ getAspect: playerAspect, notify: toast });
 window.LilacAnime4K?.init({ getAspect: playerAspect, notify: toast });
 syncPlayerSettingsUI();
 applyPlayerAspect();

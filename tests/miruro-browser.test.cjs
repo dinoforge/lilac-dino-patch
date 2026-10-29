@@ -6,7 +6,7 @@ test('document transport shares bootstrap and preserves binary bytes and error s
  let windows=0,loads=0;const requests=[];
  const binary=Buffer.from([0,255,128,13,10,42]);
  class Window extends EventEmitter{
-  constructor(options){super();windows++;assert.equal(options.show,false);assert.equal(options.webPreferences.nodeIntegration,false);this.webContents=new EventEmitter();this.webContents.setWindowOpenHandler=()=>{};this.webContents.mainFrame={executeJavaScript:async script=>vm.runInNewContext(script,{location:{origin:'https://www.miruro.to'},fetch:async(url,options)=>{requests.push(url);assert.equal(options.credentials,'include');return new Response(binary,{status:requests.length===3?400:200,headers:{'content-type':'application/octet-stream'}})},AbortSignal,Uint8Array,String,Array,btoa})};}
+  constructor(options){super();windows++;assert.equal(options.show,false);assert.equal(options.webPreferences.nodeIntegration,false);this.webContents=new EventEmitter();this.webContents.setWindowOpenHandler=()=>{};this.webContents.mainFrame={executeJavaScript:async script=>vm.runInNewContext(script,{location:{origin:'https://www.miruro.to'},fetch:async(url,options)=>{requests.push(url);assert.equal(options.credentials,'include');const status=Number(new URL(url).searchParams.get('status'))||200;return new Response(binary,{status,headers:{'content-type':'application/octet-stream'}})},AbortSignal,Uint8Array,String,Array,btoa})};}
   async loadURL(){loads++;setImmediate(()=>this.webContents.emit('dom-ready'))}
   isDestroyed(){return Boolean(this.dead)}
   destroy(){this.dead=true;this.emit('closed')}
@@ -16,9 +16,12 @@ test('document transport shares bootstrap and preserves binary bytes and error s
  const results=await Promise.all(urls.map(request));
  assert.equal(windows,1);assert.equal(loads,1);
  results.forEach(result=>{assert.equal(result.response.status,200);assert.deepEqual(result.body,binary)});
- const bad=await request(urls[0]);assert.equal(bad.response.ok,false);assert.equal(bad.response.status,400);
+ for(const status of [403,429]){
+  const denied=await request(`https://www.miruro.to/api/v1/anime?status=${status}`);
+  assert.equal(denied.response.ok,false);assert.equal(denied.response.status,status);
+ }
  await assert.rejects(request('https://example.com/api/v1/anime'),/허용되지/);
- assert.equal(windows,1);
+ assert.equal(windows,1,'access-denied responses do not open a verification window or retry on another host');
  request.close();
  await request(urls[0]);assert.equal(windows,2);request.close();
 });

@@ -14,6 +14,8 @@ import sys
 import tarfile
 import tempfile
 import time
+import urllib.error
+import urllib.request
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -22,6 +24,13 @@ from typing import Any, Callable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_PROJECT_ROOT = Path(r"D:\Codex-Coding-Folder\LilacAnime-Player")
+IS_FROZEN = bool(getattr(sys, "frozen", False))
+_LAST_THEME_DIAGNOSTIC: tuple[str, str] | None = None
+MANAGER_VERSION = "1.2.4"
+PATCH_VERSION = "1.0.0"
+MANAGER_FOLDER_NAME = "DinoPatchManager"
+PATCH_STATE_RELATIVE = Path("state") / "patch-state.json"
+PATCH_HISTORY_RELATIVE = Path("state") / "operations.jsonl"
 MANIFEST_RELATIVE = Path("patches") / "patch03" / "manifest.json"
 VALIDATOR_RELATIVE = Path("scripts") / "validate-patch03-clean-source.cjs"
 CONTRACT_TEST_RELATIVE = Path("tests") / "patch03-clean-source.contract.test.cjs"
@@ -39,6 +48,13 @@ EXPECTED_PROVIDERS = ["reanime", "miruro", "animenosub", "ohli24", "linkani"]
 
 class ManagerError(RuntimeError):
     """A safe, user-displayable validation or application failure."""
+
+
+def _hidden_subprocess_options() -> dict[str, int]:
+    """Keep helper processes from flashing a console over the Windows GUI."""
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    return {}
 
 
 def _norm(path: Path) -> str:
@@ -63,16 +79,50 @@ def same_or_within(candidate: Path, parent: Path) -> bool:
         return False
 
 
+def _is_link_or_junction(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    is_junction = getattr(path, "is_junction", None)
+    try:
+        return bool(is_junction and is_junction())
+    except OSError:
+        return True
+
+
 def paths_overlap(left: Path, right: Path) -> bool:
     return same_or_within(left, right) or same_or_within(right, left)
 
 
 def assert_project_root(root: Path = PROJECT_ROOT) -> Path:
     actual = canonical_path(root, strict=True)
-    expected = canonical_path(EXPECTED_PROJECT_ROOT)
-    if _norm(actual) != _norm(expected):
-        raise ManagerError(f"이 도구는 지정된 개발 프로젝트에서만 실행할 수 있습니다: {actual}")
+    if IS_FROZEN:
+        executable_dir = canonical_path(Path(sys.executable).resolve().parent, strict=True)
+        deployment_root = canonical_path(executable_dir.parent, strict=True)
+        accepted = {_norm(executable_dir), _norm(deployment_root)}
+        if _norm(actual) not in accepted:
+            raise ManagerError(f"패키지 관리자 경로가 실행 파일 위치와 일치하지 않습니다: {actual}")
+    else:
+        expected = canonical_path(EXPECTED_PROJECT_ROOT)
+        if _norm(actual) != _norm(expected):
+            raise ManagerError(f"이 도구는 지정된 개발 프로젝트에서만 실행할 수 있습니다: {actual}")
     return actual
+
+
+def manager_home() -> Path:
+    """Return the directory containing the manager executable or source GUI."""
+    if IS_FROZEN:
+        return canonical_path(Path(sys.executable).resolve().parent)
+    return canonical_path(Path(__file__).resolve().parent)
+
+
+def patch_source_root() -> Path:
+    """Return the root containing patches/patch03 and bundled validation assets."""
+    if IS_FROZEN and (manager_home() / MANIFEST_RELATIVE).is_file():
+        return manager_home()
+    frozen_assets = getattr(sys, "_MEIPASS", None)
+    if IS_FROZEN and frozen_assets and (Path(frozen_assets) / MANIFEST_RELATIVE).is_file():
+        return canonical_path(frozen_assets, strict=True)
+    return PROJECT_ROOT
 
 
 def protected_roots(project_root: Path = PROJECT_ROOT) -> list[Path]:
@@ -209,6 +259,8 @@ def validate_manifest(manifest: Any) -> None:
     required_text = ("officialVersion", "officialCommit", "officialArchiveSha256", "officialTreeSha256")
     if any(not isinstance(manifest.get(key), str) or not manifest[key] for key in required_text):
         raise ManagerError("manifest에 공식 버전·커밋·원본 SHA 정보가 빠졌습니다.")
+    if "patchVersion" in manifest and not re.fullmatch(r"\d+\.\d+\.\d+", str(manifest["patchVersion"])):
+        raise ManagerError("디노 패치 버전 형식이 잘못됐습니다.")
     if not re.fullmatch(r"[0-9a-f]{40}", manifest["officialCommit"], re.I):
         raise ManagerError("manifest 공식 커밋 SHA 형식이 잘못됐습니다.")
     for key in ("officialArchiveSha256", "officialTreeSha256"):
@@ -272,8 +324,12 @@ def _inventory(root: Path) -> dict[str, str]:
             if name in {".git", "node_modules"}:
                 continue
             entry = current_path / name
-            if entry.is_symlink():
+            if _is_link_or_junction(entry):
                 raise ManagerError(f"원본 트리에 심볼릭 링크/정션이 있습니다: {entry.relative_to(root)}")
+            if current_path == root and name == MANAGER_FOLDER_NAME:
+                # The manager, its backups and its operation journal live beside
+                # the source tree and are not LilacAnime runtime files.
+                continue
             kept.append(name)
         dirs[:] = kept
         for name in files:
@@ -281,7 +337,7 @@ def _inventory(root: Path) -> dict[str, str]:
             relative = entry.relative_to(root).as_posix()
             if relative == ".git" or relative.startswith(".git/") or relative == "node_modules" or relative.startswith("node_modules/"):
                 continue
-            if entry.is_symlink():
+            if _is_link_or_junction(entry):
                 raise ManagerError(f"원본 트리에 심볼릭 링크가 있습니다: {relative}")
             if not entry.is_file():
                 raise ManagerError(f"일반 파일이 아닌 항목이 있습니다: {relative}")
@@ -640,6 +696,7 @@ def run_node_contracts(source_root: Path, project_root: Path = PROJECT_ROOT, *, 
         result = subprocess.run(
             [node, "--check", str(target)], cwd=project_root, capture_output=True,
             text=True, encoding="utf-8", errors="replace", timeout=timeout,
+            **_hidden_subprocess_options(),
         )
         if result.returncode:
             raise ManagerError(f"JavaScript 구문 검사 실패: {target.name}\n{_redact(result.stderr or result.stdout)}")
@@ -651,6 +708,7 @@ def run_node_contracts(source_root: Path, project_root: Path = PROJECT_ROOT, *, 
     result = subprocess.run(
         [node, "--test", str(contract)], cwd=project_root, env=env, capture_output=True,
         text=True, encoding="utf-8", errors="replace", timeout=timeout,
+        **_hidden_subprocess_options(),
     )
     output = _redact((result.stdout or "") + (result.stderr or ""))
     if result.returncode:
@@ -726,7 +784,10 @@ def _run_existing_validator(archive: Path, project_root: Path = PROJECT_ROOT, *,
         if not dependencies_from:
             raise ManagerError("Electron 외부 검증에는 OS Temp에 준비된 의존성 폴더를 직접 선택해야 합니다.")
         args.extend(["--dependencies-from", dependencies_from, "--run-electron"])
-    result = subprocess.run(args, cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+    result = subprocess.run(
+        args, cwd=root, capture_output=True, text=True, encoding="utf-8",
+        errors="replace", timeout=600, **_hidden_subprocess_options(),
+    )
     output = _redact((result.stdout or "") + (result.stderr or ""))
     if result.returncode:
         raise ManagerError(f"기존 원본 검증기가 실패했습니다.\n{output[-8000:]}")
@@ -945,3 +1006,813 @@ def existing_validator(
     if not archive.is_file():
         raise ManagerError("검증 입력은 공식 원본 아카이브 파일이어야 합니다.")
     return _run_existing_validator(archive, project_root, electron=electron, dependencies_from=dependencies_from)
+
+
+def _package_info(root: Path) -> dict[str, Any]:
+    package_path = root / "package.json"
+    if not package_path.is_file():
+        raise ManagerError("선택한 폴더에 공식 package.json이 없습니다.")
+    try:
+        package = json.loads(package_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ManagerError(f"package.json을 읽을 수 없습니다: {exc}") from exc
+    if not isinstance(package, dict):
+        raise ManagerError("package.json 최상위 값이 JSON 객체가 아닙니다.")
+    if not (root / "src" / "app.js").is_file() or not (root / "electron" / "main.cjs").is_file():
+        raise ManagerError("이 폴더는 지원되는 LilacAnime 소스 구조가 아닙니다. 패키지 설치본이나 app.asar 구조는 지원하지 않습니다.")
+    build = package.get("build") if isinstance(package.get("build"), dict) else {}
+    app_id = str(build.get("appId") or package.get("appId") or "")
+    product = str(build.get("productName") or package.get("productName") or "")
+    if app_id != "com.lilac.anime.desktop" and product.casefold() != "lilacanime":
+        raise ManagerError("package.json의 앱 식별 정보가 공식 LilacAnime와 일치하지 않습니다.")
+    return package
+
+
+def find_original_root(start: str | os.PathLike[str] | None = None, *, max_levels: int = 8) -> Path | None:
+    """Search parents of this program for an unpacked LilacAnime source tree."""
+    anchor = canonical_path(start or manager_home())
+    if anchor.is_file():
+        anchor = anchor.parent
+    current = anchor
+    for _ in range(max_levels + 1):
+        try:
+            _package_info(current)
+            return current
+        except ManagerError:
+            pass
+        if current.parent == current:
+            break
+        current = current.parent
+    return None
+
+
+def _manager_data_root(root: Path) -> Path:
+    manager_dir = root / MANAGER_FOLDER_NAME
+    if _is_link_or_junction(manager_dir):
+        raise ManagerError("DinoPatchManager 경로가 심볼릭 링크/정션입니다. 안전을 위해 중단했습니다.")
+    if not same_or_within(canonical_path(manager_dir), root):
+        raise ManagerError("관리자 데이터 경로가 원본 폴더 밖을 가리킵니다.")
+    return manager_dir
+
+
+def _manager_data_path(root: Path, relative: Path) -> Path:
+    base = _manager_data_root(root)
+    if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+        raise ManagerError("관리자 상태/백업 경로가 잘못됐습니다.")
+    target = base / relative
+    current = base
+    for part in relative.parts:
+        current = current / part
+        if _is_link_or_junction(current):
+            raise ManagerError(f"관리자 상태/백업 경로에 심볼릭 링크가 있습니다: {current}")
+    resolved = canonical_path(target)
+    if not same_or_within(resolved, base):
+        raise ManagerError("관리자 상태/백업 경로가 보호 폴더 밖을 가리킵니다.")
+    return target
+
+
+def _state_path(root: Path) -> Path:
+    return _manager_data_path(root, PATCH_STATE_RELATIVE)
+
+
+def _history_path(root: Path) -> Path:
+    return _manager_data_path(root, PATCH_HISTORY_RELATIVE)
+
+
+def _read_json_file(path: Path, description: str) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ManagerError(f"{description}을 읽을 수 없습니다: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ManagerError(f"{description} 형식이 올바르지 않습니다.")
+    return data
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.dino-{os.getpid()}-{time.time_ns()}.tmp")
+    try:
+        with temporary.open("xb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
+    encoded = (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    _atomic_write(path, encoded)
+
+
+def _append_history(root: Path, record: dict[str, Any]) -> None:
+    path = _history_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    encoded = (json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(descriptor, "ab") as stream:
+        stream.write(encoded)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def read_history(root_value: str | os.PathLike[str], *, limit: int = 100) -> list[dict[str, Any]]:
+    root = canonical_path(root_value, strict=True)
+    path = _history_path(root)
+    if not path.is_file():
+        return []
+    records: list[dict[str, Any]] = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines()[-max(1, min(limit, 500)):]:
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict):
+                records.append(record)
+    except OSError as exc:
+        raise ManagerError(f"작업 기록을 읽을 수 없습니다: {exc}") from exc
+    return records
+
+
+def _assert_managed_target(root: Path, *, package_mode: bool = IS_FROZEN) -> dict[str, Any]:
+    root = canonical_path(root, strict=True)
+    if not root.is_dir() or _is_unc(root) or not root.drive:
+        raise ManagerError("원본은 로컬 드라이브의 실제 폴더여야 합니다. 네트워크 경로는 지원하지 않습니다.")
+    package = _package_info(root)
+    expected_development = canonical_path(EXPECTED_PROJECT_ROOT)
+    if paths_overlap(root, expected_development):
+        raise ManagerError("개발 프로젝트는 자동 적용 대상이 아닙니다. 공식 원본 폴더를 선택하세요.")
+    if not package_mode and paths_overlap(root, Path(r"D:\LilacAnime")):
+        raise ManagerError("현재 설치된 LilacAnime 경로는 이 개발 실행에서 보호됩니다. 배포 관리자를 원본 폴더 안에서 실행하세요.")
+    if package_mode:
+        expected_manager = canonical_path(root / MANAGER_FOLDER_NAME)
+        if not same_or_within(manager_home(), expected_manager):
+            raise ManagerError("패키지 관리자는 선택한 원본의 DinoPatchManager 폴더 안에서 실행해야 합니다.")
+    protected_names = ("APPDATA", "LOCALAPPDATA", "ProgramData", "ProgramFiles", "ProgramFiles(x86)", "WINDIR")
+    for key in protected_names:
+        value = os.environ.get(key)
+        if value:
+            protected = canonical_path(value)
+            if paths_overlap(root, protected):
+                raise ManagerError(f"시스템·앱 데이터 보호 경로에는 직접 적용할 수 없습니다: {key}")
+    return package
+
+
+def _target_state(root: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    state_path = _state_path(root)
+    if state_path.is_file():
+        state = _read_json_file(state_path, "패치 상태 기록")
+        if state.get("patchVersion") != manifest.get("patchVersion", PATCH_VERSION):
+            return {"status": "UNSUPPORTED_STATE", "reason": "현재 관리자와 기록된 패치 버전이 다릅니다.", "state": state}
+        if state.get("officialCommit") != manifest["officialCommit"]:
+            return {"status": "UNSUPPORTED_STATE", "reason": "패치 상태 기록의 공식 기준 커밋이 다릅니다.", "state": state}
+        if state.get("status") == "APPLIED":
+            actual = _inventory(root)
+            if actual == state.get("afterFileHashes"):
+                return {"status": "APPLIED", "state": state, "treeSha256": tree_sha256(actual)}
+            return {"status": "CONFLICT", "state": state, "reason": "패치 적용 후 원본 파일이 바뀌었거나 예상하지 못한 파일이 있습니다."}
+        if state.get("status") == "UNPATCHED":
+            files = _verify_original_root(root, manifest)
+            return {"status": "UNPATCHED", "state": state, "treeSha256": tree_sha256(files)}
+        return {"status": "UNSUPPORTED_STATE", "reason": "기록된 패치 상태를 안전하게 인식할 수 없습니다.", "state": state}
+
+    destinations = {item["destination"] for item in manifest["runtimeModules"]}
+    installed = sorted(path for path in destinations if (root / Path(*path.split("/"))).exists())
+    applied_anchors = []
+    for item in manifest["connections"]:
+        target = _module_path(root, item["file"])
+        if item["after"].encode("utf-8") in target.read_bytes():
+            applied_anchors.append(item["file"])
+    if installed or applied_anchors:
+        return {"status": "PARTIAL_OR_UNKNOWN", "reason": "패치 상태 기록 없이 패치 연결 또는 모듈 일부가 발견됐습니다. 자동 적용을 중단했습니다."}
+    files = _verify_original_root(root, manifest)
+    return {"status": "UNPATCHED", "state": None, "treeSha256": tree_sha256(files)}
+
+
+def inspect_managed_target(root_value: str | os.PathLike[str], patch_root_value: str | os.PathLike[str] | None = None) -> dict[str, Any]:
+    root = canonical_path(root_value, strict=True)
+    patch_root, manifest = load_manifest(patch_root_value or patch_source_root())
+    package = _assert_managed_target(root)
+    target = _target_state(root, manifest)
+    return {
+        **target,
+        "path": str(root),
+        "version": str(package.get("version", "unknown")),
+        "patchVersion": manifest.get("patchVersion", PATCH_VERSION),
+        "officialCommit": manifest["officialCommit"],
+        "patchRoot": str(patch_root),
+    }
+
+
+def assert_app_not_running(root: Path, *, runner: Callable[..., Any] = subprocess.run) -> None:
+    if os.name != "nt":
+        return
+    try:
+        package = _package_info(root)
+        build = package.get("build") if isinstance(package.get("build"), dict) else {}
+        app_name = str(build.get("productName") or package.get("productName") or "LilacAnime")
+        script = (
+            "$root=[IO.Path]::GetFullPath($env:DINO_TARGET_ROOT).TrimEnd('\\');"
+            "$app=$env:DINO_APP_NAME+'.exe';"
+            "$hits=Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {"
+            "($_.Name -ieq $app -and $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root,[StringComparison]::OrdinalIgnoreCase)) -or "
+            "($_.Name -ieq 'electron.exe' -and $_.CommandLine -and $_.CommandLine.IndexOf($root,[StringComparison]::OrdinalIgnoreCase) -ge 0)"
+            "}; if($hits){$hits | ForEach-Object { '{0}:{1}' -f $_.Name,$_.ProcessId }}"
+        )
+        env = os.environ.copy()
+        env["DINO_TARGET_ROOT"] = str(root)
+        env["DINO_APP_NAME"] = app_name
+        completed = runner(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=8, env=env,
+            **_hidden_subprocess_options(),
+        )
+    except Exception as exc:
+        raise ManagerError(f"LilacAnime 실행 상태를 확인하지 못해 파일 변경을 중단했습니다: {type(exc).__name__}") from exc
+    if completed.returncode != 0:
+        raise ManagerError("Windows 프로세스 조회가 실패해 LilacAnime 실행 여부를 확인하지 못했습니다. 앱을 닫은 뒤 다시 시도하세요.")
+    active = str(completed.stdout or "").strip()
+    if active:
+        raise ManagerError(f"LilacAnime가 실행 중입니다 ({active}). 앱을 완전히 종료한 뒤 관리자에서 다시 확인하세요.")
+
+
+def _acquire_operation_lock(root: Path) -> tuple[Path, int]:
+    state_dir = _manager_data_path(root, Path("state"))
+    state_dir.mkdir(parents=True, exist_ok=True)
+    lock = _manager_data_path(root, Path("state") / "operation.lock")
+    try:
+        descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError as exc:
+        raise ManagerError("이미 패치 작업이 진행 중입니다. 중복 작업을 시작하지 않았습니다.") from exc
+    os.write(descriptor, json.dumps({"pid": os.getpid(), "createdAt": datetime.now(timezone.utc).isoformat()}).encode("utf-8"))
+    os.fsync(descriptor)
+    return lock, descriptor
+
+
+def _release_operation_lock(lock: Path, descriptor: int) -> None:
+    try:
+        os.close(descriptor)
+    except OSError:
+        pass
+    try:
+        lock.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _make_backup(
+    root: Path,
+    backup_id: str,
+    before_hashes: dict[str, str],
+    after_hashes: dict[str, str],
+    manifest: dict[str, Any],
+    touched_paths: list[str],
+) -> dict[str, Any]:
+    backup_root = _manager_data_path(root, Path("backups") / backup_id)
+    backup_root.mkdir(parents=True, exist_ok=False)
+    backup_root = _manager_data_path(root, Path("backups") / backup_id)
+    files: list[dict[str, Any]] = []
+    for relative in sorted(set(touched_paths)):
+        _safe_relative(relative)
+        before = root.joinpath(*relative.split("/"))
+        existed = relative in before_hashes
+        backup_relative = f"original/{relative}" if existed else None
+        if existed:
+            backup_path = _manager_data_path(root, Path("backups") / backup_id / backup_relative)
+            backup_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(before, backup_path)
+            if _sha256_file(backup_path) != before_hashes[relative]:
+                raise ManagerError(f"백업 사본 SHA-256 검증 실패: {relative}")
+        files.append({
+            "path": relative,
+            "existedBefore": existed,
+            "backupPath": backup_relative,
+            "beforeSha256": before_hashes.get(relative),
+            "afterSha256": after_hashes.get(relative),
+        })
+    backup = {
+        "schemaVersion": 1,
+        "id": backup_id,
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+        "officialVersion": manifest["officialVersion"],
+        "officialCommit": manifest["officialCommit"],
+        "patchVersion": manifest.get("patchVersion", PATCH_VERSION),
+        "beforeTreeSha256": tree_sha256(before_hashes),
+        "afterTreeSha256": tree_sha256(after_hashes),
+        "beforeFileHashes": before_hashes,
+        "afterFileHashes": after_hashes,
+        "files": files,
+        "restorable": True,
+    }
+    _atomic_write_json(_manager_data_path(root, Path("backups") / backup_id / "backup.json"), backup)
+    return backup
+
+
+def list_backups(root_value: str | os.PathLike[str]) -> list[dict[str, Any]]:
+    root = canonical_path(root_value, strict=True)
+    backup_dir = _manager_data_path(root, Path("backups"))
+    if not backup_dir.is_dir():
+        return []
+    result: list[dict[str, Any]] = []
+    for child in sorted(backup_dir.iterdir(), key=lambda p: p.name, reverse=True):
+        if _is_link_or_junction(child):
+            continue
+        metadata = _manager_data_path(root, Path("backups") / child.name / "backup.json")
+        if not child.is_dir() or not metadata.is_file():
+            continue
+        try:
+            value = _read_json_file(metadata, "백업 정보")
+        except ManagerError:
+            continue
+        result.append(value)
+    return result
+
+
+def _restore_backup_files(root: Path, backup: dict[str, Any], manifest: dict[str, Any], *, operation: str) -> dict[str, Any]:
+    backup_id = str(backup.get("id", ""))
+    if not re.fullmatch(r"[A-Za-z0-9T._-]{8,80}", backup_id):
+        raise ManagerError("백업 ID 형식이 잘못됐습니다.")
+    backup_root = _manager_data_path(root, Path("backups") / backup_id)
+    if not same_or_within(backup_root, _manager_data_path(root, Path("backups"))):
+        raise ManagerError("백업 경로가 관리자 백업 폴더 밖을 가리킵니다.")
+    if backup.get("officialCommit") != manifest.get("officialCommit") or backup.get("patchVersion") != manifest.get("patchVersion", PATCH_VERSION):
+        raise ManagerError("백업의 공식 커밋 또는 패치 버전이 현재 관리자와 다릅니다.")
+    if backup.get("officialVersion") != manifest.get("officialVersion"):
+        raise ManagerError("백업의 공식 버전이 현재 지원 기준과 다릅니다.")
+    before_hashes = backup.get("beforeFileHashes")
+    after_hashes = backup.get("afterFileHashes")
+    entries = backup.get("files")
+    if not isinstance(before_hashes, dict) or not isinstance(after_hashes, dict) or not isinstance(entries, list):
+        raise ManagerError("백업 파일 목록이나 해시 정보가 없습니다.")
+    if any(not isinstance(item, dict) for item in entries):
+        raise ManagerError("백업의 파일 항목 형식이 올바르지 않습니다.")
+    expected_files = sorted(set(manifest["officialRuntimeModifiedAllowlist"]) | {item["destination"] for item in manifest["runtimeModules"]})
+    if sorted(_safe_relative(item.get("path")) for item in entries) != expected_files:
+        raise ManagerError("백업 대상 파일 목록이 현재 manifest의 허용 범위와 다릅니다.")
+    for hashes, label in ((before_hashes, "복원 전"), (after_hashes, "적용 후")):
+        if any(not isinstance(path, str) or not re.fullmatch(r"[0-9A-F]{64}", str(digest), re.I) for path, digest in hashes.items()):
+            raise ManagerError(f"백업의 {label} 파일 지문 형식이 잘못됐습니다.")
+    if tree_sha256(before_hashes) != manifest["officialTreeSha256"].upper():
+        raise ManagerError("백업의 복원 전 트리가 고정 공식 원본과 일치하지 않습니다.")
+    before_paths = set(before_hashes)
+    after_paths = set(after_hashes)
+    added = {item["destination"] for item in manifest["runtimeModules"]}
+    allowed_modified = set(manifest["officialRuntimeModifiedAllowlist"])
+    modified = {path for path in before_paths & after_paths if before_hashes[path] != after_hashes[path]}
+    if after_paths - before_paths != added or before_paths - after_paths or modified != allowed_modified:
+        raise ManagerError("백업의 변경 파일 집합이 manifest 허용 범위와 다릅니다.")
+    if tree_sha256(after_hashes) != backup.get("afterTreeSha256"):
+        raise ManagerError("백업의 적용 후 트리 지문이 metadata와 일치하지 않습니다.")
+    if set(after_hashes) != after_paths or any(
+        not isinstance(value, str) or not re.fullmatch(r"[0-9A-F]{64}", value, re.I)
+        for value in after_hashes.values()
+    ):
+        raise ManagerError("백업의 적용 후 파일 지문 형식이 잘못됐습니다.")
+    backup_meta_path = _manager_data_path(root, Path("backups") / backup_id / "backup.json")
+    state_path = _state_path(root)
+    old_backup_meta = backup_meta_path.read_bytes()
+    old_state = state_path.read_bytes() if state_path.is_file() else None
+    current = _inventory(root)
+    if current != after_hashes:
+        raise ManagerError("현재 파일이 백업 생성 시점의 패치 적용 결과와 다릅니다. 사용자 변경을 덮어쓰지 않도록 복원을 중단했습니다.")
+    restore_data: dict[str, bytes | None] = {}
+    for entry in entries:
+        relative = _safe_relative(entry.get("path"))
+        current_path = _module_path(root, relative)
+        if entry.get("existedBefore"):
+            backup_relative = _safe_relative(entry.get("backupPath"))
+            backup_path = _manager_data_path(root, Path("backups") / backup_id / backup_relative)
+            if not same_or_within(backup_path, backup_root) or not backup_path.is_file():
+                raise ManagerError(f"복원 원본 파일이 없거나 백업 밖을 가리킵니다: {relative}")
+            content = backup_path.read_bytes()
+            if _sha256_file(backup_path) != entry.get("beforeSha256"):
+                raise ManagerError(f"백업 파일 SHA-256이 기록과 다릅니다: {relative}")
+            restore_data[relative] = content
+        else:
+            if current_path.exists() and _sha256_file(current_path) != entry.get("afterSha256"):
+                raise ManagerError(f"관리자가 추가한 파일이 바뀌었습니다. 삭제하지 않습니다: {relative}")
+            restore_data[relative] = None
+
+    snapshot = {relative: (root.joinpath(*relative.split("/")).read_bytes() if root.joinpath(*relative.split("/")).is_file() else None) for relative in restore_data}
+    changed: list[str] = []
+    try:
+        for relative, content in restore_data.items():
+            destination = _module_path(root, relative)
+            if content is None:
+                if destination.exists():
+                    destination.unlink()
+            else:
+                _atomic_write(destination, content)
+            changed.append(relative)
+        if _inventory(root) != before_hashes:
+            raise ManagerError("복원 후 원본 파일 트리가 백업된 기준과 일치하지 않습니다.")
+    except Exception as exc:
+        rollback_errors = []
+        for relative in reversed(changed):
+            destination = _module_path(root, relative)
+            try:
+                old = snapshot[relative]
+                if old is None:
+                    if destination.exists():
+                        destination.unlink()
+                else:
+                    _atomic_write(destination, old)
+            except Exception as rollback_exc:
+                rollback_errors.append(f"{relative}: {type(rollback_exc).__name__}")
+        detail = f"원상 복원 중 오류: {exc}"
+        if rollback_errors:
+            detail += "\n자동 되돌리기 일부 실패: " + ", ".join(rollback_errors)
+        detail += f"\n보존된 백업: {backup_root}"
+        raise ManagerError(detail) from exc
+
+    backup["restorable"] = False
+    backup["restoredAt"] = datetime.now(timezone.utc).isoformat()
+    previous_state: dict[str, Any] = {}
+    if old_state is not None:
+        try:
+            previous_state = json.loads(old_state.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            previous_state = {}
+    new_state = {
+        "schemaVersion": 1,
+        "status": "UNPATCHED",
+        "officialVersion": backup["officialVersion"],
+        "officialCommit": backup["officialCommit"],
+        "patchVersion": backup["patchVersion"],
+        "lastBackupId": backup_id,
+        "restoredAt": datetime.now(timezone.utc).isoformat(),
+        "previousState": previous_state.get("status"),
+    }
+    try:
+        _atomic_write_json(state_path, new_state)
+        _atomic_write_json(backup_root / "backup.json", backup)
+    except Exception as exc:
+        rollback_errors = []
+        for relative in reversed(list(restore_data)):
+            destination = _module_path(root, relative)
+            try:
+                old = snapshot[relative]
+                if old is None:
+                    if destination.exists():
+                        destination.unlink()
+                else:
+                    _atomic_write(destination, old)
+            except Exception as rollback_exc:
+                rollback_errors.append(f"{relative}: {type(rollback_exc).__name__}")
+        try:
+            _atomic_write(backup_meta_path, old_backup_meta)
+            if old_state is None:
+                state_path.unlink(missing_ok=True)
+            else:
+                _atomic_write(state_path, old_state)
+        except Exception as rollback_exc:
+            rollback_errors.append(f"manager state: {type(rollback_exc).__name__}")
+        detail = f"복원 상태를 기록하지 못해 파일 변경을 되돌렸습니다: {type(exc).__name__}"
+        if rollback_errors:
+            detail += "\n되돌리기 일부 실패: " + ", ".join(rollback_errors)
+        raise ManagerError(detail) from exc
+    record = {
+        "action": operation,
+        "result": "PASS",
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+        "backupId": backup_id,
+        "files": [entry["path"] for entry in entries],
+    }
+    try:
+        _append_history(root, record)
+    except OSError:
+        record["historyWarning"] = "작업 기록 파일을 갱신하지 못했습니다. 백업 및 상태 기록은 유지됩니다."
+    return {"status": "RESTORED", **record}
+
+
+def apply_patch_in_place(
+    root_value: str | os.PathLike[str],
+    patch_root_value: str | os.PathLike[str] | None = None,
+    *,
+    progress: Callable[[str], None] | None = None,
+    process_check: Callable[[Path], None] = assert_app_not_running,
+) -> dict[str, Any]:
+    """Back up and transactionally apply Patch 03 to a verified source folder."""
+    root = canonical_path(root_value, strict=True)
+    package = _assert_managed_target(root)
+    patch_root, manifest = load_manifest(patch_root_value or patch_source_root())
+    state = _target_state(root, manifest)
+    if state["status"] == "APPLIED":
+        return {"status": "ALREADY_APPLIED", "path": str(root), "treeSha256": state.get("treeSha256"), "version": package.get("version"), "patchVersion": manifest.get("patchVersion", PATCH_VERSION)}
+    if state["status"] != "UNPATCHED":
+        raise ManagerError(str(state.get("reason") or f"현재 패치 상태는 {state['status']}이며 자동 변경을 허용하지 않습니다."))
+
+    lock, descriptor = _acquire_operation_lock(root)
+    try:
+        process_check(root)
+        # Re-check after acquiring the lock in case another manager instance changed the tree.
+        state = _target_state(root, manifest)
+        if state["status"] != "UNPATCHED":
+            if state["status"] == "APPLIED":
+                return {"status": "ALREADY_APPLIED", "path": str(root), "treeSha256": state.get("treeSha256")}
+            raise ManagerError(str(state.get("reason") or "호환성 상태가 작업 중 바뀌어 중단했습니다."))
+        original_hashes = _verify_original_root(root, manifest)
+        touched_paths = sorted(set(manifest["officialRuntimeModifiedAllowlist"]) | {item["destination"] for item in manifest["runtimeModules"]})
+        if progress:
+            progress("공식 원본 버전, 파일 트리, 연결 지점과 IPC 계약을 확인했습니다.")
+
+        validation_parent = canonical_path(Path(tempfile.gettempdir()), strict=True)
+        if paths_overlap(validation_parent, EXPECTED_PROJECT_ROOT):
+            raise ManagerError("OS 임시 경로가 개발 프로젝트와 겹쳐 사전 검증을 중단했습니다.")
+        validation_dir = Path(tempfile.mkdtemp(prefix="dino-inplace-preflight-", dir=validation_parent))
+        staged = validation_dir / "source"
+        try:
+            _copy_original_folder(root, staged)
+            copied = _verify_original_root(staged, manifest)
+            if copied != original_hashes:
+                raise ManagerError("임시 사전 검증본이 원본과 일치하지 않습니다.")
+            _apply_connections(staged, manifest)
+            _copy_modules(patch_root, staged, manifest)
+            staged_result = _verify_patched_tree(staged, original_hashes, manifest)
+            contract_root = patch_root if IS_FROZEN else PROJECT_ROOT
+            contracts = run_node_contracts(staged, contract_root)
+            if contracts["status"] not in {"PASS", "NOT RUN"}:
+                raise ManagerError("임시 사전 검증에서 공식 Patch 03 계약 검사가 통과하지 않았습니다.")
+            staged_hashes = staged_result["fileHashes"]
+            staged_contents = {
+                relative: _module_path(staged, relative).read_bytes()
+                for relative in touched_paths
+            }
+        finally:
+            shutil.rmtree(validation_dir, ignore_errors=False)
+
+        before_hashes = _inventory(root)
+        if before_hashes != original_hashes:
+            raise ManagerError("원본 파일이 사전 검사 중 변경되어 적용하지 않았습니다.")
+        backup_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + os.urandom(4).hex()
+        backup = _make_backup(root, backup_id, before_hashes, staged_hashes, manifest, touched_paths)
+        if progress:
+            progress(f"복원 가능한 백업을 만들었습니다: {backup_id}")
+
+        modified_paths = touched_paths
+        applied: list[str] = []
+        try:
+            for relative in modified_paths:
+                target = _module_path(root, relative)
+                _atomic_write(target, staged_contents[relative])
+                applied.append(relative)
+            after_hashes = _inventory(root)
+            if after_hashes != staged_hashes:
+                raise ManagerError("실제 원본에 기록한 파일이 검증된 임시 적용 결과와 다릅니다.")
+            new_state = {
+                "schemaVersion": 1,
+                "status": "APPLIED",
+                "officialVersion": manifest["officialVersion"],
+                "officialCommit": manifest["officialCommit"],
+                "patchVersion": manifest.get("patchVersion", PATCH_VERSION),
+                "backupId": backup_id,
+                "appliedAt": datetime.now(timezone.utc).isoformat(),
+                "beforeTreeSha256": backup["beforeTreeSha256"],
+                "afterTreeSha256": tree_sha256(after_hashes),
+                "afterFileHashes": after_hashes,
+                "modifiedOfficialFiles": sorted(manifest["officialRuntimeModifiedAllowlist"]),
+                "addedPatchFiles": sorted(item["destination"] for item in manifest["runtimeModules"]),
+                "contracts": contracts,
+            }
+            _atomic_write_json(_state_path(root), new_state)
+        except Exception as exc:
+            rollback_errors = []
+            for relative in reversed(applied):
+                target = _module_path(root, relative)
+                backup_entry = next(item for item in backup["files"] if item["path"] == relative)
+                try:
+                    if backup_entry["existedBefore"]:
+                        original_path = _manager_data_root(root) / "backups" / backup_id / "original" / Path(*relative.split("/"))
+                        _atomic_write(target, original_path.read_bytes())
+                    elif target.exists():
+                        expected = backup_entry.get("afterSha256")
+                        if _sha256_file(target) == expected:
+                            target.unlink()
+                except Exception as rollback_exc:
+                    rollback_errors.append(f"{relative}: {type(rollback_exc).__name__}")
+            detail = f"패치 적용 중 실패해 이번 작업 변경을 되돌렸습니다: {exc}\n백업 보존: {_manager_data_root(root) / 'backups' / backup_id}"
+            if rollback_errors:
+                detail += "\n되돌리지 못한 파일: " + ", ".join(rollback_errors)
+            raise ManagerError(detail) from exc
+
+        record = {
+            "action": "PATCH_APPLY",
+            "result": "PASS",
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "backupId": backup_id,
+            "officialVersion": manifest["officialVersion"],
+            "patchVersion": manifest.get("patchVersion", PATCH_VERSION),
+            "files": modified_paths,
+            "treeSha256": tree_sha256(after_hashes),
+        }
+        try:
+            _append_history(root, record)
+        except OSError:
+            record["historyWarning"] = "작업 기록 파일을 기록하지 못했습니다. 패치 상태와 백업은 보존됐습니다."
+        if progress:
+            progress("패치를 적용하고 원본 파일 지문을 다시 확인했습니다.")
+        return {"status": "APPLIED", "path": str(root), "backupId": backup_id, "version": manifest["officialVersion"], "patchVersion": manifest.get("patchVersion", PATCH_VERSION), "modifiedOfficialFiles": record["files"][:2], "addedPatchFiles": [x for x in modified_paths if x not in original_hashes], "treeSha256": record["treeSha256"], "contracts": contracts, "historyWarning": record.get("historyWarning")}
+    finally:
+        _release_operation_lock(lock, descriptor)
+
+
+def restore_backup(
+    root_value: str | os.PathLike[str],
+    backup_id: str,
+    *,
+    patch_root_value: str | os.PathLike[str] | None = None,
+    operation: str = "BACKUP_RESTORE",
+    process_check: Callable[[Path], None] = assert_app_not_running,
+) -> dict[str, Any]:
+    root = canonical_path(root_value, strict=True)
+    _assert_managed_target(root)
+    if not re.fullmatch(r"[A-Za-z0-9T._-]{8,80}", str(backup_id)):
+        raise ManagerError("선택한 백업 ID가 잘못됐습니다.")
+    lock, descriptor = _acquire_operation_lock(root)
+    try:
+        process_check(root)
+        _, manifest = load_manifest(patch_root_value or patch_source_root())
+        backup_path = _manager_data_path(root, Path("backups") / backup_id / "backup.json")
+        backup = _read_json_file(backup_path, "백업 정보")
+        if backup.get("id") != backup_id or not backup.get("restorable"):
+            raise ManagerError("이 백업은 복원할 수 있는 상태가 아닙니다.")
+        result = _restore_backup_files(root, backup, manifest, operation=operation)
+        return {"path": str(root), **result}
+    finally:
+        _release_operation_lock(lock, descriptor)
+
+
+def uninstall_patch(
+    root_value: str | os.PathLike[str],
+    *,
+    patch_root_value: str | os.PathLike[str] | None = None,
+    process_check: Callable[[Path], None] = assert_app_not_running,
+) -> dict[str, Any]:
+    root = canonical_path(root_value, strict=True)
+    _assert_managed_target(root)
+    state_path = _state_path(root)
+    if not state_path.is_file():
+        raise ManagerError("복원 가능한 패치 상태 기록이 없습니다. 원본 파일을 임의 추정해 해제하지 않습니다.")
+    state = _read_json_file(state_path, "패치 상태 기록")
+    if state.get("status") == "UNPATCHED":
+        return {"status": "ALREADY_UNPATCHED", "path": str(root), "message": "패치가 이미 해제되어 있습니다."}
+    if state.get("status") != "APPLIED" or not state.get("backupId"):
+        raise ManagerError("현재 패치 상태에서 안전한 해제를 확인하지 못했습니다.")
+    return restore_backup(root, state["backupId"], patch_root_value=patch_root_value, operation="PATCH_UNINSTALL", process_check=process_check)
+
+
+def automatic_startup_check(
+    root_value: str | os.PathLike[str] | None = None,
+    *,
+    progress: Callable[[str], None] | None = None,
+    process_check: Callable[[Path], None] = assert_app_not_running,
+    patch_root_value: str | os.PathLike[str] | None = None,
+) -> dict[str, Any]:
+    root = canonical_path(root_value) if root_value else find_original_root()
+    if root is None:
+        return {"status": "NO_SOURCE", "reason": "관리자 실행 위치의 상위 경로에서 지원되는 LilacAnime 소스 폴더를 찾지 못했습니다."}
+    info = inspect_managed_target(root, patch_root_value)
+    if info["status"] == "APPLIED":
+        return info
+    if info["status"] == "UNPATCHED":
+        result = apply_patch_in_place(root, patch_root_value, progress=progress, process_check=process_check)
+        return {**info, **result}
+    return info
+
+
+def _parse_semver(value: str) -> tuple[int, int, int] | None:
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", value.strip(), re.I)
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def check_official_update(*, current_version: str, timeout: float = 6.0, opener: Callable[..., Any] = urllib.request.urlopen) -> dict[str, Any]:
+    url = "https://api.github.com/repos/whispelyn-byte/LilacAnime-desktop/releases/latest"
+    request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "DinoPatchManager"})
+    try:
+        with opener(request, timeout=timeout) as response:
+            payload = json.loads(response.read(1024 * 1024).decode("utf-8"))
+        latest = str(payload.get("tag_name", ""))
+        current = _parse_semver(current_version)
+        newest = _parse_semver(latest)
+        if not newest:
+            return {"status": "CHECK_FAILED", "reason": "GitHub 응답에 읽을 수 있는 공식 버전 태그가 없습니다."}
+        if current and newest <= current:
+            return {"status": "UP_TO_DATE", "currentVersion": current_version, "latestVersion": latest}
+        return {
+            "status": "UPDATE_AVAILABLE_UNSUPPORTED",
+            "currentVersion": current_version,
+            "latestVersion": latest,
+            "releaseUrl": str(payload.get("html_url", "")),
+            "reason": "이 관리자에는 새 버전의 공식 원본 지문과 패치 연결 계약이 없습니다. 승인만으로 업데이트하지 않으며, 호환성 기준을 검증하기 전까지 자동 업데이트를 지원하지 않습니다.",
+        }
+    except (OSError, urllib.error.URLError, TimeoutError, UnicodeError, json.JSONDecodeError) as exc:
+        return {"status": "CHECK_FAILED", "reason": f"GitHub 최신 버전 조회에 실패했습니다 ({type(exc).__name__}). 패치 상태에는 영향을 주지 않았습니다."}
+
+
+def approve_official_update(update_info: dict[str, Any]) -> dict[str, Any]:
+    if update_info.get("status") == "UP_TO_DATE":
+        return {"status": "NO_UPDATE", "reason": "공식 최신 버전이 이미 적용돼 있습니다."}
+    if update_info.get("status") == "CHECK_FAILED":
+        return {"status": "NOT_AVAILABLE", "reason": str(update_info.get("reason", "공식 업데이트 정보를 확인할 수 없습니다."))}
+    return {
+        "status": "UNSUPPORTED",
+        "reason": "공식 업데이트는 사용자가 승인해도 적용할 수 없습니다. 이 버전의 서명/해시·파일별 마이그레이션·복원 절차가 준비되지 않았기 때문에 원본 파일을 변경하지 않았습니다.",
+    }
+
+
+def _append_manager_diagnostic(action: str, result: str, reason: str) -> None:
+    try:
+        path = manager_home() / "manager.log"
+        record = {
+            "action": action,
+            "result": result,
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "reason": str(reason)[:800],
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(descriptor, "ab") as stream:
+            stream.write((json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8"))
+            stream.flush()
+    except OSError:
+        pass
+
+
+def _read_legacy_theme_sqlite(path: Path) -> str | None:
+    import sqlite3
+
+    uri = path.resolve().as_uri() + "?mode=ro"
+    try:
+        connection = sqlite3.connect(uri, uri=True, timeout=0.2)
+    except sqlite3.Error:
+        return None
+    try:
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for table in ("ItemTable", "itemTable"):
+            if table not in tables:
+                continue
+            row = connection.execute(f'SELECT value FROM "{table}" WHERE key=? LIMIT 1', ("theme",)).fetchone()
+            if row:
+                value = row[0].decode("utf-8", "replace") if isinstance(row[0], bytes) else str(row[0])
+                if value in {"dark", "light", "system"}:
+                    return value
+    except sqlite3.Error:
+        return None
+    finally:
+        connection.close()
+    return None
+
+
+def _system_theme() -> tuple[str, str]:
+    if os.name == "nt":
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", 0, winreg.KEY_READ)
+            try:
+                value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            finally:
+                winreg.CloseKey(key)
+            return ("light" if int(value) else "dark", "Windows AppsUseLightTheme")
+        except (OSError, ImportError, ValueError):
+            pass
+    return "dark", "안전한 기본값"
+
+
+def read_official_theme(root_value: str | os.PathLike[str]) -> dict[str, Any]:
+    """Read the official localStorage theme when a supported legacy store exists; never writes user data."""
+    root = canonical_path(root_value, strict=True)
+    try:
+        package = _package_info(root)
+        build = package.get("build") if isinstance(package.get("build"), dict) else {}
+        app_name = str(build.get("productName") or package.get("productName") or "LilacAnime")
+        app_data_value = os.environ.get("APPDATA", "").strip()
+        if not app_data_value:
+            raise OSError("APPDATA is unavailable")
+        app_data = Path(app_data_value)
+        local_storage = app_data / app_name / "Local Storage"
+        for candidate in (local_storage / "file__0.localstorage", local_storage / "leveldb" / "file__0.localstorage"):
+            if candidate.is_file():
+                theme = _read_legacy_theme_sqlite(candidate)
+                if theme in {"dark", "light", "system"}:
+                    resolved = _system_theme()[0] if theme == "system" else theme
+                    return {"status": "READ", "theme": resolved, "setting": theme, "source": str(candidate), "readOnly": True}
+        leveldb = local_storage / "leveldb"
+        if leveldb.is_dir():
+            reason = "공식 테마는 Chromium LevelDB에 저장되어 있지만, 안전한 읽기 전용 해석기를 사용할 수 없습니다."
+        else:
+            reason = "공식 테마 저장소를 찾지 못했습니다."
+    except (OSError, ManagerError) as exc:
+        reason = f"공식 테마 설정을 읽지 못했습니다: {type(exc).__name__}"
+    fallback, source = _system_theme()
+    global _LAST_THEME_DIAGNOSTIC
+    diagnostic = (reason, fallback)
+    if diagnostic != _LAST_THEME_DIAGNOSTIC:
+        _append_manager_diagnostic("THEME_READ", "FALLBACK", reason)
+        _LAST_THEME_DIAGNOSTIC = diagnostic
+    return {"status": "FALLBACK", "theme": fallback, "source": source, "reason": reason, "readOnly": True}

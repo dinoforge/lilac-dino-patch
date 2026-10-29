@@ -107,3 +107,35 @@ test('segments: stray blocks between the right ones are let go by the fit, short
   assert.equal(keptSegments(truth, cues, [{ startTime: 90, endTime: 180 }], score), null);
   assert.deepEqual(keptSegments(truth, cues, [{ startTime: 510, endTime: 598 }], score), truth);
 });
+
+test('two-part subtitle alignment keeps the first timing and moves the rest only when it improves fit', () => {
+  const { twoParts, fitScore, mover } = require('../electron/subtitle-sync.cjs');
+  let seed = 7; const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const cues = []; for (let t = 2; t < 1300; t += 2 + random() * 6) if (t < 60 || t > 170) cues.push([t, t + 1 + random() * 2]);
+  const speech = cues.map(([s, e]) => s < 60 ? [s, e] : [s - 10, e - 10]);
+  const parts = twoParts(cues, speech, 0, -10);
+  assert.deepEqual(parts, [{ from: cues[0][0], shift: 0 }, { from: cues.find(([start]) => start > 170)[0], shift: -10 }]);
+  assert.ok(fitScore(cues, speech, mover(0, 1, parts)) > fitScore(cues, speech, mover(-10, 1)));
+  assert.equal(twoParts(cues, cues.map(([s, e]) => [s - 10, e - 10]), 0, -10), null);
+});
+
+test('track subtitle alignment finds ordered timing parts and uses a single part when appropriate', () => {
+  const { alignedParts, merged } = require('../electron/subtitle-sync.cjs');
+  let seed = 7; const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const cues = []; for (let t = 2; t < 1300; t += 2 + random() * 6) if (t < 60 || t > 170) cues.push([t, t + 1 + random() * 2]);
+  const late = s => s < 60 ? 0 : s < 800 ? 10 : 13.5;
+  const found = alignedParts(cues, merged(cues.map(([s, e]) => [s - late(s), e - late(s)])), { reach: 300, penalties: [6] })[0];
+  assert.deepEqual(found.map(part => part.shift), [0, -10, -13.5]);
+  assert.equal(found[1].from, cues.find(([start]) => start > 170)[0]);
+  assert.equal(found[2].from, cues.find(([start]) => start >= 800)[0]);
+  assert.deepEqual(alignedParts(cues, merged(cues.map(([s, e]) => [s + 4, e + 4])), { reach: 300, penalties: [6] })[0].map(part => part.shift), [4]);
+});
+
+test('site-track start score rejects a shift whose line starts do not match the reference', () => {
+  const { startScore } = require('../electron/subtitle-sync.cjs');
+  const lines = [[10, 12], [20, 22], [30, 31], [40, 42]], starts = [10.2, 19.5, 30.25, 50];
+  assert.equal(startScore(lines, starts), 0.5);
+  assert.equal(startScore(lines, starts, time => time + 10), 0.5);
+  assert.equal(startScore(lines, starts, time => time + 5), 0);
+  assert.equal(startScore([], starts), 0);
+});

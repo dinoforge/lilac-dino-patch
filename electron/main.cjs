@@ -10,7 +10,7 @@ const { pipeline } = require('stream/promises');
 const AdmZip = require('adm-zip');
 const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
-const { createFlixProxyUrl, createFlixAvProxyUrl, closeFlixProxy, primeFlix } = require('./flix-proxy.cjs');
+const { createFlixProxyUrl, createFlixAvProxyUrl, closeFlixProxy, primeFlix, flixReadable } = require('./flix-proxy.cjs');
 const { createPlayerStreamHeaders } = require('./player-stream-headers.cjs');
 const { communityEpisodes, communityFileEpisode, communityLinkEpisodes, planCommunityLinks, pickCommunityFile, selectCommunityFile, COMMUNITY_FONT } = require('./community-matching.cjs');
 const { createTmdbClient } = require('./tmdb-client.cjs');
@@ -26,8 +26,9 @@ const { SubtitleStore } = require('./subtitle-store.cjs');
 const { createTranslator } = require('./subtitle-translator.cjs');
 const subtitleSource = require('../src/subtitle-source.js');
 const { selectMiruroServer } = require('./miruro-playback.cjs');
-const { createMiruroSession } = require('./miruro-session.cjs');
+const { createMiruroBrowser } = require('./miruro-browser.cjs');
 const { createSubtitleSync } = require('./subtitle-sync.cjs');
+const { createWhisper } = require('./whisper.cjs');
 const { QUARTER_PROVIDERS, quarterForDate, quarterPeriod, quarterQuery } = require('./quarter-catalog.cjs');
 const { fetchLatestEpisodes } = require('./latest-episodes.cjs');
 const { createWeeklySchedule } = require('./weekly-schedule.cjs');
@@ -74,7 +75,7 @@ const playerStreamHeaders = createPlayerStreamHeaders();
 const malIdCache = new Map();
 let downloadManager;
 let updater;
-let subtitleSync=null;
+let subtitleSync=null,whisper=null;
 
 async function coverDataUrl(rawUrl){
   return String(rawUrl||'');
@@ -464,7 +465,12 @@ async function resolveProviderEpisode(episode) {
     if(!ordered.length)throw new Error('이 작품은 현재 RE:Anime에서 재생할 수 없습니다. 다른 콘텐츠 소스를 선택해주세요.');
     let lastError;
     for(const server of ordered){
-      try{return {...await resolveStreamPage(server.url,`${REANIME_WEB}/`),servers:allServers.map(({label,kind})=>({label,kind})),server:server.label}}catch(error){lastError=error}
+      try{
+        const stream=await resolveStreamPage(server.url,`${REANIME_WEB}/`);
+        // Skip a confirmed unreadable FlixCloud stream; a probe/network failure is inconclusive and playback can still try it.
+        if(!await flixReadable(stream.url).catch(()=>true))throw new Error(`RE:Anime ${server.label} 서버의 영상을 읽을 수 없습니다. 다른 서버도 안 되면 다른 콘텐츠 소스로 재생해 주세요.`);
+        return {...stream,servers:allServers.map(({label,kind})=>({label,kind})),server:server.label};
+      }catch(error){lastError=error}
     }
     throw lastError||new Error('모든 영상 서버 연결에 실패했습니다.');
   }
@@ -517,7 +523,7 @@ function animenosubServers(html,pageUrl){
 // The site's own catalog API (AniList data under Miruro ids). Answers are gzip XORed with "miruro/catalog"; lists take
 // 12 or 15 entries a page and are paged with a cursor.
 const MIRURO_KEY=Buffer.from('miruro/catalog');
-const miruroRequest=createMiruroSession({session,BrowserWindow,parent:()=>mainWindow});
+const miruroRequest=createMiruroBrowser({BrowserWindow});
 async function miruroApi(pathname,params={}){
   // Keep .to primary and use compatible mirrors only for transport/server failures.
   // Do not route around HTTP access denials or rate limits by trying another host.
@@ -871,7 +877,7 @@ async function ohliStream(playerUrl){
     win.loadURL(playerUrl,{httpReferrer:`${OHLI24_WEB}/`,userAgent:LINKKF_UA}).catch(()=>{});
     for(let i=0;i<60&&!master&&!media;i++){
       await new Promise(resolve=>setTimeout(resolve,500));
-      if(i%4===3)win.webContents.executeJavaScript(`try{window.jwplayer?.().play?.()}catch{};document.querySelectorAll('video').forEach(v=>{v.muted=true;v.play().catch(()=>{})})`,true).catch(()=>{});
+      if(i%4===3)win.webContents.mainFrame.executeJavaScript(`try{window.jwplayer?.().play?.()}catch{};document.querySelectorAll('video').forEach(v=>{v.muted=true;v.play().catch(()=>{})})`,true).catch(()=>{});
     }
     if(!master&&!media)throw new Error('애니24 영상 주소를 찾지 못했습니다.');
     const subtitle=await ohliCaption(win,playerUrl);
@@ -887,7 +893,7 @@ async function ohliStream(playerUrl){
   }finally{ses.webRequest.onSendHeaders(null);if(!win.isDestroyed())win.destroy()}
 }
 async function ohliCaption(win,playerUrl){
-  const files=await win.webContents.executeJavaScript(`(()=>{try{const item=window.jwplayer?.().getPlaylist?.()?.[0]||{};return [...(item.tracks||[]),...(item.sources||[]).flatMap(source=>source.tracks||[])].filter(track=>/^(captions|subtitles)$/i.test(track.kind||'')&&track.file).map(track=>String(track.file))}catch{return []}})()`,true).catch(()=>[]);
+  const files=await win.webContents.mainFrame.executeJavaScript(`(()=>{try{const item=window.jwplayer?.().getPlaylist?.()?.[0]||{};return [...(item.tracks||[]),...(item.sources||[]).flatMap(source=>source.tracks||[])].filter(track=>/^(captions|subtitles)$/i.test(track.kind||'')&&track.file).map(track=>String(track.file))}catch{return []}})()`,true).catch(()=>[]);
   for(const file of new Set(files)){
     try{
       const url=new URL(file,playerUrl);if(!['http:','https:'].includes(url.protocol))continue;
@@ -1033,6 +1039,11 @@ async function saveRemoteSubtitle(url,{referer='',userAgent=LINKKF_UA,headers={}
 // A session has one request hook; a second one replaces the first. Player pages open side by side in one session
 // (Re:Anime's servers, each in the session that keeps FlixCloud's cookies), so the session's hook hands each request
 // to the page it came from.
+// Ignore known ad hosts and ad path components without inspecting query tokens, where stream IDs often contain "ad".
+function isAdMedia(url){
+  let where=String(url);try{const parsed=new URL(url);where=parsed.hostname+parsed.pathname}catch{}
+  return /runative|magsrv|juneworewyjyna|pxltag/i.test(String(url))||/(?:^|[./_-])ad(?:s|server|vert\w*)?(?=[./_-]|$)/i.test(where);
+}
 const resolverHooks=new Map();
 function hookResolver(ses,webContentsId,handler){
   let handlers=resolverHooks.get(ses);
@@ -1050,7 +1061,7 @@ async function resolveStreamPage(targetUrl, referer = '', timeoutMs = 30000, { p
   const resolver=new BrowserWindow({show:false,width:960,height:640,webPreferences:{partition,contextIsolation:true,nodeIntegration:false,sandbox:true,autoplayPolicy:'no-user-gesture-required',backgroundThrottling:false}});
   resolver.webContents.setUserAgent(browserUa);
   const ses=resolver.webContents.session;let stream=null,subtitle=null,lastHeaders={},flixPk='',flixVideo='',flixAudio='';const streams=new Map();
-  const unhook=hookResolver(ses,resolver.webContents.id,(details,callback)=>{const lower=details.url.toLowerCase(),headers=details.requestHeaders||{};if(isFlixCloud){headers['User-Agent']=ANDROID_WEBVIEW_UA;headers['sec-ch-ua']='"Chromium";v="131", "Not_A Brand";v="24"';headers['sec-ch-ua-mobile']='?1';headers['sec-ch-ua-platform']='"Android"';headers['Accept-Language']='en-US,en;q=0.9,ko;q=0.7'}const adMedia=/runative|magsrv|juneworewyjyna|pxltag/i.test(lower),media=lower.includes('.m3u8')||/\.(mp4|webm)(?:\?|$)/i.test(lower);if(media&&!adMedia&&!lower.includes('ad')){streams.set(details.url,{...headers});if(!stream){stream=details.url;lastHeaders={...headers}}}if(!isFlixCloud&&lower.includes('.vtt')&&!/thumbnail/i.test(lower))subtitle ||= details.url;callback({requestHeaders:headers});});
+  const unhook=hookResolver(ses,resolver.webContents.id,(details,callback)=>{const lower=details.url.toLowerCase(),headers=details.requestHeaders||{};if(isFlixCloud){headers['User-Agent']=ANDROID_WEBVIEW_UA;headers['sec-ch-ua']='"Chromium";v="131", "Not_A Brand";v="24"';headers['sec-ch-ua-mobile']='?1';headers['sec-ch-ua-platform']='"Android"';headers['Accept-Language']='en-US,en;q=0.9,ko;q=0.7'}const adMedia=isAdMedia(details.url),media=lower.includes('.m3u8')||/\.(mp4|webm)(?:\?|$)/i.test(lower);if(media&&!adMedia){streams.set(details.url,{...headers});if(!stream){stream=details.url;lastHeaders={...headers}}}if(!isFlixCloud&&lower.includes('.vtt')&&!/thumbnail/i.test(lower))subtitle ||= details.url;callback({requestHeaders:headers});});
   const stop=()=>{if(!resolver.isDestroyed())resolver.destroy()};signal?.addEventListener('abort',stop);
   try {
     // The address is looked for while the page loads: a player page can keep loading ads for half a minute after the
@@ -1061,7 +1072,7 @@ async function resolveStreamPage(targetUrl, referer = '', timeoutMs = 30000, { p
     while(!stream&&!resolver.isDestroyed()&&Date.now()<streamDeadline){
       if(isFlixCloud&&loaded&&!blockChecked){
         blockChecked=true;
-        const blocked=await resolver.webContents.executeJavaScript(`(()=>{const text=(document.title+' '+(document.body?.innerText||'')).toLowerCase();return text.includes('sorry, you have been blocked')||text.includes('you have been blocked')})()`,true).catch(()=>false);
+        const blocked=await resolver.webContents.mainFrame.executeJavaScript(`(()=>{const text=(document.title+' '+(document.body?.innerText||'')).toLowerCase();return text.includes('sorry, you have been blocked')||text.includes('you have been blocked')})()`,true).catch(()=>false);
         if(blocked)throw new Error('FlixCloud가 이 앱 세션을 차단했습니다. 다른 영상 서버로 전환합니다.');
       }
       for(const frame of resolver.webContents.mainFrame.frames){
@@ -1076,7 +1087,7 @@ async function resolveStreamPage(targetUrl, referer = '', timeoutMs = 30000, { p
       const complete=()=>has(/master/i)||(has(/\/video(?:\/|\.|$)/i)&&has(/\/audio(?:\/|\.|$)/i));
       const readyDeadline=Date.now()+10000;let previousSize=-1,stableSince=Date.now();
       while(!resolver.isDestroyed()&&Date.now()<readyDeadline){
-        if(!flixPk)flixPk=await resolver.webContents.executeJavaScript(`window.__pk||''`,true).catch(()=>'');
+        if(!flixPk)flixPk=await resolver.webContents.mainFrame.executeJavaScript(`window.__pk||''`,true).catch(()=>'');
         if(streams.size!==previousSize){previousSize=streams.size;stableSince=Date.now()}
         if(flixPk&&(complete()||Date.now()-stableSince>=1500))break;
         await new Promise(resolve=>setTimeout(resolve,150));
@@ -1095,14 +1106,14 @@ async function resolveStreamPage(targetUrl, referer = '', timeoutMs = 30000, { p
     if(isFlixCloud&&!resolver.isDestroyed()){
       // FlixCloud embeds the complete track list in the player HTML. Report every track so the
       // player can offer a choice, and only auto-select Korean (Android v0.3.9).
-      const html=await resolver.webContents.executeJavaScript(`document.documentElement.innerHTML||''`,true).catch(()=>'');
+      const html=await resolver.webContents.mainFrame.executeJavaScript(`document.documentElement.innerHTML||''`,true).catch(()=>'');
       subtitleTracks=parseFlixSubtitleTracks(html);
       subtitle=subtitleTracks.find(isKoreanTrack)?.url||null;
     }
     if(stream&&!subtitle&&!isFlixCloud&&waitSubtitle){const subtitleDeadline=Date.now()+2500;while(Date.now()<subtitleDeadline&&!subtitle)await new Promise(resolve=>setTimeout(resolve,200));}
     if(!stream)throw new Error(resolver.isDestroyed()?'플레이어 창이 닫혀 스트림 탐색을 중단했습니다.':'영상 주소를 찾지 못했습니다 (응답 시간 초과).');
     // The key appears with the player; a page that never sets it is given up instead of waiting forever.
-    if(isFlixCloud){const keyDeadline=Date.now()+15000;while(!flixPk&&!resolver.isDestroyed()&&Date.now()<keyDeadline){flixPk=await resolver.webContents.executeJavaScript(`window.__pk||''`,true).catch(()=>'');if(!flixPk)await new Promise(resolve=>setTimeout(resolve,250))}if(!flixPk)throw new Error(resolver.isDestroyed()?'플레이어 창이 닫혀 복호화 키 탐색을 중단했습니다.':'FlixCloud 복호화 키를 찾지 못했습니다.');const headers={...lastHeaders,Referer:targetUrl,'User-Agent':ANDROID_WEBVIEW_UA};stream=flixVideo&&flixAudio?await createFlixAvProxyUrl(flixVideo,flixAudio,flixPk,headers):await createFlixProxyUrl(stream,flixPk,headers);}
+    if(isFlixCloud){const keyDeadline=Date.now()+15000;while(!flixPk&&!resolver.isDestroyed()&&Date.now()<keyDeadline){flixPk=await resolver.webContents.mainFrame.executeJavaScript(`window.__pk||''`,true).catch(()=>'');if(!flixPk)await new Promise(resolve=>setTimeout(resolve,250))}if(!flixPk)throw new Error(resolver.isDestroyed()?'플레이어 창이 닫혀 복호화 키 탐색을 중단했습니다.':'FlixCloud 복호화 키를 찾지 못했습니다.');const headers={...lastHeaders,Referer:targetUrl,'User-Agent':ANDROID_WEBVIEW_UA};stream=flixVideo&&flixAudio?await createFlixAvProxyUrl(flixVideo,flixAudio,flixPk,headers):await createFlixProxyUrl(stream,flixPk,headers);}
     let subtitleUrl=subtitle,subtitlePath=null,subtitleAss=null;if(subtitle){try{const saved=subtitleResult(await saveRemoteSubtitle(subtitle,{referer:targetUrl,userAgent:browserUa,headers:lastHeaders}));subtitleUrl=saved.url;subtitlePath=saved.path;subtitleAss=saved.assUrl?{url:saved.assUrl,path:saved.assPath}:null}catch{/* Community subtitle fallback remains available. */}}
     return {url:stream,subtitleUrl,subtitlePath,subtitleAss,subtitleTracks,headers:lastHeaders,referer:targetUrl};
   } finally {signal?.removeEventListener('abort',stop);ses.webRequest.onBeforeSendHeaders(null);if(!resolver.isDestroyed())resolver.destroy();}
@@ -1738,7 +1749,14 @@ async function communityPosts(blog,{force=false}={}){
 function communitySeason(text=''){
   const value=String(text).normalize('NFKC'),m=value.match(/(?:season|시즌)\s*(\d+)|(\d+)\s*기(?![가-힣])|(\d+)(?:st|nd|rd|th)(?:\s*season)?\b|[가-힣](\d)(?=\s|$)/i);
   if(m)return Number(m[1]||m[2]||m[3]||m[4]);
-  const roman=value.trim().match(/(?:^|\s)(II|III|IV|V|VI)\s*$/i);return roman?{II:2,III:3,IV:4,V:5,VI:6}[roman[1].toUpperCase()]:null;
+  // A roman numeral at the end, or before a subtitle ("클레바테스Ⅱ ~마수왕과 가짜 용사 전승~", "시광대리인 Ⅱ -Link Click Ⅱ-").
+  const roman=value.trim().match(/(?:^|\s)(II|III|IV|V|VI)\s*$/i)||value.match(/(?:^|[\s가-힣])(II|III|IV|VI|V)(?=\s*[~\-(:])/);return roman?{II:2,III:3,IV:4,V:5,VI:6}[roman[1].toUpperCase()]:null;
+}
+// Every season a post title names: some makers keep a series in one post ("… 1기/2기/3기", "클레바테스 1기 … / 2기 …").
+// A title naming none is the first season's.
+function communitySeasons(text=''){
+  const listed=new Set([...String(text).normalize('NFKC').matchAll(/(\d+)\s*기(?![가-힣])/g)].map(m=>Number(m[1])));
+  return listed.size>1?listed:new Set([communitySeason(text)??1]);
 }
 // Provider (English) titles also number a later season with a bare digit or a roman numeral at the end
 // ("The Angel Next Door Spoils Me Rotten 2", Re:Anime's "…Rotten2", "Overlord IV"), but "Kaiju No. 8",
@@ -2382,7 +2400,10 @@ app.whenReady().then(async () => {
     }
   });
   const subtitleStore=new SubtitleStore({app,reconvert:reconvertSubtitle});
-  subtitleSync=createSubtitleSync({userData:app.getPath('userData'),ffmpegPath:require('ffmpeg-static').replace('app.asar','app.asar.unpacked'),managedRoot:subtitleStore.managedRoot});
+  const ffmpegPath=require('ffmpeg-static').replace('app.asar','app.asar.unpacked');
+  const ffmpegStream=(url,headers)=>createFlixProxyUrl(url,'',{...headers,'User-Agent':headers?.['User-Agent']||LINKKF_UA});
+  subtitleSync=createSubtitleSync({userData:app.getPath('userData'),ffmpegPath,managedRoot:subtitleStore.managedRoot,proxy:ffmpegStream});
+  whisper=createWhisper({userData:app.getPath('userData'),ffmpegPath,subtitleRoot:subtitleStore.managedRoot,proxy:ffmpegStream});
   // Same order as the player's ensureSubtitle: the preferred source's saved file, the stream's own
   // subtitle, any saved file, then Kairan/Csora.
   const downloadSubtitleKey=job=>{const episode=job.episode||{};return encodeURIComponent(String(episode.url||episode.token||episode.id||episode.number||''))};
@@ -2749,6 +2770,19 @@ app.whenReady().then(async () => {
   ipcMain.handle('subtitle-sync:prepare',()=>{if(!subtitleSync.installed())subtitleSync.install().catch(()=>{});return true});
   ipcMain.handle('subtitle-sync:retime',(_,request={})=>subtitleSync.retime({subtitlePath:String(request.subtitlePath||''),assPath:request.assPath?String(request.assPath):null,offset:Number(request.offset),scale:Number(request.scale)||1,segments:Array.isArray(request.segments)?request.segments.map(segment=>({from:Number(segment?.from),shift:Number(segment?.shift)})):null}));
   ipcMain.handle('subtitle-sync:cancel',()=>{subtitleSync.cancel();return true});
+  const whisperEvent=(event,value)=>{if(!event.sender.isDestroyed())event.sender.send('whisper:progress',value)};
+  ipcMain.handle('whisper:status',()=>whisper.status());
+  ipcMain.handle('whisper:select',(_,id)=>whisper.select(String(id||'')));
+  ipcMain.handle('whisper:install',event=>whisper.install((message,progress)=>whisperEvent(event,{kind:'install',message,progress})));
+  ipcMain.handle('whisper:download',(event,id)=>whisper.downloadModel(String(id||''),progress=>whisperEvent(event,{kind:'model',id,progress})));
+  ipcMain.handle('whisper:remove',(_,id)=>whisper.removeModel(String(id||'')));
+  ipcMain.handle('whisper:transcribe',async(event,request={})=>{
+    const id=Number(request.id)||0;
+    try{return await whisper.transcribe({key:String(request.key||''),videoUrl:String(request.videoUrl||''),headers:request.headers||{},startAt:Number(request.startAt)||0,duration:Number(request.duration)||0},value=>whisperEvent(event,{kind:'run',id,...value}))}
+    catch(error){if(error.canceled)return {canceled:true};throw error}
+  });
+  ipcMain.handle('whisper:cancel',()=>whisper.cancel());
+  ipcMain.handle('whisper:jump',(_,seconds)=>whisper.jump(Number(seconds)||0));
   ipcMain.handle('clipboard:copy-text',(_,value)=>{const text=String(value??'');if(!text.trim()||text.length>2_000_000)throw new Error('복사할 내용이 비어 있거나 너무 큽니다.');clipboard.writeText(text);return true});
   ipcMain.handle('app:diagnostic-info',()=>({version:app.getVersion(),platform:process.platform,arch:process.arch}));
   // 설정 > 자막 캐시: the subtitle files no saved subtitle uses (translations, downloads, partial results), removed by
@@ -2960,14 +2994,15 @@ app.whenReady().then(async () => {
   ipcMain.handle('subtitle:jump',(_,id,seconds)=>{translator().jump(Number(id)||null,Number(seconds)||0);return true});
   // playing: where the episode is (the lines from there are translated first); the lines done so far go to the player
   // as they come (translate:progress {lines}), so it shows them before the rest is translated.
-  ipcMain.handle('subtitle:translate',async(event,{path:file='',title='',id=0,provider='',anime=null,playing=0,fresh=false,only=false,anySide=false}={})=>{
+  ipcMain.handle('subtitle:translate',async(event,{path:file='',title='',id=0,provider='',anime=null,playing=0,fresh=false,only=false,anySide=false,linesKey='',partial=false}={})=>{
     const resolved=path.resolve(String(file||''));
     // App subtitle files and the tracks saved with downloads.
     const savedByUser=Object.values(subtitleStore.data).some(items=>items.some(item=>item.source==='user'&&path.resolve(item.path)===resolved));
     if(!savedByUser&&![path.join(app.getPath('userData'),'subtitles'),downloadManager?.root].some(root=>root&&resolved.startsWith(root+path.sep))||!/\.vtt$/i.test(resolved)||!fs.existsSync(resolved))throw new Error('번역할 자막 파일이 없습니다.');
     const send=value=>{if(!event.sender.isDestroyed())event.sender.send('translate:progress',{id,...value})};
     const context=await translationContext(anime||{},String(title||''));
-    const result=await translator().translate({file:resolved,id:Number(id)||null,title:String(title||''),provider:['cloud','gemini','local'].includes(provider)?provider:'',context,playing:Number(playing)||0,fresh:fresh===true,only:only===true,anySide:anySide===true,progress:(done,total)=>send({done,total}),status:text=>send({status:text}),lines:items=>send({lines:items})});
+    const result=await translator().translate({file:resolved,id:Number(id)||null,title:String(title||''),provider:['cloud','gemini','local'].includes(provider)?provider:'',context,playing:Number(playing)||0,fresh:fresh===true,only:only===true,anySide:anySide===true,linesKey:String(linesKey||''),partial:partial===true,progress:(done,total)=>send({done,total}),status:text=>send({status:text}),lines:items=>send({lines:items})});
+    if(result.partial)return {partial:true,engine:result.engine||'',failed:result.failed,lines:result.lines};
     return subtitleResult(result.path,{model:result.model,engine:result.engine||'',failed:result.failed,cached:result.cached,fallbackNote:result.fallbackNote||'',fallbackReason:result.fallbackReason||''});
   });
   // Several lookups at a time (TMDB answers quickly; AniList allows about 90 requests a minute).
@@ -3129,5 +3164,5 @@ ipcMain.handle('anime:artwork',(_,anime={})=>animeArtwork(anime||{}).catch(()=>(
   app.quit();
 });
 
-app.on('before-quit', () => { desktopState?.beforeQuit();subtitleSync?.stop();downloadManager?.shutdown();closeFlixProxy(); subtitleTranslator?.local?.stop();updater?.installOnQuit(); });
+app.on('before-quit', () => { desktopState?.beforeQuit();subtitleSync?.stop();whisper?.stop();downloadManager?.shutdown();closeFlixProxy();miruroRequest.close?.(); subtitleTranslator?.local?.stop();updater?.installOnQuit(); });
 app.on('window-all-closed', () => { if (process.env.LILAC_SMOKE_REANIME==='1'||desktopState?.settings().trayEnabled&&!desktopState.quitting)return;if (process.platform !== 'darwin') app.quit(); });

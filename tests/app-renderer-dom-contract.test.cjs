@@ -10,8 +10,8 @@ const translator = fs.readFileSync(path.join(root, 'electron/subtitle-translator
 
 test('official subtitle translation controls are rendered and bound to saved settings', () => {
   for (const id of ['dropCaptions', 'promptExtra', 'promptRules', 'savePrompt', 'resetPrompt', 'loadDefaultRules']) {
-    assert.ok(html.includes('id="' + id + '"'), id + ' is part of the official translation settings UI');
-    assert.ok(app.includes('#' + id), id + ' is connected by the renderer');
+    assert.ok(html.includes('id="' + id + '"'), `${id} is part of the official translation settings UI`);
+    assert.ok(app.includes('#' + id), `${id} is connected by the renderer`);
   }
   assert.match(html, /id=["']prepareNextCloud["']/);
   assert.match(app, /#prepareNextCloud/);

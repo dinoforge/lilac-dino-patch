@@ -9,6 +9,14 @@ const { createRequire } = require('node:module');
 const filename = path.resolve(__dirname, '../electron/subtitle-translator.cjs');
 const source = fs.readFileSync(filename, 'utf8');
 const response = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+const claudeStream = text => new Response([
+  ['message_start', { type: 'message_start', message: { id: 'msg_test', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 0 } } }],
+  ['content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }],
+  ['content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } }],
+  ['content_block_stop', { type: 'content_block_stop', index: 0 }],
+  ['message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null, stop_details: null }, usage: { output_tokens: 1 } }],
+  ['message_stop', { type: 'message_stop' }]
+].map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join(''), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 function setup(t, fetch, settings = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lilac-ai-test-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -95,6 +103,39 @@ test('Qwen valid model list is saved after validation', async t => {
   const saved = await ai.saveSettings({ qwenKey: 'fake-key' });
   assert.equal(saved.qwenModel, 'qwen-plus');
   assert.deepEqual(Array.from(saved.qwenModels), ['qwen-plus']);
+});
+
+test('Claude key is validated with the official model list and selects the newest Opus', async t => {
+  const { ai } = setup(t, async (url, init) => {
+    assert.match(String(url), /^https:\/\/api\.anthropic\.com\/v1\/models\?limit=100$/);
+    assert.equal(new Headers(init.headers).get('x-api-key'), 'fake-key');
+    return response({ data: ['claude-haiku-5-5', 'claude-opus-5-5', 'claude-sonnet-5-5'].map(id => ({ type: 'model', id })), has_more: false });
+  });
+  const saved = await ai.saveSettings({ claudeKey: ' fake-key ' });
+  assert.equal(saved.claudeModel, 'claude-opus-5-5');
+  assert.deepEqual(Array.from(saved.claudeModels), ['claude-haiku-5-5', 'claude-opus-5-5', 'claude-sonnet-5-5']);
+  assert.equal((await ai.saveSettings({ claudeModel: 'claude-haiku-5-5' })).claudeModel, 'claude-haiku-5-5');
+});
+
+test('Claude translation uses the official streaming API adapter and preserves subtitle timing', async t => {
+  const { ai, dir } = setup(t, async (url, init) => {
+    assert.match(String(url), /^https:\/\/api\.anthropic\.com\/v1\/messages/);
+    const headers = new Headers(init.headers), body = JSON.parse(init.body);
+    assert.equal(headers.get('x-api-key'), 'fake-key');
+    assert.match(headers.get('anthropic-beta') || '', /server-side-fallback-2026-07-01/);
+    assert.equal(body.model, 'claude-opus-5-5');
+    assert.equal(body.stream, true);
+    assert.equal(body.fallbacks, 'default');
+    assert.equal(body.output_config.effort, 'low');
+    assert.equal(body.output_config.format.type, 'json_schema');
+    assert.deepEqual(body.system, [{ type: 'text', text: body.system[0].text, cache_control: { type: 'ephemeral' } }]);
+    return claudeStream('{"lines":[{"i":0,"t":"안녕"}]}');
+  }, { cloud: 'claude', claudeKey: 'fake-key', claudeModel: 'claude-opus-5-5', claudeModels: ['claude-opus-5-5'] });
+  const file = path.join(dir, 'source.vtt');
+  fs.writeFileSync(file, 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello\n');
+  const result = await ai.translate({ file, provider: 'cloud' });
+  assert.equal(result.failed, 0);
+  assert.match(fs.readFileSync(result.path, 'utf8'), /00:00:01\.000 --> 00:00:02\.000\n안녕/);
 });
 
 test('Gemini daily quota fails immediately without repeated requests', async t => {
@@ -218,4 +259,29 @@ test('번역 프롬프트 is saved trimmed, refused past 4000 characters, and a 
   await ai.saveSettings({ promptExtra: '- 존댓말' });
   assert.equal((await ai.translate({ file, provider: 'cloud' })).cached, false);
   assert.equal(calls, 2);
+});
+
+// Whisper's subtitle grows while it is translated: each run keeps its lines under linesKey, so the next one sends only
+// the new lines; a partial run makes no file; the final run takes them all up and writes the translation.
+test('a growing subtitle is translated line by line as it grows (linesKey, partial)', async t => {
+  const sent = [];
+  const { ai, dir } = setup(t, async (url, init) => {
+    const body = String(init.body), texts = [...body.matchAll(/LINE(\d+)/g)].map(match => Number(match[1]));
+    sent.push([...new Set(texts)]);
+    const ids = [...new Set([...body.matchAll(/\\"i\\":(\d+)/g)].map(match => Number(match[1])))];
+    return response({ output: [{ content: [{ type: 'output_text', text: JSON.stringify({ lines: ids.map(i => ({ i, t: `번역${i}` })) }) }] }] });
+  }, { cloud: 'openai', openaiKey: 'fake-openai', openaiModel: 'gpt-5-mini' });
+  const file = path.join(dir, 'whisper.vtt'), cue = n => `00:00:${String(n).padStart(2, '0')}.000 --> 00:00:${String(n).padStart(2, '0')}.900\nLINE${n}\n`;
+  const write = count => fs.writeFileSync(file, `WEBVTT\n\n${Array.from({ length: count }, (_, n) => cue(n + 1)).join('\n')}`);
+  write(3);
+  const first = await ai.translate({ file, provider: 'cloud', linesKey: file, partial: true });
+  assert.equal(first.partial, true); assert.equal(first.lines, 3);
+  write(5);
+  const shown = [];
+  await ai.translate({ file, provider: 'cloud', linesKey: file, partial: true, lines: items => shown.push(...items) });
+  assert.deepEqual(sent[sent.length - 1], [4, 5], 'only the two new lines are sent');
+  assert.equal(new Set(shown.map(item => item.raw)).size, 5, 'the lines kept from before are given too');
+  const requests = sent.length, final = await ai.translate({ file, provider: 'cloud', linesKey: file });
+  assert.equal(sent.length, requests, 'the final run sends nothing');
+  assert.ok(final.path && fs.readFileSync(final.path, 'utf8').includes('번역'));
 });

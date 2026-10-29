@@ -219,6 +219,46 @@ test('speed shortcuts reach 3x and 4x, respect the upper limit and step back', (
   }
 });
 
+test('keyboard seeks show the destination without raising the full player controls', () => {
+  const hint = { className: 'player-seek-hint', classList: classList(), children: [], replaceChildren(...children) { this.children = children; } };
+  const player = { classList: classList(), contains: () => false };
+  const video = { currentTime: 100, duration: 1000, paused: false, volume: 1, muted: false };
+  let controlsShown = 0;
+  const context = vm.createContext({
+    document: { activeElement: { tagName: 'BODY', isContentEditable: false }, fullscreenElement: null, createElement: () => ({ textContent: '' }) },
+    $: selector => ({ '#video': video, '#immersivePlayer': player, '#playerSeekHint': hint }[selector] || null),
+    localStorage: { getItem: key => key === 'seekSeconds' ? '10' : null },
+    playerLocked: false, playerSettingsOpen: () => false, playerFlag: () => false,
+    showPlayerControls: () => { controlsShown++; }, seekPlayer: time => { video.currentTime = time; },
+    formatTime: time => `${Math.floor(time / 60)}:${String(Math.floor(time % 60)).padStart(2, '0')}`,
+    setTimeout: () => 1, clearTimeout() {}
+  });
+  vm.runInContext(section('let seekHint = null;', 'function resetAutoSkipState()'), context);
+  const start = source.indexOf('function handlePlayerKey(event) {'), end = source.indexOf('async function takeScreenshot()', start);
+  assert.ok(start >= 0 && end > start, 'player keyboard handler exists');
+  vm.runInContext(source.slice(start, end), context);
+
+  const key = (value, code) => ({ key: value, code, preventDefault() { this.prevented = true; } });
+  context.handlePlayerKey(key('ArrowLeft', 'ArrowLeft'));
+  assert.equal(video.currentTime, 90);
+  assert.equal(hint.className, 'player-seek-hint back');
+  assert.equal(hint.children[0].textContent, '−10초');
+  assert.equal(hint.children[1].textContent, '1:30');
+  assert.equal(controlsShown, 0);
+
+  context.handlePlayerKey(key('ArrowLeft', 'ArrowLeft'));
+  assert.equal(video.currentTime, 80);
+  assert.equal(hint.children[0].textContent, '−20초', 'repeated seeks in the same direction accumulate');
+
+  context.handlePlayerKey(key('5', 'Digit5'));
+  assert.equal(video.currentTime, 500);
+  assert.equal(hint.className, 'player-seek-hint jump');
+  assert.deepEqual(hint.children.map(child => child.textContent), ['8:20']);
+  assert.equal(controlsShown, 0);
+  assert.equal(require('cheerio').load(indexHtml)('#playerSeekHint').length, 1);
+  assert.match(playerCss, /\.player-seek-hint\.show\s*\{\s*opacity:\s*1/);
+});
+
 test('3x and 4x settings persist in the playback select and default slider', () => {
   const h = setup(), originalSelect = h.context.$;
   const $html = require('cheerio').load(indexHtml);
@@ -527,6 +567,29 @@ test('LinkAni is a selectable source and Patch 03 provider while original Linkkf
   assert.match(mainSource, /LINKANI_WEB|linkaniFetch|linkaniItems|linkaniDetail|resolveLinkaniEpisode/);
   assert.match(mainSource, /ipcMain\.handle\('linkkf:resolve'/);
   assert.doesNotMatch(integrated.match(/const PROVIDERS = \[([^\]]+)\]/)?.[1] || '', /linkkf/i);
+});
+
+test('AI subtitle selection does not treat a retired ChatGPT record as a current AI translation', async () => {
+  const entry = { source: 'chatgpt', path: 'legacy-chatgpt.vtt', url: 'file:///legacy-chatgpt.vtt' };
+  const applied = [], actions = [], notices = [];
+  const context = vm.createContext({
+    playbackRequestId: 12, subtitleSelectionRequestId: 4, currentPlaybackContext: {},
+    subtitleStoreKey: () => 'episode-key',
+    window: { lilac: { savedSubtitles: async key => { assert.equal(key, 'episode-key'); return [entry]; }, geminiSettings: async () => ({}) } },
+    pressSubtitleSource: source => actions.push(['pressed', source]),
+    preferAiSubtitle: enabled => actions.push(['preferred', enabled]),
+    renderSubtitleSheet: () => actions.push(['render']),
+    applySavedSubtitle: saved => applied.push(saved),
+    autoTranslateProvider: () => null, autoProvider: () => null, toast: message => notices.push(message)
+  });
+  vm.runInContext(section('async function switchSubtitleSource(', '// Quality:'), context);
+
+  await context.switchSubtitleSource('ai', 4, 12);
+
+  assert.equal(context.currentPlaybackContext.sheetSource, null);
+  assert.deepEqual(actions, [['pressed', 'ai'], ['preferred', true], ['render']]);
+  assert.deepEqual(applied, []);
+  assert.match(notices[0], /번역 API 키나 로컬 AI 모델/);
 });
 
 function subtitleSourceHarness() {

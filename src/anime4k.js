@@ -1,10 +1,12 @@
 // The media element keeps playback, audio and native captions; only its picture is replaced.
 (() => {
   const modes = {
-    off: '끄기', light: '가볍게', a: 'A · 선명하게', b: 'B · 부드럽게', c: 'C · 노이즈 제거'
+    off: '끄기', light: '가볍게', a: 'A · 선명하게', b: 'B · 부드럽게', c: 'C · 노이즈 제거',
+    aa: 'A+A · 더 선명하게', bb: 'B+B · 더 부드럽게', ca: 'C+A · 노이즈 제거 후 선명하게', hq: '고화질 (고사양)'
   };
   let video, stage, getAspect, notify, library, renderer, canvas, gl, dimensions;
-  let frameId = null, frameKind = null, revision = 0, blocked = false, message = '';
+  let frameId = null, frameKind = null, revision = 0, blocked = false, message = '', sourceKind = 'video';
+  const wantedSource = () => window.LilacCleanup?.active?.() ? 'cleanup' : 'video';
   const mode = () => Object.hasOwn(modes, localStorage.getItem('playerAnime4k')) ? localStorage.getItem('playerAnime4k') : 'off';
   const visible = () => document.body.classList.contains('player-mode');
   function syncUI() {
@@ -56,12 +58,14 @@
     const max = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), gl.getParameter(gl.MAX_RENDERBUFFER_SIZE));
     if (video.videoWidth * 2 > max || video.videoHeight * 2 > max) throw new Error('Video exceeds GPU limits');
     renderer = new library.ImageUpscaler(library.profiles[mode()]);
-    renderer.attachSource(video, canvas);
+    const cleaned = wantedSource() === 'cleanup' ? window.LilacCleanup.source() : null;
+    renderer.attachSource(cleaned || video, canvas); sourceKind = cleaned ? 'cleanup' : 'video';
     dimensions = `${video.videoWidth}:${video.videoHeight}`;
     layout();
   }
   function draw() {
     if (!renderer || video.readyState < 2) return false;
+    if (sourceKind === 'cleanup') window.LilacCleanup.render();
     renderer.upscale();
     if (gl.isContextLost() || gl.getError() !== gl.NO_ERROR || canvas.style.visibility !== 'visible') throw new Error('Unable to render frame');
     stage.classList.add('anime4k-active');
@@ -83,7 +87,7 @@
       const loaded = await library;
       if (current !== revision) return;
       library = loaded;
-      if (renderer && dimensions !== `${video.videoWidth}:${video.videoHeight}`) { release(); current = revision; }
+      if (renderer && (dimensions !== `${video.videoWidth}:${video.videoHeight}` || sourceKind !== wantedSource())) { release(); current = revision; }
       if (!renderer) createRenderer();
       draw(); schedule();
     } catch (error) { if (current === revision) fail(error); }
@@ -109,5 +113,7 @@
     window.addEventListener('pagehide', release);
     syncUI(); refresh();
   }
-  window.LilacAnime4K = { init, select, mode, frame, layout, syncUI };
+  const running = () => Boolean(renderer) && !blocked;
+  const reset = () => { if (!renderer) return; release(); refresh(); };
+  window.LilacAnime4K = { init, select, mode, frame, layout, syncUI, running, reset };
 })();
