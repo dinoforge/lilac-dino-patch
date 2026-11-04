@@ -1,0 +1,122 @@
+{
+  "officialRepository": "https://github.com/whispelyn-byte/LilacAnime-desktop",
+  "patchVersion": "1.0.0",
+  "officialVersion": "0.5.54",
+  "officialCommit": "e4ac62214f5c4863eebae5052633e7f9f33dcbaa",
+  "officialArchiveSha256": "007B0141D416614829DACF5494CFC44FD2A1EA80AA58E7E50C856D0FCDBF27CD",
+  "officialTreeSha256": "4CAD7FA1107E1B32B13C424EC12C308E3B09FF33077C2D288AA741BB2DD75DFD",
+  "officialTreeFileCount": 141,
+  "officialTreeHashFormat": "SHA256(sorted(relative path UTF-8 + NUL + raw file SHA256 digest + LF))",
+  "officialConnectionFiles": [
+    "src/app.js",
+    "src/index.html"
+  ],
+  "connections": [
+    {
+      "file": "src/app.js",
+      "description": "통합 모드에서도 마지막 개별 공급원을 공식 검색 상태의 초기값으로 사용",
+      "before": "const state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: localStorage.getItem('contentSource') || 'reanime',",
+      "after": "const savedContentSource = localStorage.getItem('contentSource');\nconst state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: savedContentSource === 'integrated' ? (localStorage.getItem('contentSourceProvider') || 'reanime') : (savedContentSource || 'reanime'),"
+    },
+    {
+      "file": "src/index.html",
+      "description": "공식 스타일시트 옆에 통합 검색 스타일 연결",
+      "before": "<link rel=\"stylesheet\" href=\"styles.css\" />",
+      "after": "<link rel=\"stylesheet\" href=\"styles.css\" />\n  <link rel=\"stylesheet\" href=\"integrated-search.css\" />"
+    },
+    {
+      "file": "src/index.html",
+      "description": "기존 공급원 설정에 통합 옵션 한 개 연결",
+      "before": "<button data-value=\"miruro\">Miruro</button></div><p>선택한 사이트의 애니 목록·제목·회차·영상 소스를 함께 사용합니다.</p>",
+      "after": "<button data-value=\"miruro\">Miruro</button><button data-value=\"integrated\">통합</button></div><p>개별 공급원은 선택한 사이트만 사용하고, 통합은 RE:Anime·Miruro·Animenosub·애니24·링크애니 결과를 작품별로 묶습니다. Linkkf는 개별 모드로 유지됩니다.</p>"
+    },
+    {
+      "file": "src/index.html",
+      "description": "기존 공급원 선택 요소에 통합 옵션 한 개 연결",
+      "before": "<option value=\"miruro\">Miruro</option></select>",
+      "after": "<option value=\"miruro\">Miruro</option><option value=\"integrated\">통합</option></select>"
+    },
+    {
+      "file": "src/index.html",
+      "description": "통합 모듈을 공식 앱 스크립트 전후로 로드",
+      "before": "<script src=\"app.js\"></script>",
+      "after": "<script src=\"integrated-search.js\"></script>\n  <script src=\"app.js\"></script>\n  <script src=\"patch03-bridge.js\"></script>"
+    }
+  ],
+  "runtimeModules": [
+    {
+      "source": "src/integrated-search.js",
+      "destination": "src/integrated-search.js",
+      "sha256": "60E2D484926549531933329751A3C16A582B507371762260B00753148C45527D"
+    },
+    {
+      "source": "src/integrated-search.css",
+      "destination": "src/integrated-search.css",
+      "sha256": "FA2513F3D8652395E4B6E5275F07C6789E0A2D49008BCED7AA708B6273A24899"
+    },
+    {
+      "source": "patches/patch03/patch03-bridge.js",
+      "destination": "src/patch03-bridge.js",
+      "sha256": "2874DBB5B6437EF417127727A195CE9911615F974116FB02229339F2A8E796CD"
+    }
+  ],
+  "officialRuntimeModifiedAllowlist": [
+    "src/app.js",
+    "src/index.html"
+  ],
+  "officialApis": [
+    {
+      "name": "providerCatalog",
+      "channel": "provider:catalog"
+    },
+    {
+      "name": "providerDetail",
+      "channel": "provider:detail"
+    },
+    {
+      "name": "providerResolve",
+      "channel": "provider:resolve"
+    }
+  ],
+  "additionalOfficialSources": [
+    {
+      "officialVersion": "0.5.55",
+      "officialCommit": "207693ea7ee31b83276ac793b35136055a24de26",
+      "officialArchiveSha256": "994E1346C4562B7A0E501D9092D59CB2D1B0C52691D4CD2C250ADDACD5E7C3AC",
+      "officialTreeSha256": "CDA756AAEBA4A07EE5BB738B6850C1E0F850DBD74B3166A6D6BB09CB1221A523",
+      "officialTreeFileCount": 145,
+      "connections": [
+        {
+          "file": "src/app.js",
+          "description": "통합 모드에서도 마지막 개별 공급원을 공식 검색 상태의 초기값으로 사용",
+          "before": "const state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: localStorage.getItem('contentSource') || 'reanime',",
+          "after": "const savedContentSource = localStorage.getItem('contentSource');\nconst state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: savedContentSource === 'integrated' ? (localStorage.getItem('contentSourceProvider') || 'reanime') : (savedContentSource || 'reanime'),"
+        },
+        {
+          "file": "src/index.html",
+          "description": "공식 스타일시트 옆에 통합 검색 스타일 연결",
+          "before": "<link rel=\"stylesheet\" href=\"styles.css\" />",
+          "after": "<link rel=\"stylesheet\" href=\"styles.css\" />\n  <link rel=\"stylesheet\" href=\"integrated-search.css\" />"
+        },
+        {
+          "file": "src/index.html",
+          "description": "기존 공급원 설정에 통합 옵션 한 개 연결",
+          "before": "<button data-value=\"miruro\">Miruro</button></div><p>선택한 사이트의 애니 목록·제목·회차·영상 소스를 함께 사용합니다.</p>",
+          "after": "<button data-value=\"miruro\">Miruro</button><button data-value=\"integrated\">통합</button></div><p>개별 공급원은 선택한 사이트만 사용하고, 통합은 RE:Anime·Miruro·Animenosub·애니24·링크애니 결과를 작품별로 묶습니다. Linkkf는 개별 모드로 유지됩니다.</p>"
+        },
+        {
+          "file": "src/index.html",
+          "description": "기존 공급원 선택 요소에 통합 옵션 한 개 연결",
+          "before": "<option value=\"miruro\">Miruro</option></select>",
+          "after": "<option value=\"miruro\">Miruro</option><option value=\"integrated\">통합</option></select>"
+        },
+        {
+          "file": "src/index.html",
+          "description": "통합 모듈을 공식 앱 스크립트 전후로 로드",
+          "before": "<script src=\"app.js\"></script>",
+          "after": "<script src=\"integrated-search.js\"></script>\n  <script src=\"app.js\"></script>\n  <script src=\"patch03-bridge.js\"></script>"
+        }
+      ]
+    }
+  ]
+}

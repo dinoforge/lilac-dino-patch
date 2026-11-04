@@ -1,0 +1,14 @@
+{
+  "name": "dino-patch-manager-electron",
+  "version": "1.2.4",
+  "description": "Dino Patch Manager Electron interface for the official LilacAnime source tree",
+  "main": "main.cjs",
+  "author": "Dino Patch Manager",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "classic-level": "3.0.0"
+  },
+  "devDependencies": {
+    "electron": "38.8.6"
+  }
+}
