@@ -22,7 +22,7 @@
 | 패치 01 | `src/app.js`, `src/weekday-schedule.js`, `src/quarter-selection.js`, `electron/main.cjs`, `electron/preload.cjs`, `electron/weekday-episodes.cjs`에 결합 | 순수 로직은 일부 분리 가능하지만 원본 홈 안의 요일 탭과 출처 버튼은 현재 포크 UI에 종속 |
 | 패치 02 | `src/manual-subtitle-translation.js`의 VTT 파서/프롬프트/응답 검증 및 `docs/prompts` 파일은 상대적으로 독립적. 번역 적용은 포크의 저장 IPC와 플레이어에 결합 | 자막 파일을 사용자가 가져와 Companion에서 변환·내보내는 작업은 가능, 원본에 자동 적용하려면 연동 지점 필요 |
 
-근거: [upstream v0.5.14](https://github.com/whispelyn-byte/LilacAnime-desktop/releases/tag/v0.5.14), [원본 main](https://github.com/whispelyn-byte/LilacAnime-desktop/blob/main/electron/main.cjs), [원본 preload](https://github.com/whispelyn-byte/LilacAnime-desktop/blob/main/electron/preload.cjs), [통합본 기준 커밋](https://github.com/dinoforge/anime-player/commit/4610a45f52e9a076b67a6774bcf3887dc390e485).
+근거: [upstream v0.5.14](https://github.com/whispelyn-byte/LilacAnime-desktop/releases/tag/v0.5.14), [원본 main](https://github.com/whispelyn-byte/LilacAnime-desktop/blob/main/electron/main.cjs), [원본 preload](https://github.com/whispelyn-byte/LilacAnime-desktop/blob/main/electron/preload.cjs), [통합본 기준 커밋](https://github.com/dinoforge/lilac-dino-patch/commit/4610a45f52e9a076b67a6774bcf3887dc390e485).
 
 ## 안전한 구성 권고 — 독립형 Sidecar Companion
 

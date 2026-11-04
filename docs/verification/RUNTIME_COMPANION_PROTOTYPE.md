@@ -20,7 +20,7 @@ Companion을 원본 LilacAnime 안에 넣는 공식 확장 지점은 확인되�
 - 태그의 [`electron/main.cjs`](https://github.com/whispelyn-byte/LilacAnime-desktop/blob/v0.5.14/electron/main.cjs#L1996-L2015)는 main window를 만들고 원본 `src/index.html`을 로드한다.
 - 태그의 [`electron/preload.cjs`](https://github.com/whispelyn-byte/LilacAnime-desktop/blob/v0.5.14/electron/preload.cjs#L1-L6)는 `contextBridge.exposeInMainWorld('lilac', ...)`로 내부 renderer API를 노출한다. API에는 방영표·공급원·재생·자막·번역 IPC가 있지만, 이 API가 외부 프로그램에 공개되는 인터페이스라는 근거는 없다.
 - v0.5.14 태그 소스를 별도 객체로 읽어 `main.cjs`와 `preload.cjs`를 확인했다. `main.cjs`에서 plugin loader, external protocol/deep link, 원격 디버깅 포트를 찾지 못했다. 이 확인은 공개 소스에 대한 정적 조사이며, 설치된 원본을 실행하거나 파일·프로필을 읽은 결과가 아니다.
-- 기존 타당성 조사는 원격 브랜치 [`codex/companion-architecture-audit`](https://github.com/dinoforge/anime-player/blob/codex/companion-architecture-audit/docs/planning/COMPANION_ADDON_FEASIBILITY.md)의 `docs/planning/COMPANION_ADDON_FEASIBILITY.md`에서 읽었다. 결론은 위 태그 소스 확인과 일치한다.
+- 기존 타당성 조사는 원격 브랜치 [`codex/companion-architecture-audit`](https://github.com/dinoforge/lilac-dino-patch/blob/codex/companion-architecture-audit/docs/planning/COMPANION_ADDON_FEASIBILITY.md)의 `docs/planning/COMPANION_ADDON_FEASIBILITY.md`에서 읽었다. 결론은 위 태그 소스 확인과 일치한다.
 
 | 접점 | 상태 | 판단 |
 |---|---|---|

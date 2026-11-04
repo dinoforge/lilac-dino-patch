@@ -7,8 +7,8 @@
 - 시스템 브라우저 승인과 loopback HTTP 콜백, PKCE/state/nonce, ID token JWKS 서명·issuer/audience/expiration 검증, Windows Electron safeStorage 암호화 자격증명 저장, OAuth refresh, 허용된 모델 조회, 공식 Responses SSE 완료 확인, 중단/연결 해제를 담당하는 SIWC 런타임 추가.
 - SIWC 계정 전용 자동 자막 번역 UI를 별도 JS 모듈로 구현했다. 영어·일본어 프롬프트와 작품·회차 문맥, cue ID 검증, 묶음별 실제 진행률, 세션 이어하기, 별도 VTT 저장·적용을 사용한다. ChatGPT 웹사이트 자동 조작·쿠키 접근·웹 대화 삭제는 구현하지 않는다.
 - v0.5.14 격리 source adapter payload와 IPC preload에 새 모듈 및 버튼 연결. 사용자 설치본, 원본 v0.5.14, `main`, 기존 사용자 데이터는 수정하지 않음.
-- Windows GitHub Actions SIWC 테스트 **10/10 통과**: https://github.com/dinoforge/anime-player/actions/runs/38130205203
-- Windows 전체 `npm test` **329개: 325 통과, 4 SKIP, 실패 0**: https://github.com/dinoforge/anime-player/actions/runs/38130373580. 4개 SKIP은 격리 공식 upstream 소스 디렉터리 지정 누락에 따른 어댑터 경로 테스트이며 통과로 간주하지 않는다.
+- Windows GitHub Actions SIWC 테스트 **10/10 통과**: https://github.com/dinoforge/lilac-dino-patch/actions/runs/38130205203
+- Windows 전체 `npm test` **329개: 325 통과, 4 SKIP, 실패 0**: https://github.com/dinoforge/lilac-dino-patch/actions/runs/38130373580. 4개 SKIP은 격리 공식 upstream 소스 디렉터리 지정 누락에 따른 어댑터 경로 테스트이며 통과로 간주하지 않는다.
 - **실제 ChatGPT 계정 SIWC 인증, 모델 사용, 사용자 동의, 실제 자막 공급원/영상, Electron 원본 전체 GUI 조작 시험은 미검증**. 특히 개인 비공개 프로젝트 SIWC 권한은 확인되지 않았다. 사용자 허가 없는 계정 연결/유료 요청 없음.
 - 주요 보고서: `docs/verification/PATCH_02_SIWC_RUNTIME.md`. 사용자는 터미널 명령 없이 클릭 UI를 통해 이용하도록 설계했지만 현재 설치용 최종 배포물은 아직 없다.
 
@@ -136,7 +136,7 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 ## 저장소와 기준선
 
 - 작업 폴더: D:\Codex-Coding-Folder\LilacAnime-Player
-- GitHub: https://github.com/dinoforge/anime-player (비공개)
+- GitHub: https://github.com/dinoforge/lilac-dino-patch (비공개)
 - 원본 기준: whispelyn-byte/LilacAnime-desktop main, v0.5.6, d7d4ec4853d252d67f0febb939be9770ca703444
 - 초기 main 스냅샷: 2bf37e51f1ab07f7c7b0d06f86cb6705005642f2, root commit
 - upstream 원본 이력은 로컬 upstream-main 브랜치에 남아 있다. 새 GitHub 저장소에는 main 스냅샷만 push했다.
@@ -752,3 +752,11 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - `npm run pack`, `npm run test:phase1-main`, `npm run test:phase1-electron`, `npm run test:phase1-exe` 통과. 패키지 main smoke는 합성 HTTP fixture 91회, 외부 네트워크 요청 0회였고 renderer smoke 오류와 차단된 외부 요청도 0회였다.
 - 사용자 승인으로 고유 앱 ID의 per-user NSIS(124,485,145바이트)를 `%TEMP%` 임시 폴더에 설치하고 설치본 `LilacAnime.exe`를 임시 `APPDATA`/`LOCALAPPDATA`/Chromium 프로필로 실행했다. 홈·검색 UI, preload bridge, 앱 정보 IPC, 이어보기 경계와 회차 종료가 통과했다. 전용 HKCU 등록과 설치 폴더를 제거했으며 기존 `LilacAnime 0.5.9` HKLM 등록 경로는 유지됐다. 실제 공급원·영상·자막은 요청하지 않았다.
 - NSIS 산출물을 담은 임시 폴더 `%TEMP%\lilac-nsis-season-d90875ee6d49403aa4884d9b7b6158d9`와 옵션 충돌로 중단된 첫 빌드 폴더 `%TEMP%\lilac-nsis-season-28191216e1ea444f8ceadf6697007068`는 남아 있다. 임시 폴더 재귀 삭제 명령이 자동 검토에서 거부되어 제거하지 않았다. 앱 설치와 HKCU 등록은 이미 정상 제거했다.
+
+## 2026-11-04 라일락 디노 패치 저장소 전환
+
+- GitHub 저장소를 `dinoforge/anime-player`에서 `dinoforge/lilac-dino-patch`로 변경했고 설명을 `라일락 디노 패치 | LilacAnime 구조 기반 자동 호환성 패치 관리자`로 갱신했다. 비공개 상태와 `main` 기본 브랜치를 유지했다. GitHub에서 확인된 기존 브랜치와 워크플로는 유지했다.
+- 기본 문서 `README.md`, `PRODUCT.md`, `DESIGN.md`를 디노 패치 관리자 중심으로 갱신했다. 기존 LilacAnime Player 문서 세 개는 `docs/legacy/`에 원문과 전환 안내를 두어 보존했다. 기존 프로젝트 URL이 가리키는 과거 커밋·Actions 기록 링크는 새 저장소 주소로 갱신했다.
+- GitHub 기본 `main` 기준 커밋은 전환 전 `80b5e36bc28aebf2762d340c57ab441542d2edfa`였고, 이 트리에는 A35 관리자 소스와 `tools/dino-patch-manager` 경로가 없다. 디노 관련 기존 브랜치는 초기 관리자/미리보기 구현이며 A35-final과 일치하지 않는다. 로컬 A35 소스와 바이너리의 정확한 빌드 대응 증거가 없어 소스 파일을 임의로 추가하지 않았고 A35 재현 빌드 가능하다고 주장하지 않는다.
+- A35 Windows ZIP은 로컬 배포 산출물로 보존되어 있으며 GitHub Release나 일반 Git 커밋에 올리지 않았다. Actions 권리 승인 변수는 설정하지 않았고 태그도 만들지 않았다. 기존 `Build` 워크플로는 레거시 LilacAnime 앱용이며 태그/수동 실행만 가능하고 승인 변수로 가드된다. SIWC 테스트 워크플로는 기존 비활성 상태를 유지했다.
+- 이 변경은 문서·저장소 메타데이터 범위다. 코드, A35 ZIP, 기존 앱 파일과 패키지 설정은 수정하지 않았다. 관리자 또는 앱 테스트는 재실행하지 않았고 `git diff --check`를 확인했다. 기존 로컬 dirty 작업 트리는 분리된 OS Temp 복제본에서 보존했으며, 해당 저장소를 가리키던 로컬 `origin`만 새 주소로 바꾸고 공식 `upstream`은 유지했다.
