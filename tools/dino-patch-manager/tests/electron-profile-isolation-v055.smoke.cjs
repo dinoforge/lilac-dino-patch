@@ -304,6 +304,7 @@ async function main() {
   const runs = [];
   let first = null;
   let second = null;
+  let third = null;
   try {
     first = await launchManager(sourceRoot, profileRoot, 'first-auto-apply');
     assert.ok(first.state.root.toLocaleLowerCase().includes(sourceRoot.toLocaleLowerCase()), 'Manager must auto-detect the v0.5.55 source root.');
@@ -328,15 +329,17 @@ async function main() {
     const uninstalled = await waitForUi(second.cdp, (item) => item.busy === '대기' && item.patch === '호환 · 미적용', 'A27 UI uninstall');
     assert.deepEqual(digestEntries(treeEntries(sourceRoot, new Set(['DinoPatchManager']))), beforeTree, 'Uninstall must restore all official v0.5.55 files.');
     runs.push({ label: 'uninstall', status: uninstalled.patch, officialTreeRestored: true });
+    await closeManager(second); second = null;
 
-    await click(second.cdp, '#apply');
-    const reapplied = await waitForUi(second.cdp, (item) => item.busy === '대기' && item.patch === '적용됨 · 호환', 'A27 UI reapply');
+    third = await launchManager(sourceRoot, profileRoot, 'restart-auto-reapply');
+    const reapplied = third.state;
     assert.equal(reapplied.backupCount, 1, 'Reapply must reuse the original backup.');
-    await click(second.cdp, '#restore');
-    const restored = await waitForUi(second.cdp, (item) => item.busy === '대기' && item.patch === '호환 · 미적용', 'A27 UI backup restore');
+    runs.push({ label: 'restart-auto-reapply', status: reapplied.patch, backupCount: reapplied.backupCount, processes: third.isolatedProcesses });
+    await click(third.cdp, '#restore');
+    const restored = await waitForUi(third.cdp, (item) => item.busy === '대기' && item.patch === '호환 · 미적용', 'A27 UI backup restore');
     assert.deepEqual(digestEntries(treeEntries(sourceRoot, new Set(['DinoPatchManager']))), beforeTree, 'Backup restore must return the official tree to the pinned baseline.');
     runs.push({ label: 'backup-restore', status: restored.patch, officialTreeRestored: true });
-    await closeManager(second); second = null;
+    await closeManager(third); third = null;
 
     const finalTree = digestEntries(treeEntries(sourceRoot, new Set(['DinoPatchManager'])));
     assert.deepEqual(finalTree, beforeTree);
@@ -344,7 +347,7 @@ async function main() {
       status: 'PASS', officialVersion: profile.officialVersion, officialCommit: profile.officialCommit,
       officialGitTree: '4aa940186722f7aa118fc4dcae843cc84023c84d',
       localArchiveSha256: profile.officialArchiveSha256, officialTree: beforeTree, restoredTree: finalTree,
-      packageHashes, patchedSourceSnapshot: { path: 'official-patched', ...patchedSnapshot }, runs, screenshots: ['captures/first-auto-apply.png', 'captures/restart-idempotent.png'],
+      packageHashes, patchedSourceSnapshot: { path: 'official-patched', ...patchedSnapshot }, runs, screenshots: ['captures/first-auto-apply.png', 'captures/restart-idempotent.png', 'captures/restart-auto-reapply.png'],
       profilePathMode: 'separate OS Temp directories; actual app.getPath and Chromium process switch checked',
     };
     const reportPath = path.join(reportsRoot, 'a27-v055-isolation-smoke.json');
@@ -353,6 +356,7 @@ async function main() {
   } finally {
     if (first) await closeManager(first);
     if (second) await closeManager(second);
+    if (third) await closeManager(third);
   }
 }
 

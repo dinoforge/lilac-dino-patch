@@ -226,6 +226,60 @@ class PatchManagerTests(unittest.TestCase):
             manager_core.EXPECTED_MODULES,
         )
 
+    def test_project_root_is_derived_for_an_independent_checkout(self) -> None:
+        self.assertEqual(manager_core.EXPECTED_PROJECT_ROOT, manager_core.PROJECT_ROOT)
+        self.assertEqual(manager_core.assert_project_root(manager_core.PROJECT_ROOT), manager_core.PROJECT_ROOT)
+
+    def test_frozen_manager_can_run_from_inside_its_official_source_target(self) -> None:
+        deployed_manager = self.official / manager_core.MANAGER_FOLDER_NAME
+        deployed_manager.mkdir()
+        with (
+            mock.patch.object(manager_core, "IS_FROZEN", True),
+            mock.patch.object(manager_core, "EXPECTED_PROJECT_ROOT", deployed_manager / "resources"),
+            mock.patch.object(manager_core, "manager_home", return_value=deployed_manager),
+        ):
+            package = manager_core._assert_managed_target(self.official, package_mode=True)
+
+        self.assertEqual(package["version"], "0.5.54")
+
+    def test_frozen_patch_assets_resolve_and_missing_bundle_fails_closed(self) -> None:
+        manager_home = self.root / "deployment"
+        frozen_assets = self.root / "_internal"
+        manifest_path = frozen_assets / manager_core.MANIFEST_RELATIVE
+        manifest_path.parent.mkdir(parents=True)
+        manifest_path.write_text("{}", encoding="utf-8")
+
+        with mock.patch.object(manager_core, "IS_FROZEN", True), mock.patch.object(
+            manager_core, "manager_home", return_value=manager_home
+        ), mock.patch.object(sys, "_MEIPASS", str(frozen_assets), create=True):
+            self.assertEqual(manager_core.patch_source_root(), manager_core.canonical_path(frozen_assets, strict=True))
+
+        nested_home = self.root / "packaged-engine"
+        nested_internal = nested_home / "_internal"
+        nested_manifest = nested_internal / manager_core.MANIFEST_RELATIVE
+        nested_manifest.parent.mkdir(parents=True)
+        nested_manifest.write_text("{}", encoding="utf-8")
+        with mock.patch.object(manager_core, "IS_FROZEN", True), mock.patch.object(
+            manager_core, "manager_home", return_value=nested_home
+        ), mock.patch.object(sys, "_MEIPASS", str(nested_home), create=True):
+            self.assertEqual(manager_core.patch_source_root(), manager_core.canonical_path(nested_internal, strict=True))
+
+        executable_manifest = manager_home / manager_core.MANIFEST_RELATIVE
+        executable_manifest.parent.mkdir(parents=True)
+        executable_manifest.write_text("{}", encoding="utf-8")
+        with mock.patch.object(manager_core, "IS_FROZEN", True), mock.patch.object(
+            manager_core, "manager_home", return_value=manager_home
+        ), mock.patch.object(sys, "_MEIPASS", str(frozen_assets), create=True):
+            self.assertEqual(manager_core.patch_source_root(), manager_core.canonical_path(manager_home, strict=True))
+
+        empty_home = self.root / "missing-deployment-assets"
+        empty_home.mkdir()
+        with mock.patch.object(manager_core, "IS_FROZEN", True), mock.patch.object(
+            manager_core, "manager_home", return_value=empty_home
+        ), mock.patch.object(sys, "_MEIPASS", str(self.root / "missing-internal-assets"), create=True):
+            with self.assertRaisesRegex(manager_core.ManagerError, "manifest"):
+                manager_core.patch_source_root()
+
     def test_manifest_selects_exact_official_source_profile(self) -> None:
         _, default = manager_core.load_manifest(self.patch)
         _, base_version = manager_core.load_manifest(self.patch, "0.5.54")

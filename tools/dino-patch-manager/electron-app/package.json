@@ -5,10 +5,15 @@
   "main": "main.cjs",
   "author": "Dino Patch Manager",
   "license": "UNLICENSED",
+  "packageManager": "npm@11.11.0",
+  "engines": {
+    "node": "24.14.1"
+  },
   "dependencies": {
     "classic-level": "3.0.0"
   },
   "devDependencies": {
-    "electron": "38.8.6"
+    "electron": "38.8.6",
+    "electron-builder": "26.15.3"
   }
 }

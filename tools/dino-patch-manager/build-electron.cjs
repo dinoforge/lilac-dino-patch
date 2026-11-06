@@ -41,12 +41,20 @@ async function build(argv) {
     electronDist: electronDistArg,
     tempRoot: tempRootArg,
   });
-  const electronBuilderPath = path.join(paths.project, 'node_modules', 'electron-builder');
-  if (!fs.existsSync(electronBuilderPath)) throw new Error('기존 프로젝트의 electron-builder가 없어 빌드를 중단했습니다. 패키지를 설치하지 않았습니다.');
-  const electronPackage = JSON.parse(fs.readFileSync(path.join(paths.project, 'node_modules', 'electron', 'package.json'), 'utf8'));
+  const stagedNodeModules = path.join(paths.stage, 'node_modules');
+  const electronBuilderPath = path.join(stagedNodeModules, 'electron-builder');
+  const electronPackagePath = path.join(stagedNodeModules, 'electron', 'package.json');
+  const builderPackagePath = path.join(electronBuilderPath, 'package.json');
+  if (!fs.existsSync(electronPackagePath) || !fs.existsSync(builderPackagePath)) {
+    throw new Error('격리된 관리자 staging에 Electron/electron-builder가 없어 빌드를 중단했습니다.');
+  }
+  const electronPackage = JSON.parse(fs.readFileSync(electronPackagePath, 'utf8'));
+  const builderPackage = JSON.parse(fs.readFileSync(builderPackagePath, 'utf8'));
   const appPackage = JSON.parse(fs.readFileSync(path.join(paths.stage, 'package.json'), 'utf8'));
-  if (electronPackage.version !== appPackage.devDependencies.electron) throw new Error('관리자와 로컬 Electron 버전이 일치하지 않습니다.');
-  const levelModuleRoot = path.join(paths.stage, 'node_modules');
+  if (electronPackage.version !== appPackage.devDependencies.electron) throw new Error('관리자 staging의 Electron 버전이 package.json과 일치하지 않습니다.');
+  if (builderPackage.version !== appPackage.devDependencies['electron-builder']) throw new Error('관리자 staging의 electron-builder 버전이 package.json과 일치하지 않습니다.');
+  if (path.resolve(paths.electron) !== path.resolve(path.join(stagedNodeModules, 'electron', 'dist'))) throw new Error('Electron runtime은 격리 staging에서 가져와야 합니다.');
+  const levelModuleRoot = stagedNodeModules;
   if (!fs.existsSync(path.join(levelModuleRoot, 'classic-level', 'package.json'))) throw new Error('격리 스테이징에 classic-level이 없습니다. 프로젝트 node_modules는 사용하지 않습니다.');
   const nativeFiles = [];
   const collectNativeFiles = (directory) => {
@@ -81,7 +89,7 @@ async function build(argv) {
   });
   const appOut = path.join(paths.output, 'win-unpacked');
   const executable = path.join(appOut, '디노패치관리자.exe');
-  for (const required of [executable, path.join(appOut, 'resources', 'manager-engine', 'DinoPatchManagerEngine.exe'), path.join(appOut, 'resources', 'manager-node', 'node.exe'), path.join(appOut, 'resources', 'manager-node', 'node_modules', 'classic-level', 'package.json'), path.join(appOut, 'resources', 'app.asar')]) {
+  for (const required of [executable, path.join(appOut, 'resources', 'manager-engine', 'DinoPatchManagerEngine.exe'), path.join(appOut, 'resources', 'manager-engine', '_internal', 'patches', 'patch03', 'manifest.json'), path.join(appOut, 'resources', 'manager-node', 'node.exe'), path.join(appOut, 'resources', 'manager-node', 'node_modules', 'classic-level', 'package.json'), path.join(appOut, 'resources', 'app.asar')]) {
     if (!fs.existsSync(required)) throw new Error(`빌드 산출물 검증 실패: ${required}`);
   }
   process.stdout.write(`${JSON.stringify({ status: 'PASS', executable, output: appOut })}\n`);

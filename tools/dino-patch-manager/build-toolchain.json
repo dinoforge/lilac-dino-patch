@@ -1,0 +1,18 @@
+{
+  "node": "24.14.1",
+  "npm": "11.11.0",
+  "python": "3.14.7",
+  "electron": "38.8.6",
+  "electronBuilder": "26.15.3",
+  "classicLevel": "3.0.0",
+  "pythonPackages": {
+    "pip": "26.2.1",
+    "setuptools": "84.2.1",
+    "altgraph": "0.17.5",
+    "packaging": "26.3",
+    "pefile": "2024.8.26",
+    "pyinstaller": "6.21.0",
+    "pyinstaller-hooks-contrib": "2026.9",
+    "pywin32-ctypes": "0.2.3"
+  }
+}

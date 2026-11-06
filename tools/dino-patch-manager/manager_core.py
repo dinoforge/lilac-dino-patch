@@ -25,7 +25,7 @@ from urllib.parse import urlparse
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-EXPECTED_PROJECT_ROOT = Path(r"D:\Codex-Coding-Folder\LilacAnime-Player")
+EXPECTED_PROJECT_ROOT = PROJECT_ROOT
 IS_FROZEN = bool(getattr(sys, "frozen", False))
 _LAST_THEME_DIAGNOSTIC: tuple[str, str] | None = None
 MANAGER_VERSION = "1.2.4"
@@ -164,11 +164,19 @@ def manager_home() -> Path:
 
 def patch_source_root() -> Path:
     """Return the root containing patches/patch03 and bundled validation assets."""
-    if IS_FROZEN and (manager_home() / MANIFEST_RELATIVE).is_file():
-        return manager_home()
-    frozen_assets = getattr(sys, "_MEIPASS", None)
-    if IS_FROZEN and frozen_assets and (Path(frozen_assets) / MANIFEST_RELATIVE).is_file():
-        return canonical_path(frozen_assets, strict=True)
+    if IS_FROZEN:
+        executable_assets = manager_home()
+        frozen_assets = getattr(sys, "_MEIPASS", None)
+        candidates = [executable_assets, executable_assets / "_internal"]
+        if frozen_assets:
+            frozen_root = Path(frozen_assets)
+            if frozen_root.is_dir():
+                frozen_root = canonical_path(frozen_root, strict=True)
+                candidates.extend((frozen_root, frozen_root / "_internal"))
+        for candidate in candidates:
+            if (candidate / MANIFEST_RELATIVE).is_file():
+                return canonical_path(candidate, strict=True)
+        raise ManagerError("관리자 패키지에 Patch 03 manifest가 없어 읽기 전용 상태 확인을 중단했습니다.")
     return PROJECT_ROOT
 
 
@@ -1859,9 +1867,10 @@ def _assert_managed_target(root: Path, *, package_mode: bool = IS_FROZEN) -> dic
     if not root.is_dir() or _is_unc(root) or not root.drive:
         raise ManagerError("원본은 로컬 드라이브의 실제 폴더여야 합니다. 네트워크 경로는 지원하지 않습니다.")
     package = _package_info(root)
-    expected_development = canonical_path(EXPECTED_PROJECT_ROOT)
-    if paths_overlap(root, expected_development):
-        raise ManagerError("개발 프로젝트는 자동 적용 대상이 아닙니다. 공식 원본 폴더를 선택하세요.")
+    if not IS_FROZEN:
+        expected_development = canonical_path(EXPECTED_PROJECT_ROOT)
+        if paths_overlap(root, expected_development):
+            raise ManagerError("개발 프로젝트는 자동 적용 대상이 아닙니다. 공식 원본 폴더를 선택하세요.")
     if not package_mode and paths_overlap(root, Path(r"D:\LilacAnime")):
         raise ManagerError("현재 설치된 LilacAnime 경로는 이 개발 실행에서 보호됩니다. 배포 관리자를 원본 폴더 안에서 실행하세요.")
     if package_mode:

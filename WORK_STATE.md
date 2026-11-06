@@ -760,3 +760,11 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - GitHub 기본 `main` 기준 커밋은 전환 전 `80b5e36bc28aebf2762d340c57ab441542d2edfa`였고, 이 트리에는 A35 관리자 소스와 `tools/dino-patch-manager` 경로가 없다. 디노 관련 기존 브랜치는 초기 관리자/미리보기 구현이며 A35-final과 일치하지 않는다. 로컬 A35 소스와 바이너리의 정확한 빌드 대응 증거가 없어 소스 파일을 임의로 추가하지 않았고 A35 재현 빌드 가능하다고 주장하지 않는다.
 - A35 Windows ZIP은 로컬 배포 산출물로 보존되어 있으며 GitHub Release나 일반 Git 커밋에 올리지 않았다. Actions 권리 승인 변수는 설정하지 않았고 태그도 만들지 않았다. 기존 `Build` 워크플로는 레거시 LilacAnime 앱용이며 태그/수동 실행만 가능하고 승인 변수로 가드된다. SIWC 테스트 워크플로는 기존 비활성 상태를 유지했다.
 - 이 변경은 문서·저장소 메타데이터 범위다. 코드, A35 ZIP, 기존 앱 파일과 패키지 설정은 수정하지 않았다. 관리자 또는 앱 테스트는 재실행하지 않았고 `git diff --check`를 확인했다. 기존 로컬 dirty 작업 트리는 분리된 OS Temp 복제본에서 보존했으며, 해당 저장소를 가리키던 로컬 `origin`만 새 주소로 바꾸고 공식 `upstream`은 유지했다.
+
+## 2026-11-06 A35 독립 빌드 장애 수정 및 검증
+
+- `fix/a35-independent-build`에서 PyInstaller frozen 배포의 `_internal` 자산 경로 탐색을 보완하고, 패키지 관리자가 원본 내부 `DinoPatchManager`에서 실행될 때 개발 체크아웃 경로 가드가 오탐하던 조건을 고쳤다. 빌드 스크립트에서 고정 개발자 경로를 제거하고 Node/npm/Python/PyInstaller/Electron/electron-builder 의존성을 기록·고정했다. Linkkf는 통합 집계에서 제외하는 기존 정책에 맞춰 테스트 기대값을 수정했다.
+- Python 66/66, 관리자 UI 및 통합 검색 Node 34/34, 전체 `npm test` 413개 중 369 통과·44 건너뜀·실패 0. 깨끗한 공식 v0.5.58 소스 검사에서 구조 호환성 및 호출 계약 10/10 통과. 전체 npm 실행의 건너뜀은 source-root 지정이 필요한 검사와 빌드 산출물 안에 포함된 계약 테스트 사본이다.
+- 독립 Windows 패키지 `tools/dino-patch-manager/release/DinoPatchManager-Electron-v1.2.4-independent-final/win-unpacked`를 생성하고 엔진 info와 격리 GUI smoke를 통과했다. 공식 v0.5.55 OS Temp 사본에서 자동 적용·재실행 멱등성·해제·자동 재적용·백업 복원을 확인했으며, 145개 원본 파일 트리 해시가 복원 후 동일했다. Chromium 프로세스는 테스트 전용 사용자 데이터 경로를 사용했다. 실제 GUI 캡처는 OS Temp 테스트 보고서에 보존했다.
+- 패키지 SHA-256: EXE `F167E902DFF8E9C57B2802D4E3D38F1E8034704B1425F8EB67319D21EE71A5B7`, app.asar `1B5A605839365D5C76E724339B8A6F5586125955E668D25E1BEEDEBD76F79ABB`, 엔진 `AA24320C271F0714F42FEE6FFD3416AB0C7486358D793B9A0140D49881ED35F3`. 빌드 임시 staging 일부는 Windows 접근 거부로 삭제되지 않아 진단 보존 상태다.
+- 기존 A35 ZIP은 원본 체크아웃에서 읽기 전용으로 재확인했다(192,183,482 bytes, SHA-256 `2A31616982AA16BC759FF8608E66D6FD7F646537E5336AD2CD71642B3D037D48`). 기존 체크아웃은 branch `codex/runtime-attach-feasibility`, HEAD `438c790ca435f9cd7f82901d3066fca5edc925bd`였고, 이번 작업은 분리 복제본에서만 수행했다. 독립 빌드 검증은 A35/A36 릴리스가 아니며 Git 게시 전 변경 목록 검토가 남아 있다.

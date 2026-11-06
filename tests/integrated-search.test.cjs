@@ -33,15 +33,16 @@ test('a unique MAL ID bridges an AniList item and an item without an AniList ID'
   assert.deepEqual(groups[0].sourceItems.map(source => source.provider), ['reanime', 'animenosub']);
 });
 
-test('ambiguous MAL bridges do not merge different AniList identities or an unlinked result', () => {
+test('ambiguous MAL bridges stay separate and standalone Linkkf is excluded from aggregation', () => {
   const groups = groupResults([
     item('reanime', 'a', { anilistId: 100, malId: 900 }),
     item('miruro', 'b', { anilistId: 101, malId: 900 }),
     item('linkkf', 'c', { malId: 900 })
   ]);
 
-  assert.equal(groups.length, 3);
-  assert.deepEqual(groups.map(group => group.sourceItems.length), [1, 1, 1]);
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups.map(group => group.sourceItems.length), [1, 1]);
+  assert.equal(groups.flatMap(group => group.sourceItems).some(source => source.provider === 'linkkf'), false);
 });
 
 test('same-title seasons and candidates without stable IDs remain separate', () => {
