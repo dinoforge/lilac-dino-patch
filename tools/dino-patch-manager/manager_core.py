@@ -1316,7 +1316,9 @@ def _verify_patched_contracts(source_root: Path, manifest: dict[str, Any]) -> No
         raise ManagerError("통합 검색·공식 앱·브리지 스크립트 순서가 맞지 않습니다.")
     if "providerCatalog" not in bridge or "providerDetail" not in bridge or "providerResolve" not in bridge:
         raise ManagerError("Patch 브리지가 공식 검색·상세·resolve 계약을 재사용하지 않습니다.")
-    if "window.lilac.providerCatalog(provider, text)" not in bridge or "officialOpenDetail.call(this, id)" not in bridge:
+    if "window.lilac.providerCatalog(provider, text)" not in bridge or not any(
+        call in bridge for call in ("officialOpenDetail.call(this, id)", "officialOpenDetail.call(this, selectedId)")
+    ):
         raise ManagerError("Patch 브리지가 공식 검색/상세 진입 함수를 우회합니다.")
     if "savedContentSource === 'integrated'" not in app:
         raise ManagerError("통합 모드에서 마지막 개별 공급원 상태 연결이 없습니다.")

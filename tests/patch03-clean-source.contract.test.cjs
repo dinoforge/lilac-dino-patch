@@ -164,7 +164,8 @@ function makeBridgeContext(api, options = {}) {
     titleOf: item => item.title,
     cancelPendingPlaybackLookups() {},
     saveRecentSearch() {},
-    switchView() {},
+    switchView(view) { searchView.classList.toggle('active', view === 'search'); },
+    showHomeList(list) { this.switchView('search'); this.renderCards('#searchGrid', list); },
     toast() {},
     location: { reload() { calls.reloaded = (calls.reloaded || 0) + 1; } }
   };
@@ -259,6 +260,19 @@ test('group source selection calls the original detail entry point and renders o
   assert.equal(app.detailDialog.open, true);
 });
 
+test('a provider filter selects that provider as the initial detail source', { skip: cleanSourceOnly }, async () => {
+  const app = makeBridgeContext(require(path.join(sourceRoot, 'src', 'integrated-search.js')));
+  await app.window.doSearch('Frieren Season 2');
+  app.document.querySelector('#searchProviderFilters').querySelectorAll('button')
+    .find(button => button.dataset.provider === 'miruro').click();
+
+  await app.window.openDetail('reanime:reanime-frieren-s2');
+
+  assert.equal(app.calls.details.at(-1), 'miruro:miruro-frieren-s2');
+  assert.equal(app.detailContent.querySelector('[data-provider-source][aria-pressed="true"]')?.dataset.providerSource,
+    'miruro:miruro-frieren-s2');
+});
+
 test('provider failures remain distinct from empty results and do not suppress healthy providers', { skip: cleanSourceOnly }, async () => {
   const api = require(path.join(sourceRoot, 'src', 'integrated-search.js'));
   const app = makeBridgeContext(api);
@@ -280,7 +294,7 @@ test('provider failures remain distinct from empty results and do not suppress h
   assert.match(app.document.querySelector('#searchStatus').textContent, /확인 필요: Miruro/);
 });
 
-test('title variants query only ready-empty providers and remain capped at three terms', { skip: cleanSourceOnly }, async () => {
+test('title variants query ready-empty and skipped providers, avoid failed providers, and remain capped at three terms', { skip: cleanSourceOnly }, async () => {
   const api = require(path.join(sourceRoot, 'src', 'integrated-search.js'));
   const app = makeBridgeContext(api);
   const calls = [];
@@ -301,6 +315,31 @@ test('title variants query only ready-empty providers and remain capped at three
   assert.ok(calls.some(call => call.provider === 'reanime' && call.query === 'Frieren Season 2'));
   assert.ok(calls.some(call => call.provider === 'ohli24' && call.query === 'Frieren Season 2'));
   assert.ok(!variantCalls.some(call => call.provider === 'ohli24'));
+});
+
+test('Korean integrated searches retry providers skipped for the original query with safe title variants', { skip: cleanSourceOnly }, async () => {
+  const api = require(path.join(sourceRoot, 'src', 'integrated-search.js'));
+  const app = makeBridgeContext(api);
+  const anchor = { provider: 'reanime', id: 'ko-anchor', mal_id: 'reanime:ko-anchor', anilistId: 1888001,
+    title: '한국어 작품', year: 2025, type: 'TV' };
+  const variants = ['miruro', 'animenosub'].map(provider => ({ ...anchor, provider, id: `${provider}-anchor`, mal_id: `${provider}:${provider}-anchor` }));
+  const calls = [];
+  app.window.lilac.providerCatalog = async (provider, query) => {
+    calls.push({ provider, query });
+    if (query === '한국어 작품') return provider === 'reanime' ? [anchor] : [];
+    if (query === 'Korean Work') return variants.filter(item => item.provider === provider);
+    return [];
+  };
+  app.window.lilac.titleVariants = async () => ['Korean Work'];
+
+  await app.window.doSearch('한국어 작품');
+
+  assert.equal(calls.some(call => ['miruro', 'animenosub'].includes(call.provider) && /[가-힣]/.test(call.query)), false,
+    'providers that skip Korean catalog queries remain skipped for the original query');
+  assert.deepEqual(calls.filter(call => call.query === 'Korean Work').map(call => call.provider).sort(), ['animenosub', 'linkani', 'miruro', 'ohli24']);
+  const grouped = app.window.__dinoPatch03Bridge.getSearchSnapshot();
+  assert.equal(grouped.length, 1);
+  assert.deepEqual(grouped[0].sourceItems.map(item => item.provider).sort(), ['animenosub', 'miruro', 'reanime']);
 });
 
 test('a delayed old detail cannot replace the most recently selected source picker', { skip: cleanSourceOnly }, async () => {
@@ -329,4 +368,22 @@ test('Linkkf stays on the official individual search path and is not aggregated'
   assert.deepEqual(app.calls.originalSearch, ['Linkkf query']);
   assert.equal(app.calls.catalog.length, 0);
   assert.equal(app.window.__dinoPatch03Bridge.providers.includes('linkkf'), false);
+});
+
+test('late integrated results cannot overwrite an original home list', { skip: cleanSourceOnly }, async () => {
+  const api = require(path.join(sourceRoot, 'src', 'integrated-search.js'));
+  const app = makeBridgeContext(api);
+  const pending = [];
+  app.window.lilac.providerCatalog = (provider, query) => new Promise(resolve => pending.push({ provider, query, resolve }));
+
+  const searching = app.window.doSearch('slow integrated query');
+  for (let attempt = 0; attempt < 10 && pending.length < api.PROVIDERS.length; attempt++) await Promise.resolve();
+  assert.equal(pending.length, api.PROVIDERS.length);
+
+  const homeItems = [{ provider: 'reanime', mal_id: 'home:1', title: 'Home item' }];
+  app.window.showHomeList(homeItems, 'All titles');
+  for (const request of pending) request.resolve([]);
+  await searching;
+
+  assert.deepEqual(app.calls.cards.at(-1), homeItems);
 });

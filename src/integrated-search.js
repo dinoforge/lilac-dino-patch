@@ -274,7 +274,7 @@
     const statuses = new Map((result?.statuses || []).map(status => [status.provider, status]));
     return [...new Set(providers)].filter(provider => {
       const status = statuses.get(provider);
-      return status?.state === 'ready' && Number(status.resultCount) === 0;
+      return ['ready', 'skipped'].includes(status?.state) && Number(status.resultCount) === 0;
     });
   }
 

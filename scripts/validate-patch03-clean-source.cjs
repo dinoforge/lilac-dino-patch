@@ -156,7 +156,10 @@ function verifyChangedFiles(sourceRoot, before) {
   if ((html.match(/id="detailDialog"/g) || []).length !== 1) throw new Error('Patch 03 must reuse the one official #detailDialog.');
   if (!/savedContentSource === 'integrated' \? \(localStorage\.getItem\('contentSourceProvider'\) \|\| 'reanime'\)/.test(app)) throw new Error('The integrated-mode state bootstrap was not applied.');
   if (!/integrated-search\.js[\s\S]*app\.js[\s\S]*patch03-bridge\.js/.test(html)) throw new Error('Patch script load order is incorrect.');
-  if (!bridge.includes('window.lilac.providerCatalog(provider, text)') || !bridge.includes('officialOpenDetail.call(this, id)')) throw new Error('Patch bridge no longer uses the official catalog/detail functions.');
+  if (!bridge.includes('window.lilac.providerCatalog(provider, text)')
+    || (!bridge.includes('officialOpenDetail.call(this, id)') && !bridge.includes('officialOpenDetail.call(this, selectedId)'))) {
+    throw new Error('Patch bridge no longer uses the official catalog/detail functions.');
+  }
   const patchApi = require(path.join(sourceRoot, 'src', 'integrated-search.js'));
   if (JSON.stringify(patchApi.PROVIDERS) !== JSON.stringify(['reanime', 'miruro', 'animenosub', 'ohli24', 'linkani'])) throw new Error('Patch provider allowlist drifted or includes Linkkf.');
   return { modified, removed, added, hashes: Object.fromEntries([...after.entries()]) };
