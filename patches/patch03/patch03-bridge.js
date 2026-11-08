@@ -27,6 +27,15 @@
     return;
   }
 
+  const initialSourceSettings = typeof api.initializeSourceSettings === 'function'
+    ? api.initializeSourceSettings(localStorage)
+    : { ok: false, reason: 'source-settings-migration-contract-is-missing' };
+  if (!initialSourceSettings.ok || typeof api.readSourceSettings !== 'function'
+    || typeof api.saveSourceSelection !== 'function') {
+    disablePatch(initialSourceSettings.reason || 'source settings could not be migrated safely');
+    return;
+  }
+
   const groupBySourceId = new Map();
   let resultGroups = [];
   let resultStatuses = [];
@@ -47,12 +56,10 @@
     };
   }
 
-  const integratedMode = () => localStorage.getItem('contentSource') === 'integrated';
+  const integratedMode = () => api.readSourceSettings(localStorage).mode === 'integrated';
   function selectedProvider() {
-    const stored = integratedMode()
-      ? localStorage.getItem('contentSourceProvider')
-      : localStorage.getItem('contentSource');
-    return singleSources.includes(stored) ? stored : 'reanime';
+    const stored = api.readSourceSettings(localStorage).provider;
+    return singleSources.includes(stored) ? stored : initialSourceSettings.provider;
   }
   function syncSourceSelection() {
     sourceSelect.value = integratedMode() ? 'integrated' : selectedProvider();
@@ -68,13 +75,13 @@
 
   sourceSelect.onchange = event => {
     const selected = event.target.value;
-    if (selected === 'integrated') {
-      if (!integratedMode()) localStorage.setItem('contentSourceProvider', selectedProvider());
-      localStorage.setItem('contentSource', 'integrated');
-    } else if (singleSources.includes(selected)) {
-      localStorage.setItem('contentSourceProvider', selected);
-      localStorage.setItem('contentSource', selected);
-    } else return;
+    if (selected !== 'integrated' && !singleSources.includes(selected)) return;
+    const saved = api.saveSourceSelection(localStorage, selected);
+    if (!saved.ok) {
+      syncSourceSelection();
+      window.toast?.('공급원 설정을 안전하게 저장하지 못했습니다. 기존 설정을 유지했습니다.');
+      return;
+    }
     syncSourceSelection();
     window.toast?.(selected === 'integrated' ? '통합 공급원 검색을 사용합니다.' : '콘텐츠 소스를 바꿨어요. 목록을 다시 불러옵니다.');
     setTimeout(() => window.location.reload(), 600);

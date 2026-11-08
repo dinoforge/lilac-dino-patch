@@ -1320,12 +1320,17 @@ def _verify_patched_contracts(source_root: Path, manifest: dict[str, Any]) -> No
         call in bridge for call in ("officialOpenDetail.call(this, id)", "officialOpenDetail.call(this, selectedId)")
     ):
         raise ManagerError("Patch 브리지가 공식 검색/상세 진입 함수를 우회합니다.")
-    if "savedContentSource === 'integrated'" not in app:
-        raise ManagerError("통합 모드에서 마지막 개별 공급원 상태 연결이 없습니다.")
-    for provider in EXPECTED_PROVIDERS:
-        if provider not in search_module:
-            raise ManagerError(f"통합 검색 공급원 목록에서 {provider}를 찾지 못했습니다.")
-    if re.search(r"['\"]linkkf['\"]", search_module):
+    if "initializeSourceSettings(localStorage)" not in app or "officialSourceForState?.(dinoSourceSettings, savedContentSource)" not in app:
+        raise ManagerError("디노 검색 모드 초기화 또는 공식 공급원 안전 대체 연결이 없습니다.")
+    if "lilacDinoPatch.searchMode" not in search_module or "saveSourceSelection" not in bridge:
+        raise ManagerError("디노 전용 검색 모드 저장 계약이 없습니다.")
+    if "localStorage.setItem('contentSource', 'integrated')" in bridge:
+        raise ManagerError("디노 통합 모드가 공식 contentSource 키에 저장됩니다.")
+    provider_match = re.search(r"const\s+PROVIDERS\s*=\s*\[([^\]]*)\]", search_module)
+    declared_providers = re.findall(r"['\"]([^'\"]+)['\"]", provider_match.group(1)) if provider_match else []
+    if declared_providers != EXPECTED_PROVIDERS:
+        raise ManagerError("통합 검색 공급원 목록이 검증된 다섯 공급원과 일치하지 않습니다.")
+    if "linkkf" in declared_providers:
         raise ManagerError("Linkkf가 Patch 03 통합 공급원 목록에 포함되어 있습니다.")
 
 

@@ -317,6 +317,12 @@ app.whenReady().then(async () => {
     localStorage.setItem('seriesSubtitlePick', ${JSON.stringify(JSON.stringify(syntheticSeriesSubtitlePick))});
     localStorage.setItem('history', ${JSON.stringify(JSON.stringify(migrationHistory))});
   })()`);
+  const legacyProfileBeforeMigration = await win.webContents.executeJavaScript(`({
+    contentSource: localStorage.getItem('contentSource'),
+    provider: localStorage.getItem('contentSourceProvider')
+  })`);
+  assert.equal(legacyProfileBeforeMigration.contentSource, 'integrated', 'reproduces the legacy Dino sentinel in the original setting key');
+  assert.equal(legacyProfileBeforeMigration.provider, 'miruro');
   const migrationReload = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
   win.webContents.reload();
   await migrationReload;
@@ -352,6 +358,7 @@ app.whenReady().then(async () => {
     light: document.body.classList.contains('light'),
     contentSource: localStorage.getItem('contentSource'),
     provider: localStorage.getItem('contentSourceProvider'),
+    dinoSearchMode: localStorage.getItem('lilacDinoPatch.searchMode'),
     speed: localStorage.getItem('defaultSpeed'),
     subtitleSource: localStorage.getItem('subtitleSource'),
     subtitleSize: localStorage.getItem('subtitleSize'),
@@ -361,8 +368,10 @@ app.whenReady().then(async () => {
   })`);
   assert.equal(seededProfile.theme, 'light');
   assert.equal(seededProfile.light, true, 'the synthetic Light theme is applied by the official renderer');
-  assert.equal(seededProfile.contentSource, 'integrated');
+  assert.equal(seededProfile.contentSource, officialSourceRoot ? 'miruro' : 'integrated',
+    'the official patched source migrates legacy mode while the packaged root app keeps its independent schema');
   assert.equal(seededProfile.provider, 'miruro');
+  assert.equal(seededProfile.dinoSearchMode, officialSourceRoot ? 'integrated' : null);
   assert.equal(seededProfile.speed, '1.25');
   assert.equal(seededProfile.subtitleSource, 'animenosub');
   assert.equal(seededProfile.subtitleSize, '108');
@@ -737,6 +746,7 @@ app.whenReady().then(async () => {
     theme: localStorage.getItem('theme'),
     contentSource: localStorage.getItem('contentSource'),
     provider: localStorage.getItem('contentSourceProvider'),
+    dinoSearchMode: localStorage.getItem('lilacDinoPatch.searchMode'),
     speed: localStorage.getItem('defaultSpeed'),
     subtitleSource: localStorage.getItem('subtitleSource'),
     subtitleSize: localStorage.getItem('subtitleSize'),
@@ -745,8 +755,9 @@ app.whenReady().then(async () => {
     seriesSubtitlePick: JSON.parse(localStorage.getItem('seriesSubtitlePick') || '{}')
   })`);
   assert.equal(persistedProfileAfterFlow.theme, 'light');
-  assert.equal(persistedProfileAfterFlow.contentSource, 'integrated');
+  assert.equal(persistedProfileAfterFlow.contentSource, officialSourceRoot ? 'miruro' : 'integrated');
   assert.equal(persistedProfileAfterFlow.provider, 'miruro');
+  assert.equal(persistedProfileAfterFlow.dinoSearchMode, officialSourceRoot ? 'integrated' : null);
   assert.equal(persistedProfileAfterFlow.speed, '1.25');
   assert.equal(persistedProfileAfterFlow.subtitleSource, 'animenosub');
   assert.equal(persistedProfileAfterFlow.subtitleSize, '108');

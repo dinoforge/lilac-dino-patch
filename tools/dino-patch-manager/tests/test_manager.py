@@ -484,7 +484,9 @@ class PatchManagerTests(unittest.TestCase):
         self.assertEqual(result["removedFiles"], [])
         self.assertEqual(result["outputPostMoveSha256"], manager_core.tree_sha256(manager_core._inventory(output)))
         self.assertTrue(Path(result["reportPath"]).is_file())
-        self.assertIn("savedContentSource === 'integrated'", (output / "src/app.js").read_text(encoding="utf-8"))
+        patched_app = (output / "src/app.js").read_text(encoding="utf-8")
+        self.assertIn("LilacIntegratedSearch?.initializeSourceSettings(localStorage)", patched_app)
+        self.assertIn("officialSourceForState?.(dinoSourceSettings, savedContentSource)", patched_app)
         duplicate = self.root / "parent" / "second-application"
         with self.assertRaises(manager_core.ManagerError):
             manager_core.apply_patch(output, self.patch, duplicate)

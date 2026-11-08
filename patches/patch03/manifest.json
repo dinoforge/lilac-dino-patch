@@ -14,9 +14,9 @@
   "connections": [
     {
       "file": "src/app.js",
-      "description": "통합 모드에서도 마지막 개별 공급원을 공식 검색 상태의 초기값으로 사용",
+      "description": "레거시 통합 설정을 검증·복구하고 공식 공급원 선택과 디노 검색 모드를 분리",
       "before": "const state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: localStorage.getItem('contentSource') || 'reanime',",
-      "after": "const savedContentSource = localStorage.getItem('contentSource');\nconst state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: savedContentSource === 'integrated' ? (localStorage.getItem('contentSourceProvider') || 'reanime') : (savedContentSource || 'reanime'),"
+      "after": "const dinoSourceSettings = window.LilacIntegratedSearch?.initializeSourceSettings(localStorage);\nconst savedContentSource = localStorage.getItem('contentSource');\nconst state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: window.LilacIntegratedSearch?.officialSourceForState?.(dinoSourceSettings, savedContentSource) || 'reanime',"
     },
     {
       "file": "src/index.html",
@@ -47,7 +47,7 @@
     {
       "source": "src/integrated-search.js",
       "destination": "src/integrated-search.js",
-      "sha256": "FA1D7E76CF2E3FCEDD8BFD6292918FEDA524849BB13BBC2B9F5D77ABC26DA8C6"
+      "sha256": "5024ECBFB5CA7488CB99EC16FDCF4DA5F5CA65238EAD09D49DDF9429EA3790F0"
     },
     {
       "source": "src/integrated-search.css",
@@ -57,7 +57,7 @@
     {
       "source": "patches/patch03/patch03-bridge.js",
       "destination": "src/patch03-bridge.js",
-      "sha256": "87586CB1F99FA5660E4DBCAC7CBFAF36874CD1FE89EBCEA43AC42548C0147D58"
+      "sha256": "34AD2EC49F62FAAC1878C032AB209E941EF30DF29EE7103337FECF7A1AF259D0"
     }
   ],
   "officialRuntimeModifiedAllowlist": [
@@ -88,9 +88,9 @@
       "connections": [
         {
           "file": "src/app.js",
-          "description": "통합 모드에서도 마지막 개별 공급원을 공식 검색 상태의 초기값으로 사용",
+          "description": "레거시 통합 설정을 검증·복구하고 공식 공급원 선택과 디노 검색 모드를 분리",
           "before": "const state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: localStorage.getItem('contentSource') || 'reanime',",
-          "after": "const savedContentSource = localStorage.getItem('contentSource');\nconst state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: savedContentSource === 'integrated' ? (localStorage.getItem('contentSourceProvider') || 'reanime') : (savedContentSource || 'reanime'),"
+          "after": "const dinoSourceSettings = window.LilacIntegratedSearch?.initializeSourceSettings(localStorage);\nconst savedContentSource = localStorage.getItem('contentSource');\nconst state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: window.LilacIntegratedSearch?.officialSourceForState?.(dinoSourceSettings, savedContentSource) || 'reanime',"
         },
         {
           "file": "src/index.html",
