@@ -143,6 +143,7 @@
     let [label, tone] = labelByStatus[state.status] || [state.status, 'bad'];
     if (structural && (state.status === 'APPLIED' || state.status === 'ALREADY_APPLIED')) label = '적용됨 · 구조 확인';
     if (structural && state.status === 'UNPATCHED') label = '구조 호환 · 미적용';
+    if (state.status === 'UNPATCHED' && result.manualUninstall) label = '수동 해제 · 미적용';
     setChip(elements.patchBadge, label, tone);
     renderSafety(state.status);
     const targetPath = state.root || result.reason || '원본 폴더를 선택하세요.';
@@ -153,7 +154,11 @@
     elements.targetPatchVersion.textContent = result.patchVersion ? `v${result.patchVersion}` : (state.info ? `v${state.info.patchVersion}` : '확인 불가');
     elements.patchOfficialBase.textContent = state.info ? `v${state.info.officialVersion}` : '확인 불가';
     elements.message.textContent = recentMessage(state.status, operation);
-    const [managementSummary, managementTone] = managementSummaryByStatus[state.status] || ['결과 확인 필요', 'bad'];
+    const [defaultManagementSummary, defaultManagementTone] = managementSummaryByStatus[state.status] || ['결과 확인 필요', 'bad'];
+    const managementSummary = state.status === 'UNPATCHED' && result.manualUninstall
+      ? '수동 해제 유지 · 공식 소스 변경까지 미적용'
+      : defaultManagementSummary;
+    const managementTone = state.status === 'UNPATCHED' && result.manualUninstall ? 'warn' : defaultManagementTone;
     const prefix = result.sourceUpdateDetected
       ? '공식 원본 변경 · 자동 재적용 완료'
       : operation.includes('자동') || operation.includes('감지') ? '자동 검사 완료' : operation.includes('검사') || operation.includes('확인') ? '검사 완료' : '현재 상태';
@@ -164,10 +169,16 @@
     const sourceUpdateNote = result.sourceUpdateDetected
       ? `이전 v${result.previousOfficialVersion || '확인 불가'}에서 v${result.version || '확인 불가'}로 바뀐 공식 소스를 확인하고, 호환성 검사 후 디노 패치를 자동 적용했습니다.`
       : '';
+    const manualUninstallNote = result.manualUninstall
+      ? '사용자가 디노 패치를 직접 해제했습니다. 현재 공식 소스가 변경될 때까지 자동으로 다시 적용하지 않습니다.'
+      : '';
+    if (result.manualUninstall && state.status === 'UNPATCHED') {
+      elements.message.textContent = '디노 패치 수동 해제됨 · 공식 소스 변경까지 미적용 상태를 유지합니다.';
+    }
     if (result.sourceUpdateDetected && ['APPLIED', 'ALREADY_APPLIED'].includes(state.status)) {
       elements.message.textContent = `공식 원본 변경 확인 · v${result.version} 디노 패치 자동 적용 완료`;
     }
-    setDetail([sourceUpdateNote, result.reason ? String(result.reason) : '', evidenceNote].filter(Boolean).join('\n\n'));
+    setDetail([manualUninstallNote, sourceUpdateNote, result.reason ? String(result.reason) : '', evidenceNote].filter(Boolean).join('\n\n'));
     addLog(`${operation || '상태'} · ${state.status}${result.reason ? ` · ${result.reason}` : ''}`);
     updateActionButtons();
   }

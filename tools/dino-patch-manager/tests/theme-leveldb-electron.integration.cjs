@@ -229,8 +229,8 @@ async function run() {
   const moduleRoot = assertTempChild(moduleRootArg, 'classic-level package root');
   const fixtureParent = fs.realpathSync.native(fixtureParentArg);
   if (!isWithin(fixtureParent, managerRoot) || fixtureParent === managerRoot) throw new Error('Fixture output must be inside the manager test-artifacts directory.');
-  const packageJson = JSON.parse(fs.readFileSync(path.join(projectRoot, 'node_modules', 'electron', 'package.json'), 'utf8'));
-  const electronExe = path.join(projectRoot, 'node_modules', 'electron', 'dist', 'electron.exe');
+  const packageJson = JSON.parse(fs.readFileSync(path.join(moduleRoot, 'electron', 'package.json'), 'utf8'));
+  const electronExe = path.join(moduleRoot, 'electron', 'dist', 'electron.exe');
   assert.equal(packageJson.version, '38.8.6');
   assert.ok(fs.existsSync(electronExe), 'Existing Electron 38.8.6 runtime is required.');
   const runRoot = fs.mkdtempSync(path.join(temp, 'DinoTheme-Electron-LevelDB-'));
