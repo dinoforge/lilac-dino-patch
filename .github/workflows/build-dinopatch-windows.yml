@@ -141,6 +141,32 @@ jobs:
             Remove-Item -LiteralPath $oldModules -Recurse -Force -ErrorAction Stop
           }
 
+      - name: Remove non-Windows binaries and duplicate UI dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = Join-Path (Get-Location).Path 'tools/dino-patch-manager/release/LilacAnime-DinoPatch-Electron-v1.2.4-github-renamed/win-unpacked'
+          $localeDir = Join-Path $app 'locales'
+          $keep = @('ko', 'en-US')
+          $removed = @(Get-ChildItem -LiteralPath $localeDir -File -Filter '*.pak' | Where-Object { $_.BaseName -notin $keep })
+          if ($removed.Count -gt 0) { $removed | Remove-Item -Force -ErrorAction Stop }
+          foreach ($language in $keep) {
+            if (-not (Test-Path -LiteralPath (Join-Path $localeDir "$language.pak") -PathType Leaf)) { throw "Required UI locale missing: $language" }
+          }
+          $appMain = Get-Content -LiteralPath 'tools/dino-patch-manager/electron-app/main.cjs' -Raw
+          if (-not $appMain.Contains("'manager-node', 'node_modules'")) { throw 'Manager external LevelDB runtime contract changed; refuse duplicate removal' }
+          $duplicate = Join-Path $app 'resources/app.asar.unpacked/node_modules'
+          if (Test-Path -LiteralPath $duplicate) {
+            Remove-Item -LiteralPath $duplicate -Recurse -Force -ErrorAction Stop
+          }
+          $prebuilds = Join-Path $app 'resources/manager-node/node_modules/classic-level/prebuilds'
+          foreach ($dir in @(Get-ChildItem -LiteralPath $prebuilds -Directory)) {
+            if ($dir.Name -ne 'win32-x64') { Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction Stop }
+          }
+          $native = @(Get-ChildItem -LiteralPath (Join-Path $prebuilds 'win32-x64') -Filter '*.node' -File)
+          if ($native.Count -eq 0) { throw 'Win-x64 LevelDB binary was removed' }
+          Write-Host "Pruned $($removed.Count) unused locale packs, duplicate Electron native modules and cross-OS LevelDB prebuilds"
+
       - name: Create ZIP and SHA-256
         shell: pwsh
         run: |
