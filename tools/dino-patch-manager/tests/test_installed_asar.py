@@ -117,6 +117,14 @@ class TestInstalledAsar(unittest.TestCase):
         recovered = ia.uninstall(self.install, process_check=lambda root: None)
         self.assertEqual(recovered["status"], "UNPATCHED")
         self.assertEqual(self.archive.read_bytes(), old)
+        # A post-operation fs.watch notification must never reinstall a patch
+        # that the user explicitly removed.
+        checked = ia.inspect(self.install)
+        self.assertTrue(checked["manualUninstall"])
+        checked_again = ia.startup(self.install, process_check=lambda root: None)
+        self.assertEqual(checked_again["status"], "UNPATCHED")
+        self.assertTrue(checked_again["manualUninstall"])
+        self.assertEqual(self.archive.read_bytes(), old)
 
     def test_unknown_original_changes_fail_closed(self):
         changed = dict(self.original)
