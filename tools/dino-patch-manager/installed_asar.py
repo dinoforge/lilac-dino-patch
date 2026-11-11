@@ -9,6 +9,7 @@ import copy
 import hashlib
 import json
 import os
+import subprocess
 from pathlib import Path
 import shutil
 import struct
@@ -270,6 +271,9 @@ def inspect(root_value):
     version = _version(asar)
     result = {"path": str(root), "version": version, "patchVersion": core.PATCH_VERSION, "targetKind": "INSTALLED_ASAR"}
     state = _state(root)
+    if (_state_root(root) / "pending.json").is_file():
+        return {**result, "status": "PARTIAL_OR_UNKNOWN",
+                "reason": "이전 설치본 패치 작업의 복구 기록이 있습니다. 백업 확인 전 파일을 변경하지 않습니다."}
     actual_sha = _sha(archive_path)
     if state:
         if state.get("version") != version or state.get("patchVersion") != core.PATCH_VERSION:
@@ -317,23 +321,6 @@ def _replacement_bytes(asar: Archive, manifest: dict, patch_root: Path):
     return replacements
 
 
-def _check_patch_contract(replacements: dict[str, bytes]):
-    # The known existing contract validation only needs these runtime files.
-    with tempfile.TemporaryDirectory(prefix="dino-installed-contract-") as folder:
-        stage = Path(folder)
-        for relative, content in replacements.items():
-            target = stage / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(content)
-        _, manifest = _manifest(json.loads(replacements["package.json"].decode("utf-8"))["version"]) if "package.json" in replacements else (None, None)
-        # Run existing syntax and runtime contract checks against modified files,
-        # independently of the official installed application's other resources.
-        for required in ("src/app.js", "src/index.html", "src/integrated-search.js", "src/integrated-search.css", "src/patch03-bridge.js"):
-            if not (stage / required).is_file():
-                raise core.ManagerError(f"검증용 패치 파일 누락: {required}")
-        return stage
-
-
 def _atomic_json(path: Path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(path.name + ".writing")
@@ -345,13 +332,68 @@ def _atomic_json(path: Path, data):
             temp.unlink()
 
 
+def _ensure_installed_app_stopped(root: Path) -> None:
+    if os.name != "nt":
+        return
+    powershell = (
+        "$ErrorActionPreference='Stop';"
+        "$exe=[IO.Path]::GetFullPath($env:DINO_INSTALLED_EXE);"
+        "$hits=@(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {"
+        "($_.Name -ieq 'LilacAnime.exe') -or "
+        "($_.Name -ieq 'electron.exe' -and $_.CommandLine -and "
+        "$_.CommandLine.Contains($env:DINO_INSTALLED_ROOT))"
+        "});"
+        "if($hits.Count -gt 0){$hits | ForEach-Object { '{0}:{1}' -f $_.Name,$_.ProcessId }}"
+    )
+    env = os.environ.copy()
+    env["DINO_INSTALLED_EXE"] = str(root / "LilacAnime.exe")
+    env["DINO_INSTALLED_ROOT"] = str(root)
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", powershell],
+            env=env, text=True, encoding="utf-8", capture_output=True, timeout=10,
+            **core._hidden_subprocess_options(),
+        )
+    except Exception as exc:
+        raise core.ManagerError("LilacAnime 실행 여부를 확인할 수 없어 설치본 변경을 중단했습니다.") from exc
+    if result.returncode:
+        raise core.ManagerError("Windows 프로세스 조회가 실패해 설치본 변경을 중단했습니다.")
+    if result.stdout.strip():
+        raise core.ManagerError("LilacAnime가 실행 중입니다. 앱을 완전히 종료한 뒤 다시 검사하세요.")
+
+
+def _preflight_patch(replacements: dict[str, bytes], manifest: dict):
+    with tempfile.TemporaryDirectory(prefix="dino-installed-preflight-") as folder:
+        source = Path(folder)
+        for relative, data in replacements.items():
+            target = source / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        core._verify_patched_contracts(source, manifest)
+        node = core._node_executable()
+        if not node:
+            raise core.ManagerError("내장 JavaScript 검사기가 없어 설치본 자동 패치를 중단했습니다.")
+        for relative in ("src/app.js", "src/integrated-search.js", "src/patch03-bridge.js"):
+            command = [node, "--check", relative]
+            result = subprocess.run(
+                command, cwd=source, env=core._node_subprocess_environment(),
+                capture_output=True, text=True, encoding="utf-8", timeout=60,
+                **core._hidden_subprocess_options(),
+            )
+            if result.returncode:
+                raise core.ManagerError(f"설치본 {relative} 사전 구문 검사 실패: {result.stderr[-300:]}")
+
+
 def _apply(root: Path, *, process_check):
     result = inspect(root)
     if result["status"] == "APPLIED":
         return {**result, "status": "ALREADY_APPLIED"}
     if result["status"] != "UNPATCHED":
         return result
-    process_check(root)
+    if process_check is core.assert_app_not_running:
+        _ensure_installed_app_stopped(root)
+    else:
+        process_check(root)
     archive_path = root / "resources" / "app.asar"
     original_sha = _sha(archive_path)
     asar = Archive(archive_path)
@@ -359,6 +401,7 @@ def _apply(root: Path, *, process_check):
     _identity(asar, version)
     patch_root, manifest = _manifest(version)
     replacements = _replacement_bytes(asar, manifest, patch_root)
+    _preflight_patch(replacements, manifest)
     data_root = _state_root(root)
     if data_root.exists() and core._is_link_or_junction(data_root):
         raise core.ManagerError("설치본 백업 폴더에 링크가 있어 변경하지 않았습니다.")
@@ -415,7 +458,10 @@ def uninstall(root_value, *, process_check=core.assert_app_not_running):
         return {**inspected, "status": "ALREADY_UNPATCHED"}
     if inspected["status"] != "APPLIED":
         raise core.ManagerError(inspected.get("reason") or "설치본 패치 상태가 안전하지 않아 복원하지 않았습니다.")
-    process_check(root)
+    if process_check is core.assert_app_not_running:
+        _ensure_installed_app_stopped(root)
+    else:
+        process_check(root)
     data_root = _state_root(root)
     state = _state(root)
     source = data_root / "original-app.asar"
