@@ -272,13 +272,13 @@ function inspectProcessTree(rootPid, exePath, expectedUserData) {
 }
 
 async function launchManager({ expectedStartupPatch = '적용됨' } = {}) {
-  const packagedExe = path.join(managerAppRoot, '디노패치관리자.exe');
+  const packagedExe = path.join(managerAppRoot, 'LilacAnime-DinoPatch.exe');
   const packagedEngine = path.join(managerAppRoot, 'resources', 'manager-engine', 'DinoPatchManagerEngine.exe');
   assert.ok(fs.existsSync(packagedExe) && fs.existsSync(packagedEngine), `${managerLabel} package and bundled engine must exist.`);
   const deployed = path.join(sourceRoot, 'DinoPatchManager');
   const copy = spawnSync('robocopy.exe', [path.resolve(managerAppRoot), path.resolve(deployed), '/E', '/COPY:DAT', '/DCOPY:DAT', '/R:0', '/W:0', '/XJ', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'], { encoding: 'utf8', windowsHide: true, shell: false });
   if (copy.error || copy.status === null || copy.status >= 8) throw new Error(`Could not deploy ${managerLabel} into the isolated source (${copy.error?.message || copy.status}).`);
-  const exe = path.join(deployed, '디노패치관리자.exe');
+  const exe = path.join(deployed, 'LilacAnime-DinoPatch.exe');
   const engine = path.join(deployed, 'resources', 'manager-engine', 'DinoPatchManagerEngine.exe');
   assert.ok(fs.existsSync(exe) && fs.existsSync(engine), `${managerLabel} must be executed from the DinoPatchManager folder inside the isolated source.`);
   const runtime = Object.fromEntries(['appData', 'userData', 'sessionData', 'cache', 'temp', 'logs', 'crashDumps', 'localAppData'].map((name) => [name, path.join(profileRoot, name)]));
