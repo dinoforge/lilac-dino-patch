@@ -211,8 +211,28 @@ class TestInstalledAsar(unittest.TestCase):
         self.assertFalse((self.base / "AppData" / "DinoPatchManager").exists())
 
     def test_missing_app_asar_does_not_fallback_to_source_mode(self):
-        (self.install / "resources" / "app.asar").unlink()
+        original = self.archive.read_bytes()
+        temporary = self.archive.with_name("app.asar.replacing")
+        self.archive.rename(temporary)
+        self.assertTrue(ia.looks_like_installed_directory(self.install))
         self.assertFalse(ia.is_installed_target(self.install))
+        with mock.patch.object(core, "inspect_managed_target") as source_inspect, \
+             mock.patch.object(core, "automatic_startup_check") as source_startup, \
+             mock.patch.object(core, "apply_patch_in_place") as source_apply:
+            for operation in ("inspect", "startup", "apply"):
+                result = bridge.dispatch({"operation": operation, "root": str(self.install)})
+                self.assertEqual(result["status"], "PARTIAL_OR_UNKNOWN")
+                self.assertEqual(result["targetKind"], "INSTALLED_ASAR")
+                self.assertTrue(result["readOnly"])
+                self.assertIn("resources/app.asar", result["reason"])
+                self.assertNotIn("package.json", result["reason"])
+            source_inspect.assert_not_called()
+            source_startup.assert_not_called()
+            source_apply.assert_not_called()
+        self.assertFalse((self.install / "package.json").exists())
+        temporary.rename(self.archive)
+        self.assertEqual(self.archive.read_bytes(), original)
+        self.assertEqual(bridge.dispatch({"operation": "inspect", "root": str(self.install))["status"], "UNPATCHED")
 
     def test_pending_transaction_blocks_changes(self):
         state_root = ia._state_root(ia._root(self.install))
