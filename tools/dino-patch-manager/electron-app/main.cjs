@@ -303,7 +303,7 @@ async function verifyStableSourceChange(reason, attempt = 0) {
       sendProgress('공식 설치본 app.asar 파일 교체 중입니다. 원본을 변경하지 않고 안정화 후 다시 확인합니다.');
     } else {
       closeSourceWatchers();
-      sendProgress(`공식 원본 변경 상태를 안정적으로 확인하지 못했습니다 (${error.code || error.name}). 자동 적용을 보류하고, 원본이 안정된 뒤 다시 검사하세요.`);
+      sendProgress(`실시간 원본 변경 감시 중단 (${error.code || error.name}): ${String(error.message || error).slice(0, 300)}. 자동 감시와 별개로 수동 적용 버튼에서 안전 검사를 다시 요청할 수 있습니다.`);
     }
   } finally {
     sourceMonitor.scanning = false;
@@ -342,7 +342,7 @@ async function refreshSourceMonitorAfterOperation(operation, result) {
     if (error.code === 'ENOENT') {
       sendProgress('설치본 app.asar 파일이 교체 중입니다. 패치 상태는 별도로 유지하고 원본 감시만 다시 확인합니다.');
     } else {
-      sendProgress(`실시간 원본 감시를 갱신하지 못했습니다 (${error.code || error.name}). 패치 상태는 별도로 유지하고 감시를 다시 시도합니다.`);
+      sendProgress(`실시간 원본 감시만 갱신하지 못했습니다 (${error.code || error.name}): ${String(error.message || error).slice(0, 250)}. 수동 적용은 독립 검사로 진행할 수 있습니다.`);
     }
   }
 }
