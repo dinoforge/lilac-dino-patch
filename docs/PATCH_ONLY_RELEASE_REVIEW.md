@@ -51,3 +51,12 @@
 - [프리릴리즈 dino-v0.1.0-beta.1](https://github.com/dinoforge/lilac-dino-patch/releases/tag/dino-v0.1.0-beta.1)에 ZIP과 `SHA256SUMS.txt`를 게시했다. 릴리즈 워크플로 #43012865575는 동일 소스 커밋, 압축 검사, 원본 앱 소스·영상·자막 부재, 필수 고지 파일 존재를 검증했다.
 - 기존 `.github/workflows/build.yml`의 원본 앱 빌드용 `LILAC_RELEASE_RIGHTS_APPROVED` 게이트를 수정·설정하지 않았다. 별도 패치 전용 릴리즈만 게시했다.
 - 이 기록은 원본 앱의 재배포 허가가 생겼다는 뜻도, 개별 패치 스니펫·서비스 이용 조건에 대한 법률적 판정도 아니다. 릴리즈는 현재 **비공개 저장소의 프리릴리즈**이며 접근 권한 없는 계정에는 제공되지 않는다.
+
+## 2026-11-11 Beta 2 경량판 검증 및 게시
+
+- 빌드: [Windows Actions #43015434982](https://github.com/dinoforge/lilac-dino-patch/actions/runs/43015434982), 입력 소스 커밋 `b159eb7f02b29f52b68f85a61ebc758b6f455eb5`.
+- 실제 ZIP: `LilacAnime-DinoPatch-Windows-x64.zip`, 140,994,541바이트, SHA-256 `3A1B2C94765A020BA10D0D654ED9A9834F70332635E92146C70A7B2725F2B599`. ZIP 압축 내용과 해시를 별도로 재확인했다.
+- Electron의 Node.js 22.22.0 실행 모드를 Python 패치 엔진의 개별 검증 프로세스에서 재사용하도록 변경하여 별도 `node.exe`를 포함하지 않았다. `--check`, `--test`, LevelDB 읽기·쓰기와 Python 브리지 실행 검사가 통과했다.
+- `locales`에는 `ko.pak`과 `en-US.pak`만 남겼다. 중복 `app.asar.unpacked/node_modules`와 Windows x64 이외의 LevelDB 네이티브 모듈을 제외했다. Electron·Chromium·Node·Python 및 npm 패키지 고지는 유지했다.
+- [프리릴리즈 dino-v0.1.0-beta.2](https://github.com/dinoforge/lilac-dino-patch/releases/tag/dino-v0.1.0-beta.2)로 경량판과 `SHA256SUMS.txt`를 게시했다. 릴리즈 검증 작업 #43016363836은 성공했다. 기존 Beta 1은 변경·삭제하지 않았다.
+- 공식 LilacAnime 앱 전체, 공식 설치본, 영상·자막 파일은 포함하지 않는다. 비공식 독립 프로젝트이며 저장소는 비공개이다. 코드 출처 및 제3자 서비스의 이용 조건을 명시적으로 보증한다는 뜻은 아니다.
