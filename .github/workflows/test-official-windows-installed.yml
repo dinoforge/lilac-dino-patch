@@ -3,7 +3,10 @@ name: Verify official Windows LilacAnime ASAR installation
 on:
   push:
     branches: [test/dino-full-functional-integration]
-    paths: [.github/workflows/test-official-windows-installed.yml]
+    paths:
+      - .github/workflows/test-official-windows-installed.yml
+      - tools/dino-patch-manager/tests/verify_official_installed_asar.py
+      - tools/dino-patch-manager/installed_asar.py
   workflow_dispatch:
 
 permissions:
