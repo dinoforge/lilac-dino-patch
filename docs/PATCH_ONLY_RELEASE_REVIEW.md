@@ -41,3 +41,13 @@
 **결론:** 원본 LilacAnime Desktop **전체 앱 재배포 허가를 필수 요건으로 일괄 적용하는 것은 과도하다.** 다만 새 ZIP의 제3자 라이선스 고지 및 패치 코드 출처를 확인하기 전까지 자동 게시를 승인했다고 표기하지 않는다.
 
 이 문서는 공식 권리자 허가를 대신하거나 사용자의 저작권 보유를 독립적으로 증명하지 않는다.
+
+## 2026-11-11 최종 패치 전용 프리릴리즈
+
+- [Actions Windows 빌드 #43012176628](https://github.com/dinoforge/lilac-dino-patch/actions/runs/43012176628)에서 패치 관리자 Windows x64 빌드, 패키징 후 LevelDB 읽기·쓰기 기본 검사, ZIP 압축·파일 수 검사 및 필수 라이선스 파일 확인을 통과했다.
+- 최종 아티팩트 소스 커밋: `ec440df476d4fc47738d0d3f3497c148339a6fcc`.
+- 최종 ZIP: `LilacAnime-DinoPatch-Windows-x64.zip`, 크기 192,178,346바이트, SHA-256 `90C56F620ED1BFA0F4692866AFE4921DC1FBC2DEDC69E635558E829FC016E3CF`.
+- 프로덕션 npm 패키지만 남겨 개발용 Electron/electron-builder 중복 폴더를 제외했다. 각 패키지 LICENSE와 Electron/Chromium 고지, `THIRD_PARTY_LICENSES/Node.js-LICENSE.txt`, `THIRD_PARTY_LICENSES/Python-LICENSE.txt`를 ZIP에 포함시켰다.
+- [프리릴리즈 dino-v0.1.0-beta.1](https://github.com/dinoforge/lilac-dino-patch/releases/tag/dino-v0.1.0-beta.1)에 ZIP과 `SHA256SUMS.txt`를 게시했다. 릴리즈 워크플로 #43012865575는 동일 소스 커밋, 압축 검사, 원본 앱 소스·영상·자막 부재, 필수 고지 파일 존재를 검증했다.
+- 기존 `.github/workflows/build.yml`의 원본 앱 빌드용 `LILAC_RELEASE_RIGHTS_APPROVED` 게이트를 수정·설정하지 않았다. 별도 패치 전용 릴리즈만 게시했다.
+- 이 기록은 원본 앱의 재배포 허가가 생겼다는 뜻도, 개별 패치 스니펫·서비스 이용 조건에 대한 법률적 판정도 아니다. 릴리즈는 현재 **비공개 저장소의 프리릴리즈**이며 접근 권한 없는 계정에는 제공되지 않는다.
