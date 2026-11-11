@@ -140,7 +140,7 @@ class TestInstalledAsar(unittest.TestCase):
         files["package.json"] = json.dumps(package).encode()
         files["src/player.js"] = b"const player = true;\\n"
         files["electron/preload.cjs"] = b"const preload = true;\\n"
-        files["src/index.html"] = b"<html><head><link id='one'></head><body><button id='two'></button><select id='three'></select><script src=\\\"app.js\\\"></script></body></html>"
+        files["src/index.html"] = b"""<html><head><link id='one'></head><body><button id='two'></button><select id='three'></select><script src="app.js"></script></body></html>"""
         synthetic_asar(self.archive, files)
         html = files["src/index.html"].decode("utf-8")
         connections = [
@@ -162,7 +162,6 @@ class TestInstalledAsar(unittest.TestCase):
         manifest["connections"] = connections
         manifest["_connectionProfiles"] = [{"officialVersion": "0.5.54", "connections": connections}]
         self.manifest_patch.stop()
-        self.addCleanup(lambda: None)
         mocked = mock.patch.object(core, "load_manifest", return_value=(self.patch, manifest))
         mocked.start()
         self.addCleanup(mocked.stop)
