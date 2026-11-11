@@ -74,8 +74,16 @@ def dispatch(
             # mistake an installed application for a source checkout.
             # Inspect and startup are strictly read-only until the archive
             # is present again; do not assume a patch was applied.
-            reason = ("설치본의 resources/app.asar 파일이 없거나 접근할 수 없습니다. "
-                      "공식 앱 업데이트/파일 교체가 끝난 뒤 다시 검사하세요. 원본은 변경하지 않았습니다.")
+            archive_path = root / "resources" / "app.asar"
+            if archive_path.is_dir():
+                kind = "app.asar가 압축 파일이 아닌 폴더입니다."
+            elif archive_path.is_symlink():
+                kind = "app.asar가 링크이므로 안전을 위해 차단했습니다."
+            else:
+                kind = "app.asar 파일이 없거나 접근할 수 없습니다."
+            reason = (f"설치본 resources/{kind} "
+                      "공식 앱 업데이트/파일 교체가 끝났는지 확인하세요. "
+                      "수동 적용도 독립 검사에서 안전한 파일이 확인되어야 진행합니다. 원본을 변경하지 않았습니다.")
             if operation in {"inspect", "startup", "apply"}:
                 return {
                     "status": "PARTIAL_OR_UNKNOWN",
