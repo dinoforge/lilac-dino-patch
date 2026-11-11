@@ -98,7 +98,7 @@ def dispatch(
             if operation == "inspect":
                 return installed_asar.inspect(root)
             if operation == "apply":
-                return installed_asar.startup(root)
+                return installed_asar.apply(root)
             if operation == "uninstall":
                 return installed_asar.uninstall(root)
             if operation == "backups":
