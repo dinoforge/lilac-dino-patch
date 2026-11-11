@@ -203,8 +203,8 @@ test('test profile validation rejects relative paths, traversal, and junctions b
 test('packaged engine keeps Windows PATH intact and isolates its test profile', () => {
   const main = read('electron-app/main.cjs');
   const smoke = read('tests/electron_ui_smoke.cjs');
-  assert.match(main, /key\.toLowerCase\(\) === 'path'/);
-  assert.match(main, /env\[pathKey\] = `\$\{nodeDir\}\$\{path\.delimiter\}\$\{inheritedPath\}`/);
+  assert.match(main, /env\.DINO_MANAGER_NODE_EXE = process\.execPath/);
+  assert.match(main, /env: bridgeEnvironment\(\)/);
   assert.match(main, /PYTHONUTF8:\s*'1'/);
   assert.match(main, /PYTHONIOENCODING:\s*'utf-8'/);
   assert.match(main, /readline\.createInterface\(\{ input: child\.stdout/);
