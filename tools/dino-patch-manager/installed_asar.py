@@ -365,6 +365,10 @@ def inspect(root_value):
         if state.get("status") == "UNPATCHED":
             if actual_sha != state.get("originalSha256"):
                 return {**result, "status": "CONFLICT", "reason": "패치 해제 후 설치본이 변경되었습니다."}
+            # The user explicitly uninstalled; an automatic watcher recheck
+            # must not silently apply the patch again.
+            return {**result, "status": "UNPATCHED", "manualUninstall": True,
+                    "runtimePlaybackVerified": False}
     if any(relative in asar.files for relative in core.EXPECTED_MODULES):
         return {**result, "status": "PARTIAL_OR_UNKNOWN", "reason": "이미 설치된 패치 모듈이 있지만 검증된 상태 기록은 없습니다."}
     try:
@@ -479,6 +483,8 @@ def _apply(root: Path, *, process_check):
     if result["status"] == "APPLIED":
         return {**result, "status": "ALREADY_APPLIED"}
     if result["status"] != "UNPATCHED":
+        return result
+    if result.get("manualUninstall"):
         return result
     if process_check is core.assert_app_not_running:
         _ensure_installed_app_stopped(root)
