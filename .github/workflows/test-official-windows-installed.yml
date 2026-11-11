@@ -70,5 +70,53 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $asar = (Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'dino-asar-location.txt') -Raw).Trim()
-          & python tools/dino-patch-manager/tests/verify_official_installed_asar.py $asar '${{ matrix.version }}'
+          $patched = Join-Path $env:RUNNER_TEMP 'verified-patched-app.asar'
+          & python tools/dino-patch-manager/tests/verify_official_installed_asar.py $asar '${{ matrix.version }}' $patched
           if ($LASTEXITCODE -ne 0) { throw 'Windows ASAR compatibility test failed' }
+          if (-not (Test-Path -LiteralPath $patched -PathType Leaf)) { throw 'Patched ASAR smoke-test copy missing' }
+
+      - name: Compare genuine app startup before and after ASAR patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $asar = (Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'dino-asar-location.txt') -Raw).Trim()
+          $exe = Join-Path (Split-Path (Split-Path $asar -Parent) -Parent) 'LilacAnime.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+            throw 'Official Windows executable not found next to resources/app.asar'
+          }
+          $backup = Join-Path $env:RUNNER_TEMP 'official-app-before-launch.asar'
+          Copy-Item -LiteralPath $asar -Destination $backup
+          function Invoke-AppProbe {
+            $psi = [System.Diagnostics.ProcessStartInfo]::new($exe)
+            $psi.UseShellExecute = $false
+            $psi.WorkingDirectory = Split-Path -Parent $exe
+            $psi.CreateNoWindow = $true
+            $psi.ArgumentList.Add('--disable-gpu')
+            $psi.ArgumentList.Add('--no-sandbox')
+            $process = [System.Diagnostics.Process]::Start($psi)
+            try {
+              Start-Sleep -Seconds 5
+              $alive = -not $process.HasExited
+              $code = if ($alive) { 'running' } else { "$($process.ExitCode)" }
+              Write-Host "Process probe: $code"
+              return @{ alive = $alive; exitCode = $code }
+            } finally {
+              if (-not $process.HasExited) { $process.Kill($true) }
+              $process.WaitForExit(10000) | Out-Null
+              $process.Dispose()
+            }
+          }
+          try {
+            $baseline = Invoke-AppProbe
+            Copy-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'verified-patched-app.asar') -Destination $asar -Force
+            $patched = Invoke-AppProbe
+            if ($baseline.alive -and -not $patched.alive) {
+              throw "Official app launched before patch but failed after patch (exit=$($patched.exitCode))."
+            }
+            if ($baseline.exitCode -ne $patched.exitCode) {
+              throw "App startup changed unexpectedly: baseline=$($baseline.exitCode) patched=$($patched.exitCode)"
+            }
+            Write-Host 'Official Windows launch behavior unchanged after ASAR patch'
+          } finally {
+            Copy-Item -LiteralPath $backup -Destination $asar -Force
+          }
