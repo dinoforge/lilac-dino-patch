@@ -1,12 +1,12 @@
-# 라일락 디노 패치 사용법
+# LilacAnime DinoPatch 사용법
 
-라일락 디노 패치는 **LilacAnime에 통합 검색 기능을 추가하는 Windows 프로그램**입니다.
+LilacAnime DinoPatch는 **LilacAnime에 통합 검색 기능을 추가하는 Windows 프로그램**입니다.
 
 ## 설치하기
 
 1. 배포 ZIP을 압축 해제합니다.
 2. **DinoPatchManager** 폴더를 LilacAnime **소스 폴더** 안에 넣습니다.
-3. **디노패치관리자.exe**를 실행합니다.
+3. **LilacAnime-DinoPatch.exe**를 실행합니다.
 4. 원본 폴더가 맞는지 확인하면, 지원되는 버전에 패치가 **자동 적용**됩니다.
 
 **소스 폴더란?** `package.json`, `src`, `electron`이 함께 있는 폴더입니다. 일반 설치 폴더만으로는 사용할 수 없습니다.
@@ -22,4 +22,4 @@
 - 수동 해제 후에는 같은 원본에 자동으로 다시 적용되지 않습니다. 현재 버전에는 **다시 적용 버튼이 없습니다.**
 - **GitHub 다운로드용 ZIP은 아직 출시되지 않았습니다.**
 
-[공식 LilacAnime](https://github.com/whispelyn-byte/LilacAnime-desktop) · [디노 패치 GitHub](https://github.com/dinoforge/lilac-dino-patch)
+[공식 LilacAnime](https://github.com/whispelyn-byte/LilacAnime-desktop) · [LilacAnime DinoPatch GitHub](https://github.com/dinoforge/lilac-dino-patch)
