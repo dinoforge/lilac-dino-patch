@@ -6,6 +6,7 @@ on:
       - test/dino-full-functional-integration
     paths:
       - .github/workflows/build-dinopatch-windows.yml
+      - tools/dino-patch-manager/tests/theme-leveldb-electron.integration.cjs
   workflow_dispatch:
 
 permissions:
