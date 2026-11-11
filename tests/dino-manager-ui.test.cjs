@@ -25,7 +25,7 @@ test('Electron UI retains A layout tokens and lists only the real Dino Patch', (
   assert.doesNotMatch(html, /eyebrow|공식 원본 보호 · 안전한 패치 관리/);
   assert.equal((html.match(/id="detailDialog"/g) || []).length, 0);
   assert.equal((html.match(/class="patch-row"/g) || []).length, 1);
-  assert.match(html, /id="patchDetails"/);
+  assert.doesNotMatch(html, /id="patchDetails"|id="patchOfficialBase"/, 'Redundant fold-out patch details are removed.');
   assert.doesNotMatch(html, /id="(?:apply|rowApply)"/);
   assert.match(html, /id="uninstall"/);
   assert.doesNotMatch(html, /요일표|자막 번역 패치|Patch 0[123]/);
@@ -36,7 +36,7 @@ test('patch-list screen keeps source, global actions, backups, history and botto
   const html = read('electron-app/index.html');
   const css = read('electron-app/manager.css');
   const renderer = read('electron-app/renderer.js');
-  for (const id of ['managerVersion', 'targetPath', 'officialVersion', 'targetPatchVersion', 'patchOfficialBase', 'patchBadge', 'autoManageStatus', 'message', 'detail', 'busyBadge', 'safetyCard', 'safetyTitle', 'safetyMessage', 'history', 'inspect', 'uninstall', 'backupSelect', 'restore']) {
+  for (const id of ['managerVersion', 'targetPath', 'officialVersion', 'targetPatchVersion', 'patchBadge', 'autoManageStatus', 'message', 'detail', 'busyBadge', 'safetyCard', 'safetyTitle', 'safetyMessage', 'history', 'inspect', 'uninstall', 'backupSelect', 'restore']) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.doesNotMatch(html, /id="(?:compatBadge|patchState|patchVersion)"/);
@@ -46,7 +46,7 @@ test('patch-list screen keeps source, global actions, backups, history and botto
   assert.match(html, /실행 시 자동 검사 · 필요 시 적용/);
   assert.doesNotMatch(html, /전체 검사|전체 적용|id="(?:apply|rowApply)"/);
   assert.match(html, /class="patch-row"/);
-  assert.match(html, /class="patch-details"/);
+  assert.doesNotMatch(html, /class="patch-details"/);
   assert.match(html, /원본 폴더/);
   assert.match(html, /id="safetyCard" class="safety"[^>]*hidden/);
   assert.match(html, /id="activityStatus" class="result-actions" hidden/);
@@ -68,7 +68,7 @@ test('patch-list screen keeps source, global actions, backups, history and botto
   assert.match(css, /#targetPath[\s\S]*text-overflow:\s*ellipsis/);
   assert.match(css, /\[hidden\] \{ display: none !important/);
   assert.match(css, /\.safety p \{ margin-top:/);
-  assert.match(css, /\.result-card \{ margin-top: auto;/);
+  assert.match(css, /\.result-card \{ margin-top: 0;/);
   assert.doesNotMatch(css, /\.result-card \{[^}]*position:\s*sticky/);
   assert.match(css, /\.patch-list-card \{ display: flex; flex: 0 0 auto;/);
   assert.match(css, /\.patch-list \{[\s\S]*max-height: min\(640px, calc\(100vh - 150px\)\);[\s\S]*overflow-y: auto/);
