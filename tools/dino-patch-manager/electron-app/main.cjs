@@ -232,7 +232,8 @@ function installSourceWatchers(snapshot) {
 
 function setSourceWatchRoot(rootValue) {
   const root = fs.realpathSync.native(rootValue);
-  if (sourceMonitor.root && normalized(sourceMonitor.root) === normalized(root)) return;
+  if (sourceMonitor.root && normalized(sourceMonitor.root) === normalized(root)
+    && sourceMonitor.baseline && sourceMonitor.watchers.length) return;
   closeSourceWatchers();
   if (sourceMonitor.timer) clearTimeout(sourceMonitor.timer);
   sourceMonitor.timer = null;
@@ -256,6 +257,19 @@ function scheduleSourceScan(reason, waitMs = 900, attempt = 0) {
   }, waitMs);
 }
 
+async function readSourceSnapshotWithRetry(root, retries = 3) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return takeSourceSnapshot(root);
+    } catch (error) {
+      // Atomic app.asar replacements can briefly remove the directory entry.
+      // A persistent missing file still fails closed after bounded retries.
+      if (error.code !== 'ENOENT' || attempt >= retries) throw error;
+      await delay(200 * (attempt + 1));
+    }
+  }
+}
+
 async function verifyStableSourceChange(reason, attempt = 0) {
   if (!sourceMonitor.root) return;
   if (busy || sourceMonitor.scanning) {
@@ -264,12 +278,13 @@ async function verifyStableSourceChange(reason, attempt = 0) {
   }
   sourceMonitor.scanning = true;
   sourceMonitor.pending = false;
+  let retryMissingArchive = false;
   try {
-    const first = takeSourceSnapshot(sourceMonitor.root);
+    const first = await readSourceSnapshotWithRetry(sourceMonitor.root);
     await delay(450);
-    const second = takeSourceSnapshot(sourceMonitor.root);
+    const second = await readSourceSnapshotWithRetry(sourceMonitor.root);
     await delay(450);
-    const third = takeSourceSnapshot(sourceMonitor.root);
+    const third = await readSourceSnapshotWithRetry(sourceMonitor.root);
     if (first.signature !== second.signature || second.signature !== third.signature) {
       sendProgress('공식 원본 파일이 아직 변경 중입니다. 파일 지문이 안정될 때까지 적용을 보류합니다.');
       if (attempt < 3) scheduleSourceScan('공식 원본 안정화 재확인', 1500, attempt + 1);
@@ -281,21 +296,28 @@ async function verifyStableSourceChange(reason, attempt = 0) {
     sourceMonitor.warningSent = false;
     if (previous && previous.signature !== third.signature) sendSourceChange(third, reason);
   } catch (error) {
-    closeSourceWatchers();
     sourceMonitor.warningSent = true;
-    sendProgress(`공식 원본 변경 상태를 안정적으로 확인하지 못했습니다 (${error.code || error.name}). 자동 적용을 보류하고, 원본이 안정된 뒤 다시 검사하세요.`);
+    if (error.code === 'ENOENT' && attempt < 3) {
+      // Keep the parent-directory watchers while an updater swaps app.asar.
+      retryMissingArchive = true;
+      sendProgress('공식 설치본 app.asar 파일 교체 중입니다. 원본을 변경하지 않고 안정화 후 다시 확인합니다.');
+    } else {
+      closeSourceWatchers();
+      sendProgress(`공식 원본 변경 상태를 안정적으로 확인하지 못했습니다 (${error.code || error.name}). 자동 적용을 보류하고, 원본이 안정된 뒤 다시 검사하세요.`);
+    }
   } finally {
     sourceMonitor.scanning = false;
-    if (sourceMonitor.pending) scheduleSourceScan(sourceMonitor.pendingReason || '공식 원본 변경 재확인', 900);
+    if (retryMissingArchive) scheduleSourceScan('설치본 app.asar 파일 안정화 재확인', 1600, attempt + 1);
+    else if (sourceMonitor.pending) scheduleSourceScan(sourceMonitor.pendingReason || '공식 원본 변경 재확인', 900);
   }
 }
 
 async function refreshSourceMonitorAfterOperation(operation, result) {
   if (!sourceMonitor.root) return;
   try {
-    const first = takeSourceSnapshot(sourceMonitor.root);
+    const first = await readSourceSnapshotWithRetry(sourceMonitor.root);
     await delay(200);
-    const second = takeSourceSnapshot(sourceMonitor.root);
+    const second = await readSourceSnapshotWithRetry(sourceMonitor.root);
     if (first.signature !== second.signature) {
       sourceMonitor.pending = true;
       scheduleSourceScan('관리자 작업 중 공식 원본이 계속 변경됨', 900, 0);
@@ -313,7 +335,15 @@ async function refreshSourceMonitorAfterOperation(operation, result) {
     }
   } catch (error) {
     sourceMonitor.warningSent = true;
-    sendProgress(`작업 후 공식 원본 변경 감시 상태를 갱신하지 못했습니다 (${error.code || error.name}). 다음 실행 또는 수동 재검사에서 다시 확인합니다.`);
+    // The operation result is still authoritative. A watcher problem must not
+    // convert an already verified patch state to an unknown/failed operation.
+    sourceMonitor.pending = true;
+    sourceMonitor.pendingReason = '작업 후 설치본 변경 감시 재확인';
+    if (error.code === 'ENOENT') {
+      sendProgress('설치본 app.asar 파일이 교체 중입니다. 패치 상태는 별도로 유지하고 원본 감시만 다시 확인합니다.');
+    } else {
+      sendProgress(`실시간 원본 감시를 갱신하지 못했습니다 (${error.code || error.name}). 패치 상태는 별도로 유지하고 감시를 다시 시도합니다.`);
+    }
   }
 }
 
@@ -434,8 +464,20 @@ async function withOperation(operation, work) {
     sendProgress(`${operation} 작업이 끝났습니다.`);
     return result;
   } finally {
-    busy = false;
-    await refreshSourceMonitorAfterOperation(operation, result);
+    try {
+      // Only these operations can change the official files. Avoid rehashing
+      // app.asar after read-only checks and diagnostics.
+      if (/초기 검사|패치 적용|패치 해제|백업 복원/.test(operation)) {
+        await refreshSourceMonitorAfterOperation(operation, result);
+      }
+    } finally {
+      busy = false;
+      if (sourceMonitor.pending) {
+        const reason = sourceMonitor.pendingReason || '공식 원본 변경 재확인';
+        sourceMonitor.pending = false;
+        scheduleSourceScan(reason, 900);
+      }
+    }
   }
 }
 
