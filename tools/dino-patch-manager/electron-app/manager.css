@@ -46,7 +46,7 @@ body.theme-light {
 
 [hidden] { display: none !important; }
 .shell { display: flex; flex-direction: column; gap: 12px; width: min(860px, calc(100% - 48px)); min-height: 0; margin: 0 auto; padding: 22px 0 15px; }
-.topbar, .source-location, .list-heading, .patch-row-main, .patch-title-line, .backup-actions, .result-row, .row-actions, .update-actions, .advanced-tools > summary { display: flex; align-items: center; }
+.topbar, .source-location, .list-heading, .patch-row-main, .patch-title-line, .backup-actions, .result-row, .row-actions, .update-actions { display: flex; align-items: center; }
 .topbar, .list-heading, .backup-heading { justify-content: space-between; }
 h1, h2, h3, p, dl { margin: 0; }
 h1 { font-size: 27px; line-height: 1.2; letter-spacing: -.035em; }
