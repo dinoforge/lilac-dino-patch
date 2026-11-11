@@ -45,7 +45,7 @@ body.theme-light {
 }
 
 [hidden] { display: none !important; }
-.shell { display: flex; flex-direction: column; gap: 12px; width: min(860px, calc(100% - 48px)); min-height: 100vh; margin: 0 auto; padding: 22px 0 15px; }
+.shell { display: flex; flex-direction: column; gap: 12px; width: min(860px, calc(100% - 48px)); min-height: 0; margin: 0 auto; padding: 22px 0 15px; }
 .topbar, .source-location, .list-heading, .patch-row-main, .patch-title-line, .backup-actions, .result-row, .row-actions, .update-actions, .advanced-tools > summary { display: flex; align-items: center; }
 .topbar, .list-heading, .backup-heading { justify-content: space-between; }
 h1, h2, h3, p, dl { margin: 0; }
@@ -111,14 +111,6 @@ h3 { font-size: 14px; line-height: 1.35; font-weight: 650; }
 .theme-light .status-chip.bad { color: #8b3037; background: #fde7e8; }
 .row-actions { flex: 0 0 auto; gap: 9px; }
 .row-actions .button { min-height: 38px; padding: 0 13px; }
-.patch-details { margin: 0 15px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; }
-.patch-details summary { width: fit-content; padding: 9px 1px; cursor: pointer; user-select: none; }
-.patch-detail-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 9px 18px; padding: 0 0 13px; }
-.patch-detail-grid > div { display: grid; gap: 2px; min-width: 0; }
-.patch-detail-grid span { color: var(--muted); font-size: 10px; }
-.patch-detail-grid strong { color: var(--text); font-size: 11px; font-weight: 550; overflow-wrap: anywhere; }
-.patch-detail-wide { grid-column: 1 / -1; }
-
 .backup-card { padding: 11px 17px; }
 .backup-heading { margin-bottom: 7px; }
 .backup-actions { align-items: end; gap: 9px; }
@@ -141,7 +133,7 @@ h3 { font-size: 14px; line-height: 1.35; font-weight: 650; }
 .update-status { min-height: 24px; margin-top: 6px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .update-actions .button { min-height: 34px; }
 
-.result-card { margin-top: auto; padding: 11px 15px; border: 1px solid var(--border); border-radius: 13px; background: var(--card); box-shadow: 0 8px 24px rgba(0, 0, 0, .14); }
+.result-card { margin-top: 0; padding: 11px 15px; border: 1px solid var(--border); border-radius: 13px; background: var(--card); box-shadow: 0 8px 24px rgba(0, 0, 0, .14); }
 .result-row { min-height: 24px; gap: 12px; }
 .result-label { flex: 0 0 auto; color: var(--accent); font-size: 10px; letter-spacing: .04em; font-weight: 700; white-space: nowrap; }
 .message { flex: 1 1 auto; min-width: 0; color: var(--text); font-size: 12px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
