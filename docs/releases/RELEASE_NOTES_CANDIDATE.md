@@ -1,4 +1,4 @@
-# Lilac Dino Patch 0.1.0 Beta 1
+# LilacAnime DinoPatch 0.1.0 Beta 1
 
 Windows x64용 비공식 LilacAnime Desktop 소스 패치 관리자입니다. 공식 애플리케이션을 대체하지 않고, 호환되는 공식 소스 폴더에서 기존 홈·상세·회차·재생 경로를 유지하며 디노 패치 기능을 관리합니다.
 
