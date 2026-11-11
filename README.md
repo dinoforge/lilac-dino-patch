@@ -1,6 +1,6 @@
-# 라일락 디노 패치
+# LilacAnime DinoPatch
 
-**Lilac Dino Patch**는 LilacAnime에 통합 검색 기능을 추가하는 **비공식 Windows x64 패치 관리자**입니다.
+**LilacAnime DinoPatch**는 LilacAnime에 통합 검색 기능을 추가하는 **비공식 Windows x64 패치 관리자**입니다.
 
 ## 주요 기능
 
@@ -12,7 +12,7 @@
 
 1. LilacAnime를 종료합니다.
 2. 배포 ZIP을 받은 경우, `DinoPatchManager` 폴더를 공식 LilacAnime **소스 폴더**에 넣습니다.
-3. `디노패치관리자.exe`를 실행합니다.
+3. `LilacAnime-DinoPatch.exe`를 실행합니다.
 
 **주의:** `package.json`, `src/`, `electron/`이 있는 공식 소스 폴더가 필요합니다. 일반 설치본만으로는 적용할 수 없습니다.
 
