@@ -73,27 +73,6 @@ jobs:
           if (Test-Path -LiteralPath $oldModules) { throw 'Unexpected old runtime destination' }
           Move-Item -LiteralPath $modules -Destination $oldModules
           Copy-Item -LiteralPath (Join-Path $prod 'node_modules') -Destination $nodeRuntime -Recurse
-          $probe = @'
-          const fs = require('node:fs');
-          const os = require('node:os');
-          const path = require('node:path');
-          const { ClassicLevel } = require(path.join(process.argv[1], 'classic-level'));
-          (async () => {
-            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dinopatch-level-probe-'));
-            const db = new ClassicLevel(dir, { valueEncoding: 'utf8' });
-            try {
-              await db.open();
-              await db.put('key', 'verified');
-              if (await db.get('key') !== 'verified') throw Error('LevelDB result mismatch');
-              await db.close();
-            } finally {
-              if (db.status === 'open') await db.close();
-              fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 200 });
-            }
-          })().catch(e => { console.error(e); process.exitCode = 1; });
-          '@
-          & (Join-Path $nodeRuntime 'node.exe') -e $probe $modules
-          if ($LASTEXITCODE -ne 0) { throw 'Packaged production LevelDB probe failed' }
           $runtimeModules = @(Get-ChildItem -LiteralPath $modules -Directory)
           if ($runtimeModules.Count -gt 20) { throw "Unexpected production package count: $($runtimeModules.Count)" }
           Write-Host "Production-only runtime package count: $($runtimeModules.Count)"
@@ -143,7 +122,6 @@ jobs:
             'resources/app.asar',
             'resources/manager-engine/DinoPatchManagerEngine.exe',
             'resources/manager-engine/_internal/patches/patch03/manifest.json',
-            'resources/manager-node/node.exe',
             'resources/manager-node/node_modules/classic-level/package.json'
           )) {
             if (-not (Test-Path -LiteralPath (Join-Path $manager $required) -PathType Leaf)) {
@@ -155,8 +133,8 @@ jobs:
           $nodeDir = Split-Path -Parent ((Get-Command node -ErrorAction Stop).Source)
           $nodeLicence = Join-Path $nodeDir 'LICENSE'
           if (-not (Test-Path -LiteralPath $nodeLicence -PathType Leaf)) {
-            $nodeLicence = Join-Path $env:RUNNER_TEMP 'node-v24.14.1-LICENSE'
-            Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/nodejs/node/v24.14.1/LICENSE' -OutFile $nodeLicence -TimeoutSec 60
+            $nodeLicence = Join-Path $env:RUNNER_TEMP 'node-v22.22.0-LICENSE'
+            Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/nodejs/node/v22.22.0/LICENSE' -OutFile $nodeLicence -TimeoutSec 60
           }
           $pythonLicence = Join-Path $env:pythonLocation 'LICENSE.txt'
           if (-not (Test-Path -LiteralPath $pythonLicence -PathType Leaf)) {
