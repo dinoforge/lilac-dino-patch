@@ -417,8 +417,8 @@ test('installed ASAR snapshot never falls through to source package.json during 
     fs.renameSync(archive, pendingArchive);
     assert.throws(() => takeSourceSnapshot(target), (error) => {
       assert.equal(error.code, 'ENOENT');
-      assert.match(error.message, /resources\\/app\\.asar/);
-      assert.doesNotMatch(error.message, /package\\.json/);
+      assert.ok(error.message.includes('resources/app.asar'));
+      assert.ok(!error.message.includes('package.json'));
       return true;
     });
     // Do not create package.json. The installed archive must remain recognized.
