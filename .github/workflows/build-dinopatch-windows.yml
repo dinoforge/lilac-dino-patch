@@ -132,6 +132,38 @@ jobs:
           if ($native.Count -eq 0) { throw 'Win-x64 LevelDB binary was removed' }
           Write-Host "Pruned $($removed.Count) unused locale packs, duplicate Electron native modules and cross-OS LevelDB prebuilds"
 
+      - name: Exclude all non-runtime documentation and test fixtures
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $appRoot = Join-Path (Get-Location).Path 'tools/dino-patch-manager/release/LilacAnime-DinoPatch-Electron-v1.2.4-github-renamed/win-unpacked'
+          $modules = Join-Path $appRoot 'resources/manager-node/node_modules'
+          $removeDirs = @('test', 'tests', 'example', 'examples', 'doc', 'docs', 'benchmark', 'benchmarks', 'coverage', '.github', '.bin', '.nyc_output')
+          $developerDirectories = @(Get-ChildItem -LiteralPath $modules -Directory -Recurse -Force | Where-Object { $_.Name -in $removeDirs } | Sort-Object { $_.FullName.Length } -Descending)
+          foreach ($directory in $developerDirectories) {
+            if (Test-Path -LiteralPath $directory.FullName) {
+              Remove-Item -LiteralPath $directory.FullName -Recurse -Force -ErrorAction Stop
+            }
+          }
+          $developerFiles = @(Get-ChildItem -LiteralPath $modules -File -Recurse -Force | Where-Object {
+            ($_.Name -match '^(README|CHANGELOG|HISTORY|CONTRIBUTING|AUTHORS|CODE_OF_CONDUCT)([.]|$)') -or
+            ($_.Extension -in @('.map', '.ts')) -or
+            ($_.Name -in @('.npmignore', '.travis.yml', '.editorconfig', '.package-lock.json'))
+          })
+          foreach ($file in $developerFiles) { Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop }
+          $defaultApp = Join-Path $appRoot 'resources/default_app.asar'
+          if (Test-Path -LiteralPath $defaultApp) {
+            # Electron starts from the verified resources/app.asar, not its
+            # sample app. Keep Chrome/Python DLLs and license notices intact.
+            Remove-Item -LiteralPath $defaultApp -Force -ErrorAction Stop
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $appRoot 'resources/app.asar') -PathType Leaf)) {
+            throw 'Required custom Electron application archive was removed'
+          }
+          Write-Host "Removed $($developerDirectories.Count) non-runtime directories and $($developerFiles.Count) developer files"
+          $leftovers = @(Get-ChildItem -LiteralPath $modules -Directory -Recurse -Force | Where-Object { $_.Name -in $removeDirs })
+          if ($leftovers.Count -gt 0) { throw 'Non-runtime npm test or documentation folders remain' }
+
       - name: Verify embedded Node CLI, LevelDB and Python engine bridge
         shell: pwsh
         run: |
@@ -249,6 +281,9 @@ jobs:
           if ((Get-ChildItem -LiteralPath $licences -File).Count -ne 2) { throw 'Runtime license files were not collected' }
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip)
+          $unused = @(Get-ChildItem -LiteralPath (Join-Path $manager 'resources/manager-node/node_modules') -Directory -Recurse -Force | Where-Object { $_.Name -in @('test', 'tests', 'example', 'examples', 'docs', 'doc', 'benchmark', 'benchmarks', '.bin') })
+          if ($unused.Count -gt 0) { throw 'ZIP still includes development-only dependency directories' }
+          if (Test-Path -LiteralPath (Join-Path $manager 'resources/default_app.asar')) { throw 'Electron sample application should not ship' }
           $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
           try {
             $zipFiles = @($archive.Entries | Where-Object { -not $_.FullName.EndsWith('/') })
