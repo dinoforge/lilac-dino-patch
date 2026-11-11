@@ -47,6 +47,60 @@ jobs:
           & .\tools\dino-patch-manager\build_electron_windows.ps1 -PythonExe .\.venv-dino-build\Scripts\python.exe -BuildName github-renamed
           if ($LASTEXITCODE -ne 0) { throw "Manager Windows build failed" }
 
+      - name: Keep only licensed production runtime modules
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path (Get-Location).Path 'tools/dino-patch-manager/release/LilacAnime-DinoPatch-Electron-v1.2.4-github-renamed/win-unpacked'
+          $nodeRuntime = Join-Path $root 'resources/manager-node'
+          $modules = Join-Path $nodeRuntime 'node_modules'
+          $prod = Join-Path $env:RUNNER_TEMP 'dinopatch-production-modules'
+          New-Item -ItemType Directory -Path $prod -Force | Out-Null
+          Copy-Item -LiteralPath 'tools/dino-patch-manager/electron-app/package.json' -Destination $prod
+          Copy-Item -LiteralPath 'tools/dino-patch-manager/electron-app/package-lock.json' -Destination $prod
+          Push-Location $prod
+          try {
+            npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+            if ($LASTEXITCODE -ne 0) { throw 'Production-only npm install failed' }
+          } finally {
+            Pop-Location
+          }
+          if (Test-Path -LiteralPath (Join-Path $prod 'node_modules/electron')) { throw 'Dev-only Electron unexpectedly installed' }
+          if (Test-Path -LiteralPath (Join-Path $prod 'node_modules/electron-builder')) { throw 'Dev-only electron-builder unexpectedly installed' }
+          $native = @(Get-ChildItem -LiteralPath (Join-Path $prod 'node_modules/classic-level') -Recurse -File -Filter '*.node')
+          if ($native.Count -eq 0) { throw 'ClassicLevel native Windows runtime is missing' }
+          $oldModules = Join-Path $env:RUNNER_TEMP 'dinopatch-old-dev-node-modules'
+          if (Test-Path -LiteralPath $oldModules) { throw 'Unexpected old runtime destination' }
+          Move-Item -LiteralPath $modules -Destination $oldModules
+          Copy-Item -LiteralPath (Join-Path $prod 'node_modules') -Destination $nodeRuntime -Recurse
+          $probe = @'
+          const fs = require('node:fs');
+          const os = require('node:os');
+          const path = require('node:path');
+          const { ClassicLevel } = require(path.join(process.argv[1], 'classic-level'));
+          (async () => {
+            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dinopatch-level-probe-'));
+            const db = new ClassicLevel(dir, { valueEncoding: 'utf8' });
+            try {
+              await db.open();
+              await db.put('key', 'verified');
+              if (await db.get('key') !== 'verified') throw Error('LevelDB result mismatch');
+              await db.close();
+            } finally {
+              if (db.status === 'open') await db.close();
+              fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 200 });
+            }
+          })().catch(e => { console.error(e); process.exitCode = 1; });
+          '@
+          & (Join-Path $nodeRuntime 'node.exe') -e $probe $modules
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged production LevelDB probe failed' }
+          $runtimeModules = @(Get-ChildItem -LiteralPath $modules -Directory)
+          if ($runtimeModules.Count -gt 20) { throw "Unexpected production package count: $($runtimeModules.Count)" }
+          Write-Host "Production-only runtime package count: $($runtimeModules.Count)"
+          if (Test-Path -LiteralPath $oldModules) {
+            Remove-Item -LiteralPath $oldModules -Recurse -Force -ErrorAction Stop
+          }
+
       - name: Create ZIP and SHA-256
         shell: pwsh
         run: |
