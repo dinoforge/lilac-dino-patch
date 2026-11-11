@@ -7,7 +7,7 @@
     safetyCard: $('safetyCard'), safetyTitle: $('safetyTitle'), safetyMessage: $('safetyMessage'),
     targetPath: $('targetPath'), officialVersion: $('officialVersion'), targetPatchVersion: $('targetPatchVersion'),
     autoManageStatus: $('autoManageStatus'),
-    uninstall: $('uninstall'), restore: $('restore'), inspect: $('inspect'), history: $('history'),
+    apply: $('apply'), uninstall: $('uninstall'), restore: $('restore'), inspect: $('inspect'), history: $('history'),
     chooseRoot: $('chooseRoot'), diagnostics: $('diagnostics'), backupSelect: $('backupSelect'),
     checkUpdates: $('checkUpdates'), updateStatus: $('updateStatus'),
     message: $('message'), detail: $('detail'), activityStatus: $('activityStatus'), busyBadge: $('busyBadge'), log: $('log'), themeStatus: $('themeStatus'),
@@ -103,7 +103,7 @@
     if (state.busy && (message.includes('원본 확인') || message.includes('자동 적용'))) {
       setAutoManageStatus('자동 검사 중', 'busy');
     }
-    for (const button of [elements.uninstall, elements.restore, elements.inspect, elements.history, elements.chooseRoot, elements.checkUpdates, elements.diagnostics]) {
+    for (const button of [elements.apply, elements.uninstall, elements.restore, elements.inspect, elements.history, elements.chooseRoot, elements.checkUpdates, elements.diagnostics]) {
       if (button) button.disabled = state.busy || button.dataset.disabledByState === 'true';
     }
     updateActionButtons();
@@ -123,8 +123,10 @@
     const selectedBackup = state.backups.find((item) => item.id === elements.backupSelect.value && item.restorable === true);
     elements.inspect.disabled = state.busy || !hasRoot;
     elements.history.disabled = state.busy || !hasRoot;
-    // Source checks and patch application run automatically. Advanced tools
-    // expose a manual recheck and safe uninstall, not a competing apply path.
+    // Keep the explicit action available even if the monitor flagged an
+    // uncertain state: the engine independently re-checks before any write.
+    // This button does not bypass ASAR validity, contracts, backup or locks.
+    elements.apply.disabled = state.busy || !hasRoot || applied;
     elements.uninstall.disabled = state.busy || !applied;
     elements.backupSelect.disabled = state.busy || !hasRoot || state.backups.length === 0;
     elements.restore.disabled = state.busy || !hasRoot || !restoreAllowedForState || !selectedBackup;
@@ -430,6 +432,19 @@
   });
 
   elements.inspect.addEventListener('click', async () => { try { await refreshTarget('원본 다시 확인 및 필요한 경우 자동 적용'); } catch {} });
+  elements.apply.addEventListener('click', async () => {
+    // Manual apply is not a second automatic startup: it runs a standalone
+    // engine preflight and may explicitly re-enable a previously uninstalled
+    // patch. Even UNKNOWN/CONFLICT statuses can request a fresh safety check,
+    // but the backend refuses all unverified modifications.
+    if (state.busy || !state.root || ['APPLIED', 'ALREADY_APPLIED'].includes(state.status)) return;
+    const confirmed = await window.dinoManager.confirm('apply');
+    if (!confirmed) return;
+    try {
+      await withUiOperation('수동 패치 적용', () => window.dinoManager.apply());
+      await loadBackups();
+    } catch { /* withUiOperation reports the independent inspection failure */ }
+  });
   elements.uninstall.addEventListener('click', async () => {
     const confirmed = await window.dinoManager.confirm('uninstall');
     if (!confirmed) return;
