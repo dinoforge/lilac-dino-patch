@@ -937,13 +937,13 @@ async function main() {
     await saveScreenshot(first.cdp, path.join(screenshotRoot, 'manager-electron-dark.png'));
     await saveScreenshot(first.cdp, path.join(screenshotRoot, 'manager-auto-apply-complete.png'));
 
-    const patchDetails = await evaluate(first.cdp, `(() => { const details=document.getElementById('patchDetails'); details.open=true; return {open:details.open, base:document.getElementById('patchOfficialBase').textContent, version:document.getElementById('targetPatchVersion').textContent, rowCount:document.querySelectorAll('.patch-row').length}; })()`);
-    assert.equal(patchDetails.open, true, 'The patch detail row must expand inline.');
-    assert.match(patchDetails.base, /0\.5\.54/);
-    assert.match(patchDetails.version, /1\.0\.0/);
-    assert.equal(patchDetails.rowCount, 1, 'Only the implemented patch should be listed.');
-    await saveScreenshot(first.cdp, path.join(screenshotRoot, 'manager-patch-detail-expanded.png'));
-    await evaluate(first.cdp, `document.getElementById('patchDetails').open=false`);
+    const condensedPatchList = await evaluate(first.cdp, `(() => ({ rowCount: document.querySelectorAll('.patch-row').length, redundantDetails: Boolean(document.getElementById('patchDetails')), redundantBase: Boolean(document.getElementById('patchOfficialBase')), version: document.getElementById('targetPatchVersion').textContent, statusSpacing: getComputedStyle(document.querySelector('.result-card')).marginTop }))()`);
+    assert.equal(condensedPatchList.rowCount, 1, 'Only the actual patch should be listed.');
+    assert.equal(condensedPatchList.redundantDetails, false, 'Duplicate expandable patch details must be removed.');
+    assert.equal(condensedPatchList.redundantBase, false, 'Redundant fixed official baseline must not be shown.');
+    assert.match(condensedPatchList.version, /1\\.0\\.0/);
+    assert.equal(condensedPatchList.statusSpacing, '0px', 'Task status must directly follow the cards without reserved space.');
+    await saveScreenshot(first.cdp, path.join(screenshotRoot, 'manager-compact-patch-list.png'));
 
     const realOnePatchLayout = await readLayout(first.cdp);
     assert.equal(realOnePatchLayout.patchRowCount, 1, 'Production starts with exactly one real patch row.');
