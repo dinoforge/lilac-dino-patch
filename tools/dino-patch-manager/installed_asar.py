@@ -478,14 +478,17 @@ def _preflight_patch(replacements: dict[str, bytes], manifest: dict):
                 raise core.ManagerError(f"설치본 {relative} 사전 구문 검사 실패: {result.stderr[-300:]}")
 
 
-def _apply(root: Path, *, process_check):
+def _apply(root: Path, *, process_check, manual_requested: bool = False):
     result = inspect(root)
     if result["status"] == "APPLIED":
         return {**result, "status": "ALREADY_APPLIED"}
     if result["status"] != "UNPATCHED":
         return result
-    if result.get("manualUninstall"):
+    if result.get("manualUninstall") and not manual_requested:
+        # Automatic startup/watcher must never undo an explicit uninstall.
         return result
+    # An explicit click may reapply only after the normal UNPATCHED preflight,
+    # with complete backup / ASAR SHA verification still enforced below.
     if process_check is core.assert_app_not_running:
         _ensure_installed_app_stopped(root)
     else:
@@ -546,6 +549,21 @@ def startup(root_value, *, process_check=core.assert_app_not_running):
         return _apply(root, process_check=process_check)
     except PermissionError as exc:
         raise core.ManagerError("설치 폴더 쓰기 권한이 없습니다. 설치 경로 권한을 확인해 주세요. 원본 백업은 보존했습니다.") from exc
+
+
+def apply(root_value, *, process_check=core.assert_app_not_running):
+    """Explicit apply operation: bypass automatic-uninstall suppression only.
+
+    It does NOT bypass archive identity, compatibility, process checks, backups,
+    pending transactions or atomic write verification.
+    """
+    root = _root(root_value)
+    try:
+        return _apply(root, process_check=process_check, manual_requested=True)
+    except PermissionError as exc:
+        raise core.ManagerError(
+            "설치본 쓰기 권한이 없습니다. 설치 경로 권한을 확인하세요. 원본 백업은 보존했습니다."
+        ) from exc
 
 
 def uninstall(root_value, *, process_check=core.assert_app_not_running):
