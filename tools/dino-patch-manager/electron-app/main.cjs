@@ -516,7 +516,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 760,
     show: true,
-    title: '디노 패치 관리자',
+    title: 'LilacAnime DinoPatch',
     autoHideMenuBar: true,
     backgroundColor: '#111820',
     webPreferences: {
@@ -616,6 +616,7 @@ function installIpc() {
 }
 
 runtimePaths = resolveRuntimePaths();
+// Preserve existing profile identity for backward compatibility.
 app.setName('DinoPatchManager');
 app.setAppUserModelId('com.dino.lilac.patchmanager');
 const HAS_SINGLE_INSTANCE_LOCK = app.requestSingleInstanceLock();
@@ -634,7 +635,7 @@ app.whenReady().then(() => {
     app.exit(70);
     return;
   }
-  dialog.showErrorBox('디노 패치 관리자 시작 실패', message);
+  dialog.showErrorBox('LilacAnime DinoPatch 시작 실패', message);
   app.quit();
 });
 
