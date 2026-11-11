@@ -18,9 +18,9 @@ jobs:
     timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
-      EXPECTED_COMMIT: b159eb7f02b29f52b68f85a61ebc758b6f455eb5
-      BUILD_RUN: "43015434982"
-      RELEASE_TAG: dino-v0.1.0-beta.2
+      EXPECTED_COMMIT: c890b28f51a2be32e003bd3b47b7f1bd2afda6fe
+      BUILD_RUN: "43025097331"
+      RELEASE_TAG: dino-v0.1.0-beta.3
       ZIP_NAME: LilacAnime-DinoPatch-Windows-x64.zip
     steps:
       - name: Check out scoped redistribution review
@@ -71,7 +71,7 @@ jobs:
           set -euo pipefail
           cd release-files
           sha256sum --check SHA256SUMS.txt
-          printf "%s  %s\n" "3A1B2C94765A020BA10D0D654ED9A9834F70332635E92146C70A7B2725F2B599" "$ZIP_NAME" | sha256sum --check --status
+          printf "%s  %s\n" "18BA5273D8F5EA27BDC73A2F6B35FECA48DE56172436480E7D6FB3D39EB400F1" "$ZIP_NAME" | sha256sum --check --status
           unzip -tqq "$ZIP_NAME"
           unzip -Z1 "$ZIP_NAME" > zip-entries.txt
           for file in \
@@ -122,7 +122,7 @@ jobs:
           set -euo pipefail
           sha="$(sha256sum "release-files/$ZIP_NAME" | cut -d' ' -f1)"
           cat > release-notes.md <<'EOF'
-          ## LilacAnime DinoPatch 0.1.0 Beta 2
+          ## LilacAnime DinoPatch 0.1.0 Beta 3
 
           비공식 Windows x64용 **독립 패치 관리자**입니다. 공식 LilacAnime Desktop 설치 파일이나 전체 소스는 포함하지 않습니다.
 
@@ -130,7 +130,9 @@ jobs:
 
           경량화: 중복 Node.js 실행 파일과 다른 운영체제용 바이너리, 중복 네이티브 모듈, 사용하지 않는 언어팩을 제거했습니다. 한국어와 영어 UI는 유지합니다. 내장 Node 검사, LevelDB, Python 패치 엔진 연결 검사를 통과했습니다.
 
-          사용법: LilacAnime를 종료한 뒤 ZIP을 풀고 `DinoPatchManager` 폴더 전체를 공식 LilacAnime **소스 폴더**(`package.json`, `src/`, `electron/`이 있는 폴더)에 넣은 다음 `LilacAnime-DinoPatch.exe`를 실행하세요. 일반 설치본만으로는 적용할 수 없습니다.
+          설치본 지원: 공식 Windows LilacAnime v0.5.54와 v0.5.55에서 `app.asar` 내부 파일을 자동으로 검증합니다. `package.json`이 설치 폴더에 노출돼 있을 필요는 없습니다. 앱 종료를 확인하고 원본 ASAR 전체를 백업하며, 오류·다른 버전·변경된 소스가 발견되면 패치를 중단합니다. 두 버전의 공식 설치 파일로 패치 적용·원복 및 실행 검사를 통과했습니다.
+
+          사용법: LilacAnime를 종료한 뒤 ZIP을 풀고 `DinoPatchManager` 폴더의 `LilacAnime-DinoPatch.exe`를 실행하세요. `원본 폴더 변경`을 눌러 `LilacAnime.exe`와 `resources/app.asar`가 있는 공식 설치 폴더를 선택합니다. 기존 소스 폴더 방식도 지원합니다.
 
           내장 Node.js/Python/Electron 및 npm 런타임에 대한 제3자 라이선스 고지가 패키지에 포함되어 있습니다. 영상과 자막 파일은 제공하지 않습니다. 공식 LilacAnime 프로젝트의 승인을 받은 제품이 아닙니다.
 
@@ -140,6 +142,6 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$EXPECTED_COMMIT" \
             --prerelease \
-            --title "LilacAnime DinoPatch 0.1.0 Beta 2" \
+            --title "LilacAnime DinoPatch 0.1.0 Beta 3" \
             --notes-file release-notes.md
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url,tagName,isPrerelease,assets
