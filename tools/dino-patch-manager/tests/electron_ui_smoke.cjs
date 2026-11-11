@@ -328,7 +328,7 @@ public static class DinoManagerWindow {
   [DllImport("user32.dll", SetLastError=true)] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
   public static IntPtr FindVisibleWindow(uint targetProcessId) {
     IntPtr found=IntPtr.Zero;
-    EnumWindows((hWnd, extra) => { uint owner; GetWindowThreadProcessId(hWnd, out owner); if(owner!=targetProcessId || !IsWindowVisible(hWnd)) return true; var title=new StringBuilder(256); GetWindowText(hWnd,title,title.Capacity); if(title.ToString().Contains("디노 패치 관리자")){ found=hWnd; return false; } return true; }, IntPtr.Zero);
+    EnumWindows((hWnd, extra) => { uint owner; GetWindowThreadProcessId(hWnd, out owner); if(owner!=targetProcessId || !IsWindowVisible(hWnd)) return true; var title=new StringBuilder(256); GetWindowText(hWnd,title,title.Capacity); if(title.ToString().Contains("LilacAnime DinoPatch")){ found=hWnd; return false; } return true; }, IntPtr.Zero);
     return found;
   }
 }
