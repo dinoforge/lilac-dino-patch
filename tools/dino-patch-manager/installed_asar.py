@@ -245,7 +245,15 @@ def _identity(asar: Archive, version: str) -> None:
             # electron-builder can sanitize package.json when packaging.
             # The real code files below remain pinned to the official tag.
             continue
-        if core._git_blob_sha1(asar.read(relative)) != sha:
+        data = asar.read(relative)
+        crlf = data.count(bytes([13, 10]))
+        lf = data.count(bytes([10]))
+        if crlf not in (0, lf):
+            raise core.CompatibilityBlocked(
+                f"설치본 {relative}에 혼합 줄바꿈이 있어 변경을 중단했습니다.", "CONFLICT"
+            )
+        normalized = data.replace(bytes([13, 10]), bytes([10]))
+        if core._git_blob_sha1(normalized) != sha:
             raise core.CompatibilityBlocked(
                 f"설치본 {relative}이 공식 v{version} 지문과 달라 변경하지 않았습니다.", "CONFLICT"
             )
@@ -311,8 +319,15 @@ def _replacement_bytes(asar: Archive, manifest: dict, patch_root: Path):
         replacements[relative] = asar.read(relative)
     for connection in manifest["connections"]:
         relative = connection["file"]
+        data = replacements[relative]
+        windows_eol = data.count(bytes([13, 10])) > 0 and data.count(bytes([13, 10])) == data.count(bytes([10]))
+        before = connection["before"]
+        after = connection["after"]
+        if windows_eol:
+            before = before.replace(chr(10), chr(13) + chr(10))
+            after = after.replace(chr(10), chr(13) + chr(10))
         replacements[relative] = core._replace_exactly(
-            replacements[relative], connection["before"], connection["after"], connection["description"]
+            data, before, after, connection["description"]
         )
     for module in manifest["runtimeModules"]:
         relative = module["destination"]
