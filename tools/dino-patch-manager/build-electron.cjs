@@ -76,7 +76,7 @@ async function build(argv) {
       electronVersion: electronPackage.version,
       electronDist: paths.electron,
       directories: { output: paths.output },
-      files: ['main.cjs', 'preload.cjs', 'index.html', 'renderer.js', 'manager.css', 'theme-leveldb.cjs', 'windows-path.cjs', 'package.json'],
+      files: ['main.cjs', 'preload.cjs', 'index.html', 'renderer.js', 'manager.css', 'theme-leveldb.cjs', 'windows-path.cjs', 'source-snapshot.cjs', 'package.json'],
       extraResources: [
         { from: paths.engine, to: 'manager-engine' },
         { from: levelModuleRoot, to: 'manager-node/node_modules' },
