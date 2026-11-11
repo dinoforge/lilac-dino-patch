@@ -18,8 +18,8 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 def main():
-    if len(sys.argv) != 3:
-        raise SystemExit("asar path and version required")
+    if len(sys.argv) not in (3, 4):
+        raise SystemExit("asar path, version and optional patched-output path required")
     original = Path(sys.argv[1]).resolve(strict=True)
     version = sys.argv[2]
     if version not in ("0.5.54", "0.5.55"):
@@ -47,6 +47,8 @@ def main():
         if result["status"] != "APPLIED":
             raise AssertionError(f"v{version} patch failed: {result}")
         after = digest(copied)
+        if len(sys.argv) == 4:
+            shutil.copyfile(copied, Path(sys.argv[3]))
         if before == after:
             raise AssertionError("ASAR patch made no changes")
         archive = installed_asar.Archive(copied)
