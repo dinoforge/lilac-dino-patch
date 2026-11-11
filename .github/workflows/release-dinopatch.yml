@@ -1,0 +1,110 @@
+name: Publish LilacAnime DinoPatch Beta Release
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/release-dinopatch.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RIGHTS_APPROVED: ${{ vars.LILAC_RELEASE_RIGHTS_APPROVED }}
+      EXPECTED_COMMIT: f319d9894dbca69d0b259e125dbf84a217eeab89
+      EXPECTED_SHA256: 08e76611e94b98d3302a150defdc48a74487de38b1c79bbcc646050fc27dc4c8
+      BUILD_RUN: "43002889119"
+      RELEASE_TAG: dino-v0.1.0-beta.1
+      ZIP_NAME: LilacAnime-DinoPatch-Windows-x64.zip
+    steps:
+      - name: Require pre-existing redistribution approval
+        shell: bash
+        run: |
+          if [[ "$RIGHTS_APPROVED" != "true" ]]; then
+            echo "::error::Release blocked: LILAC_RELEASE_RIGHTS_APPROVED is not true. Review redistribution rights and required notices before authorizing."
+            exit 1
+          fi
+
+      - name: Confirm exact source and artifact build
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_commit="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${BUILD_RUN}" --jq '.head_sha')"
+          actual_status="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${BUILD_RUN}" --jq '.conclusion')"
+          test "$actual_commit" = "$EXPECTED_COMMIT"
+          test "$actual_status" = "success"
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release already exists; refusing to overwrite."
+            exit 1
+          fi
+          if git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${RELEASE_TAG}" | grep -q .; then
+            echo "::error::Release tag already exists; refusing to overwrite."
+            exit 1
+          fi
+
+      - name: Download exact approved build artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-files
+          gh run download "$BUILD_RUN" --repo "$GITHUB_REPOSITORY" --name LilacAnime-DinoPatch-Windows-x64 --dir release-files
+          test -s "release-files/${ZIP_NAME}"
+          test -s release-files/SHA256SUMS.txt
+
+      - name: Validate ZIP, checksum, and critical bundled inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-files
+          printf '%s  %s\n' "$EXPECTED_SHA256" "$ZIP_NAME" | sha256sum --check --status
+          grep -iqF "$EXPECTED_SHA256" SHA256SUMS.txt
+          unzip -tqq "$ZIP_NAME"
+          unzip -Z1 "$ZIP_NAME" > zip-entries.txt
+          for file in \
+            "DinoPatchManager/LilacAnime-DinoPatch.exe" \
+            "DinoPatchManager/resources/app.asar" \
+            "DinoPatchManager/resources/manager-engine/DinoPatchManagerEngine.exe" \
+            "DinoPatchManager/resources/manager-engine/_internal/patches/patch03/manifest.json" \
+            "DinoPatchManager/resources/manager-node/node.exe"; do
+            grep -xF "$file" zip-entries.txt >/dev/null || { echo "::error::ZIP missing $file"; exit 1; }
+          done
+          if grep -Ei '\.(mp4|mkv|srt|vtt|ass)$' zip-entries.txt; then
+            echo "::error::Unexpected bundled video or subtitle content."
+            exit 1
+          fi
+          echo "Verified SHA256: $EXPECTED_SHA256"
+
+      - name: Create prerelease and upload verified assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'NOTES'
+          LilacAnime DinoPatch is an independent, unofficial Windows x64 source-folder patch manager.
+
+          Features: integrated multi-provider search, source selection, compatibility checks, automatic patching, and backup/uninstall recovery.
+
+          Installation:
+          1. Close LilacAnime Desktop.
+          2. Extract the ZIP and copy the entire DinoPatchManager folder inside the official LilacAnime source root (package.json, src/, electron/).
+          3. Run LilacAnime-DinoPatch.exe from that folder.
+
+          The regular installed LilacAnime app.asar alone is not a supported patch target.
+          A manual reapply button is not included. Not all upstream versions or providers are guaranteed to work.
+          This beta contains no bundled video or subtitle content and is not an official LilacAnime release.
+
+          Build source: f319d9894dbca69d0b259e125dbf84a217eeab89
+          ZIP SHA-256: 08E76611E94B98D3302A150DEFDC48A74487DE38B1C79BBCC646050FC27DC4C8
+          NOTES
+          gh release create "$RELEASE_TAG" "release-files/${ZIP_NAME}" "release-files/SHA256SUMS.txt" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$EXPECTED_COMMIT" \
+            --prerelease \
+            --title "LilacAnime DinoPatch 0.1.0 Beta 1" \
+            --notes-file release-notes.md
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url,tagName,isPrerelease,assets
