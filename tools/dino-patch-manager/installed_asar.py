@@ -341,6 +341,97 @@ def _state(root: Path):
     return state
 
 
+def _pending_recovery_review(root: Path, version: str, archive_sha: str) -> dict:
+    """Read-only reconciliation plan. Never trust pending.json alone."""
+    data_root = _state_root(root)
+    marker = data_root / "pending.json"
+    if not marker.is_file() or marker.is_symlink():
+        return {"ready": False, "reason": "확인 가능한 이전 작업 복구 기록이 없습니다."}
+    if (root / "resources" / "app.asar.dino-writing").exists():
+        return {"ready": False, "reason": "이전 임시 패치 파일이 남아 있습니다. 직접 삭제하지 말고 원본과 백업을 확인하세요."}
+    try:
+        pending = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"ready": False, "reason": "복구 기록 JSON을 읽지 못했습니다. 파일은 보존했습니다."}
+    if not isinstance(pending, dict):
+        return {"ready": False, "reason": "복구 기록의 형식이 올바르지 않습니다."}
+    if (pending.get("schemaVersion") != 1
+            or pending.get("target") != str(root)
+            or pending.get("version") != version
+            or pending.get("patchVersion") != core.PATCH_VERSION
+            or pending.get("status") != "APPLIED"):
+        return {"ready": False, "reason": "복구 기록이 선택한 설치본 또는 패치 버전과 일치하지 않습니다."}
+    original = pending.get("originalSha256")
+    patched = pending.get("patchedSha256")
+    if not all(isinstance(x, str) and len(x) == 64 and
+               all(c in "0123456789ABCDEF" for c in x)
+               for x in (original, patched)):
+        return {"ready": False, "reason": "복구 기록에 유효한 SHA-256 값이 없습니다."}
+    backup = data_root / "original-app.asar"
+    if not backup.is_file() or backup.is_symlink():
+        return {"ready": False, "reason": "검증된 원본 ASAR 백업 파일이 없습니다. 복구 기록을 보존합니다."}
+    if _sha(backup) != original:
+        return {"ready": False, "reason": "원본 백업의 SHA-256이 기록과 다릅니다. 파일을 변경하지 않습니다."}
+    mode = "APPLIED" if archive_sha == patched else ("UNPATCHED" if archive_sha == original else None)
+    if mode is None:
+        return {"ready": False, "reason": "현재 app.asar 지문이 복구 기록의 원본/패치본 어느 쪽과도 일치하지 않습니다."}
+    try:
+        state = _state(root)
+    except core.CompatibilityBlocked as exc:
+        return {"ready": False, "reason": str(exc)}
+    if state and (state.get("originalSha256") != original
+                  or state.get("version") != version
+                  or state.get("patchVersion") != core.PATCH_VERSION):
+        return {"ready": False, "reason": "기존 설치본 상태 기록이 복구 기록과 충돌합니다."}
+    if state and state.get("status") == "APPLIED" and archive_sha != state.get("patchedSha256"):
+        return {"ready": False, "reason": "이미 적용된 것으로 기록된 패치 지문이 현재 파일과 다릅니다."}
+    return {
+        "ready": True, "mode": mode, "pending": pending,
+        "markerSha256": _sha(marker), "originalSha256": original,
+        "currentSha256": archive_sha,
+        "reason": ("검증된 원본 백업과 현재 설치본이 모두 복구 기록에 일치합니다. "
+                   "사용자가 복구를 확인하면 원본 앱 파일은 건드리지 않고 상태 기록만 정리합니다."),
+    }
+
+
+def recover_pending(root_value, *, process_check=core.assert_app_not_running):
+    """Explicitly resolve an interrupted ASAR transaction after strict hash checks.
+
+    This changes only the manager's metadata, never the installed app or backup.
+    The pending marker is archived rather than deleted.
+    """
+    root = _root(root_value)
+    if process_check is core.assert_app_not_running:
+        _ensure_installed_app_stopped(root)
+    else:
+        process_check(root)
+    archive = root / "resources" / "app.asar"
+    original_file = Archive(archive)  # Validate a genuine ASAR, not a directory.
+    version = _version(original_file)
+    report = _pending_recovery_review(root, version, _sha(archive))
+    if not report.get("ready"):
+        return {"status": "PARTIAL_OR_UNKNOWN", "targetKind": "INSTALLED_ASAR",
+                "reason": report["reason"], "recoveryAvailable": False, "readOnly": True}
+    data_root = _state_root(root)
+    marker = data_root / "pending.json"
+    backup = data_root / "original-app.asar"
+    # Detect changes during the review before updating ANY metadata.
+    if (_sha(marker) != report["markerSha256"]
+            or _sha(archive) != report["currentSha256"]
+            or _sha(backup) != report["originalSha256"]):
+        return {"status": "PARTIAL_OR_UNKNOWN", "targetKind": "INSTALLED_ASAR",
+                "reason": "복구 검사 도중 파일이 변경되었습니다. 원본을 보존하고 중단했습니다.",
+                "recoveryAvailable": False, "readOnly": True}
+    state = {**report["pending"], "status": report["mode"]}
+    _atomic_json(data_root / "state.json", state)
+    archived = data_root / ("pending.reconciled-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + ".json")
+    if archived.exists():
+        raise core.ManagerError("복구 기록 보관 파일이 이미 존재합니다. 기록을 덮어쓰지 않았습니다.")
+    marker.rename(archived)
+    return {**inspect(root), "recoveryResolved": True,
+            "reason": "백업과 설치본 SHA-256을 확인했습니다. 원본 ASAR는 변경하지 않았고, 복구 기록을 별도로 보존했습니다."}
+
+
 def inspect(root_value):
     root = _root(root_value)
     archive_path = root / "resources" / "app.asar"
@@ -349,8 +440,10 @@ def inspect(root_value):
     result = {"path": str(root), "version": version, "patchVersion": core.PATCH_VERSION, "targetKind": "INSTALLED_ASAR"}
     state = _state(root)
     if (_state_root(root) / "pending.json").is_file():
+        review = _pending_recovery_review(root, version, _sha(archive_path))
         return {**result, "status": "PARTIAL_OR_UNKNOWN",
-                "reason": "이전 설치본 패치 작업의 복구 기록이 있습니다. 백업 확인 전 파일을 변경하지 않습니다."}
+                "recoveryAvailable": bool(review.get("ready")),
+                "reason": ("이전 설치본 패치 작업의 복구 기록이 있습니다. " + review["reason"])}
     actual_sha = _sha(archive_path)
     if state:
         if state.get("version") != version or state.get("patchVersion") != core.PATCH_VERSION:
