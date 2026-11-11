@@ -47,6 +47,46 @@ jobs:
           & .\tools\dino-patch-manager\build_electron_windows.ps1 -PythonExe .\.venv-dino-build\Scripts\python.exe -BuildName github-renamed
           if ($LASTEXITCODE -ne 0) { throw "Manager Windows build failed" }
 
+      - name: Verify packaged Electron can replace standalone Node
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $built = Join-Path (Get-Location).Path 'tools/dino-patch-manager/release/LilacAnime-DinoPatch-Electron-v1.2.4-github-renamed/win-unpacked'
+          $exe = Join-Path $built 'LilacAnime-DinoPatch.exe'
+          $modules = Join-Path $built 'resources/manager-node/node_modules'
+          $env:ELECTRON_RUN_AS_NODE = '1'
+          try {
+            $v = & $exe -p "process.versions.node"
+            if ($LASTEXITCODE -ne 0 -or -not $v) { throw "Electron RUN_AS_NODE version probe failed" }
+            Write-Host "Electron-embedded Node version: $v"
+            $code = @'
+          const os = require('node:os');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { ClassicLevel } = require(path.join(process.argv[1], 'classic-level'));
+          (async () => {
+            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dino-electron-node-probe-'));
+            const db = new ClassicLevel(dir, { valueEncoding: 'utf8' });
+            try {
+              await db.open();
+              await db.put('hello', 'works');
+              if (await db.get('hello') !== 'works') throw Error('LevelDB readback mismatch');
+              await db.close();
+            } finally {
+              if (db.status === 'open') await db.close();
+              fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 250 });
+            }
+          })().catch(error => { console.error(error); process.exitCode = 1; });
+          '@
+            & $exe -e $code $modules
+            if ($LASTEXITCODE -ne 0) { throw "Packaged Electron cannot load LevelDB as Node" }
+            $fixture = Join-Path $env:RUNNER_TEMP 'dino-electron-node-syntax.js'
+            Set-Content -LiteralPath $fixture -Encoding utf8 -Value 'const valid = 1;'
+            & $exe --check $fixture
+            if ($LASTEXITCODE -ne 0) { throw "Electron Node --check support missing" }
+          } finally {
+            Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+          }
       - name: Keep only licensed production runtime modules
         shell: pwsh
         run: |
