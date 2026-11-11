@@ -1,10 +1,10 @@
-# Lilac Dino Patch 0.1.0 Beta 1 — 릴리즈 설명 초안
+# LilacAnime DinoPatch 0.1.0 Beta 1 — 릴리즈 설명 초안
 
 > **미게시 초안.** 이 문서를 GitHub에 추가하는 것은 태그, 빌드, ZIP, GitHub Release를 생성하거나 승인하는 행위가 아닙니다. 실제 배포 여부는 별도로 확인해야 합니다.
 
 ## 제품과 원본
 
-- 프로젝트: [Lilac Dino Patch](https://github.com/dinoforge/lilac-dino-patch) — 비공식 독립 Windows x64 패치 관리자
+- 프로젝트: [LilacAnime DinoPatch](https://github.com/dinoforge/lilac-dino-patch) — 비공식 독립 Windows x64 패치 관리자
 - 공식 원본: [LilacAnime Desktop](https://github.com/whispelyn-byte/LilacAnime-desktop)
 - 관리 대상: 공식 LilacAnime **소스 폴더**. 일반 설치본의 `app.asar`만으로는 적용 대상을 구성할 수 없습니다.
 - 기능적 통합: 원본 앱의 홈·상세·회차·플레이어 구조를 유지하고 디노 검색과 패치 관리 기능을 연결합니다. 원본 코드 저장소와의 Git 기록 병합을 의미하지 않습니다.
