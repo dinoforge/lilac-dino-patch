@@ -138,7 +138,7 @@ class TestInstalledAsar(unittest.TestCase):
         self.assertFalse(ia.is_installed_target(self.install))
 
     def test_pending_transaction_blocks_changes(self):
-        state_root = ia._state_root(self.install)
+        state_root = ia._state_root(ia._root(self.install))
         state_root.mkdir(parents=True)
         (state_root / "pending.json").write_text("{}")
         result = ia.inspect(self.install)
