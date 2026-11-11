@@ -26,57 +26,46 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $download = Join-Path $env:RUNNER_TEMP "original-installer"
+          $download = Join-Path $env:RUNNER_TEMP 'original-installer'
           New-Item -ItemType Directory -Force -Path $download | Out-Null
           gh release download "v${{ matrix.version }}" --repo whispelyn-byte/LilacAnime-desktop --pattern 'LilacAnime-Setup.exe' --dir $download
-          if ($LASTEXITCODE -ne 0) { throw "Official download failed" }
+          if ($LASTEXITCODE -ne 0) { throw 'Official download failed' }
 
-      - name: Extract installer into disposable Windows runner folder
+      - name: Extract nested NSIS payload
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $installer = Join-Path $env:RUNNER_TEMP 'original-installer/LilacAnime-Setup.exe'
           $destination = Join-Path $env:RUNNER_TEMP 'official-extracted'
           New-Item -ItemType Directory -Force -Path $destination | Out-Null
-          $zip = (Get-Command 7z.exe -ErrorAction SilentlyContinue).Source
-          if (-not $zip) { $zip = 'C:\Program Files\7-Zip\7z.exe' }
-          if (-not (Test-Path -LiteralPath $zip -PathType Leaf)) { throw 'Windows 7-Zip is unavailable' }
-          & $zip x $installer "-o$destination" -y | Out-Null
+          $sevenZip = (Get-Command 7z.exe -ErrorAction SilentlyContinue).Source
+          if (-not $sevenZip) { $sevenZip = 'C:\Program Files\7-Zip\7z.exe' }
+          if (-not (Test-Path -LiteralPath $sevenZip -PathType Leaf)) { throw 'Windows 7-Zip is unavailable' }
+          & $sevenZip x $installer "-o$destination" -y | Out-Null
           if ($LASTEXITCODE -ne 0) { throw 'NSIS extraction failed' }
           $archives = @(Get-ChildItem -LiteralPath $destination -Filter 'app.asar' -Recurse -File)
           if ($archives.Count -eq 0) {
-            $payloads = @(Get-ChildItem -LiteralPath $destination -Recurse -File | Where-Object { $_.Name -match '^app-.*[.]7z
-          Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'dino-asar-location.txt') -Value $archives[0].FullName
-          Write-Host "Found official v${{ matrix.version }} installed ASAR"
-
-      - name: Verify official Windows ASAR pin and patch+restore in isolated copy
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $asar = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'dino-asar-location.txt') -Raw
-          & python tools/dino-patch-manager/tests/verify_official_installed_asar.py $asar.Trim() '${{ matrix.version }}'
-          if ($LASTEXITCODE -ne 0) { throw "Official installed Windows ASAR regression failed" }
- })
-            Write-Host "Extracted installer payloads: $($payloads.Count)"
+            $payloads = @(Get-ChildItem -LiteralPath $destination -Recurse -File | Where-Object { $_.Name -match '^app-.*[.]7z$' })
+            Write-Host "Extracted NSIS nested payloads: $($payloads.Count)"
             foreach ($payload in $payloads) {
               $inside = Join-Path $destination 'application-content'
               New-Item -ItemType Directory -Path $inside -Force | Out-Null
-              & $zip x $payload.FullName "-o$inside" -y | Out-Null
-              if ($LASTEXITCODE -ne 0) { throw "Nested NSIS payload extraction failed: $($payload.Name)" }
+              & $sevenZip x $payload.FullName "-o$inside" -y | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "Nested payload extraction failed: $($payload.Name)" }
             }
             $archives = @(Get-ChildItem -LiteralPath $destination -Filter 'app.asar' -Recurse -File)
           }
           if ($archives.Count -ne 1) {
-            Get-ChildItem -LiteralPath $destination -Recurse -File | Select-Object -First 25 -ExpandProperty FullName | Out-Host
-            throw "Expected exactly one extracted app.asar; found $($archives.Count)"
+            Get-ChildItem -LiteralPath $destination -Recurse -File | Select-Object -First 20 -ExpandProperty FullName | Out-Host
+            throw "Expected one installed app.asar; found $($archives.Count)"
           }
           Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'dino-asar-location.txt') -Value $archives[0].FullName
-          Write-Host "Found official v${{ matrix.version }} installed ASAR"
+          Write-Host "Found official Windows v${{ matrix.version }} app.asar"
 
-      - name: Verify official Windows ASAR pin and patch+restore in isolated copy
+      - name: Verify pinned files, patch and byte-exact restore in temp copy
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $asar = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'dino-asar-location.txt') -Raw
-          & python tools/dino-patch-manager/tests/verify_official_installed_asar.py $asar.Trim() '${{ matrix.version }}'
-          if ($LASTEXITCODE -ne 0) { throw "Official installed Windows ASAR regression failed" }
+          $asar = (Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'dino-asar-location.txt') -Raw).Trim()
+          & python tools/dino-patch-manager/tests/verify_official_installed_asar.py $asar '${{ matrix.version }}'
+          if ($LASTEXITCODE -ne 0) { throw 'Windows ASAR compatibility test failed' }
