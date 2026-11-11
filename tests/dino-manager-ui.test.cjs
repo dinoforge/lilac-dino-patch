@@ -51,9 +51,9 @@ test('patch-list screen keeps source, global actions, backups, history and botto
   assert.match(html, /id="safetyCard" class="safety"[^>]*hidden/);
   assert.match(html, /id="activityStatus" class="result-actions" hidden/);
   assert.doesNotMatch(html, /기능<\/dt>|관리자가 기록한 변경만 되돌립니다/);
-  assert.match(html, /<details class="card advanced-tools">/);
-  assert.doesNotMatch(html, /<details class="card advanced-tools" open/);
-  const advanced = html.match(/<details class="card advanced-tools">([\s\S]*?)<\/details>\s*<section class="result-card"/)?.[1] || '';
+  assert.match(html, /<section class="card advanced-tools" aria-label="고급 도구">/);
+  assert.doesNotMatch(html, /<details class="card advanced-tools"/);
+  const advanced = html.match(/<section class="card advanced-tools"[^>]*>([\s\S]*?)<\/section>\s*<section class="result-card"/)?.[1] || '';
   assert.match(advanced, /id="inspect"[\s\S]*id="uninstall"[\s\S]*id="backupSelect"[\s\S]*id="restore"[\s\S]*id="history"/);
   assert.match(advanced, /id="checkUpdates"[\s\S]*id="diagnostics"[\s\S]*class="log-details"/);
   assert.doesNotMatch(advanced, /id="approveUpdate"/);
@@ -69,6 +69,8 @@ test('patch-list screen keeps source, global actions, backups, history and botto
   assert.match(css, /\[hidden\] \{ display: none !important/);
   assert.match(css, /\.safety p \{ margin-top:/);
   assert.match(css, /\.result-card \{ margin-top: 0;/);
+  assert.doesNotMatch(css, /\.advanced-tools\s*>\s*summary/);
+  assert.doesNotMatch(css, /\.shell\s*\{[^}]*min-height:\s*100vh/);
   assert.doesNotMatch(css, /\.result-card \{[^}]*position:\s*sticky/);
   assert.match(css, /\.patch-list-card \{ display: flex; flex: 0 0 auto;/);
   assert.match(css, /\.patch-list \{[\s\S]*max-height: min\(640px, calc\(100vh - 150px\)\);[\s\S]*overflow-y: auto/);
