@@ -65,7 +65,7 @@ v0.5.58 이후 버전의 구조 기반 판정은 적용 가능성을 평가할 �
 
 현재 GitHub `main`은 이전 LilacAnime Player 개발 트리에서 시작했으며, A35-final 관리자 소스·빌드 입력의 전체 집합은 아직 이 저장소에 들어 있지 않습니다. 기존 관리 브랜치에는 초기 UI와 이전 엔진 구현만 있으며 A35-final을 재현하지 않습니다. A35 바이너리 ZIP은 로컬 배포 산출물로 보존되어 있고 GitHub Release는 없습니다. 소스와 바이너리의 정확한 대응 자료를 확보하기 전에는 이 저장소가 A35를 재현 빌드할 수 있다고 주장하지 않습니다.
 
-기존 앱의 실행 파일, `appId`, 패키지 이름, 설정 경로, IPC, 공급원 ID 및 공식 출처 식별자는 호환성을 위해 이 프로젝트명 전환에서 일괄 변경하지 않았습니다. 기존 LilacAnime 앱 코드와 명세의 역사적 사본은 [문서 보관함](docs/legacy/README.md)에 연결되어 있습니다.
+기존 앱의 실행 파일, `appId`, 패키지 이름, 설정 경로, IPC, 공급원 ID 및 공식 출처 식별자는 호환성을 위해 이 프로젝트명 전환에서 일괄 변경하지 않았습니다. 기존 LilacAnime 앱 코드와 명세의 역사적 사본은 [이전 개발 문서 보관 브랜치](https://github.com/dinoforge/lilac-dino-patch/tree/archive/main-before-docs-cleanup-20261111/docs/legacy)에 연결되어 있습니다.
 
 ## 권리와 공개 상태
 
