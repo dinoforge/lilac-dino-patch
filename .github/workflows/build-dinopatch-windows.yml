@@ -7,6 +7,11 @@ on:
     paths:
       - .github/workflows/build-dinopatch-windows.yml
       - tools/dino-patch-manager/tests/theme-leveldb-electron.integration.cjs
+      - tools/dino-patch-manager/tests/test_installed_asar.py
+      - tools/dino-patch-manager/installed_asar.py
+      - tools/dino-patch-manager/manager_bridge.py
+      - tools/dino-patch-manager/electron-app/main.cjs
+      - tools/dino-patch-manager/electron-app/renderer.js
   workflow_dispatch:
 
 permissions:
