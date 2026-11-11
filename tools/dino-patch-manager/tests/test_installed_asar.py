@@ -126,6 +126,35 @@ class TestInstalledAsar(unittest.TestCase):
         self.assertTrue(checked_again["manualUninstall"])
         self.assertEqual(self.archive.read_bytes(), old)
 
+    def test_explicit_manual_apply_reenables_uninstalled_patch_without_disabling_safety(self):
+        original = self.archive.read_bytes()
+        first = ia.startup(self.install, process_check=lambda root: None)
+        self.assertEqual(first["status"], "APPLIED")
+        self.assertEqual(ia.uninstall(self.install, process_check=lambda root: None)["status"], "UNPATCHED")
+        self.assertEqual(self.archive.read_bytes(), original)
+
+        # Automatic startup does not undo the user's explicit uninstall.
+        self.assertTrue(ia.startup(self.install, process_check=lambda root: None)["manualUninstall"])
+        self.assertEqual(self.archive.read_bytes(), original)
+
+        # Manual action uses its own path, with the same preflight and backup.
+        applied = ia.apply(self.install, process_check=lambda root: None)
+        self.assertEqual(applied["status"], "APPLIED")
+        self.assertNotEqual(self.archive.read_bytes(), original)
+        self.assertEqual(ia.uninstall(self.install, process_check=lambda root: None)["status"], "UNPATCHED")
+        self.assertEqual(self.archive.read_bytes(), original)
+
+    def test_manual_apply_cannot_override_unknown_archive_state(self):
+        old = self.archive.read_bytes()
+        state_root = ia._state_root(ia._root(self.install))
+        state_root.mkdir(parents=True, exist_ok=True)
+        (state_root / "pending.json").write_text('{"status": "PENDING"}', encoding="utf-8")
+        inspected = ia.inspect(self.install)
+        self.assertEqual(inspected["status"], "PARTIAL_OR_UNKNOWN")
+        applied = ia.apply(self.install, process_check=lambda root: None)
+        self.assertEqual(applied["status"], "PARTIAL_OR_UNKNOWN")
+        self.assertEqual(self.archive.read_bytes(), old)
+
     def test_unknown_original_changes_fail_closed(self):
         changed = dict(self.original)
         changed["src/app.js"] += b"\nconsole.log('modified by user')"
