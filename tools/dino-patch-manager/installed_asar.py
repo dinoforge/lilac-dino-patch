@@ -228,7 +228,10 @@ def _version(asar: Archive) -> str:
         package = json.loads(asar.read("package.json").decode("utf-8"))
     except (UnicodeError, ValueError) as exc:
         raise core.CompatibilityBlocked("설치본 package.json 내부를 확인할 수 없습니다.", "UNSUPPORTED") from exc
-    if not isinstance(package, dict) or package.get("build", {}).get("appId") != "com.lilac.anime.desktop":
+    if not isinstance(package, dict):
+        raise core.CompatibilityBlocked("설치본 앱 정보 형식이 올바르지 않습니다.", "UNSUPPORTED")
+    build = package.get("build") if isinstance(package.get("build"), dict) else {}
+    if package.get("name") != "lilacanime-desktop" and build.get("appId") != "com.lilac.anime.desktop":
         raise core.CompatibilityBlocked("설치본 앱 식별 정보가 공식 LilacAnime와 다릅니다.", "UNSUPPORTED")
     return str(package.get("version", ""))
 
@@ -238,6 +241,10 @@ def _identity(asar: Archive, version: str) -> None:
     if not expected:
         raise core.CompatibilityBlocked(f"설치본 v{version}은 아직 검증된 패치 대상이 아닙니다.", "UNSUPPORTED")
     for relative, sha in expected.items():
+        if relative == "package.json":
+            # electron-builder can sanitize package.json when packaging.
+            # The real code files below remain pinned to the official tag.
+            continue
         if core._git_blob_sha1(asar.read(relative)) != sha:
             raise core.CompatibilityBlocked(
                 f"설치본 {relative}이 공식 v{version} 지문과 달라 변경하지 않았습니다.", "CONFLICT"
