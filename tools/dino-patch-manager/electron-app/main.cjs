@@ -13,7 +13,7 @@ const SOURCE_DIR = path.resolve(__dirname, '..');
 const MANAGER_ENTRY = app.isPackaged
   ? path.join(process.resourcesPath, 'manager-engine', 'DinoPatchManagerEngine.exe')
   : path.join(SOURCE_DIR, 'manager_bridge.py');
-const NODE_BUNDLE = app.isPackaged ? path.join(process.resourcesPath, 'manager-node', 'node.exe') : null;
+// The packaged Electron executable provides Node CLI mode for isolated contract checks.
 const TEST_ROOT_VALUE = process.env.DINO_MANAGER_TEST_ROOT || '';
 const TEST_PROFILE_VALUE = process.env.DINO_MANAGER_TEST_PROFILE_ROOT || '';
 const TEST_OS_TEMP_ROOT_VALUE = process.env.DINO_MANAGER_TEST_OS_TEMP_ROOT || '';
@@ -351,14 +351,10 @@ async function refreshSourceMonitorAfterOperation(operation, result) {
 
 function bridgeEnvironment() {
   const env = { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' };
-  if (NODE_BUNDLE && fs.existsSync(NODE_BUNDLE)) {
-    const nodeDir = path.dirname(NODE_BUNDLE);
-    const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') || 'PATH';
-    const inheritedPath = env[pathKey] || '';
-    for (const key of Object.keys(env)) {
-      if (key.toLowerCase() === 'path' && key !== pathKey) delete env[key];
-    }
-    env[pathKey] = `${nodeDir}${path.delimiter}${inheritedPath}`;
+  if (app.isPackaged) {
+    // Used only when Python launches its Node contract-check subprocesses.
+    // Never enable ELECTRON_RUN_AS_NODE in the Electron GUI process itself.
+    env.DINO_MANAGER_NODE_EXE = process.execPath;
   }
   if (TEST_MODE) {
     setEnvironmentValue(env, 'APPDATA', runtimePaths.appData);
