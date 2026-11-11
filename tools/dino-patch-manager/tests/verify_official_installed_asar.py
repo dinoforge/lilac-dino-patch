@@ -36,6 +36,12 @@ def main():
         before = digest(copied)
         detected = installed_asar.inspect(install)
         if detected["status"] != "UNPATCHED" or detected["version"] != version:
+            import manager_core as core
+            archive = installed_asar.Archive(copied)
+            for name, expected in installed_asar.SUPPORTED[version].items():
+                data = archive.read(name)
+                normalized = data.replace(b"\\r\\n", b"\\n")
+                print(f"File {name}: raw={core._git_blob_sha1(data)} normalized={core._git_blob_sha1(normalized)} expected={expected} crlf={data.count(bytes([13,10]))} lf={data.count(bytes([10]))}", flush=True)
             raise AssertionError(f"v{version} official ASAR failed pin check: {detected}")
         result = installed_asar.startup(install, process_check=lambda _root: None)
         if result["status"] != "APPLIED":
