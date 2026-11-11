@@ -7,6 +7,7 @@ const path = require('node:path');
 const readline = require('node:readline');
 const { readOfficialLevelDbTheme } = require('./theme-leveldb.cjs');
 const { toExtendedWindowsPath } = require('./windows-path.cjs');
+const { takeSourceSnapshot } = require('./source-snapshot.cjs');
 
 const MANAGER_DIR = app.isPackaged ? path.dirname(process.execPath) : path.resolve(__dirname, '..');
 const SOURCE_DIR = path.resolve(__dirname, '..');
@@ -18,7 +19,6 @@ const TEST_ROOT_VALUE = process.env.DINO_MANAGER_TEST_ROOT || '';
 const TEST_PROFILE_VALUE = process.env.DINO_MANAGER_TEST_PROFILE_ROOT || '';
 const TEST_OS_TEMP_ROOT_VALUE = process.env.DINO_MANAGER_TEST_OS_TEMP_ROOT || '';
 const TEST_MODE = Boolean(TEST_ROOT_VALUE || TEST_PROFILE_VALUE || TEST_OS_TEMP_ROOT_VALUE);
-const SOURCE_IGNORED_DIRECTORIES = new Set(['.git', 'node_modules']);
 const SOURCE_WATCH_LIMIT = 4096;
 
 let mainWindow = null;
@@ -179,53 +179,6 @@ function sendProgress(message) {
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-function takeSourceSnapshot(rootValue) {
-  const root = fs.realpathSync.native(rootValue);
-  const installedAsar = path.join(root, 'resources', 'app.asar');
-  if (fs.existsSync(path.join(root, 'LilacAnime.exe')) && fs.existsSync(installedAsar)) {
-    const hash = crypto.createHash('sha256');
-    const fd = fs.openSync(installedAsar, 'r');
-    try {
-      const buffer = Buffer.allocUnsafe(1024 * 1024);
-      let length;
-      while ((length = fs.readSync(fd, buffer, 0, buffer.length, null)) > 0) hash.update(buffer.subarray(0, length));
-    } finally {
-      fs.closeSync(fd);
-    }
-    const digest = hash.digest('hex').toUpperCase();
-    return { root, version: 'installed-asar', files: { 'resources/app.asar': digest },
-      directories: [root, path.join(root, 'resources')], signature: digest };
-  }
-  const files = Object.create(null);
-  const directories = [];
-  const pending = [root];
-  while (pending.length) {
-    const directory = pending.pop();
-    directories.push(directory);
-    const entries = fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
-    for (const entry of entries) {
-      if (directory === root && entry.name === 'DinoPatchManager') continue;
-      if (SOURCE_IGNORED_DIRECTORIES.has(entry.name)) continue;
-      const fullPath = path.join(directory, entry.name);
-      const stat = fs.lstatSync(fullPath);
-      if (stat.isSymbolicLink()) throw new Error(`공식 소스 감시 경로에 심볼릭 링크 또는 junction이 있습니다: ${path.relative(root, fullPath)}`);
-      if (stat.isDirectory()) {
-        pending.push(fullPath);
-        continue;
-      }
-      if (!stat.isFile()) throw new Error(`공식 소스 감시 대상에 일반 파일이 아닌 항목이 있습니다: ${path.relative(root, fullPath)}`);
-      const relative = path.relative(root, fullPath).split(path.sep).join('/');
-      files[relative] = crypto.createHash('sha256').update(fs.readFileSync(fullPath)).digest('hex').toUpperCase();
-    }
-  }
-  const packagePath = path.join(root, 'package.json');
-  const packageInfo = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
-  if (typeof packageInfo.version !== 'string') throw new Error('공식 package.json에 버전 문자열이 없습니다.');
-  const hash = crypto.createHash('sha256');
-  for (const relative of Object.keys(files).sort()) hash.update(relative, 'utf8').update('\0').update(files[relative], 'ascii').update('\n');
-  return { root, version: packageInfo.version, files, directories: directories.sort(), signature: hash.digest('hex').toUpperCase() };
 }
 
 function closeSourceWatchers() {
