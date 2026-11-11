@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import manager_core as core
+import installed_asar
 
 
 MAX_REQUEST_BYTES = 1024 * 1024
@@ -54,12 +55,43 @@ def dispatch(
         if start is not None and not isinstance(start, str):
             raise core.ManagerError("자동 검색 시작 경로 형식이 올바르지 않습니다.")
         found = core.find_original_root(start)
+        if found is None and start:
+            anchor = core.canonical_path(start)
+            if anchor.is_file():
+                anchor = anchor.parent
+            for candidate in (anchor, *list(anchor.parents)[:8]):
+                if installed_asar.is_installed_target(candidate):
+                    found = candidate
+                    break
         return {"status": "SOURCE_FOUND" if found else "NO_SOURCE", "path": str(found) if found else None}
 
     if operation in {"startup", "inspect", "apply", "uninstall", "backups", "history", "theme", "restore"}:
         if not root_value:
             raise core.ManagerError("LilacAnime 원본 폴더를 먼저 확인하세요.")
         root = core.canonical_path(root_value, strict=True)
+        if installed_asar.is_installed_target(root):
+            if operation == "startup":
+                return installed_asar.startup(root)
+            if operation == "inspect":
+                return installed_asar.inspect(root)
+            if operation == "apply":
+                return installed_asar.startup(root)
+            if operation == "uninstall":
+                return installed_asar.uninstall(root)
+            if operation == "backups":
+                return installed_asar.backups(root)
+            if operation == "history":
+                return installed_asar.history(root)
+            if operation == "theme":
+                theme, source = core._system_theme()
+                return {"status": "FALLBACK", "theme": theme, "source": source,
+                        "reason": "설치본 테마는 안전한 원본 설정 읽기 대상이 아닙니다.", "readOnly": True}
+            if operation == "restore":
+                backup_id = request.get("backupId")
+                state = installed_asar._state(root)
+                if not isinstance(backup_id, str) or state is None or backup_id != state.get("backupId"):
+                    raise core.ManagerError("복원 대상이 기록된 설치본 백업과 일치하지 않습니다.")
+                return installed_asar.uninstall(root)
 
         if operation == "startup":
             return core.automatic_startup_check(root, progress=progress)
