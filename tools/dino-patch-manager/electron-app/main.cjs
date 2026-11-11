@@ -555,7 +555,7 @@ function createWindow() {
 }
 
 function requireAction(action) {
-  if (!['uninstall', 'restore', 'approveUpdate'].includes(action)) throw new Error('허용되지 않은 확인 작업입니다.');
+  if (!['apply', 'uninstall', 'restore', 'approveUpdate'].includes(action)) throw new Error('허용되지 않은 확인 작업입니다.');
 }
 
 function installIpc() {
@@ -625,6 +625,7 @@ function installIpc() {
     requireAction(action);
     if (TEST_MODE && process.env.DINO_MANAGER_AUTOCONFIRM === '1') return true;
     const messages = {
+      apply: ['수동 패치 적용', '자동 감시와 별도로 현재 원본을 다시 확인합니다. 호환성·파일 지문·원본 백업이 검증된 경우에만 패치합니다. 이전에 직접 해제했다면 이 작업으로 다시 적용합니다. 계속할까요?'],
       uninstall: ['패치 해제', '디노 패치가 변경한 공식 파일만 백업본으로 되돌립니다. 현재 파일의 지문이 예상과 다르면 중단합니다. 계속할까요?'],
       restore: ['백업 복원', '선택한 백업의 파일 지문과 현재 상태가 맞을 때만 원본을 복원합니다. 계속할까요?'],
       approveUpdate: ['공식 업데이트 검토', '새 공식 버전 설치는 현재 관리자에서 지원하지 않습니다. 안전하게 업데이트 적용이 거부되는 것을 확인할까요?'],
