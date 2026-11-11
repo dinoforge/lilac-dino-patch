@@ -69,6 +69,29 @@ def dispatch(
         if not root_value:
             raise core.ManagerError("LilacAnime 원본 폴더를 먼저 확인하세요.")
         root = core.canonical_path(root_value, strict=True)
+        if installed_asar.looks_like_installed_directory(root) and not installed_asar.is_installed_target(root):
+            # An updater/antivirus may briefly move app.asar away. Never
+            # mistake an installed application for a source checkout.
+            # Inspect and startup are strictly read-only until the archive
+            # is present again; do not assume a patch was applied.
+            reason = ("설치본의 resources/app.asar 파일이 없거나 접근할 수 없습니다. "
+                      "공식 앱 업데이트/파일 교체가 끝난 뒤 다시 검사하세요. 원본은 변경하지 않았습니다.")
+            if operation in {"inspect", "startup", "apply"}:
+                return {
+                    "status": "PARTIAL_OR_UNKNOWN",
+                    "path": str(root),
+                    "targetKind": "INSTALLED_ASAR",
+                    "reason": reason,
+                    "readOnly": True,
+                }
+            if operation == "theme":
+                theme, source = core._system_theme()
+                return {
+                    "status": "FALLBACK", "theme": theme, "source": source,
+                    "reason": "설치본 app.asar가 확인되지 않아 테마 읽기를 건너뛰었습니다.",
+                    "readOnly": True,
+                }
+            raise core.ManagerError(reason)
         if installed_asar.is_installed_target(root):
             if operation == "startup":
                 return installed_asar.startup(root)
