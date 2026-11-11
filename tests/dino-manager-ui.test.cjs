@@ -20,7 +20,7 @@ test('Electron UI retains A layout tokens and lists only the real Dino Patch', (
   assert.match(css, /#9ad6b7/i);
   assert.match(css, /border-radius:\s*16px/);
   assert.match(css, /border-radius:\s*9px/);
-  assert.match(html, /디노 패치/);
+  assert.match(html, /LilacAnime DinoPatch/);
   assert.doesNotMatch(html, /통합 검색 · 동일 작품 연결|Patch 0[123]|요일표와 회차 데이터 보강|한국어 자막 수동 번역/);
   assert.doesNotMatch(html, /eyebrow|공식 원본 보호 · 안전한 패치 관리/);
   assert.equal((html.match(/id="detailDialog"/g) || []).length, 0);
@@ -443,7 +443,7 @@ test('independent Windows build pins its toolchain and validates bundled engine 
   assert.match(buildScript, /npm_config_userconfig/);
   assert.match(buildScript, /npm_config_globalconfig/);
   assert.match(buildScript, /package-lock\.json/);
-  assert.match(buildScript, /DinoPatchManager-Electron-v.*\$BuildName/);
+  assert.match(buildScript, /LilacAnime-DinoPatch-Electron-v.*\$BuildName/);
   assert.match(read('build-toolchain.json'), /"pyinstaller": "6\.21\.0"/);
   assert.match(read('requirements-build.txt'), /^pyinstaller==6\.21\.0$/m);
   assert.match(read('electron-app/package.json'), /"electron-builder": "26\.15\.3"/);
@@ -452,9 +452,9 @@ test('independent Windows build pins its toolchain and validates bundled engine 
   assert.match(builder, /manager-engine.*patches.*patch03.*manifest\.json/);
   assert.match(builder, /'theme-leveldb\.cjs'/);
   assert.match(builder, /manager-node\/node_modules/);
-  assert.match(read('tests/electron_ui_smoke.cjs'), /path\.join\(sourceRoot, 'DinoPatchManager', '디노패치관리자\.exe'\)/);
-  assert.match(read('tests/electron_ui_smoke.cjs'), /DinoPatchManager-Electron-v1\.2\.4-A22-final/);
-  assert.match(read('tests/electron_ui_smoke.cjs'), /DinoPatchManager-Electron-v1\.2\.4-A22-final/);
+  assert.match(read('tests/electron_ui_smoke.cjs'), /path\.join\(sourceRoot, 'DinoPatchManager', 'LilacAnime-DinoPatch\.exe'\)/);
+  assert.match(read('tests/electron_ui_smoke.cjs'), /LilacAnime-DinoPatch-Electron-v1\.2\.4-A22-final/);
+  assert.match(read('tests/electron_ui_smoke.cjs'), /LilacAnime-DinoPatch-Electron-v1\.2\.4-A22-final/);
   assert.match(read('tests/electron_ui_smoke.cjs'), /DINO_MANAGER_SMOKE_APP_ROOT/);
   assert.match(read('tests/electron_ui_smoke.cjs'), /manager-electron-system-theme\.png/);
   assert.match(read('tests/electron_ui_smoke.cjs'), /__delete_theme__/);
@@ -490,7 +490,7 @@ test('build path validator rejects a target outside the manager release director
 test('A27 isolation smoke launches only the package copied inside the isolated official source', () => {
   const smoke = fs.readFileSync(path.join(managerRoot, 'tests', 'electron-profile-isolation-v055.smoke.cjs'), 'utf8');
   assert.match(smoke, /const deployedAppRoot = path\.join\(sourceRoot, 'DinoPatchManager'\)/);
-  assert.match(smoke, /const exePath = path\.join\(deployedAppRoot, '디노패치관리자\.exe'\)/);
+  assert.match(smoke, /const exePath = path\.join\(deployedAppRoot, 'LilacAnime-DinoPatch\.exe'\)/);
   assert.match(smoke, /copyDirectory\(appRoot, deployedAppRoot\)/);
   assert.match(smoke, /copyOfficialSnapshot\(sourceRoot, path\.join\(testRoot, 'official-patched'\), appliedEntries\)/);
   assert.match(smoke, /requireTempDirectory\(deployedAppRoot, 'Copied A27 deployment'\)/);
