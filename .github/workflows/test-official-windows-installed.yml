@@ -7,6 +7,7 @@ on:
       - .github/workflows/test-official-windows-installed.yml
       - tools/dino-patch-manager/tests/verify_official_installed_asar.py
       - tools/dino-patch-manager/installed_asar.py
+      - tools/dino-patch-manager/manager_core.py
   workflow_dispatch:
 
 permissions:
@@ -19,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: ['0.5.54', '0.5.55']
+        version: ['0.5.54', '0.5.55', '0.5.63']
     steps:
       - uses: actions/checkout@v4
 
