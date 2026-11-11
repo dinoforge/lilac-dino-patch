@@ -147,31 +147,7 @@ jobs:
           $modules = Join-Path $manager 'resources/manager-node/node_modules'
           foreach ($name in @('classic-level','abstract-level','module-error','napi-macros','node-gyp-build','buffer','is-buffer','level-supports','level-transcoder','maybe-combine-errors','base64-js','ieee754')) {
             $module = Join-Path $modules $name
-            $notice = @(Get-ChildItem -LiteralPath $module -File | Where-Object { $_.Name -match '^(LICENSE|LICENCE)(\\..*)?          [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip)
-          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
-          try {
-            $zipFiles = @($archive.Entries | Where-Object { -not $_.FullName.EndsWith('/') })
-            $sourceFiles = @(Get-ChildItem -LiteralPath $manager -File -Recurse -Force)
-            if ($zipFiles.Count -ne $sourceFiles.Count) {
-              throw "ZIP file count mismatch: archive=$($zipFiles.Count) source=$($sourceFiles.Count)"
-            }
-          } finally {
-            $archive.Dispose()
-          }
-          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
-          Set-Content -LiteralPath (Join-Path $artifacts 'SHA256SUMS.txt') -Value "$hash  LilacAnime-DinoPatch-Windows-x64.zip" -Encoding ascii
-          Write-Host "ZIP: LilacAnime-DinoPatch-Windows-x64.zip"
-          Write-Host "SHA-256: $hash"
-          Write-Host "Source commit: $env:GITHUB_SHA"
-
-      - name: Save private build artifact (not a GitHub Release)
-        uses: actions/upload-artifact@v4
-        with:
-          name: LilacAnime-DinoPatch-Windows-x64
-          path: build-artifacts/*
-          if-no-files-found: error
-          retention-days: 14
- })
+            $notice = @(Get-ChildItem -LiteralPath $module -File | Where-Object { ($_.Name -like 'LICENSE*') -or ($_.Name -like 'LICENCE*') })
             if ($notice.Count -eq 0) { throw "Missing npm dependency license: $name" }
           }
           if ((Get-ChildItem -LiteralPath $licences -File).Count -ne 2) { throw 'Runtime license files were not collected' }
