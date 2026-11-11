@@ -20,6 +20,6 @@ LilacAnime DinoPatch는 **LilacAnime에 통합 검색 기능을 추가하는 Win
 - 먼저 LilacAnime를 종료하세요.
 - 오류가 뜨면 파일을 직접 수정하지 말고 **진단 정보**를 확인하세요.
 - 수동 해제 후에는 같은 원본에 자동으로 다시 적용되지 않습니다. 현재 버전에는 **다시 적용 버튼이 없습니다.**
-- **[0.1.0 Beta 1 ZIP 다운로드](https://github.com/dinoforge/lilac-dino-patch/releases/tag/dino-v0.1.0-beta.1)** — 비공개 저장소에 접근 권한이 있어야 다운로드할 수 있습니다.
+- **[0.1.0 Beta 2 경량판 ZIP 다운로드](https://github.com/dinoforge/lilac-dino-patch/releases/tag/dino-v0.1.0-beta.2)** — 비공개 저장소에 접근 권한이 있어야 다운로드할 수 있습니다.
 
 [공식 LilacAnime](https://github.com/whispelyn-byte/LilacAnime-desktop) · [LilacAnime DinoPatch GitHub](https://github.com/dinoforge/lilac-dino-patch)
