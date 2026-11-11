@@ -422,7 +422,12 @@
       const result = await withUiOperation('원본 호환성 검사 및 자동 적용', () => window.dinoManager.startup());
       await loadBackups();
       if (result && result.status === 'NO_SOURCE') renderState({ ...result, path: selected }, '원본 검색');
-    } catch (error) { /* withUiOperation has already rendered a safe error. */ }
+    } catch (error) {
+      const message = String(error && error.message ? error.message : error);
+      elements.message.textContent = '원본 폴더를 확인하지 못했습니다.';
+      setDetail(message);
+      addLog('폴더 선택 실패 · ' + message);
+    }
   });
 
   elements.inspect.addEventListener('click', async () => { try { await refreshTarget('원본 다시 확인 및 필요한 경우 자동 적용'); } catch {} });
