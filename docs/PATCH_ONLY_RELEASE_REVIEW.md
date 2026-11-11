@@ -70,3 +70,12 @@
 - [프리릴리즈 dino-v0.1.0-beta.4](https://github.com/dinoforge/lilac-dino-patch/releases/tag/dino-v0.1.0-beta.4) 게시, [검증·게시 Actions #43032330797](https://github.com/dinoforge/lilac-dino-patch/actions/runs/43032330797) 성공.
 - 릴리즈 대상 `release/dino-beta4-source`는 위 빌드 커밋의 **응용 프로그램 코드를 변경하지 않고**, `.github/workflows/` 메타데이터만 기본 브랜치와 일치시킨 소스 스냅샷이다. GitHub의 워크플로 쓰기 권한 점검을 통과하기 위한 구성으로, 게시 워크플로에서 이 사실을 비교·검증했다.
 - 기존 Beta 1~3 릴리즈는 수정·삭제하지 않았다. 공식 앱 전체와 제3자 영상·자막을 배포하지 않는다.
+
+## 2026-11-11 Beta 6: 수동 적용, INVALID_ARCHIVE 진단, 최소 배포
+
+- [Windows 빌드 #43041768962](https://github.com/dinoforge/lilac-dino-patch/actions/runs/43041768962) 통과. 테스트한 소스 커밋 `c7a180ea9bf987b4774908fa084dfa421f7e883b`. 실제 `LilacAnime-DinoPatch-Windows-x64.zip` 크기는 140,752,966바이트, SHA-256 `6E8DF39A725F546146FBA42CC382E535813F0B40CB5BF2D23C31AB2208792439`.
+- [프리릴리즈 dino-v0.1.0-beta.6](https://github.com/dinoforge/lilac-dino-patch/releases/tag/dino-v0.1.0-beta.6) 게시. [GitHub Actions 검증 #43042701496](https://github.com/dinoforge/lilac-dino-patch/actions/runs/43042701496) 성공.
+- 자동 파일 감시가 정상이어야만 패치를 수동 적용할 수 있다는 제약을 제거했다. 별도 `manager:apply` 요청은 **현재 설치본 상태를 새로 검사**하고 검증된 경우에만 패치하며, 수동 해제된 패치에 한해 사용자의 명시적 요청으로 재적용을 허용한다. `PARTIAL_OR_UNKNOWN` 등 실제 불안전 상태, 백업 불일치, 호환성 실패는 여전히 차단한다.
+- `INVALID_ARCHIVE` 오류에는 실제 `resources/app.asar` 경로와 일반 파일이 아닌 유형(폴더/링크)을 명시한다. Windows 업데이트 중 일시적인 항목 교체는 제한적으로 재시도하고, 실시간 변경 감시 문제를 패치 상태 문제와 분리한다.
+- 실제 ZIP 압축 목록을 확인하여 불필요한 npm 테스트·예제·개발 문서, `resources/default_app.asar`를 제거했다. 비교한 이전 ZIP은 441개 파일이고 경량 ZIP은 334개 파일이다. 실행 중 계약 검증에 사용하는 엔진의 `_internal/tests/patch03-clean-source.contract.test.cjs`는 **필요 파일이라 유지**했으며 Electron/Node/Python/npm 라이선스 고지 및 Win-x64 LevelDB 바이너리도 보존했다.
+- 릴리즈용 `release/dino-beta6-source` 브랜치는 테스트한 응용 프로그램 코드와 같고 워크플로 메타데이터만 기본 브랜치와 일치한다. Beta 1~5는 보존했다.
