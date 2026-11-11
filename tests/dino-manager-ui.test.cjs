@@ -26,7 +26,8 @@ test('Electron UI retains A layout tokens and lists only the real Dino Patch', (
   assert.equal((html.match(/id="detailDialog"/g) || []).length, 0);
   assert.equal((html.match(/class="patch-row"/g) || []).length, 1);
   assert.doesNotMatch(html, /id="patchDetails"|id="patchOfficialBase"/, 'Redundant fold-out patch details are removed.');
-  assert.doesNotMatch(html, /id="(?:apply|rowApply)"/);
+  assert.match(html, /id="apply"[^>]*disabled[^>]*>디노 패치 수동 적용/);
+  assert.doesNotMatch(html, /id="rowApply"/);
   assert.match(html, /id="uninstall"/);
   assert.doesNotMatch(html, /요일표|자막 번역 패치|Patch 0[123]/);
   assert.match(css, /radial-gradient\(ellipse at 80% -20%, #25403f/);
@@ -44,7 +45,7 @@ test('patch-list screen keeps source, global actions, backups, history and botto
   assert.match(html, /id="patchListHeading">패치 목록/);
   assert.match(html, /id="patchRows" class="patch-list"/);
   assert.match(html, /실행 시 자동 검사 · 필요 시 적용/);
-  assert.doesNotMatch(html, /전체 검사|전체 적용|id="(?:apply|rowApply)"/);
+  assert.doesNotMatch(html, /전체 검사|전체 적용|id="rowApply"/);
   assert.match(html, /class="patch-row"/);
   assert.doesNotMatch(html, /class="patch-details"/);
   assert.match(html, /원본 폴더/);
@@ -54,7 +55,7 @@ test('patch-list screen keeps source, global actions, backups, history and botto
   assert.match(html, /<section class="card advanced-tools" aria-label="고급 도구">/);
   assert.doesNotMatch(html, /<details class="card advanced-tools"/);
   const advanced = html.match(/<section class="card advanced-tools"[^>]*>([\s\S]*?)<\/section>\s*<section class="result-card"/)?.[1] || '';
-  assert.match(advanced, /id="inspect"[\s\S]*id="uninstall"[\s\S]*id="backupSelect"[\s\S]*id="restore"[\s\S]*id="history"/);
+  assert.match(advanced, /id="inspect"[\s\S]*id="apply"[\s\S]*id="uninstall"[\s\S]*id="backupSelect"[\s\S]*id="restore"[\s\S]*id="history"/);
   assert.match(advanced, /id="checkUpdates"[\s\S]*id="diagnostics"[\s\S]*class="log-details"/);
   assert.doesNotMatch(advanced, /id="approveUpdate"/);
   assert.match(html, /id="history"/);
@@ -87,8 +88,10 @@ test('patch-list screen keeps source, global actions, backups, history and botto
   assert.match(renderer, /elements\.themeStatus\.hidden = true/);
   assert.match(renderer, /setChip\(elements\.patchBadge, label, tone\)/);
   assert.match(renderer, /function setAutoManageStatus\(/);
-  assert.match(renderer, /Source checks and patch application run automatically/);
-  assert.doesNotMatch(renderer, /elements\.apply|rowApply|canApply/);
+  assert.match(renderer, /elements\.apply\.disabled = state\.busy \|\| !hasRoot \|\| applied/);
+  assert.match(renderer, /window\.dinoManager\.confirm\('apply'\)/);
+  assert.match(renderer, /window\.dinoManager\.apply\(\)/);
+  assert.doesNotMatch(renderer, /rowApply|canApply/);
   assert.match(renderer, /managementSummaryByStatus/);
   assert.doesNotMatch(renderer, /elements\.(?:compatBadge|patchState)/);
   assert.doesNotMatch(renderer, /`대상: \$\{state\.root\}`/);
@@ -431,6 +434,25 @@ test('installed ASAR snapshot never falls through to source package.json during 
     assert.equal(afterUpdate.version, 'installed-asar');
   } finally {
     fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+test('installed ASAR directory errors show type and never fall through to package.json', () => {
+  const { takeSourceSnapshot } = require(path.join(appRoot, 'source-snapshot.cjs'));
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'dino-invalid-asar-'));
+  try {
+    const install = path.join(folder, 'LilacAnime');
+    fs.mkdirSync(path.join(install, 'resources', 'app.asar'), { recursive: true });
+    fs.writeFileSync(path.join(install, 'LilacAnime.exe'), 'installed');
+    assert.throws(() => takeSourceSnapshot(install), (error) => {
+      assert.equal(error.code, 'INVALID_ARCHIVE');
+      assert.ok(error.message.includes('파일이 아니라 폴더'));
+      assert.ok(error.message.includes('resources/app.asar'));
+      assert.ok(!error.message.includes('package.json'));
+      return true;
+    });
+  } finally {
+    fs.rmSync(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
 
