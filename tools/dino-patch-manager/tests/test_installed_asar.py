@@ -155,6 +155,67 @@ class TestInstalledAsar(unittest.TestCase):
         self.assertEqual(applied["status"], "PARTIAL_OR_UNKNOWN")
         self.assertEqual(self.archive.read_bytes(), old)
 
+    def test_pending_archive_recovery_requires_verified_backup_and_preserves_app(self):
+        applied = ia.startup(self.install, process_check=lambda root: None)
+        self.assertEqual(applied["status"], "APPLIED")
+        root = ia._root(self.install)
+        state_root = ia._state_root(root)
+        state = ia._state(root)
+        backup = state_root / "original-app.asar"
+        archive_before = self.archive.read_bytes()
+        backup_before = backup.read_bytes()
+        marker = state_root / "pending.json"
+        marker.write_text(json.dumps(state), encoding="utf-8")
+        inspected = ia.inspect(self.install)
+        self.assertEqual(inspected["status"], "PARTIAL_OR_UNKNOWN")
+        self.assertTrue(inspected["recoveryAvailable"])
+        recovered = ia.recover_pending(self.install, process_check=lambda root: None)
+        self.assertEqual(recovered["status"], "APPLIED")
+        self.assertTrue(recovered["recoveryResolved"])
+        self.assertEqual(self.archive.read_bytes(), archive_before)
+        self.assertEqual(backup.read_bytes(), backup_before)
+        self.assertFalse(marker.exists())
+        self.assertEqual(len(list(state_root.glob("pending.reconciled-*.json"))), 1)
+
+    def test_pending_original_recovery_leaves_manual_uninstall_intact(self):
+        ia.startup(self.install, process_check=lambda root: None)
+        root = ia._root(self.install)
+        data = ia._state_root(root)
+        pending = ia._state(root)
+        self.assertEqual(ia.uninstall(self.install, process_check=lambda root: None)["status"], "UNPATCHED")
+        original = self.archive.read_bytes()
+        (data / "pending.json").write_text(json.dumps(pending), encoding="utf-8")
+        self.assertTrue(ia.inspect(self.install)["recoveryAvailable"])
+        recovered = ia.recover_pending(self.install, process_check=lambda root: None)
+        self.assertEqual(recovered["status"], "UNPATCHED")
+        self.assertTrue(recovered["manualUninstall"])
+        self.assertEqual(self.archive.read_bytes(), original)
+        self.assertEqual(ia.startup(self.install, process_check=lambda root: None)["status"], "UNPATCHED")
+
+    def test_pending_recovery_does_not_discard_invalid_backup_or_temp(self):
+        ia.startup(self.install, process_check=lambda root: None)
+        root = ia._root(self.install)
+        data = ia._state_root(root)
+        marker = data / "pending.json"
+        marker.write_text(json.dumps(ia._state(root)), encoding="utf-8")
+        backup = data / "original-app.asar"
+        original_backup = backup.read_bytes()
+        temp = self.archive.with_name("app.asar.dino-writing")
+        temp.write_bytes(b"unfinished patch data")
+        report = ia.inspect(self.install)
+        self.assertFalse(report["recoveryAvailable"])
+        self.assertEqual(ia.recover_pending(self.install, process_check=lambda root: None)["status"], "PARTIAL_OR_UNKNOWN")
+        self.assertTrue(marker.is_file())
+        self.assertTrue(temp.is_file())
+        temp.unlink()
+        backup.write_bytes(b"not official backup")
+        try:
+            self.assertFalse(ia.inspect(self.install)["recoveryAvailable"])
+            self.assertEqual(ia.recover_pending(self.install, process_check=lambda root: None)["status"], "PARTIAL_OR_UNKNOWN")
+            self.assertTrue(marker.is_file())
+        finally:
+            backup.write_bytes(original_backup)
+
     def test_unknown_original_changes_fail_closed(self):
         changed = dict(self.original)
         changed["src/app.js"] += b"\nconsole.log('modified by user')"
