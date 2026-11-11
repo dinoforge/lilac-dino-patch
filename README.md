@@ -11,11 +11,11 @@
 ## 사용 방법
 
 1. LilacAnime를 종료합니다.
-2. 배포 ZIP을 받은 경우, `DinoPatchManager` 폴더를 공식 LilacAnime **소스 폴더**에 넣습니다.
-3. `LilacAnime-DinoPatch.exe`를 실행합니다.
+2. ZIP을 압축 해제하고 `DinoPatchManager` 폴더의 `LilacAnime-DinoPatch.exe`를 실행합니다.
+3. **원본 폴더 변경**에서 `LilacAnime.exe`와 `resources/app.asar`가 있는 **공식 설치 폴더**를 선택합니다.
 
-**주의:** `package.json`, `src/`, `electron/`이 있는 공식 소스 폴더가 필요합니다. 일반 설치본만으로는 적용할 수 없습니다.
+**지원:** 공식 Windows 설치본 **v0.5.54·v0.5.55** 및 기존 공식 소스 폴더 방식. 설치 폴더 밖에 `package.json`이 없어도 됩니다. 설치본의 `app.asar` 내부 버전과 파일 지문을 확인한 뒤 전체 ASAR를 백업하고 적용합니다.
 
 [간단한 사용자 설명서](docs/USER_GUIDE.md) · [공식 LilacAnime Desktop](https://github.com/whispelyn-byte/LilacAnime-desktop)
 
-> **[LilacAnime DinoPatch 0.1.0 Beta 2 경량판 다운로드](https://github.com/dinoforge/lilac-dino-patch/releases/tag/dino-v0.1.0-beta.2)** · 비공식 독립 패치입니다. 현재 비공개 저장소이므로 접근 권한이 있는 GitHub 계정만 파일을 받을 수 있습니다.
+> **[LilacAnime DinoPatch 0.1.0 Beta 3 설치본 지원 다운로드](https://github.com/dinoforge/lilac-dino-patch/releases/tag/dino-v0.1.0-beta.3)** · 비공식 독립 패치입니다. 현재 비공개 저장소이므로 접근 권한이 있는 GitHub 계정만 파일을 받을 수 있습니다.
