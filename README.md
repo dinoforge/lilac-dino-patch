@@ -16,6 +16,8 @@
 
 **호환성:** 특정 버전 번호만으로 차단하지 않습니다. 설치본의 `app.asar` 내부 실제 파일·호출 계약을 검사한 뒤 호환성이 확인되면 백업 후 적용합니다. 공식 Windows **v0.5.54·v0.5.55·v0.5.63**에서 패치·원복·실행 검사를 통과했습니다. 검증되지 않은 변경 구조에는 적용하지 않습니다. 기존 소스 폴더 방식도 지원합니다.
 
+> **Beta 5 버그 수정:** 설치본 파일이 일시적으로 없어지는 동안 잘못된 소스 검사를 실행하지 않습니다. 감시 오류만으로 검증된 패치 상태를 변경하지 않으며, 원본이 실제로 없거나 손상된 경우에는 안전을 위해 파일 변경을 중단합니다.
+
 [간단한 사용자 설명서](docs/USER_GUIDE.md) · [공식 LilacAnime Desktop](https://github.com/whispelyn-byte/LilacAnime-desktop)
 
-> **[LilacAnime DinoPatch 0.1.0 Beta 4 다운로드](https://github.com/dinoforge/lilac-dino-patch/releases/tag/dino-v0.1.0-beta.4)** · 비공식 독립 패치입니다. 현재 비공개 저장소이므로 접근 권한이 있는 GitHub 계정만 파일을 받을 수 있습니다.
+> **[LilacAnime DinoPatch 0.1.0 Beta 5 다운로드](https://github.com/dinoforge/lilac-dino-patch/releases/tag/dino-v0.1.0-beta.5)** · 비공식 독립 패치입니다. 현재 비공개 저장소이므로 접근 권한이 있는 GitHub 계정만 파일을 받을 수 있습니다.
