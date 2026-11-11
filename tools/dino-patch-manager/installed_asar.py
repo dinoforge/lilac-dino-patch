@@ -270,7 +270,6 @@ def _manifest(asar: Archive, version: str):
     """
     patch_root, manifest = core.load_manifest(core.patch_source_root(), version)
     if manifest.get("_profilePinned"):
-        _identity(asar, version)
         manifest["compatibilityMode"] = "PINNED"
         manifest["sourceIdentityVerified"] = True
         return patch_root, manifest
@@ -357,6 +356,8 @@ def inspect(root_value):
     if any(relative in asar.files for relative in core.EXPECTED_MODULES):
         return {**result, "status": "PARTIAL_OR_UNKNOWN", "reason": "이미 설치된 패치 모듈이 있지만 검증된 상태 기록은 없습니다."}
     try:
+        if version in SUPPORTED:
+            _identity(asar, version)
         _patch_root, matched_manifest = _manifest(asar, version)
     except core.CompatibilityBlocked as exc:
         return {**result, "status": exc.status, "reason": str(exc), "sourceIdentityVerified": False}
@@ -475,6 +476,8 @@ def _apply(root: Path, *, process_check):
     original_sha = _sha(archive_path)
     asar = Archive(archive_path)
     version = _version(asar)
+    if version in SUPPORTED:
+        _identity(asar, version)
     patch_root, manifest = _manifest(asar, version)
     replacements = _replacement_bytes(asar, manifest, patch_root)
     _preflight_patch(replacements, manifest)
