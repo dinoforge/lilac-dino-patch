@@ -65,7 +65,7 @@ def dispatch(
                     break
         return {"status": "SOURCE_FOUND" if found else "NO_SOURCE", "path": str(found) if found else None}
 
-    if operation in {"startup", "inspect", "apply", "uninstall", "backups", "history", "theme", "restore"}:
+    if operation in {"startup", "inspect", "apply", "uninstall", "backups", "history", "theme", "restore", "recover"}:
         if not root_value:
             raise core.ManagerError("LilacAnime 원본 폴더를 먼저 확인하세요.")
         root = core.canonical_path(root_value, strict=True)
@@ -81,10 +81,22 @@ def dispatch(
                 kind = "app.asar가 링크이므로 안전을 위해 차단했습니다."
             else:
                 kind = "app.asar 파일이 없거나 접근할 수 없습니다."
+            marker_note = ""
+            try:
+                marker = installed_asar._state_root(root) / "pending.json"
+                if marker.is_file():
+                    marker_note = (
+                        f" 이전 패치 작업 복구 기록({marker})도 보존되어 있습니다. "
+                        "정상적인 app.asar 파일이 확인되기 전에는 복구 기록을 정리하지 않습니다."
+                    )
+            except core.ManagerError:
+                pass
             reason = (f"설치본 resources/{kind} "
-                      "공식 앱 업데이트/파일 교체가 끝났는지 확인하세요. "
-                      "수동 적용도 독립 검사에서 안전한 파일이 확인되어야 진행합니다. 원본을 변경하지 않았습니다.")
-            if operation in {"inspect", "startup", "apply"}:
+                      "공식 Windows 설치본의 app.asar는 폴더가 아니라 파일이어야 합니다. "
+                      "수동 적용은 실제 ASAR 및 백업 검증이 가능할 때만 진행합니다. "
+                      "현재 파일과 백업을 직접 삭제하거나 이동하지 마세요."
+                      + marker_note)
+            if operation in {"inspect", "startup", "apply", "recover"}:
                 return {
                     "status": "PARTIAL_OR_UNKNOWN",
                     "path": str(root),
@@ -107,6 +119,8 @@ def dispatch(
                 return installed_asar.inspect(root)
             if operation == "apply":
                 return installed_asar.apply(root)
+            if operation == "recover":
+                return installed_asar.recover_pending(root)
             if operation == "uninstall":
                 return installed_asar.uninstall(root)
             if operation == "backups":
@@ -124,6 +138,8 @@ def dispatch(
                     raise core.ManagerError("복원 대상이 기록된 설치본 백업과 일치하지 않습니다.")
                 return installed_asar.uninstall(root)
 
+        if operation == "recover":
+            raise core.ManagerError("복구 기록 확인은 공식 LilacAnime 설치본 ASAR에만 지원됩니다.")
         if operation == "startup":
             return core.automatic_startup_check(root, progress=progress)
         if operation == "inspect":
