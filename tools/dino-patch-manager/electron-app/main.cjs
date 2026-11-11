@@ -183,6 +183,21 @@ function delay(milliseconds) {
 
 function takeSourceSnapshot(rootValue) {
   const root = fs.realpathSync.native(rootValue);
+  const installedAsar = path.join(root, 'resources', 'app.asar');
+  if (fs.existsSync(path.join(root, 'LilacAnime.exe')) && fs.existsSync(installedAsar)) {
+    const hash = crypto.createHash('sha256');
+    const fd = fs.openSync(installedAsar, 'r');
+    try {
+      const buffer = Buffer.allocUnsafe(1024 * 1024);
+      let length;
+      while ((length = fs.readSync(fd, buffer, 0, buffer.length, null)) > 0) hash.update(buffer.subarray(0, length));
+    } finally {
+      fs.closeSync(fd);
+    }
+    const digest = hash.digest('hex').toUpperCase();
+    return { root, version: 'installed-asar', files: { 'resources/app.asar': digest },
+      directories: [root, path.join(root, 'resources')], signature: digest };
+  }
   const files = Object.create(null);
   const directories = [];
   const pending = [root];
@@ -560,7 +575,21 @@ function installIpc() {
       properties: ['openDirectory'],
     });
     if (result.canceled || !result.filePaths[0]) return null;
-    currentRoot = fs.realpathSync.native(result.filePaths[0]);
+    let selected = fs.realpathSync.native(result.filePaths[0]);
+    if (path.basename(selected).toLowerCase() === 'resources'
+        && fs.existsSync(path.join(selected, 'app.asar'))
+        && fs.existsSync(path.join(path.dirname(selected), 'LilacAnime.exe'))) {
+      selected = fs.realpathSync.native(path.dirname(selected));
+    }
+    const isSource = fs.existsSync(path.join(selected, 'package.json'))
+      && fs.existsSync(path.join(selected, 'src', 'app.js'))
+      && fs.existsSync(path.join(selected, 'electron', 'main.cjs'));
+    const isInstalled = fs.existsSync(path.join(selected, 'LilacAnime.exe'))
+      && fs.existsSync(path.join(selected, 'resources', 'app.asar'));
+    if (!isSource && !isInstalled) {
+      throw new Error('선택한 폴더에 공식 LilacAnime 소스나 설치본이 없습니다. 소스 폴더 또는 LilacAnime.exe가 있는 설치 폴더를 선택하세요.');
+    }
+    currentRoot = selected;
     try {
       setSourceWatchRoot(currentRoot);
     } catch (error) {
