@@ -124,6 +124,57 @@ jobs:
               throw "ZIP input is incomplete: $required"
             }
           }
+          $licences = Join-Path $manager 'THIRD_PARTY_LICENSES'
+          New-Item -ItemType Directory -Path $licences -Force | Out-Null
+          $nodeDir = Split-Path -Parent ((Get-Command node -ErrorAction Stop).Source)
+          $nodeLicence = Join-Path $nodeDir 'LICENSE'
+          if (-not (Test-Path -LiteralPath $nodeLicence -PathType Leaf)) {
+            $nodeLicence = Join-Path $env:RUNNER_TEMP 'node-v24.14.1-LICENSE'
+            Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/nodejs/node/v24.14.1/LICENSE' -OutFile $nodeLicence -TimeoutSec 60
+          }
+          $pythonLicence = Join-Path $env:pythonLocation 'LICENSE.txt'
+          if (-not (Test-Path -LiteralPath $pythonLicence -PathType Leaf)) {
+            $pythonLicence = Join-Path $env:RUNNER_TEMP 'cpython-v3.14.7-LICENSE'
+            Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/python/cpython/v3.14.7/LICENSE' -OutFile $pythonLicence -TimeoutSec 60
+          }
+          foreach ($item in @(@($nodeLicence, 'Node.js-LICENSE.txt'), @($pythonLicence, 'Python-LICENSE.txt'))) {
+            if (-not (Test-Path -LiteralPath $item[0] -PathType Leaf)) { throw "Missing runtime license: $($item[0])" }
+            Copy-Item -LiteralPath $item[0] -Destination (Join-Path $licences $item[1]) -ErrorAction Stop
+          }
+          foreach ($item in @('LICENSE.electron.txt', 'LICENSES.chromium.html')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $manager $item) -PathType Leaf)) { throw "Missing bundled Electron/Chromium notice: $item" }
+          }
+          $modules = Join-Path $manager 'resources/manager-node/node_modules'
+          foreach ($name in @('classic-level','abstract-level','module-error','napi-macros','node-gyp-build','buffer','is-buffer','level-supports','level-transcoder','maybe-combine-errors','base64-js','ieee754')) {
+            $module = Join-Path $modules $name
+            $notice = @(Get-ChildItem -LiteralPath $module -File | Where-Object { $_.Name -match '^(LICENSE|LICENCE)(\\..*)?          [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip)
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $zipFiles = @($archive.Entries | Where-Object { -not $_.FullName.EndsWith('/') })
+            $sourceFiles = @(Get-ChildItem -LiteralPath $manager -File -Recurse -Force)
+            if ($zipFiles.Count -ne $sourceFiles.Count) {
+              throw "ZIP file count mismatch: archive=$($zipFiles.Count) source=$($sourceFiles.Count)"
+            }
+          } finally {
+            $archive.Dispose()
+          }
+          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+          Set-Content -LiteralPath (Join-Path $artifacts 'SHA256SUMS.txt') -Value "$hash  LilacAnime-DinoPatch-Windows-x64.zip" -Encoding ascii
+          Write-Host "ZIP: LilacAnime-DinoPatch-Windows-x64.zip"
+          Write-Host "SHA-256: $hash"
+          Write-Host "Source commit: $env:GITHUB_SHA"
+
+      - name: Save private build artifact (not a GitHub Release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: LilacAnime-DinoPatch-Windows-x64
+          path: build-artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+ })
+            if ($notice.Count -eq 0) { throw "Missing npm dependency license: $name" }
+          }
+          if ((Get-ChildItem -LiteralPath $licences -File).Count -ne 2) { throw 'Runtime license files were not collected' }
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip)
           $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
