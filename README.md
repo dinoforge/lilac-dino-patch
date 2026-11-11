@@ -18,4 +18,4 @@
 
 [간단한 사용자 설명서](docs/USER_GUIDE.md) · [공식 LilacAnime Desktop](https://github.com/whispelyn-byte/LilacAnime-desktop)
 
-> **[LilacAnime DinoPatch 0.1.0 Beta 1 다운로드](https://github.com/dinoforge/lilac-dino-patch/releases/tag/dino-v0.1.0-beta.1)** · 비공식 독립 패치입니다. 현재 비공개 저장소이므로 접근 권한이 있는 GitHub 계정만 파일을 받을 수 있습니다.
+> **[LilacAnime DinoPatch 0.1.0 Beta 2 경량판 다운로드](https://github.com/dinoforge/lilac-dino-patch/releases/tag/dino-v0.1.0-beta.2)** · 비공식 독립 패치입니다. 현재 비공개 저장소이므로 접근 권한이 있는 GitHub 계정만 파일을 받을 수 있습니다.
