@@ -5,7 +5,7 @@
   const elements = {
     managerVersion: $('managerVersion'), patchBadge: $('patchBadge'),
     safetyCard: $('safetyCard'), safetyTitle: $('safetyTitle'), safetyMessage: $('safetyMessage'),
-    targetPath: $('targetPath'), officialVersion: $('officialVersion'), targetPatchVersion: $('targetPatchVersion'), patchOfficialBase: $('patchOfficialBase'),
+    targetPath: $('targetPath'), officialVersion: $('officialVersion'), targetPatchVersion: $('targetPatchVersion'),
     autoManageStatus: $('autoManageStatus'),
     uninstall: $('uninstall'), restore: $('restore'), inspect: $('inspect'), history: $('history'),
     chooseRoot: $('chooseRoot'), diagnostics: $('diagnostics'), backupSelect: $('backupSelect'),
@@ -77,7 +77,7 @@
       NO_SOURCE: '원본 폴더를 찾지 못했습니다.',
       CONFLICT: '파일 충돌로 작업을 중단했습니다.',
       PARTIAL_OR_UNKNOWN: '패치 상태 확인에 실패했습니다.',
-      UNSUPPORTED: '지원하지 않는 버전입니다.',
+      UNSUPPORTED: '필수 연결 구조가 달라 적용하지 않았습니다.',
       COMPATIBILITY_UNKNOWN: '공식 출처 또는 구조를 확인할 수 없어 적용을 중단했습니다.',
       SOURCE_FOUND: '원본 구조 확인 완료',
     };
@@ -152,7 +152,6 @@
     elements.targetPath.setAttribute('aria-label', `인식된 원본 폴더: ${targetPath}`);
     elements.officialVersion.textContent = result.version ? `v${result.version}` : (state.info ? `v${state.info.officialVersion} 기준` : '확인 불가');
     elements.targetPatchVersion.textContent = result.patchVersion ? `v${result.patchVersion}` : (state.info ? `v${state.info.patchVersion}` : '확인 불가');
-    elements.patchOfficialBase.textContent = state.info ? `v${state.info.officialVersion}` : '확인 불가';
     elements.message.textContent = recentMessage(state.status, operation);
     const [defaultManagementSummary, defaultManagementTone] = managementSummaryByStatus[state.status] || ['결과 확인 필요', 'bad'];
     const managementSummary = state.status === 'UNPATCHED' && result.manualUninstall
