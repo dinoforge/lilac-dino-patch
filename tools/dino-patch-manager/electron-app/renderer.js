@@ -491,7 +491,7 @@
       elements.managerVersion.textContent = `관리자 v${state.info.managerVersion}`;
       elements.officialVersion.textContent = `v${state.info.officialVersion} 기준`;
       elements.targetPatchVersion.textContent = `v${state.info.patchVersion}`;
-      addLog(`디노 패치 관리자 v${state.info.managerVersion} · 공식 기준 v${state.info.officialVersion}`);
+      addLog(`LilacAnime DinoPatch v${state.info.managerVersion} · 공식 기준 v${state.info.officialVersion}`);
       const result = await withUiOperation('원본 확인 및 필요한 경우 자동 적용', () => window.dinoManager.startup());
       if (result && result.status === 'NO_SOURCE') {
         renderState(result, '원본 검색');
