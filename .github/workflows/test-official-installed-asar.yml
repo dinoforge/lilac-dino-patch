@@ -1,0 +1,47 @@
+name: Verify installed LilacAnime 0.5.54 and 0.5.55 ASAR
+
+on:
+  push:
+    branches: [test/dino-full-functional-integration]
+    paths:
+      - .github/workflows/test-official-installed-asar.yml
+      - tools/dino-patch-manager/installed_asar.py
+      - tools/dino-patch-manager/tests/verify_official_installed_asar.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-upstream-asar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['0.5.54', '0.5.55']
+    steps:
+      - name: Check out independent patch code
+        uses: actions/checkout@v4
+
+      - name: Download official tagged package into temporary CI storage
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/official-download" "$RUNNER_TEMP/official-unpacked"
+          gh release download "v${{ matrix.version }}" \
+            --repo whispelyn-byte/LilacAnime-desktop \
+            --pattern LilacAnime-linux-amd64.deb \
+            --dir "$RUNNER_TEMP/official-download"
+          dpkg-deb -x "$RUNNER_TEMP/official-download/LilacAnime-linux-amd64.deb" "$RUNNER_TEMP/official-unpacked"
+          find "$RUNNER_TEMP/official-unpacked" -name app.asar -type f -print
+
+      - name: Verify exact official version, patch and restore only in temp copy
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t asars < <(find "$RUNNER_TEMP/official-unpacked" -name app.asar -type f)
+          test "${#asars[@]}" -eq 1
+          python3 tools/dino-patch-manager/tests/verify_official_installed_asar.py "${asars[0]}" "${{ matrix.version }}"
