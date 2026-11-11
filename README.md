@@ -79,6 +79,7 @@ v0.5.58은 실제 격리 앱 실행까지 기록된 검증 기준입니다. 새 
 - [관리자 UI 디자인 기준](DESIGN.md)
 - [저장소 전환 전 문서 보관함](docs/legacy/README.md)
 - [권리 검토 기록](docs/RIGHTS_REVIEW.md)
+- [사용자 설명서 — 설치·적용·해제·백업·문제 해결](docs/USER_GUIDE.md)
 - [공식 원본 저장소 연결](docs/UPSTREAM_LINK.md)
 - [0.1.0 Beta 1 릴리즈 설명 초안](docs/releases/dino-v0.1.0-beta.1.md)
 - [Windows 관리자 실제 릴리즈 실행 절차](docs/releases/RELEASE_OPERATIONS.md)
