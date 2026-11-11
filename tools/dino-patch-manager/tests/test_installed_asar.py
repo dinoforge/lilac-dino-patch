@@ -133,6 +133,84 @@ class TestInstalledAsar(unittest.TestCase):
         synthetic_asar(self.archive, changed)
         self.assertEqual(ia.inspect(self.install)["status"], "PARTIAL_OR_UNKNOWN")
 
+    def _unknown_version_fixture(self, version="0.5.63"):
+        """Select five unambiguous connection anchors for an unseen installed version."""
+        package = {"version": version, "build": {"appId": "com.lilac.anime.desktop"}}
+        files = dict(self.original)
+        files["package.json"] = json.dumps(package).encode()
+        files["src/player.js"] = b"const player = true;\\n"
+        files["electron/preload.cjs"] = b"const preload = true;\\n"
+        files["src/index.html"] = b"<html><head><link id='one'></head><body><button id='two'></button><select id='three'></select><script src=\\\"app.js\\\"></script></body></html>"
+        synthetic_asar(self.archive, files)
+        html = files["src/index.html"].decode("utf-8")
+        connections = [
+            {"file": "src/app.js", "before": "const source = 'reanime';",
+             "after": "const source = 'integrated';", "description": "source selection"},
+            {"file": "src/index.html", "before": "<link id='one'>",
+             "after": "<link id='one'><link id='dino'>", "description": "stylesheet"},
+            {"file": "src/index.html", "before": "<button id='two'>",
+             "after": "<button id='two'><button id='dino'>", "description": "source button"},
+            {"file": "src/index.html", "before": "<select id='three'>",
+             "after": "<select id='three'><option id='dino'>", "description": "source options"},
+            {"file": "src/index.html", "before": '<script src="app.js"></script>',
+             "after": '<script src="patch.js"></script><script src="app.js"></script>',
+             "description": "script loading"},
+        ]
+        self.assertIn("<button id='two'>", html)
+        manifest = dict(self.manifest)
+        manifest["_profilePinned"] = False
+        manifest["connections"] = connections
+        manifest["_connectionProfiles"] = [{"officialVersion": "0.5.54", "connections": connections}]
+        self.manifest_patch.stop()
+        self.addCleanup(lambda: None)
+        mocked = mock.patch.object(core, "load_manifest", return_value=(self.patch, manifest))
+        mocked.start()
+        self.addCleanup(mocked.stop)
+        return files
+
+    def test_unknown_version_with_safe_contracts_is_compatible_and_restorable(self):
+        self._unknown_version_fixture("0.5.63")
+        original = self.archive.read_bytes()
+        with mock.patch.object(core, "_verify_structural_official_contracts",
+                               return_value={"apis": {"providerCatalog": True}}) as check:
+            detected = ia.inspect(self.install)
+            self.assertEqual(detected["status"], "UNPATCHED")
+            self.assertEqual(detected["version"], "0.5.63")
+            self.assertEqual(detected["compatibilityMode"], "STRUCTURAL")
+            self.assertFalse(detected["sourceIdentityVerified"])
+            applied = ia.startup(self.install, process_check=lambda root: None)
+            self.assertEqual(applied["status"], "APPLIED")
+            self.assertGreaterEqual(check.call_count, 2)
+            self.assertNotEqual(self.archive.read_bytes(), original)
+            self.assertEqual(ia.uninstall(self.install, process_check=lambda root: None)["status"], "UNPATCHED")
+            self.assertEqual(self.archive.read_bytes(), original)
+
+    def test_unknown_version_without_connection_anchor_fails_closed(self):
+        self._unknown_version_fixture("0.6.10")
+        asar = ia.Archive(self.archive)
+        changed = {name: asar.read(name) for name in asar.files}
+        changed["src/index.html"] = changed["src/index.html"].replace(b"<button id='two'>", b"<button id='new'>")
+        synthetic_asar(self.archive, changed)
+        original = self.archive.read_bytes()
+        with mock.patch.object(core, "_verify_structural_official_contracts", return_value={}):
+            detected = ia.inspect(self.install)
+            self.assertEqual(detected["status"], "UNSUPPORTED")
+            self.assertEqual(ia.startup(self.install, process_check=lambda root: None)["status"], "UNSUPPORTED")
+        self.assertEqual(self.archive.read_bytes(), original)
+        self.assertFalse((self.base / "AppData" / "DinoPatchManager").exists())
+
+    def test_unknown_version_with_changed_ipc_contract_fails_closed(self):
+        self._unknown_version_fixture("1.0.0")
+        original = self.archive.read_bytes()
+        with mock.patch.object(core, "_verify_structural_official_contracts",
+                               side_effect=core.ManagerError("provider:detail changed")):
+            detected = ia.inspect(self.install)
+            self.assertEqual(detected["status"], "UNSUPPORTED")
+            self.assertIn("provider:detail", detected["reason"])
+            self.assertEqual(ia.startup(self.install, process_check=lambda root: None)["status"], "UNSUPPORTED")
+        self.assertEqual(self.archive.read_bytes(), original)
+        self.assertFalse((self.base / "AppData" / "DinoPatchManager").exists())
+
     def test_missing_app_asar_does_not_fallback_to_source_mode(self):
         (self.install / "resources" / "app.asar").unlink()
         self.assertFalse(ia.is_installed_target(self.install))
