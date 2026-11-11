@@ -38,6 +38,16 @@ MAX_ENTRIES = 50000
 MAX_ASAR_BYTES = 1024 * 1024 * 1024
 
 
+def looks_like_installed_directory(root_value) -> bool:
+    """Preserve installed-app routing while an updater replaces app.asar.
+
+    This is only a routing hint, NOT a compatibility or write authorization.
+    _root() and the ASAR validation still require a real archive.
+    """
+    root = Path(root_value)
+    return (root / "LilacAnime.exe").is_file() and (root / "resources").is_dir()
+
+
 def is_installed_target(root_value) -> bool:
     root = Path(root_value)
     return (root / "LilacAnime.exe").is_file() and (root / "resources" / "app.asar").is_file()
@@ -46,6 +56,8 @@ def is_installed_target(root_value) -> bool:
 def _root(root_value) -> Path:
     root = core.canonical_path(root_value, strict=True)
     if not root.is_dir() or not is_installed_target(root):
+        if looks_like_installed_directory(root):
+            raise core.ManagerError("공식 설치본 resources/app.asar 파일이 없습니다. 업데이트 또는 파일 교체가 끝났는지 확인한 뒤 다시 검사하세요. 원본을 변경하지 않았습니다.")
         raise core.ManagerError("공식 LilacAnime 설치 폴더가 아닙니다. LilacAnime.exe와 resources/app.asar가 있는 폴더를 선택하세요.")
     for path in (root, root / "LilacAnime.exe", root / "resources", root / "resources" / "app.asar"):
         if core._is_link_or_junction(path):
