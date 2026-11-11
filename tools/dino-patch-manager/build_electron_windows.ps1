@@ -186,7 +186,7 @@ foreach ($packageName in $pythonPackageNames) {
 
 $releaseRoot = Join-Path $managerSource "release"
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
-    $outputRoot = Join-Path $releaseRoot ("DinoPatchManager-Electron-v$($appPackage.version)-$BuildName")
+    $outputRoot = Join-Path $releaseRoot ("LilacAnime-DinoPatch-Electron-v$($appPackage.version)-$BuildName")
 } elseif ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
     $outputRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
 } else {
@@ -316,7 +316,7 @@ for (const [name, version] of Object.entries(expected)) {
     $appEngineRoot = Join-Path $appRoot "resources\manager-engine"
     $appEngineExe = Join-Path $appEngineRoot "DinoPatchManagerEngine.exe"
     $appManifest = Join-Path $appEngineRoot "_internal\patches\patch03\manifest.json"
-    foreach ($required in @((Join-Path $appRoot "디노패치관리자.exe"), (Join-Path $appRoot "resources\app.asar"), $appEngineExe, $appManifest)) {
+    foreach ($required in @((Join-Path $appRoot "LilacAnime-DinoPatch.exe"), (Join-Path $appRoot "resources\app.asar"), $appEngineExe, $appManifest)) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Electron 패키지에서 필수 파일이 없습니다: $required" }
     }
     $packagedInfo = Invoke-EngineInfo $appEngineExe $appEngineRoot $nodePath
