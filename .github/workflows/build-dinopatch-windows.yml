@@ -11,6 +11,8 @@ on:
       - tools/dino-patch-manager/installed_asar.py
       - tools/dino-patch-manager/manager_bridge.py
       - tools/dino-patch-manager/electron-app/main.cjs
+      - tools/dino-patch-manager/electron-app/source-snapshot.cjs
+      - tools/dino-patch-manager/build-electron.cjs
       - tools/dino-patch-manager/electron-app/renderer.js
       - tools/dino-patch-manager/electron-app/manager.css
       - tools/dino-patch-manager/electron-app/index.html
@@ -58,6 +60,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Installed ASAR regression tests failed" }
           node --test tests/dino-manager-ui.test.cjs
           if ($LASTEXITCODE -ne 0) { throw "Compact manager UI regression tests failed" }
+          node --check tools/dino-patch-manager/electron-app/source-snapshot.cjs
+          if ($LASTEXITCODE -ne 0) { throw "Source snapshot syntax check failed" }
           node --check tools/dino-patch-manager/electron-app/main.cjs
           if ($LASTEXITCODE -ne 0) { throw "Electron manager syntax check failed" }
           node --check tools/dino-patch-manager/electron-app/renderer.js
