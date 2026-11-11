@@ -1,0 +1,57 @@
+name: Verify official Windows LilacAnime ASAR installation
+
+on:
+  push:
+    branches: [test/dino-full-functional-integration]
+    paths: [.github/workflows/test-official-windows-installed.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['0.5.54', '0.5.55']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download genuine official Windows installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $download = Join-Path $env:RUNNER_TEMP "original-installer"
+          New-Item -ItemType Directory -Force -Path $download | Out-Null
+          gh release download "v${{ matrix.version }}" --repo whispelyn-byte/LilacAnime-desktop --pattern 'LilacAnime-Setup.exe' --dir $download
+          if ($LASTEXITCODE -ne 0) { throw "Official download failed" }
+
+      - name: Extract installer into disposable Windows runner folder
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Join-Path $env:RUNNER_TEMP 'original-installer/LilacAnime-Setup.exe'
+          $destination = Join-Path $env:RUNNER_TEMP 'official-extracted'
+          New-Item -ItemType Directory -Force -Path $destination | Out-Null
+          $zip = (Get-Command 7z.exe -ErrorAction SilentlyContinue).Source
+          if (-not $zip) { $zip = 'C:\Program Files\7-Zip\7z.exe' }
+          if (-not (Test-Path -LiteralPath $zip -PathType Leaf)) { throw 'Windows 7-Zip is unavailable' }
+          & $zip x $installer "-o$destination" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS extraction failed' }
+          $archives = @(Get-ChildItem -LiteralPath $destination -Filter 'app.asar' -Recurse -File)
+          if ($archives.Count -ne 1) { throw "Expected exactly one extracted app.asar; found $($archives.Count)" }
+          Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'dino-asar-location.txt') -Value $archives[0].FullName
+          Write-Host "Found official v${{ matrix.version }} installed ASAR"
+
+      - name: Verify official Windows ASAR pin and patch+restore in isolated copy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $asar = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'dino-asar-location.txt') -Raw
+          & python tools/dino-patch-manager/tests/verify_official_installed_asar.py $asar.Trim() '${{ matrix.version }}'
+          if ($LASTEXITCODE -ne 0) { throw "Official installed Windows ASAR regression failed" }
