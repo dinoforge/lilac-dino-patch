@@ -1,4 +1,4 @@
-# Lilac Dino Patch 0.1.0 Beta 1 — Windows 배포 실행 절차
+# LilacAnime DinoPatch 0.1.0 Beta 1 — Windows 배포 실행 절차
 
 > 미실행 운영 절차. 이 파일을 저장한 것만으로 빌드, 태그, ZIP, GitHub Release가 만들어지지 않습니다.
 
@@ -44,18 +44,18 @@ if ($LASTEXITCODE -ne 0) { throw 'Independent manager build failed' }
 
 스크립트는 실제 Windows 관리자용 win-unpacked 출력을 만들며 자체적으로 npm ci, 격리 프로필 검사, PyInstaller 번들 자산, 패키지 엔진 info를 검사합니다. 성공 기본 경로:
 
-tools/dino-patch-manager/release/DinoPatchManager-Electron-v1.2.4-dino-beta1-candidate/win-unpacked
+tools/dino-patch-manager/release/LilacAnime-DinoPatch-Electron-v1.2.4-dino-beta1-candidate/win-unpacked
 
 이미 출력 폴더가 있으면 빌드 스크립트가 중단하는 것이 정상입니다. 새 이름을 사용하세요. 빌드가 실패하거나 고정 도구 버전이 맞지 않으면 배포하지 않습니다.
 
 ## ZIP 및 체크섬
 
-최종 ZIP은 하위에 DinoPatchManager 폴더와 그 안에 디노패치관리자.exe, resources/app.asar, resources/manager-engine 및 manager-node를 포함해야 합니다. 숨김 파일을 누락하지 않는 압축 수단을 사용하세요. EXE, app.asar, 번들 엔진의 파일 존재와 버전·해시, ZIP 내부의 모든 상대 경로, 사용자 캐시·로그·임시 자료 및 포함 금지 콘텐츠의 부재를 확인하세요.
+최종 ZIP은 하위에 DinoPatchManager 폴더와 그 안에 LilacAnime-DinoPatch.exe, resources/app.asar, resources/manager-engine 및 manager-node를 포함해야 합니다. 숨김 파일을 누락하지 않는 압축 수단을 사용하세요. EXE, app.asar, 번들 엔진의 파일 존재와 버전·해시, ZIP 내부의 모든 상대 경로, 사용자 캐시·로그·임시 자료 및 포함 금지 콘텐츠의 부재를 확인하세요.
 
 실제 ZIP 생성 후 아래처럼 파일 크기·SHA-256을 측정해 릴리즈 노트에 기록합니다. 이전 A35 ZIP 해시나 실험 패키지 해시를 새로운 바이너리의 해시로 적지 않습니다.
 
 ~~~powershell
-$zip = 'Lilac-Dino-Patch-0.1.0-beta.1-win-x64.zip'
+$zip = 'LilacAnime-DinoPatch-Windows-x64.zip'
 if (!(Test-Path -LiteralPath $zip -PathType Leaf)) { throw 'Release ZIP not found' }
 Get-Item -LiteralPath $zip | Select-Object FullName, Length
 Get-FileHash -LiteralPath $zip -Algorithm SHA256
@@ -73,14 +73,14 @@ gh repo view dinoforge/lilac-dino-patch
 gh release view dino-v0.1.0-beta.1 --repo dinoforge/lilac-dino-patch
 
 # 기존 태그/릴리즈가 없고 위 승인 조건을 모두 충족할 때에만:
-git tag -a dino-v0.1.0-beta.1 12bec74abe089763e1e2b501dd7051dc53ad2e88 -m "Lilac Dino Patch 0.1.0 Beta 1"
+git tag -a dino-v0.1.0-beta.1 12bec74abe089763e1e2b501dd7051dc53ad2e88 -m "LilacAnime DinoPatch 0.1.0 Beta 1"
 git push origin refs/tags/dino-v0.1.0-beta.1
 ~~~
 
 릴리즈 설명은 docs/releases/dino-v0.1.0-beta.1.md 초안을 실제 게시 시점에 맞게 수정한 별도 승인된 텍스트 파일을 사용하세요. **현재 초안의 '미게시/ZIP 없음' 상태 문장을 그대로 릴리즈 설명에 쓰지 마세요.**
 
 ~~~powershell
-gh release create dino-v0.1.0-beta.1 .\Lilac-Dino-Patch-0.1.0-beta.1-win-x64.zip --repo dinoforge/lilac-dino-patch --verify-tag --prerelease --title "Lilac Dino Patch 0.1.0 Beta 1" --notes-file .\RELEASE_NOTES_APPROVED.md
+gh release create dino-v0.1.0-beta.1 .\LilacAnime-DinoPatch-Windows-x64.zip --repo dinoforge/lilac-dino-patch --verify-tag --prerelease --title "LilacAnime DinoPatch 0.1.0 Beta 1" --notes-file .\RELEASE_NOTES_APPROVED.md
 ~~~
 
 비공개 저장소에 게시된 Release와 파일은 일반 공개 다운로드가 아니라 접근 권한을 가진 계정에만 제공됩니다. 공개 배포가 승인됐다는 뜻으로 저장소 visibility를 바꾸지 마세요. GitHub Release URL, 실제 태그 SHA, ZIP 자산의 크기·체크섬을 확인한 경우에만 RELEASED로 보고하세요.
