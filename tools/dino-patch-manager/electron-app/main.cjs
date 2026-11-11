@@ -262,9 +262,9 @@ async function readSourceSnapshotWithRetry(root, retries = 3) {
     try {
       return takeSourceSnapshot(root);
     } catch (error) {
-      // Atomic installers may briefly replace the archive entry with a directory
-      // or make it disappear entirely. We retry but never accept an invalid file.
-      if (!['ENOENT', 'INVALID_ARCHIVE'].includes(error.code) || attempt >= retries) throw error;
+      // Missing files may be part of an atomic installer swap. A directory at
+      // app.asar is an invalid layout, not a condition to retry indefinitely.
+      if (error.code !== 'ENOENT' || attempt >= retries) throw error;
       await delay(200 * (attempt + 1));
     }
   }
@@ -297,18 +297,22 @@ async function verifyStableSourceChange(reason, attempt = 0) {
     if (previous && previous.signature !== third.signature) sendSourceChange(third, reason);
   } catch (error) {
     sourceMonitor.warningSent = true;
-    if (['ENOENT', 'INVALID_ARCHIVE'].includes(error.code) && attempt < 3) {
+    if (error.code === 'ENOENT' && attempt < 3) {
       // Keep the parent-directory watchers while an updater swaps app.asar.
       retryMissingArchive = true;
       sendProgress(`공식 설치본 app.asar가 일시적으로 불안정합니다 (${error.code}). 원본을 변경하지 않고 안정화 후 다시 확인합니다.`);
     } else {
       closeSourceWatchers();
+      // A persistent invalid path must stop the timer, not trigger another
+      // full hash from the pending watcher queue.
+      sourceMonitor.pending = false;
+      sourceMonitor.pendingReason = '';
       sendProgress(`실시간 원본 변경 감시 중단 (${error.code || error.name}): ${String(error.message || error).slice(0, 300)}. 자동 감시와 별개로 수동 적용 버튼에서 안전 검사를 다시 요청할 수 있습니다.`);
     }
   } finally {
     sourceMonitor.scanning = false;
     if (retryMissingArchive) scheduleSourceScan('설치본 app.asar 파일 안정화 재확인', 1600, attempt + 1);
-    else if (sourceMonitor.pending) scheduleSourceScan(sourceMonitor.pendingReason || '공식 원본 변경 재확인', 900);
+    else if (sourceMonitor.pending && !sourceMonitor.warningSent) scheduleSourceScan(sourceMonitor.pendingReason || '공식 원본 변경 재확인', 900);
   }
 }
 
@@ -337,9 +341,12 @@ async function refreshSourceMonitorAfterOperation(operation, result) {
     sourceMonitor.warningSent = true;
     // The operation result is still authoritative. A watcher problem must not
     // convert an already verified patch state to an unknown/failed operation.
-    sourceMonitor.pending = true;
-    sourceMonitor.pendingReason = '작업 후 설치본 변경 감시 재확인';
-    if (['ENOENT', 'INVALID_ARCHIVE'].includes(error.code)) {
+    sourceMonitor.pending = error.code === 'ENOENT';
+    sourceMonitor.pendingReason = sourceMonitor.pending ? '작업 후 설치본 변경 감시 재확인' : '';
+    if (error.code === 'INVALID_ARCHIVE') {
+      closeSourceWatchers();
+      sendProgress(`실시간 감시를 중지했습니다: ${String(error.message || error).slice(0, 300)}. app.asar가 실제 파일이 되기 전까지 자동 재시도하지 않습니다.`);
+    } else if (error.code === 'ENOENT') {
       sendProgress(`설치본 app.asar 상태가 변하는 중입니다 (${error.code}). 패치 결과는 따로 유지하고 원본 감시를 다시 시도합니다.`);
     } else {
       sendProgress(`실시간 원본 감시만 갱신하지 못했습니다 (${error.code || error.name}): ${String(error.message || error).slice(0, 250)}. 수동 적용은 독립 검사로 진행할 수 있습니다.`);
@@ -448,7 +455,7 @@ async function startAutomaticCheck() {
     closeSourceWatchers();
     sourceMonitor.root = root;
     sourceMonitor.baseline = null;
-    sendProgress(`실시간 원본 감시를 설정하지 못했습니다 (${error.code || error.name}). 시작 시 자동 검사와 고급 도구의 수동 재검사는 계속 사용할 수 있습니다.`);
+    sendProgress(`실시간 원본 감시를 설정하지 못했습니다 (${error.code || error.name}): ${String(error.message || error).slice(0, 260)}. 자동 감시는 보류하지만 읽기 전용 상태 검사는 계속할 수 있습니다.`);
   }
   sendProgress('공식 원본을 확인하고, 호환되면 백업 후 디노 패치를 자동 적용합니다.');
   return runBridge({ operation: 'startup', root });
