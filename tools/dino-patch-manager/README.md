@@ -1,4 +1,4 @@
-# 디노 패치 관리자
+# LilacAnime DinoPatch
 
 관리자는 승인된 A Electron HTML/CSS 화면을 사용하고, 패치 적용은 기존 manager_core.py 엔진에 위임합니다. 렌더러는 파일 경로를 직접 다루거나 셸 명령을 실행하지 않습니다. Electron main은 allowlist된 JSON 요청만 Python 엔진에 전달합니다.
 
@@ -7,7 +7,7 @@
 ~~~text
 LilacAnime/
 └─ DinoPatchManager/
-   ├─ 디노패치관리자.exe
+   ├─ LilacAnime-DinoPatch.exe
    ├─ resources/
    │  ├─ app.asar
    │  ├─ manager-engine/       # PyInstaller Python 엔진과 패치 데이터
