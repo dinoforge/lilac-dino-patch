@@ -1,12 +1,12 @@
-# 라일락 디노 패치
+# LilacAnime DinoPatch
 
-**Lilac Dino Patch** · Windows x64 · 비공개 개발 프로젝트
+**LilacAnime DinoPatch** · Windows x64 · 비공개 개발 프로젝트
 
 저장소: [github.com/dinoforge/lilac-dino-patch](https://github.com/dinoforge/lilac-dino-patch)
 
 공식 원본: [LilacAnime Desktop](https://github.com/whispelyn-byte/LilacAnime-desktop) · [업스트림 연결 안내](docs/UPSTREAM_LINK.md) · [디노 베타 릴리즈 설명 초안](docs/releases/dino-v0.1.0-beta.1.md) (**아직 릴리즈 게시 전**)
 
-라일락 디노 패치는 공식 LilacAnime Desktop **소스 폴더**의 파일 구조와 호출 계약을 검사하고, 호환되는 소스에 디노 패치를 적용·관리하는 Electron 기반 Windows 관리자입니다. 공식 애플리케이션을 대체하지 않으며, 작품 상세·회차·공급원 resolve·영상 재생은 공식 LilacAnime 흐름을 사용합니다.
+LilacAnime DinoPatch는 공식 LilacAnime Desktop **소스 폴더**의 파일 구조와 호출 계약을 검사하고, 호환되는 소스에 디노 패치를 적용·관리하는 Electron 기반 Windows 관리자입니다. 공식 애플리케이션을 대체하지 않으며, 작품 상세·회차·공급원 resolve·영상 재생은 공식 LilacAnime 흐름을 사용합니다.
 
 > 이 프로젝트는 공식 LilacAnime와 제휴하거나 공식 배포하는 제품이 아닙니다. 코드·에셋·외부 콘텐츠의 이용 권리와 배포 범위가 확인되지 않아 저장소는 비공개이고 공개 다운로드 및 GitHub Release는 제공하지 않습니다.
 
@@ -41,7 +41,7 @@ GitHub 공개 다운로드는 권리 확인 전까지 제공하지 않습니다.
 
 1. 실행 중인 LilacAnime를 종료합니다.
 2. ZIP을 풀어 안의 `DinoPatchManager` 폴더 전체를 공식 소스 루트에 복사합니다.
-3. 폴더와 `디노패치관리자.exe` 파일 이름을 바꾸지 않고 실행합니다.
+3. 폴더와 `LilacAnime-DinoPatch.exe` 파일 이름을 바꾸지 않고 실행합니다.
 4. 관리자는 소스 구조와 패치 상태를 확인하고, 호환될 때만 백업 후 자동 적용합니다.
 
 관리자 배포본에는 실행에 필요한 런타임이 포함되어 있어 별도의 Python 설치를 요구하지 않습니다. 배포 ZIP의 공식 다운로드 링크는 현재 없습니다. A35 ZIP은 개발자의 로컬 배포 폴더에 보존되어 있으며 이 저장소의 GitHub Release에는 업로드되지 않았습니다.
