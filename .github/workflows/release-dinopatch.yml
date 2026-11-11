@@ -19,6 +19,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       EXPECTED_COMMIT: 857834cd7491f399119d62fcd572a4c18c261234
+      RELEASE_TARGET: release/dino-beta4-source
       BUILD_RUN: "43029640074"
       RELEASE_TAG: dino-v0.1.0-beta.4
       ZIP_NAME: LilacAnime-DinoPatch-Windows-x64.zip
@@ -47,6 +48,23 @@ jobs:
           actual_status="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN" --jq .conclusion)"
           test "$actual_commit" = "$EXPECTED_COMMIT"
           test "$actual_status" = "success"
+          # Release target is a source snapshot of the successful build. It
+          # differs from BUILD_RUN only in CI files, and has the same workflow
+          # files as main to satisfy GitHub's workflow permission protection.
+          source_target="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$RELEASE_TARGET" --jq '.object.sha')"
+          unexpected="$(gh api "repos/$GITHUB_REPOSITORY/compare/$EXPECTED_COMMIT...$source_target" --jq '[.files[].filename | select(startswith(".github/workflows/") | not)] | length')"
+          if [[ "$unexpected" != "0" ]]; then
+            echo "::error::Release source differs from tested build outside workflow metadata."
+            exit 1
+          fi
+          source_workflows="$(gh api "repos/$GITHUB_REPOSITORY/git/trees/$source_target?recursive=1" --jq '[.tree[] | select(.type == "blob" and (.path | startswith(".github/workflows/"))) | [.path,.sha]] | sort')"
+          main_workflows="$(gh api "repos/$GITHUB_REPOSITORY/git/trees/main?recursive=1" --jq '[.tree[] | select(.type == "blob" and (.path | startswith(".github/workflows/"))) | [.path,.sha]] | sort')"
+          if [[ "$source_workflows" != "$main_workflows" ]]; then
+            echo "::error::Release source workflows are not identical to the default branch."
+            exit 1
+          fi
+          echo "Validated release source commit: $source_target"
+
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "::error::Existing release must not be overwritten."
             exit 1
@@ -142,7 +160,7 @@ jobs:
           printf "\n소스 커밋: %s\nZIP SHA-256: %s\n" "$EXPECTED_COMMIT" "$sha" >> release-notes.md
           gh release create "$RELEASE_TAG" "release-files/$ZIP_NAME" "release-files/SHA256SUMS.txt" \
             --repo "$GITHUB_REPOSITORY" \
-            --target "$EXPECTED_COMMIT" \
+            --target "$RELEASE_TARGET" \
             --prerelease \
             --title "LilacAnime DinoPatch 0.1.0 Beta 4" \
             --notes-file release-notes.md
