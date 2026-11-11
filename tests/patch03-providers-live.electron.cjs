@@ -284,11 +284,13 @@ async function run() {
   }
   if (sourceModeTest === 'exercise') {
     await selectSourceSetting('integrated', 'select integrated content source', `window.__dinoPatch03Bridge?.getMode() === 'integrated'
-      && localStorage.getItem('contentSource') === 'integrated'
+      && localStorage.getItem('lilacDinoPatch.searchMode') === 'integrated'
+      && localStorage.getItem('contentSource') !== 'integrated'
       && document.querySelector('#contentSource')?.value === 'integrated'`);
   } else if (sourceModeTest === 'verify') {
     await waitFor(() => evaluate(`window.__dinoPatch03Bridge?.getMode() === 'integrated'
-      && localStorage.getItem('contentSource') === 'integrated'
+      && localStorage.getItem('lilacDinoPatch.searchMode') === 'integrated'
+      && localStorage.getItem('contentSource') !== 'integrated'
       && document.querySelector('#contentSource')?.value === 'integrated'`, 'integrated setting restored on fresh process'), 30000, 'integrated setting restart');
   }
 
@@ -314,8 +316,8 @@ async function run() {
   if (sourceModeTest === 'verify') {
     assert.equal(startup.contentSourceMode, 'integrated');
     assert.equal(startup.contentSourceSetting, 'integrated');
-    assert.equal(startup.savedContentSource, 'integrated');
     const expectedProvider = process.env.PATCH03_EXPECTED_INDIVIDUAL_PROVIDER || 'miruro';
+    assert.equal(startup.savedContentSource, expectedProvider, 'integrated mode leaves the official provider setting valid');
     assert.equal(startup.activeProvider, expectedProvider, 'integrated mode keeps the last individual provider for existing home and schedule paths');
     assert.equal(startup.savedIndividualProvider, expectedProvider, 'the individual provider preference stays separate from integrated mode');
   }
@@ -916,7 +918,8 @@ async function run() {
     }
 
     await selectSourceSetting('integrated', 'restore integrated content source', `window.__dinoPatch03Bridge?.getMode() === 'integrated'
-      && localStorage.getItem('contentSource') === 'integrated'
+      && localStorage.getItem('lilacDinoPatch.searchMode') === 'integrated'
+      && localStorage.getItem('contentSource') !== 'integrated'
       && document.querySelector('#contentSource')?.value === 'integrated'`);
     sourceModeFlow = { individualProvider, individualSearch, individualProviderCalls: individualCalls,
       individualProviders, individualDetail, individualPlayback, restoredMode: 'integrated', restoredProvider: await evaluate('state.source', 'preserved provider after returning to integrated') };

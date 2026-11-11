@@ -1,6 +1,174 @@
 (function (root) {
   // Linkkf remains an original standalone source; Dino aggregation uses the other five sources.
   const PROVIDERS = ['reanime', 'miruro', 'animenosub', 'ohli24', 'linkani'];
+  const OFFICIAL_SOURCES = Object.freeze(['reanime', 'miruro', 'animenosub', 'ohli24', 'linkani', 'linkkf']);
+  const SOURCE_MODE_KEY = 'lilacDinoPatch.searchMode';
+  const SOURCE_MIGRATION_KEY = 'lilacDinoPatch.contentSourceMigration';
+  const LEGACY_INTEGRATED_SOURCE = 'integrated';
+
+  function storageSnapshot(storage) {
+    return {
+      contentSource: storage.getItem('contentSource'),
+      contentSourceProvider: storage.getItem('contentSourceProvider'),
+      mode: storage.getItem(SOURCE_MODE_KEY)
+    };
+  }
+
+  function restoreStorageSnapshot(storage, snapshot) {
+    try {
+      for (const [key, value] of [
+        ['contentSource', snapshot.contentSource],
+        ['contentSourceProvider', snapshot.contentSourceProvider],
+        [SOURCE_MODE_KEY, snapshot.mode]
+      ]) {
+        if (value == null) storage.removeItem(key);
+        else storage.setItem(key, value);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function readSourceMigrationJournal(storage) {
+    const raw = storage.getItem(SOURCE_MIGRATION_KEY);
+    if (raw == null) return { version: 1, entries: [] };
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch { return null; }
+    if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.entries)) return null;
+    for (const entry of parsed.entries) {
+      if (!entry || !['prepared', 'complete', 'rolled-back', 'recovery-required'].includes(entry.status)
+        || entry.before?.contentSource !== LEGACY_INTEGRATED_SOURCE
+        || !OFFICIAL_SOURCES.includes(entry.before?.contentSourceProvider)
+        || !(entry.before?.mode == null || typeof entry.before.mode === 'string')
+        || entry.after?.contentSource !== entry.before.contentSourceProvider
+        || entry.after?.mode !== LEGACY_INTEGRATED_SOURCE) return null;
+    }
+    return parsed;
+  }
+
+  function finishLegacySourceMigration(storage, journal, entry) {
+    const current = storageSnapshot(storage);
+    const before = entry.before, after = entry.after;
+    const recognizedPartialState = current.contentSourceProvider === before.contentSourceProvider
+      && [before.contentSource, after.contentSource].includes(current.contentSource)
+      && [before.mode, after.mode].includes(current.mode);
+    if (!recognizedPartialState) {
+      return { ok: false, mode: 'provider', provider: null, needsRecovery: true, reason: 'legacy-source-migration-state-changed' };
+    }
+
+    try {
+      storage.setItem('contentSource', after.contentSource);
+      storage.setItem(SOURCE_MODE_KEY, after.mode);
+      entry.status = 'complete';
+      storage.setItem(SOURCE_MIGRATION_KEY, JSON.stringify(journal));
+      return { ok: true, mode: 'integrated', provider: after.contentSource, migratedLegacySource: true, migrationBackupKey: SOURCE_MIGRATION_KEY };
+    } catch (error) {
+      const restored = restoreStorageSnapshot(storage, entry.before);
+      entry.status = restored ? 'rolled-back' : 'recovery-required';
+      try { storage.setItem(SOURCE_MIGRATION_KEY, JSON.stringify(journal)); } catch { /* preserve the prepared journal for diagnosis */ }
+      return {
+        ok: false, mode: 'provider', provider: null, needsRecovery: !restored,
+        reason: restored ? 'legacy-source-migration-rolled-back' : 'legacy-source-migration-rollback-failed',
+        error: String(error?.message || error)
+      };
+    }
+  }
+
+  function readSourceSettings(storage) {
+    if (!storage || typeof storage.getItem !== 'function') {
+      return { ok: false, mode: 'provider', provider: null, reason: 'storage-unavailable' };
+    }
+    try {
+      const source = storage.getItem('contentSource');
+      const mode = storage.getItem(SOURCE_MODE_KEY);
+      if (mode != null && mode !== LEGACY_INTEGRATED_SOURCE) {
+        return { ok: false, mode: 'provider', provider: null, needsRecovery: true, reason: 'unsupported-dino-source-mode' };
+      }
+      if (source === LEGACY_INTEGRATED_SOURCE) {
+        const previousProvider = storage.getItem('contentSourceProvider');
+        if (!OFFICIAL_SOURCES.includes(previousProvider)) {
+          return { ok: false, mode: 'provider', provider: null, needsRecovery: true, reason: 'legacy-provider-unavailable' };
+        }
+        return { ok: true, mode: 'integrated', provider: previousProvider, needsMigration: true };
+      }
+      if (source != null && source !== '' && !OFFICIAL_SOURCES.includes(source)) {
+        return { ok: false, mode: 'provider', provider: null, reason: 'unsupported-official-provider' };
+      }
+      return {
+        ok: true,
+        mode: mode === LEGACY_INTEGRATED_SOURCE ? 'integrated' : 'provider',
+        provider: source || 'reanime',
+        needsMigration: false
+      };
+    } catch (error) {
+      return { ok: false, mode: 'provider', provider: null, reason: 'storage-read-failed', error: String(error?.message || error) };
+    }
+  }
+
+  function officialSourceForState(settings, savedSource) {
+    if (settings?.ok && OFFICIAL_SOURCES.includes(settings.provider)) return settings.provider;
+    return OFFICIAL_SOURCES.includes(savedSource) ? savedSource : 'reanime';
+  }
+
+  function initializeSourceSettings(storage) {
+    if (!storage || typeof storage.getItem !== 'function' || typeof storage.setItem !== 'function'
+      || typeof storage.removeItem !== 'function') {
+      return { ok: false, mode: 'provider', provider: null, reason: 'storage-unavailable' };
+    }
+    try {
+      const journal = readSourceMigrationJournal(storage);
+      if (!journal) return { ok: false, mode: 'provider', provider: null, needsRecovery: true, reason: 'legacy-migration-journal-invalid' };
+      if (journal.entries.some(entry => entry.status === 'recovery-required')) {
+        return { ok: false, mode: 'provider', provider: null, needsRecovery: true, reason: 'legacy-migration-recovery-required' };
+      }
+      const pending = [...journal.entries].reverse().find(entry => entry.status === 'prepared');
+      if (pending) return finishLegacySourceMigration(storage, journal, pending);
+
+      const current = readSourceSettings(storage);
+      if (!current.ok || !current.needsMigration) return current;
+      if (journal.entries.length >= 16) {
+        return { ok: false, mode: 'provider', provider: null, needsRecovery: true, reason: 'legacy-migration-history-full' };
+      }
+      const before = storageSnapshot(storage);
+      const entry = {
+        status: 'prepared',
+        before,
+        after: { contentSource: current.provider, mode: LEGACY_INTEGRATED_SOURCE }
+      };
+      journal.entries.push(entry);
+      storage.setItem(SOURCE_MIGRATION_KEY, JSON.stringify(journal));
+      return finishLegacySourceMigration(storage, journal, entry);
+    } catch (error) {
+      return { ok: false, mode: 'provider', provider: null, reason: 'storage-write-failed', error: String(error?.message || error) };
+    }
+  }
+
+  function saveSourceSelection(storage, selected) {
+    if (!OFFICIAL_SOURCES.includes(selected) && selected !== LEGACY_INTEGRATED_SOURCE) {
+      return { ok: false, mode: 'provider', provider: null, reason: 'unsupported-source-selection' };
+    }
+    const initialized = initializeSourceSettings(storage);
+    if (!initialized.ok) return initialized;
+    const before = storageSnapshot(storage);
+    try {
+      if (selected === LEGACY_INTEGRATED_SOURCE) {
+        storage.setItem(SOURCE_MODE_KEY, LEGACY_INTEGRATED_SOURCE);
+      } else {
+        storage.setItem('contentSource', selected);
+        storage.setItem('contentSourceProvider', selected);
+        storage.removeItem(SOURCE_MODE_KEY);
+      }
+    } catch (error) {
+      const restored = restoreStorageSnapshot(storage, before);
+      return {
+        ok: false, mode: initialized.mode, provider: initialized.provider,
+        needsRecovery: !restored, reason: restored ? 'source-selection-rolled-back' : 'source-selection-rollback-failed',
+        error: String(error?.message || error)
+      };
+    }
+    return readSourceSettings(storage);
+  }
 
   function stableId(value) {
     const id = Number(value);
@@ -292,8 +460,29 @@
     return terms;
   }
 
-  const api = { PROVIDERS, groupResults, filterGroups, chooseSource, searchProviders, mergeSearchResults,
-    aliases, year, part, format, metadataCompatible, identityMatch, providersNeedingTitleVariants, titleVariantTerms };
+  const api = {
+    PROVIDERS,
+    OFFICIAL_SOURCES,
+    SOURCE_MODE_KEY,
+    SOURCE_MIGRATION_KEY,
+    initializeSourceSettings,
+    readSourceSettings,
+    saveSourceSelection,
+    officialSourceForState,
+    groupResults,
+    filterGroups,
+    chooseSource,
+    searchProviders,
+    mergeSearchResults,
+    aliases,
+    year,
+    part,
+    format,
+    metadataCompatible,
+    identityMatch,
+    providersNeedingTitleVariants,
+    titleVariantTerms
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.LilacIntegratedSearch = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -271,7 +271,7 @@ function inspectProcessTree(rootPid, exePath, expectedUserData) {
   return inspected;
 }
 
-async function launchManager() {
+async function launchManager({ expectedStartupPatch = '적용됨' } = {}) {
   const packagedExe = path.join(managerAppRoot, '디노패치관리자.exe');
   const packagedEngine = path.join(managerAppRoot, 'resources', 'manager-engine', 'DinoPatchManagerEngine.exe');
   assert.ok(fs.existsSync(packagedExe) && fs.existsSync(packagedEngine), `${managerLabel} package and bundled engine must exist.`);
@@ -325,7 +325,7 @@ async function launchManager() {
     cdp = await connectCdp(target.webSocketDebuggerUrl);
     await cdp.command('Runtime.enable');
     await cdp.command('Page.enable');
-    const state = await waitForUi(cdp, (value) => value.busy === '대기' && value.patch.includes('적용됨'), `${managerLabel} initial auto-apply`);
+    const state = await waitForUi(cdp, (value) => value.busy === '대기' && value.patch.includes(expectedStartupPatch), `${managerLabel} initial startup state`);
     const info = await evaluate(cdp, 'window.dinoManager.getInfo()');
     for (const key of ['appData', 'userData', 'sessionData', 'cache', 'temp', 'logs', 'crashDumps', 'chromiumUserData']) {
       assert.equal(info.runtimePaths[key].matches, true, `${key} must be isolated to this OS Temp profile.`);
@@ -430,10 +430,31 @@ async function main() {
     await saveScreenshot(handle.cdp, path.join(captureRoot, `${managerLabel.toLowerCase()}-v055-auto-reapplied.png`));
 
     await evaluate(handle.cdp, `(() => { const d=document.querySelector('.advanced-tools'); d.open=true; const b=document.getElementById('uninstall'); if(!b||b.disabled) throw new Error('Uninstall is unavailable.'); b.click(); return true; })()`);
-    const unapplied = await waitForUi(handle.cdp, (state) => state.busy === '대기' && state.patch.includes('미적용'), `${managerLabel} uninstall after automatic reapply`);
+    const unapplied = await waitForUi(
+      handle.cdp,
+      (state) => state.busy === '대기' && state.patch.includes('수동 해제') && state.detail.includes('다시 적용하지 않습니다'),
+      `${managerLabel} explicit uninstall state`,
+    );
     const restored = digestEntries(treeEntries(sourceRoot, new Set(['DinoPatchManager'])));
     assert.deepEqual(restored, digestEntries(updatedEntries), 'Uninstall must restore the complete official v0.5.55 tree.');
     await saveScreenshot(handle.cdp, path.join(captureRoot, `${managerLabel.toLowerCase()}-v055-restored-after-uninstall.png`));
+    const backupsAfterUninstall = await evaluate(handle.cdp, 'window.dinoManager.backups()');
+    const backupIdsAfterUninstall = (backupsAfterUninstall.items || []).map((item) => item.id).sort();
+    assert.deepEqual(backupIdsAfterUninstall, backups.map((item) => item.id).sort(), 'Uninstall must preserve the existing backup records without creating another backup.');
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    const stableUninstall = await waitForUi(
+      handle.cdp,
+      (state) => state.busy === '대기' && state.patch.includes('수동 해제') && state.detail.includes('변경될 때까지 자동으로 다시 적용하지 않습니다'),
+      `${managerLabel} does not reapply after a source watcher notification`,
+      5000,
+    );
+    assert.deepEqual(digestEntries(treeEntries(sourceRoot, new Set(['DinoPatchManager']))), digestEntries(updatedEntries), 'A watcher recheck must not mutate a manually uninstalled source.');
+    await closeManager(handle);
+    handle = await launchManager({ expectedStartupPatch: '수동 해제' });
+    const afterRestart = handle.state;
+    assert.ok(afterRestart.patch.includes('수동 해제') && afterRestart.detail.includes('변경될 때까지 자동으로 다시 적용하지 않습니다'), 'A fresh manager launch must preserve the explicit manual uninstall.');
+    assert.deepEqual(digestEntries(treeEntries(sourceRoot, new Set(['DinoPatchManager']))), digestEntries(updatedEntries), 'Restart must not reapply the patch to the unchanged official source.');
+    await saveScreenshot(handle.cdp, path.join(captureRoot, `${managerLabel.toLowerCase()}-v055-manual-uninstall-after-restart.png`));
 
     const report = {
       status: 'PASS',
@@ -449,6 +470,9 @@ async function main() {
       addedPatchModules: extras,
       restoredOfficialTree: restored,
       guiAfterUninstall: unapplied,
+      guiAfterUninstallQuietPeriod: stableUninstall,
+      guiAfterRestart: afterRestart,
+      backupIdsAfterUninstall,
       runtimePaths: handle.info.runtimePaths,
       chromiumProcesses: handle.childPaths,
       captures: captureRoot,

@@ -4,6 +4,8 @@
 
 저장소: [github.com/dinoforge/lilac-dino-patch](https://github.com/dinoforge/lilac-dino-patch)
 
+공식 원본: [LilacAnime Desktop](https://github.com/whispelyn-byte/LilacAnime-desktop) · [업스트림 연결 안내](docs/UPSTREAM_LINK.md) · [디노 베타 릴리즈 설명 초안](docs/releases/dino-v0.1.0-beta.1.md) (**아직 릴리즈 게시 전**)
+
 라일락 디노 패치는 공식 LilacAnime Desktop **소스 폴더**의 파일 구조와 호출 계약을 검사하고, 호환되는 소스에 디노 패치를 적용·관리하는 Electron 기반 Windows 관리자입니다. 공식 애플리케이션을 대체하지 않으며, 작품 상세·회차·공급원 resolve·영상 재생은 공식 LilacAnime 흐름을 사용합니다.
 
 > 이 프로젝트는 공식 LilacAnime와 제휴하거나 공식 배포하는 제품이 아닙니다. 코드·에셋·외부 콘텐츠의 이용 권리와 배포 범위가 확인되지 않아 저장소는 비공개이고 공개 다운로드 및 GitHub Release는 제공하지 않습니다.
@@ -61,7 +63,7 @@ v0.5.58은 실제 격리 앱 실행까지 기록된 검증 기준입니다. 새 
 
 ## 현재 저장소 이관 상태
 
-저장소 이름과 기본 문서를 디노 패치 중심으로 전환했습니다. 다만 현재 GitHub `main`에는 과거 LilacAnime Player 소스와 기존 프로젝트 자료가 남아 있고, **A35-final 관리자 소스와 빌드 입력 전체는 아직 포함되지 않았습니다.** 기존의 디노 관리자 관련 브랜치에는 초기 Electron 미리보기와 이전 패치 관리자 구현이 있지만 A35-final 소스가 아닙니다. A35 바이너리와 현재 로컬 관리자 소스의 정확한 빌드 대응을 입증할 자료가 없어 소스 완전성이나 재현 가능한 빌드를 주장하지 않습니다. 기존 앱 코드는 실행 경로를 보존하기 위해 이동하거나 삭제하지 않았습니다.
+저장소의 기본 브랜치 `main`에는 이전 LilacAnime Player의 실행 자료가 남아 있습니다. 별도 개발/검토 브랜치에는 A35 관리자 소스 이관, 독립 빌드 경로 및 관리자 수명주기·설정 호환성 개선(A/B 커밋)이 반영되어 있습니다. **기존 A35-final 배포 바이너리와 새 A/B 소스 산출물이 바이트 동일하다고 주장하지 않습니다.** 수동 재적용 GUI 실험 코드는 검토 브랜치의 A/B 커밋에 포함되지 않으며 전체 기능적 융합은 PARTIAL입니다. 기존 원본 앱 코드를 일괄 삭제·이동하거나 Git 이력을 병합하지 않았습니다.
 
 이 저장소의 루트 `package.json`과 `.github/workflows/build.yml`은 기존 LilacAnime 앱의 Windows/macOS 빌드 구성입니다. 이 워크플로는 A35 관리자를 빌드하지 않습니다. A35 바이너리 ZIP은 일반 Git 커밋에 포함하지 않았습니다.
 
@@ -77,3 +79,8 @@ v0.5.58은 실제 격리 앱 실행까지 기록된 검증 기준입니다. 새 
 - [관리자 UI 디자인 기준](DESIGN.md)
 - [저장소 전환 전 문서 보관함](docs/legacy/README.md)
 - [권리 검토 기록](docs/RIGHTS_REVIEW.md)
+- [사용자 설명서 — 설치·적용·해제·백업·문제 해결](docs/USER_GUIDE.md)
+- [공식 원본 저장소 연결](docs/UPSTREAM_LINK.md)
+- [0.1.0 Beta 1 릴리즈 설명 초안](docs/releases/dino-v0.1.0-beta.1.md)
+- [Windows 관리자 실제 릴리즈 실행 절차](docs/releases/RELEASE_OPERATIONS.md)
+- [0.1.0 Beta 1 사용자용 릴리즈 노트 후보](docs/releases/RELEASE_NOTES_CANDIDATE.md)

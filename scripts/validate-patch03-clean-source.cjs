@@ -154,14 +154,25 @@ function verifyChangedFiles(sourceRoot, before) {
   const html = fs.readFileSync(path.join(sourceRoot, 'src', 'index.html'), 'utf8');
   const bridge = fs.readFileSync(path.join(sourceRoot, 'src', 'patch03-bridge.js'), 'utf8');
   if ((html.match(/id="detailDialog"/g) || []).length !== 1) throw new Error('Patch 03 must reuse the one official #detailDialog.');
-  if (!/savedContentSource === 'integrated' \? \(localStorage\.getItem\('contentSourceProvider'\) \|\| 'reanime'\)/.test(app)) throw new Error('The integrated-mode state bootstrap was not applied.');
+  if (!/LilacIntegratedSearch\?\.initializeSourceSettings\(localStorage\)/.test(app)) throw new Error('The Dino source-settings migration hook is missing from the official renderer bootstrap.');
+  if (!/LilacIntegratedSearch\?\.officialSourceForState\?\.\(dinoSourceSettings, savedContentSource\)/.test(app)) throw new Error('The original renderer source state is not kept within the official provider list on migration failure.');
   if (!/integrated-search\.js[\s\S]*app\.js[\s\S]*patch03-bridge\.js/.test(html)) throw new Error('Patch script load order is incorrect.');
   if (!bridge.includes('window.lilac.providerCatalog(provider, text)')
     || (!bridge.includes('officialOpenDetail.call(this, id)') && !bridge.includes('officialOpenDetail.call(this, selectedId)'))) {
     throw new Error('Patch bridge no longer uses the official catalog/detail functions.');
   }
+  if (!bridge.includes('saveSourceSelection(localStorage, selected)')
+    || bridge.includes("localStorage.setItem('contentSource', 'integrated')")) {
+    throw new Error('The patch still stores its integrated mode in the official contentSource key.');
+  }
   const patchApi = require(path.join(sourceRoot, 'src', 'integrated-search.js'));
   if (JSON.stringify(patchApi.PROVIDERS) !== JSON.stringify(['reanime', 'miruro', 'animenosub', 'ohli24', 'linkani'])) throw new Error('Patch provider allowlist drifted or includes Linkkf.');
+  if (patchApi.SOURCE_MODE_KEY !== 'lilacDinoPatch.searchMode'
+    || typeof patchApi.initializeSourceSettings !== 'function'
+    || typeof patchApi.saveSourceSelection !== 'function'
+    || typeof patchApi.officialSourceForState !== 'function') {
+    throw new Error('The namespaced and migratable source-settings contract is incomplete.');
+  }
   return { modified, removed, added, hashes: Object.fromEntries([...after.entries()]) };
 }
 

@@ -484,7 +484,9 @@ class PatchManagerTests(unittest.TestCase):
         self.assertEqual(result["removedFiles"], [])
         self.assertEqual(result["outputPostMoveSha256"], manager_core.tree_sha256(manager_core._inventory(output)))
         self.assertTrue(Path(result["reportPath"]).is_file())
-        self.assertIn("savedContentSource === 'integrated'", (output / "src/app.js").read_text(encoding="utf-8"))
+        patched_app = (output / "src/app.js").read_text(encoding="utf-8")
+        self.assertIn("LilacIntegratedSearch?.initializeSourceSettings(localStorage)", patched_app)
+        self.assertIn("officialSourceForState?.(dinoSourceSettings, savedContentSource)", patched_app)
         duplicate = self.root / "parent" / "second-application"
         with self.assertRaises(manager_core.ManagerError):
             manager_core.apply_patch(output, self.patch, duplicate)
@@ -946,6 +948,123 @@ class PatchManagerTests(unittest.TestCase):
             )
         self.assertEqual(first["status"], "APPLIED")
         self.assertEqual(second["status"], "APPLIED")
+
+    def test_manual_uninstall_stays_unpatched_until_official_source_changes(self) -> None:
+        fake_contracts = {"status": "PASS", "testCount": 10, "passCount": 10, "failCount": 0}
+        original_hashes = manager_core._inventory(self.official)
+        with mock.patch.object(manager_core, "run_node_contracts", return_value=fake_contracts):
+            applied = manager_core.automatic_startup_check(
+                self.official, patch_root_value=self.patch, process_check=lambda _root: None
+            )
+        self.assertEqual(applied["status"], "APPLIED")
+        manager_core.uninstall_patch(
+            self.official, patch_root_value=self.patch, process_check=lambda _root: None
+        )
+        self.assertEqual(manager_core._inventory(self.official), original_hashes)
+        state = json.loads(
+            (self.official / "DinoPatchManager" / "state" / "patch-state.json").read_text(encoding="utf-8")
+        )
+        self.assertTrue(state["manualUninstall"])
+        backup_ids = [item["id"] for item in manager_core.list_backups(self.official)]
+
+        with mock.patch.object(
+            manager_core,
+            "run_node_contracts",
+            side_effect=AssertionError("A manual uninstall must not immediately reapply the patch."),
+        ):
+            checked = manager_core.automatic_startup_check(
+                self.official, patch_root_value=self.patch, process_check=lambda _root: None
+            )
+        self.assertEqual(checked["status"], "UNPATCHED")
+        self.assertTrue(checked["manualUninstall"])
+        self.assertIn("다시 적용하지 않습니다", checked["reason"])
+        self.assertEqual(manager_core._inventory(self.official), original_hashes)
+        self.assertEqual([item["id"] for item in manager_core.list_backups(self.official)], backup_ids)
+
+        updated = self.root / "official-v0.5.56-after-manual-uninstall"
+        updated.mkdir()
+        old_official = self.official
+        self.official = updated
+        try:
+            self._make_structural_source("0.5.56")
+        finally:
+            self.official = old_official
+        updated_identity = self._mock_official_identity(updated)
+        for relative in sorted(manager_core._inventory(updated)):
+            source = updated / Path(*relative.split("/"))
+            destination = old_official / Path(*relative.split("/"))
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+
+        with mock.patch.object(manager_core, "_fetch_official_source_identity", return_value=updated_identity), mock.patch.object(
+            manager_core, "run_node_contracts", return_value=fake_contracts
+        ):
+            updated_result = manager_core.automatic_startup_check(
+                old_official, patch_root_value=self.patch, process_check=lambda _root: None
+            )
+        self.assertEqual(updated_result["status"], "APPLIED")
+        self.assertTrue(updated_result["sourceUpdateDetected"])
+        self.assertFalse(updated_result.get("manualUninstall", False))
+
+    def test_explicit_apply_after_manual_uninstall_rechecks_and_clears_suppression(self) -> None:
+        fake_contracts = {"status": "PASS", "testCount": 10, "passCount": 10, "failCount": 0}
+        original_hashes = manager_core._inventory(self.official)
+        with mock.patch.object(manager_core, "run_node_contracts", return_value=fake_contracts):
+            first = manager_core.automatic_startup_check(
+                self.official, patch_root_value=self.patch, process_check=lambda _root: None
+            )
+        self.assertEqual(first["status"], "APPLIED")
+        first_backup_id = first["backupId"]
+
+        manager_core.uninstall_patch(
+            self.official, patch_root_value=self.patch, process_check=lambda _root: None
+        )
+        self.assertEqual(manager_core._inventory(self.official), original_hashes)
+        state_path = self.official / "DinoPatchManager" / "state" / "patch-state.json"
+        self.assertTrue(json.loads(state_path.read_text(encoding="utf-8"))["manualUninstall"])
+
+        with mock.patch.object(manager_core, "run_node_contracts", return_value={"status": "FAIL", "failCount": 1}):
+            with self.assertRaisesRegex(manager_core.ManagerError, "계약 검사가 통과하지"):
+                manager_core.apply_patch_in_place(
+                    self.official, patch_root_value=self.patch, process_check=lambda _root: None
+                )
+        self.assertEqual(manager_core._inventory(self.official), original_hashes)
+        self.assertTrue(json.loads(state_path.read_text(encoding="utf-8"))["manualUninstall"])
+        backups_after_failed_apply = manager_core.list_backups(self.official)
+        self.assertEqual([item["id"] for item in backups_after_failed_apply], [first_backup_id])
+
+        with mock.patch.object(manager_core, "run_node_contracts", return_value=fake_contracts) as contracts:
+            reapplied = manager_core.apply_patch_in_place(
+                self.official, patch_root_value=self.patch, process_check=lambda _root: None
+            )
+        self.assertEqual(contracts.call_count, 1, "Explicit reapply must rerun staged contract validation.")
+        self.assertEqual(reapplied["status"], "APPLIED")
+        self.assertNotEqual(reapplied["backupId"], first_backup_id)
+        self.assertEqual(reapplied["modifiedOfficialFiles"], ["src/app.js", "src/index.html"])
+        self.assertEqual(len(reapplied["addedPatchFiles"]), 3)
+
+        applied_state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(applied_state["status"], "APPLIED")
+        self.assertFalse(applied_state.get("manualUninstall", False))
+        actual_after_hashes = manager_core._inventory(self.official)
+        self.assertEqual(actual_after_hashes, applied_state["afterFileHashes"])
+        self.assertEqual(
+            set(actual_after_hashes),
+            set(original_hashes) | {item["destination"] for item in self.manifest["runtimeModules"]},
+        )
+        backup_records = {item["id"]: item for item in manager_core.list_backups(self.official)}
+        self.assertEqual(set(backup_records), {first_backup_id, reapplied["backupId"]})
+        self.assertFalse(backup_records[first_backup_id]["restorable"])
+        self.assertTrue(backup_records[reapplied["backupId"]]["restorable"])
+
+        backup_ids = sorted(backup_records)
+        already_applied = manager_core.apply_patch_in_place(
+            self.official,
+            patch_root_value=self.patch,
+            process_check=lambda _root: self.fail("Repeated explicit apply must not mutate an applied source."),
+        )
+        self.assertEqual(already_applied["status"], "ALREADY_APPLIED")
+        self.assertEqual(sorted(item["id"] for item in manager_core.list_backups(self.official)), backup_ids)
 
     def test_automatic_startup_reconciles_new_official_source_and_recovers_interrupted_reapply(self) -> None:
         fake_contracts = {"status": "PASS", "testCount": 10, "passCount": 10, "failCount": 0}

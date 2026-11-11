@@ -112,6 +112,11 @@ function makeBridgeContext(api, options = {}) {
   ]);
   const calls = { catalog: [], originalSearch: [], details: [], cards: [], timers: [] };
   const storage = new Map([['contentSource', 'integrated'], ['contentSourceProvider', 'reanime']]);
+  const localStorage = {
+    getItem(key) { return storage.has(key) ? storage.get(key) : null; },
+    setItem(key, value) { storage.set(key, String(value)); },
+    removeItem(key) { storage.delete(key); }
+  };
   let filterRoot = null;
   const document = {
     querySelector(selector) {
@@ -172,10 +177,7 @@ function makeBridgeContext(api, options = {}) {
   const context = vm.createContext({
     window,
     document,
-    localStorage: {
-      getItem(key) { return storage.has(key) ? storage.get(key) : null; },
-      setItem(key, value) { storage.set(key, String(value)); }
-    },
+    localStorage,
     setTimeout(callback, delay) { calls.timers.push({ callback, delay }); return calls.timers.length; }
   });
   vm.runInContext('this.window=window;', context);
@@ -205,7 +207,11 @@ test('the patch preserves the official detail dialog and exposes one integrated 
   assert.equal((html.match(/option value="integrated"/g) || []).length, 1);
   assert.equal((html.match(/button data-value="integrated"/g) || []).length, 1);
   assert.match(html, /integrated-search\.js[\s\S]*app\.js[\s\S]*patch03-bridge\.js/);
-  assert.match(app, /savedContentSource === 'integrated' \? \(localStorage\.getItem\('contentSourceProvider'\) \|\| 'reanime'\)/);
+  assert.match(app, /LilacIntegratedSearch\?\.initializeSourceSettings\(localStorage\)/);
+  assert.match(app, /LilacIntegratedSearch\?\.officialSourceForState\?\.\(dinoSourceSettings, savedContentSource\)/);
+  const bridge = read('src/patch03-bridge.js');
+  assert.match(bridge, /saveSourceSelection\(localStorage, selected\)/);
+  assert.doesNotMatch(bridge, /localStorage\.setItem\('contentSource', 'integrated'\)/);
 });
 
 test('the same official identity is grouped while different seasons remain separate', { skip: cleanSourceOnly }, () => {
@@ -224,6 +230,8 @@ test('the same official identity is grouped while different seasons remain separ
 test('bridge performs integrated search through the five official catalog calls and keeps individual mode delegated', { skip: cleanSourceOnly }, async () => {
   const app = makeBridgeContext(require(path.join(sourceRoot, 'src', 'integrated-search.js')));
   await app.window.doSearch('Frieren Season 2');
+  assert.equal(app.storage.get('contentSource'), 'reanime', 'legacy integrated mode is restored to its original provider');
+  assert.equal(app.storage.get('lilacDinoPatch.searchMode'), 'integrated');
   assert.deepEqual([...new Set(app.calls.catalog.map(call => call.provider))].sort(), ['animenosub', 'linkani', 'miruro', 'ohli24', 'reanime']);
   assert.equal(app.calls.catalog.some(call => call.provider === 'linkkf'), false);
   const snapshot = app.window.__dinoPatch03Bridge.getSearchSnapshot();
@@ -237,7 +245,8 @@ test('bridge performs integrated search through the five official catalog calls 
   assert.deepEqual(app.calls.originalSearch, ['individual query']);
   assert.equal(app.calls.catalog.length, callsBeforeIndividualSearch);
   app.sourceSelect.onchange({ target: { value: 'integrated' } });
-  assert.equal(app.storage.get('contentSource'), 'integrated');
+  assert.equal(app.storage.get('contentSource'), 'ohli24', 'integrated mode must not overwrite the official provider setting');
+  assert.equal(app.storage.get('lilacDinoPatch.searchMode'), 'integrated');
   assert.equal(app.storage.get('contentSourceProvider'), 'ohli24');
   assert.equal(app.calls.timers.at(-1).delay, 600);
 });
