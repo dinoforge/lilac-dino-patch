@@ -323,7 +323,14 @@ async function run() {
     if (cleanOnSuccess) {
       const resolvedRunRoot = fs.realpathSync.native(runRoot);
       if (resolvedRunRoot !== temp && isWithin(resolvedRunRoot, temp) && path.basename(resolvedRunRoot).startsWith('DinoTheme-Electron-LevelDB-')) {
-        fs.rmSync(resolvedRunRoot, { recursive: true, force: true });
+        try {
+          // GitHub-hosted Windows runners may keep temporary LevelDB handles briefly.
+          fs.rmSync(resolvedRunRoot, { recursive: true, force: true, maxRetries: 12, retryDelay: 250 });
+        } catch (error) {
+          if (!['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(error && error.code)) throw error;
+          // The fixture is inside the validated OS temporary root, never user data.
+          process.stderr.write(`Theme LevelDB temporary cleanup deferred (locked): ${resolvedRunRoot}\n`);
+        }
       }
     }
   }
