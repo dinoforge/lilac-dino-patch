@@ -430,7 +430,9 @@ async function readLayout(cdp) {
       autoManageStatus: document.getElementById('autoManageStatus')?.textContent || null,
       actionStates: Object.fromEntries(['inspect', 'uninstall'].map((id) => { const button=document.getElementById(id); return [id, button ? { disabled:button.disabled, classes:button.className } : null]; })),
       devicePixelRatio: window.devicePixelRatio,
-      advancedOpen: tools.open,
+      advancedOpen: Boolean(tools && (tools.tagName !== 'DETAILS' || tools.open)),
+      advancedCollapsible: tools?.tagName === 'DETAILS',
+      statusGapPx: Math.round(document.querySelector('.result-card').getBoundingClientRect().top - tools.getBoundingClientRect().bottom),
       safetyExpanded: safetyCard?.classList.contains('is-expanded') || false,
       safetyMessageDisplay: safetyMessage ? getComputedStyle(safetyMessage).display : 'missing',
       detailHidden: detail ? detail.hidden : false,
@@ -786,8 +788,8 @@ async function main() {
     assert.equal(a22NativeWindow.bounds.width, 920, `The packaged ${candidateLabel} manager must open at 920 px width.`);
     assert.equal(a22NativeWindow.bounds.height, 800, `The packaged ${candidateLabel} manager must open at 800 px height.`);
     const defaultWindowLayout = await readLayout(first.cdp);
-    assert.ok(defaultWindowLayout.contentBottom <= defaultWindowLayout.height, 'The patch-list screen must fit inside the default window.');
-    assert.ok(defaultWindowLayout.height - defaultWindowLayout.contentBottom <= 24, 'The flex layout should use the available vertical space without leaving a large blank area.');
+    assert.ok(defaultWindowLayout.contentBottom > 0, 'The whole dashboard must be measurable.');
+    assert.ok(defaultWindowLayout.statusGapPx >= 0 && defaultWindowLayout.statusGapPx <= 16, 'The task status must immediately follow the always-visible tools.');
     assert.ok(defaultWindowLayout.scrollWidth <= defaultWindowLayout.width, 'The actual default window must not scroll horizontally.');
     assert.deepEqual(defaultWindowLayout.overlappingCriticalElements, [], 'The actual default window must not overlap the header, path controls or status.');
     assert.equal(defaultWindowLayout.width, baselineLayout.width, `A20 and ${candidateLabel} comparison must use the same client width.`);
@@ -850,7 +852,7 @@ async function main() {
       assert.equal(actualWindow.height, candidate.height, `Electron must accept the ${candidate.width}×${candidate.height} test height.`);
       const layout = await readLayout(first.cdp);
       assert.ok(layout.scrollWidth <= layout.width, `Candidate ${candidate.width}×${candidate.height} must not overflow horizontally.`);
-      assert.ok(layout.contentBottom <= layout.height && !layout.scrollRequired, `Candidate ${candidate.width}×${candidate.height} must fit the normal dashboard without scrolling.`);
+      assert.ok(layout.statusGapPx >= 0 && layout.statusGapPx <= 16, `Candidate ${candidate.width}×${candidate.height} has a large gap before task status.`);
       assert.deepEqual(layout.overlappingCriticalElements, [], `Candidate ${candidate.width}×${candidate.height} must not overlap text or controls.`);
       candidateLayouts.push({ configuredWindow: candidate, actualWindow, rendererViewport: { width: layout.width, height: layout.height }, aspectRatio: candidate.width / candidate.height, contentBottom: layout.contentBottom, emptyBelowContentPx: layout.height - layout.contentBottom, scrollRequired: layout.scrollRequired, scrollWidth: layout.scrollWidth, overlappingCriticalElements: layout.overlappingCriticalElements });
     }
@@ -862,9 +864,8 @@ async function main() {
     assert.ok(minimumLayout.scrollWidth <= minimumLayout.width, 'The minimum window must not introduce horizontal scrolling.');
     assert.deepEqual(minimumLayout.overlappingCriticalElements, [], 'The minimum window must not overlap primary dashboard content.');
     await saveScreenshot(first.cdp, path.join(screenshotRoot, 'manager-minimum-viewport.png'));
-    assert.ok(minimumLayout.contentBottom <= minimumLayout.height, `The collapsed patch-list screen must fit at the configured minimum height: ${JSON.stringify(minimumLayout)}`);
+    assert.ok(minimumLayout.statusGapPx >= 0 && minimumLayout.statusGapPx <= 16, 'Small windows may vertically scroll but must not reserve a blank status gap.');
 
-    await evaluate(first.cdp, `document.querySelector('.advanced-tools').open=true`);
     const minimumToolsLayout = await readLayout(first.cdp);
     assert.ok(minimumToolsLayout.scrollWidth <= minimumToolsLayout.width, 'Expanded advanced tools at minimum width must not scroll horizontally.');
     assert.deepEqual(minimumToolsLayout.overlappingCriticalElements, [], 'Expanded advanced tools at minimum width must not overlap primary content.');
@@ -877,7 +878,7 @@ async function main() {
     assert.ok(longErrorLayout.detailScrollHeight > longErrorLayout.detailClientHeight, 'Synthetic long diagnostics must exercise the internal detail scrollbar.');
     assert.ok(longErrorLayout.scrollWidth <= longErrorLayout.width, 'Long diagnostics must not create horizontal overflow.');
     await saveScreenshot(first.cdp, path.join(screenshotRoot, 'manager-long-error-detail.png'));
-    await evaluate(first.cdp, `(() => { const detail=document.getElementById('detail'); const safety=document.getElementById('safetyCard'); detail.hidden=true; detail.textContent=''; safety.hidden=true; document.querySelector('.advanced-tools').open=false; })()`);
+    await evaluate(first.cdp, `(() => { const detail=document.getElementById('detail'); const safety=document.getElementById('safetyCard'); detail.hidden=true; detail.textContent=''; safety.hidden=true; })()`);
     const restoredDefaultWindow = await resizeWindow(first, 920, 800);
     assert.equal(restoredDefaultWindow.width, 920, `The ${candidateLabel} capture window must be restored to its native default width.`);
     assert.equal(restoredDefaultWindow.height, 800, `The ${candidateLabel} capture window must be restored to its native default height.`);
@@ -885,7 +886,8 @@ async function main() {
     assert.equal(baselineSameViewportLayout.width, defaultWindowLayout.width, `The preserved A20 baseline must use the ${candidateLabel} default CSS width.`);
     assert.equal(baselineSameViewportLayout.height, defaultWindowLayout.height, `The preserved A20 baseline must use the ${candidateLabel} default CSS height.`);
     const initialLayout = defaultWindowLayout;
-    assert.equal(initialLayout.advancedOpen, false, 'Advanced tools should stay secondary until opened.');
+    assert.equal(initialLayout.advancedOpen, true, 'Advanced tools must be visible without expanding a panel.');
+    assert.equal(initialLayout.advancedCollapsible, false, 'Advanced tools must not be an accordion.');
     assert.ok(initialLayout.scrollWidth <= initialLayout.width, 'Default dashboard must not overflow horizontally.');
     assert.equal(initialLayout.pathOverflow, 'ellipsis', 'Long root paths should not take over the dashboard.');
     assert.ok(initialLayout.pathTitle.includes('LilacAnime-desktop'), 'The full source path must remain available as the path title.');
@@ -895,7 +897,7 @@ async function main() {
     assert.equal(initialLayout.safetyCardHidden, true, 'Normal state should hide the safety card.');
     assert.equal(initialLayout.safetyExpanded, false, 'Normal state should not expand the warning card.');
     assert.equal(initialLayout.detailHidden, true, 'Successful state should not display empty or repetitive detail.');
-    assert.equal(initialLayout.scrollRequired, false, 'The patch-list screen should fit its default viewport.');
+    assert.ok(initialLayout.statusGapPx <= 16, 'Default window should show the work status directly after tool controls.');
     assert.deepEqual(initialLayout.overlappingCriticalElements, [], `The ${candidateLabel} default window must not overlap key text or controls.`);
     assert.ok(initialLayout.visibleControls.includes('chooseRoot') && initialLayout.visibleControls.includes('inspect'), 'Root selection and whole-list inspection must remain directly available.');
     const configuredWindowSize = { A20: { width: 920, height: 800, minWidth: 800, minHeight: 760 }, [candidateLabel]: { width: 920, height: 800, minWidth: 800, minHeight: 760 } };
@@ -982,11 +984,11 @@ async function main() {
     layoutComparison.fixtureLayouts = fixtureLayouts;
     fs.writeFileSync(layoutComparisonPath, JSON.stringify(layoutComparison, null, 2), { flag: 'w' });
 
-    const manualDetails = await evaluate(first.cdp, `(() => { const details=document.querySelector('.advanced-tools'); details.open=true; return {open:details.open, controls:['inspect','history','uninstall','backupSelect','restore','checkUpdates','diagnostics'].every((id)=>document.getElementById(id)), noDuplicateApply:!document.getElementById('apply')&&!document.getElementById('rowApply'), logsInsideAdvanced:details.contains(document.querySelector('.log-details')), updateControlsOutsideMain:!document.querySelector('.patch-list-card').contains(document.getElementById('checkUpdates')), contentHeight:Math.round(details.getBoundingClientRect().height)}; })()`);
-    assert.equal(manualDetails.open, true, 'Advanced tools should open on demand.');
+    const manualDetails = await evaluate(first.cdp, `(() => { const details=document.querySelector('.advanced-tools'); return {visible:details.getBoundingClientRect().height > 100, controls:['inspect','history','uninstall','backupSelect','restore','checkUpdates','diagnostics'].every((id)=>document.getElementById(id)), noDuplicateApply:!document.getElementById('apply')&&!document.getElementById('rowApply'), logsInsideAdvanced:details.contains(document.querySelector('.log-details')), updateControlsOutsideMain:!document.querySelector('.patch-list-card').contains(document.getElementById('checkUpdates')), contentHeight:Math.round(details.getBoundingClientRect().height)}; })()`);
+    assert.equal(manualDetails.visible, true, 'Advanced tools must always be visible.');
     assert.equal(manualDetails.controls, true, 'Existing inspect, history, patch, restore, update and diagnostic controls must remain present.');
     assert.equal(manualDetails.noDuplicateApply, true, 'Manual apply duplicates must be removed because startup and recheck apply automatically.');
-    assert.equal(manualDetails.logsInsideAdvanced, true, 'Detailed logs must be kept inside the collapsed advanced section.');
+    assert.equal(manualDetails.logsInsideAdvanced, true, 'Detailed logs must stay inside the tool section.');
     assert.equal(manualDetails.updateControlsOutsideMain, true, 'Official updater controls must stay out of the main patch-list area.');
     const manualToolsLayout = await readLayout(first.cdp);
     assert.ok(manualToolsLayout.scrollWidth <= manualToolsLayout.width, 'Expanded advanced tools must not introduce horizontal overflow at the default size.');
@@ -1001,7 +1003,6 @@ async function main() {
       const treeBeforeUpdateReview = treeDigest(sourceRoot, new Set(['DinoPatchManager']));
       assert.deepEqual(treeDigest(sourceRoot, new Set(['DinoPatchManager'])), treeBeforeUpdateReview, 'Reviewing an unsupported release must not modify the official source.');
     }
-    await evaluate(first.cdp, `document.querySelector('.advanced-tools').open=false`);
 
     await evaluate(first.cdp, 'document.activeElement && document.activeElement.blur()');
     await first.cdp.command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
@@ -1022,7 +1023,6 @@ async function main() {
     }
     await first.cdp.command('Emulation.clearDeviceMetricsOverride');
 
-    await evaluate(first.cdp, `document.querySelector('.advanced-tools').open=true`);
     await click(first.cdp, '#inspect', '상태 확인');
     await waitForUi(first.cdp, (state) => state.busy === '대기' && state.patch === '적용됨 · 호환' && state.backupCount === 1, 'Repeat inspection without duplicate backup');
     await closeManager(first);
@@ -1035,7 +1035,6 @@ async function main() {
     assert.ok(lightLayout.scrollWidth <= lightLayout.width, 'The light-theme dashboard must not clip horizontally.');
     await saveScreenshot(second.cdp, path.join(screenshotRoot, 'manager-electron-light.png'));
     const runtimePaths = second.info.runtimePaths;
-    await evaluate(second.cdp, `document.querySelector('.advanced-tools').open=true`);
     await click(second.cdp, '#history', '작업 기록');
     const historyState = await waitForUi(second.cdp, (state) => state.historyRendered, 'History button renders engine records');
     assert.equal(historyState.historyRendered, true, 'History button must render actual engine records.');
@@ -1129,7 +1128,6 @@ async function main() {
     second = await startPackagedManager({ sourceRoot, profileRoot, theme: 'light', label: 'conflict-protection manager run' });
     const userEdit = '\n// test-only user edit: must survive conflict rejection\n';
     fs.appendFileSync(appFile, userEdit, 'utf8');
-    await evaluate(second.cdp, `document.querySelector('.advanced-tools').open=true`);
     await click(second.cdp, '#uninstall', '충돌 상태의 패치 해제');
     await waitForUi(second.cdp, (state) => state.busy === '대기' && state.patch === '파일 충돌' && state.detail.includes('사용자 변경') && state.message.includes('실패'), 'Uninstall conflict rejection with fresh source inspection');
     assert.ok(fs.readFileSync(appFile, 'utf8').includes(userEdit.trim()), 'A conflicting user edit must remain untouched.');
