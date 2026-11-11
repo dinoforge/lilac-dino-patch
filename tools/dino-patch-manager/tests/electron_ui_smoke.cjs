@@ -12,9 +12,9 @@ const { once } = require('node:events');
 const projectRoot = path.resolve(__dirname, '..', '..', '..');
 const managerRoot = path.resolve(__dirname, '..');
 const electronExe = path.join(projectRoot, 'node_modules', 'electron', 'dist', 'electron.exe');
-const builtAppRoot = path.resolve(process.env.DINO_MANAGER_SMOKE_APP_ROOT || path.join(managerRoot, 'release', 'DinoPatchManager-Electron-v1.2.4-A22-final', 'win-unpacked'));
+const builtAppRoot = path.resolve(process.env.DINO_MANAGER_SMOKE_APP_ROOT || path.join(managerRoot, 'release', 'LilacAnime-DinoPatch-Electron-v1.2.4-A22-final', 'win-unpacked'));
 const candidateLabel = /-A(\d+)-final$/i.exec(path.basename(path.dirname(builtAppRoot)))?.[0]?.slice(1).replace(/-final$/i, '') || 'A22';
-const builtExe = path.join(builtAppRoot, '디노패치관리자.exe');
+const builtExe = path.join(builtAppRoot, 'LilacAnime-DinoPatch.exe');
 const engineExe = path.join(builtAppRoot, 'resources', 'manager-engine', 'DinoPatchManagerEngine.exe');
 const pythonExe = process.env.DINO_MANAGER_PYTHON_EXE || 'D:\\Codex-Coding-Folder\\tools\\python314-build\\Scripts\\python.exe';
 const officialCommit = 'e4ac62214f5c4863eebae5052633e7f9f33dcbaa';
@@ -564,7 +564,7 @@ async function startPackagedManager({ sourceRoot, profileRoot, theme, label, exp
   if (staleLegacyTheme) installLegacyThemeFixture(profileRoot, staleLegacyTheme, appName);
   const themeDbDirectory = path.join(profileRoot, 'appData', appName, 'Local Storage', 'leveldb');
   const themeDbBefore = fs.existsSync(themeDbDirectory) ? treeDigest(themeDbDirectory) : null;
-  const deployedExe = path.join(sourceRoot, 'DinoPatchManager', '디노패치관리자.exe');
+  const deployedExe = path.join(sourceRoot, 'DinoPatchManager', 'LilacAnime-DinoPatch.exe');
   if (!fs.existsSync(deployedExe)) throw new Error(`${label} is missing the manager executable inside the isolated official source copy.`);
   const port = await getPort();
   const child = spawn(deployedExe, [
