@@ -60,3 +60,13 @@
 - `locales`에는 `ko.pak`과 `en-US.pak`만 남겼다. 중복 `app.asar.unpacked/node_modules`와 Windows x64 이외의 LevelDB 네이티브 모듈을 제외했다. Electron·Chromium·Node·Python 및 npm 패키지 고지는 유지했다.
 - [프리릴리즈 dino-v0.1.0-beta.2](https://github.com/dinoforge/lilac-dino-patch/releases/tag/dino-v0.1.0-beta.2)로 경량판과 `SHA256SUMS.txt`를 게시했다. 릴리즈 검증 작업 #43016363836은 성공했다. 기존 Beta 1은 변경·삭제하지 않았다.
 - 공식 LilacAnime 앱 전체, 공식 설치본, 영상·자막 파일은 포함하지 않는다. 비공식 독립 프로젝트이며 저장소는 비공개이다. 코드 출처 및 제3자 서비스의 이용 조건을 명시적으로 보증한다는 뜻은 아니다.
+
+## 2026-11-11 Beta 4 경량판 및 설치본 구조 호환
+
+- [Windows ZIP 빌드 #43029640074](https://github.com/dinoforge/lilac-dino-patch/actions/runs/43029640074) 성공. 실제 패키징한 소스 커밋 `857834cd7491f399119d62fcd572a4c18c261234`.
+- `LilacAnime-DinoPatch-Windows-x64.zip` (141,015,638바이트), SHA-256 `B1FC0E388984C1FF3676F6ACFFF1EC78C70751C48400452BBCB8FE1C13C6B378`. `SHA256SUMS.txt`와 ZIP 내부 라이선스·필수 파일 검사 통과.
+- 고급 도구 접기 및 중복 세부 정보·불필요한 상태창 앞 여백 제거. 실행에 필요 없는 언어팩과 중복 Node.js 실행 파일·빌드용 의존성을 계속 제외.
+- 공식 v0.5.54, v0.5.55, v0.5.63 설치본에서 패치·원복·실행 검사를 통과했다. 기존 알려진 버전은 지문 검사를 유지하며, 이외 버전은 실제 호출 계약과 연결점이 검사되는 경우에만 패치를 허용한다. **모든 미래 버전에 대한 무조건 호환성을 보장하지 않는다.**
+- [프리릴리즈 dino-v0.1.0-beta.4](https://github.com/dinoforge/lilac-dino-patch/releases/tag/dino-v0.1.0-beta.4) 게시, [검증·게시 Actions #43032330797](https://github.com/dinoforge/lilac-dino-patch/actions/runs/43032330797) 성공.
+- 릴리즈 대상 `release/dino-beta4-source`는 위 빌드 커밋의 **응용 프로그램 코드를 변경하지 않고**, `.github/workflows/` 메타데이터만 기본 브랜치와 일치시킨 소스 스냅샷이다. GitHub의 워크플로 쓰기 권한 점검을 통과하기 위한 구성으로, 게시 워크플로에서 이 사실을 비교·검증했다.
+- 기존 Beta 1~3 릴리즈는 수정·삭제하지 않았다. 공식 앱 전체와 제3자 영상·자막을 배포하지 않는다.
