@@ -448,7 +448,6 @@
       const result = await withUiOperation('작업 기록 조회', () => window.dinoManager.history());
       if (result && Array.isArray(result.items)) {
         elements.log.textContent = result.items.map((item) => JSON.stringify(item, null, 2)).join('\n\n') || '작업 기록이 없습니다.';
-        document.querySelector('.advanced-tools').open = true;
         document.querySelector('.log-details').open = true;
       }
     } catch {}
@@ -458,7 +457,6 @@
       const result = await withUiOperation('상세 진단', () => window.dinoManager.diagnostics());
       if (result && Array.isArray(result.items)) {
         elements.log.textContent = result.items.join('\n') || '상세 진단 기록이 없습니다.';
-        document.querySelector('.advanced-tools').open = true;
         document.querySelector('.log-details').open = true;
       }
     } catch {}
