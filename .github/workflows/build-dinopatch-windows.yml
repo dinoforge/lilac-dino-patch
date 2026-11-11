@@ -41,6 +41,16 @@ jobs:
           & .\.venv-dino-build\Scripts\python.exe -m pip install -r tools\dino-patch-manager\requirements-build.txt
           if ($LASTEXITCODE -ne 0) { throw "Python locked dependencies failed" }
 
+      - name: Test installed LilacAnime app.asar handling
+        shell: pwsh
+        run: |
+          & .\.venv-dino-build\Scripts\python.exe -m unittest discover -s tools/dino-patch-manager/tests -p test_installed_asar.py -v
+          if ($LASTEXITCODE -ne 0) { throw "Installed ASAR regression tests failed" }
+          node --check tools/dino-patch-manager/electron-app/main.cjs
+          if ($LASTEXITCODE -ne 0) { throw "Electron manager syntax check failed" }
+          node --check tools/dino-patch-manager/electron-app/renderer.js
+          if ($LASTEXITCODE -ne 0) { throw "Electron renderer syntax check failed" }
+
       - name: Build LilacAnime DinoPatch x64
         shell: pwsh
         run: |
