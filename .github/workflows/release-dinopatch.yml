@@ -18,10 +18,10 @@ jobs:
     timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
-      EXPECTED_COMMIT: f9d6c65c8071b1bad17bcfa853c8c09e61280079
-      RELEASE_TARGET: release/dino-beta5-source
-      BUILD_RUN: "43035036379"
-      RELEASE_TAG: dino-v0.1.0-beta.5
+      EXPECTED_COMMIT: c7a180ea9bf987b4774908fa084dfa421f7e883b
+      RELEASE_TARGET: release/dino-beta6-source
+      BUILD_RUN: "43041768962"
+      RELEASE_TAG: dino-v0.1.0-beta.6
       ZIP_NAME: LilacAnime-DinoPatch-Windows-x64.zip
     steps:
       - name: Check out scoped redistribution review
@@ -89,7 +89,7 @@ jobs:
           set -euo pipefail
           cd release-files
           sha256sum --check SHA256SUMS.txt
-          printf "%s  %s\n" "FEDE93AAFF4980E18A6C03D5E694B279ED8B52B38FB5BC90417D27C3D0D026BD" "$ZIP_NAME" | sha256sum --check --status
+          printf "%s  %s\n" "6E8DF39A725F546146FBA42CC382E535813F0B40CB5BF2D23C31AB2208792439" "$ZIP_NAME" | sha256sum --check --status
           unzip -tqq "$ZIP_NAME"
           unzip -Z1 "$ZIP_NAME" > zip-entries.txt
           for file in \
@@ -132,6 +132,14 @@ jobs:
               exit 1
             }
           done
+          if grep -E '^DinoPatchManager/resources/manager-node/node_modules/.*/(tests?|examples?|docs?|benchmarks?|[.]bin)/' zip-entries.txt; then
+            echo "::error::Unnecessary npm tests, examples or docs are still packaged."
+            exit 1
+          fi
+          if grep -xF "DinoPatchManager/resources/default_app.asar" zip-entries.txt; then
+            echo "::error::Unused Electron sample archive is bundled."
+            exit 1
+          fi
           echo "Verified bundle SHA-256: $(sha256sum "$ZIP_NAME" | cut -d' ' -f1)"
 
       - name: Create independent patch-only prerelease
@@ -140,7 +148,7 @@ jobs:
           set -euo pipefail
           sha="$(sha256sum "release-files/$ZIP_NAME" | cut -d' ' -f1)"
           cat > release-notes.md <<'EOF'
-          ## LilacAnime DinoPatch 0.1.0 Beta 5
+          ## LilacAnime DinoPatch 0.1.0 Beta 6
 
           비공식 Windows x64용 **독립 패치 관리자**입니다. 공식 LilacAnime Desktop 설치 파일이나 전체 소스는 포함하지 않습니다.
 
@@ -153,6 +161,12 @@ jobs:
           오류 수정: 설치본 `resources/app.asar` 교체 중 일시적인 `ENOENT`가 발생해도 설치 폴더를 소스 폴더로 오인하고 `package.json`을 찾지 않습니다. 파일 감시가 잠시 불안정할 때는 제한된 재시도로 재검사하며, 패치·백업의 실제 상태 판정은 별도로 유지합니다. 실제 ASAR가 없거나 상태 검증이 실패하면 안전을 위해 파일 수정을 중단합니다.
 
           안전성: 사용자가 직접 해제한 설치본 패치가 파일 변경 감시 때문에 자동 재적용되는 현상을 방지했습니다.
+
+          **수동 적용:** 고급 도구에 `디노 패치 수동 적용` 버튼을 추가했습니다. 이 버튼은 자동 파일 감시가 실패했더라도 **독립적인 엔진 호환성·원본 파일·백업 검사를 새로 수행**하고, 안전하면 적용합니다. 사용자가 수동 해제한 패치도 명시적으로 재적용할 수 있습니다. 파일이 실제로 손상되었거나 구조·백업 검증에 실패하면 강제로 수정하지 않습니다.
+
+          **INVALID_ARCHIVE 진단:** `resources/app.asar`가 폴더·링크·일반 파일 아닌 항목인 경우 그 유형과 경로를 보여줍니다. Windows 설치 과정에서 일시적으로 파일이 교체되는 경우에는 제한적으로 재시도합니다. 실시간 감시 실패와 실제 패치 상태 확인을 구분합니다.
+
+          **배포 구성 정리:** npm 의존성의 테스트·예제·개발 문서, 사용하지 않는 Electron 기본 예제 앱과 소스맵을 제외했습니다. 실제 계약 검증에 필요한 내부 스크립트와 제3자 라이선스 고지는 유지했습니다.
 
           **버전 교체 시 주의:** 기존 `DinoPatchManager/runtime` 폴더를 삭제하지 마세요. 해당 폴더에 원본 백업·상태 기록 및 관리자 사용자 데이터가 있을 수 있습니다. 관리자를 완전히 종료하고 기존 runtime 폴더를 보존한 채 새 ZIP의 프로그램 파일을 교체하세요.
 
@@ -168,6 +182,6 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$RELEASE_TARGET" \
             --prerelease \
-            --title "LilacAnime DinoPatch 0.1.0 Beta 5" \
+            --title "LilacAnime DinoPatch 0.1.0 Beta 6" \
             --notes-file release-notes.md
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url,tagName,isPrerelease,assets
