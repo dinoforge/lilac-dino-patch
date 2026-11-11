@@ -1,6 +1,6 @@
 # LilacAnime DinoPatch
 
-**LilacAnime DinoPatch**는 LilacAnime에 통합 검색 기능을 추가하는 **비공식 Windows x64 패치 관리자**입니다.
+**LilacAnime DinoPatch**는 LilacAnime에 통합 검색 기능을 추가하는 **비공식 Windows x64 패치**입니다.
 
 ## 주요 기능
 
