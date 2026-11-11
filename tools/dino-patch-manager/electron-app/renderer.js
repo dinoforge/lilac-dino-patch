@@ -7,14 +7,14 @@
     safetyCard: $('safetyCard'), safetyTitle: $('safetyTitle'), safetyMessage: $('safetyMessage'),
     targetPath: $('targetPath'), officialVersion: $('officialVersion'), targetPatchVersion: $('targetPatchVersion'),
     autoManageStatus: $('autoManageStatus'),
-    apply: $('apply'), uninstall: $('uninstall'), restore: $('restore'), inspect: $('inspect'), history: $('history'),
+    apply: $('apply'), recover: $('recover'), uninstall: $('uninstall'), restore: $('restore'), inspect: $('inspect'), history: $('history'),
     chooseRoot: $('chooseRoot'), diagnostics: $('diagnostics'), backupSelect: $('backupSelect'),
     checkUpdates: $('checkUpdates'), updateStatus: $('updateStatus'),
     message: $('message'), detail: $('detail'), activityStatus: $('activityStatus'), busyBadge: $('busyBadge'), log: $('log'), themeStatus: $('themeStatus'),
     resultCard: document.querySelector('.result-card'),
   };
 
-  const state = { root: null, info: null, status: 'UNKNOWN', busy: false, backups: [], update: null, logItems: [], pendingSourceChange: false };
+  const state = { root: null, info: null, status: 'UNKNOWN', recoveryAvailable: false, busy: false, backups: [], update: null, logItems: [], pendingSourceChange: false };
   const labelByStatus = {
     APPLIED: ['적용됨 · 호환', 'good'], ALREADY_APPLIED: ['적용됨 · 호환', 'good'],
     UNPATCHED: ['호환 · 미적용', 'warn'], NO_SOURCE: ['원본 미발견', 'neutral'],
@@ -103,7 +103,7 @@
     if (state.busy && (message.includes('원본 확인') || message.includes('자동 적용'))) {
       setAutoManageStatus('자동 검사 중', 'busy');
     }
-    for (const button of [elements.apply, elements.uninstall, elements.restore, elements.inspect, elements.history, elements.chooseRoot, elements.checkUpdates, elements.diagnostics]) {
+    for (const button of [elements.apply, elements.recover, elements.uninstall, elements.restore, elements.inspect, elements.history, elements.chooseRoot, elements.checkUpdates, elements.diagnostics]) {
       if (button) button.disabled = state.busy || button.dataset.disabledByState === 'true';
     }
     updateActionButtons();
@@ -127,6 +127,7 @@
     // uncertain state: the engine independently re-checks before any write.
     // This button does not bypass ASAR validity, contracts, backup or locks.
     elements.apply.disabled = state.busy || !hasRoot || applied;
+    elements.recover.disabled = state.busy || !hasRoot || !state.recoveryAvailable;
     elements.uninstall.disabled = state.busy || !applied;
     elements.backupSelect.disabled = state.busy || !hasRoot || state.backups.length === 0;
     elements.restore.disabled = state.busy || !hasRoot || !restoreAllowedForState || !selectedBackup;
@@ -140,6 +141,7 @@
   function renderState(result, operation = '') {
     if (!result || typeof result !== 'object') throw new Error('관리자 엔진에서 상태 데이터를 받지 못했습니다.');
     state.status = String(result.status || 'UNKNOWN');
+    state.recoveryAvailable = result.recoveryAvailable === true;
     if (result.path) state.root = result.path;
     const structural = result.compatibilityMode === 'STRUCTURAL';
     let [label, tone] = labelByStatus[state.status] || [state.status, 'bad'];
@@ -444,6 +446,15 @@
       await withUiOperation('수동 패치 적용', () => window.dinoManager.apply());
       await loadBackups();
     } catch { /* withUiOperation reports the independent inspection failure */ }
+  });
+  elements.recover.addEventListener('click', async () => {
+    if (state.busy || !state.root || !state.recoveryAvailable) return;
+    const confirmed = await window.dinoManager.confirm('recover');
+    if (!confirmed) return;
+    try {
+      await withUiOperation('복구 기록 확인', () => window.dinoManager.recover());
+      await loadBackups();
+    } catch { /* withUiOperation preserves diagnostics */ }
   });
   elements.uninstall.addEventListener('click', async () => {
     const confirmed = await window.dinoManager.confirm('uninstall');
