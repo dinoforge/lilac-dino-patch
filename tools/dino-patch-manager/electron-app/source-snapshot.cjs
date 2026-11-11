@@ -27,11 +27,26 @@ function takeSourceSnapshot(rootValue) {
   const resources = path.join(root, 'resources');
   const installedAsar = path.join(resources, 'app.asar');
 
-  if (fs.existsSync(exe) && fs.existsSync(resources)) {
+  if (fs.existsSync(exe)) {
+    // Classify using the installed executable, not the archive's temporary
+    // existence or shape. An updater can rename app.asar or resources itself.
+    if (!fs.existsSync(resources)) throw missingInstalledArchive(root);
+    const resourcesStat = fs.lstatSync(resources);
+    if (!resourcesStat.isDirectory() || resourcesStat.isSymbolicLink()) {
+      const error = new Error(`설치본 resources가 일반 폴더가 아닙니다: ${resources}`);
+      error.code = 'INVALID_ARCHIVE';
+      throw error;
+    }
     if (!fs.existsSync(installedAsar)) throw missingInstalledArchive(root);
     const stat = fs.lstatSync(installedAsar);
     if (!stat.isFile() || stat.isSymbolicLink()) {
-      const error = new Error('공식 설치본의 resources/app.asar가 일반 파일이 아닙니다.');
+      const type = stat.isSymbolicLink() ? '바로가기 또는 링크'
+        : stat.isDirectory() ? '폴더' : '일반 파일이 아닌 항목';
+      const error = new Error(
+        `공식 설치본의 resources/app.asar가 파일이 아니라 ${type}입니다: ${installedAsar}. `
+        + '자동 감시는 중단하지만 수동 패치 적용 시 독립 검사를 할 수 있습니다. '
+        + '정상적인 ASAR 파일인지 확인하세요.',
+      );
       error.code = 'INVALID_ARCHIVE';
       throw error;
     }
