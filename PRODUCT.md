@@ -1,9 +1,9 @@
-# 제품 명세 — 라일락 디노 패치
+# 제품 명세 — LilacAnime DinoPatch
 
 ## 제품 정체성
 
-- 한국어 이름: 라일락 디노 패치
-- 영문 이름: Lilac Dino Patch
+- 한국어 이름: LilacAnime DinoPatch
+- 영문 이름: LilacAnime DinoPatch
 - GitHub 저장소: `dinoforge/lilac-dino-patch`
 - 제품 유형: 공식 LilacAnime Desktop 소스 트리를 검사하고 디노 패치를 관리하는 Windows x64 Electron 관리자
 
