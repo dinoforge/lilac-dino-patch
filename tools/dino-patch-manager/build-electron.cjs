@@ -79,7 +79,6 @@ async function build(argv) {
       files: ['main.cjs', 'preload.cjs', 'index.html', 'renderer.js', 'manager.css', 'theme-leveldb.cjs', 'windows-path.cjs', 'package.json'],
       extraResources: [
         { from: paths.engine, to: 'manager-engine' },
-        { from: paths.nodePath, to: 'manager-node/node.exe' },
         { from: levelModuleRoot, to: 'manager-node/node_modules' },
       ],
       asar: true,
@@ -89,7 +88,7 @@ async function build(argv) {
   });
   const appOut = path.join(paths.output, 'win-unpacked');
   const executable = path.join(appOut, 'LilacAnime-DinoPatch.exe');
-  for (const required of [executable, path.join(appOut, 'resources', 'manager-engine', 'DinoPatchManagerEngine.exe'), path.join(appOut, 'resources', 'manager-engine', '_internal', 'patches', 'patch03', 'manifest.json'), path.join(appOut, 'resources', 'manager-node', 'node.exe'), path.join(appOut, 'resources', 'manager-node', 'node_modules', 'classic-level', 'package.json'), path.join(appOut, 'resources', 'app.asar')]) {
+  for (const required of [executable, path.join(appOut, 'resources', 'manager-engine', 'DinoPatchManagerEngine.exe'), path.join(appOut, 'resources', 'manager-engine', '_internal', 'patches', 'patch03', 'manifest.json'), path.join(appOut, 'resources', 'manager-node', 'node_modules', 'classic-level', 'package.json'), path.join(appOut, 'resources', 'app.asar')]) {
     if (!fs.existsSync(required)) throw new Error(`빌드 산출물 검증 실패: ${required}`);
   }
   process.stdout.write(`${JSON.stringify({ status: 'PASS', executable, output: appOut })}\n`);
