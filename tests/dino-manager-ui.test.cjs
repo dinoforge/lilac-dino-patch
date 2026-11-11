@@ -397,13 +397,51 @@ test('restore picker only exposes restorable backups and blocks known unsafe sta
   assert.match(html, /id="restore"[^>]*disabled/);
 });
 
+test('installed ASAR snapshot never falls through to source package.json during atomic replacement', () => {
+  const { takeSourceSnapshot } = require(path.join(appRoot, 'source-snapshot.cjs'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dino-asar-monitor-race-'));
+  try {
+    const target = path.join(directory, 'LilacAnime');
+    const resources = path.join(target, 'resources');
+    fs.mkdirSync(resources, { recursive: true });
+    fs.writeFileSync(path.join(target, 'LilacAnime.exe'), 'installed-marker');
+    const archive = path.join(resources, 'app.asar');
+    const pendingArchive = path.join(resources, 'app.asar.replacing');
+    fs.writeFileSync(archive, 'original-bytes');
+    const before = takeSourceSnapshot(target);
+    assert.equal(before.version, 'installed-asar');
+    assert.equal(before.files['resources/app.asar'], before.signature);
+    assert.equal(before.directories.length, 2);
+
+    // Simulate an update or transactional installer moving the archive away.
+    fs.renameSync(archive, pendingArchive);
+    assert.throws(() => takeSourceSnapshot(target), (error) => {
+      assert.equal(error.code, 'ENOENT');
+      assert.match(error.message, /resources\\/app\\.asar/);
+      assert.doesNotMatch(error.message, /package\\.json/);
+      return true;
+    });
+    // Do not create package.json. The installed archive must remain recognized.
+    fs.renameSync(pendingArchive, archive);
+    const afterRestore = takeSourceSnapshot(target);
+    assert.equal(afterRestore.signature, before.signature);
+    fs.writeFileSync(archive, 'new-install-version');
+    const afterUpdate = takeSourceSnapshot(target);
+    assert.notEqual(afterUpdate.signature, before.signature);
+    assert.equal(afterUpdate.version, 'installed-asar');
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
 test('source monitoring keeps official release lookup separate from source installation', () => {
   const renderer = read('electron-app/renderer.js');
   const html = read('electron-app/index.html');
   const main = read('electron-app/main.cjs');
   assert.doesNotMatch(html, /approveUpdate|자동 설치 미지원/);
   assert.match(html, /버전 조회만 합니다\. 소스 파일은 변경하지 않습니다/);
-  assert.match(main, /function takeSourceSnapshot\(/);
+  assert.match(main, /require\('\.\/source-snapshot\.cjs'\)/);
+  assert.match(read('electron-app/source-snapshot.cjs'), /function takeSourceSnapshot\(/);
   assert.match(main, /fs\.watch\(directory/);
   assert.match(main, /scheduleSourceScan\(/);
   assert.match(main, /manager:source-change/);
