@@ -44,7 +44,32 @@ jobs:
           & $zip x $installer "-o$destination" -y | Out-Null
           if ($LASTEXITCODE -ne 0) { throw 'NSIS extraction failed' }
           $archives = @(Get-ChildItem -LiteralPath $destination -Filter 'app.asar' -Recurse -File)
-          if ($archives.Count -ne 1) { throw "Expected exactly one extracted app.asar; found $($archives.Count)" }
+          if ($archives.Count -eq 0) {
+            $payloads = @(Get-ChildItem -LiteralPath $destination -Recurse -File | Where-Object { $_.Name -match '^app-.*[.]7z
+          Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'dino-asar-location.txt') -Value $archives[0].FullName
+          Write-Host "Found official v${{ matrix.version }} installed ASAR"
+
+      - name: Verify official Windows ASAR pin and patch+restore in isolated copy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $asar = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'dino-asar-location.txt') -Raw
+          & python tools/dino-patch-manager/tests/verify_official_installed_asar.py $asar.Trim() '${{ matrix.version }}'
+          if ($LASTEXITCODE -ne 0) { throw "Official installed Windows ASAR regression failed" }
+ })
+            Write-Host "Extracted installer payloads: $($payloads.Count)"
+            foreach ($payload in $payloads) {
+              $inside = Join-Path $destination 'application-content'
+              New-Item -ItemType Directory -Path $inside -Force | Out-Null
+              & $zip x $payload.FullName "-o$inside" -y | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "Nested NSIS payload extraction failed: $($payload.Name)" }
+            }
+            $archives = @(Get-ChildItem -LiteralPath $destination -Filter 'app.asar' -Recurse -File)
+          }
+          if ($archives.Count -ne 1) {
+            Get-ChildItem -LiteralPath $destination -Recurse -File | Select-Object -First 25 -ExpandProperty FullName | Out-Host
+            throw "Expected exactly one extracted app.asar; found $($archives.Count)"
+          }
           Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'dino-asar-location.txt') -Value $archives[0].FullName
           Write-Host "Found official v${{ matrix.version }} installed ASAR"
 
