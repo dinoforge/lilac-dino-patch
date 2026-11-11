@@ -21,20 +21,26 @@ LilacAnime DinoPatch는 **LilacAnime에 통합 검색 기능을 추가하는 Win
 
 관리자에 항상 표시되는 **디노 패치 해제** 버튼을 누르고 확인합니다. 원본 파일을 안전하게 복원합니다.
 
-## Beta 6로 업데이트하기
+## Beta 7로 업데이트하기
 
 1. LilacAnime와 DinoPatch를 모두 종료합니다.
-2. 기존 `DinoPatchManager/runtime` 폴더를 **반드시 보존**합니다. 이 폴더에 패치 상태 기록·원본 백업·관리자 데이터가 들어 있을 수 있습니다.
+2. 기존 `DinoPatchManager/runtime` 폴더를 보존합니다. **설치본 ASAR 원본 백업과 복구 기록은 주로 `%APPDATA%\\DinoPatchManager\\installed-asar\\`의 설치 경로별 하위 폴더**에 저장되므로 이 위치도 절대 삭제하지 않습니다.
 3. 새 ZIP의 `DinoPatchManager` 폴더에서 프로그램 파일을 교체하되, 기존 `runtime` 폴더를 삭제하거나 덮어쓰지 않습니다.
 4. 관리자를 실행하고 **원본 다시 확인**을 선택해 상태를 읽습니다.
 
-`INVALID_ARCHIVE`가 표시되면 설치 폴더의 `resources/app.asar`가 **일반 파일인지** 확인합니다. 폴더 또는 링크인 경우 정확한 유형과 위치가 진단에 표시됩니다. 자동 감시가 실패해도 수동 적용으로 독립 검사를 요청할 수 있지만, 실제 원본이 없거나 파일 형식이 잘못되었다면 안전을 위해 적용하지 않습니다. 파일을 강제로 복사하거나 원본 백업을 삭제하지 마세요.
+`INVALID_ARCHIVE`가 표시되면 설치 폴더의 `resources/app.asar`가 **일반 파일인지** 확인합니다. 공식 Windows 배포본에서 `app.asar`는 폴더가 아니라 파일입니다. 폴더·링크·손상된 파일이면 감시 경고를 반복하지 않고 적용을 차단합니다. 이때 폴더를 억지로 파일로 바꾸거나 백업·`pending.json`을 삭제하지 마세요. 공식 설치본의 복구/재설치가 필요할 수 있으며, 작업 전 사용자 데이터와 기존 상태·백업을 별도로 보존해야 합니다.
+
+## 이전 패치 복구 기록이 남은 경우
+
+`이전 설치본 패치 작업의 복구 기록이 있습니다`라는 메시지는 작업 도중 중단됐다는 증거입니다. 정상적인 `resources/app.asar` 파일이 있고, 원본 백업 및 복구 기록과 SHA-256이 일치한다면 관리자가 **복구 기록 확인** 버튼을 활성화합니다. 사용자가 확인할 때만 앱 파일이나 원본 백업을 수정하지 않고 상태 메타데이터를 정리합니다. 기존 복구 기록은 삭제하지 않고 보관됩니다.
+
+`app.asar`가 폴더이거나 원본·백업 해시가 다르면 이 버튼은 활성화되지 않습니다. 이 경우에는 수동 적용도 안전하지 않으므로 복구 기록과 백업을 그대로 둔 채 설치 상태를 확인해야 합니다.
 
 ## 알아둘 점
 
 - 먼저 LilacAnime를 종료하세요.
 - 오류가 뜨면 파일을 직접 수정하지 말고 **진단 정보**를 확인하세요.
 - 수동 해제 후에는 같은 원본에 자동으로 다시 적용되지 않습니다. **디노 패치 수동 적용** 버튼을 누르면 새 안전 검사 후 다시 적용할 수 있습니다.
-- **[0.1.0 Beta 6 ZIP 다운로드](https://github.com/dinoforge/lilac-dino-patch/releases/tag/dino-v0.1.0-beta.6)** — 비공개 저장소에 접근 권한이 있어야 다운로드할 수 있습니다.
+- **[0.1.0 Beta 7 ZIP 다운로드](https://github.com/dinoforge/lilac-dino-patch/releases/tag/dino-v0.1.0-beta.7)** — 비공개 저장소에 접근 권한이 있어야 다운로드할 수 있습니다.
 
 [공식 LilacAnime](https://github.com/whispelyn-byte/LilacAnime-desktop) · [LilacAnime DinoPatch GitHub](https://github.com/dinoforge/lilac-dino-patch)
