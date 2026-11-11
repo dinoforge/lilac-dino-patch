@@ -72,7 +72,7 @@ async function build(argv) {
     targets: Platform.WINDOWS.createTarget(['dir'], Arch.x64),
     config: {
       appId: 'com.dino.lilac.patchmanager',
-      productName: '디노 패치 관리자',
+      productName: 'LilacAnime DinoPatch',
       electronVersion: electronPackage.version,
       electronDist: paths.electron,
       directories: { output: paths.output },
@@ -84,11 +84,11 @@ async function build(argv) {
       ],
       asar: true,
       npmRebuild: false,
-      win: { target: ['dir'], executableName: '디노패치관리자' },
+      win: { target: ['dir'], executableName: 'LilacAnime-DinoPatch' },
     },
   });
   const appOut = path.join(paths.output, 'win-unpacked');
-  const executable = path.join(appOut, '디노패치관리자.exe');
+  const executable = path.join(appOut, 'LilacAnime-DinoPatch.exe');
   for (const required of [executable, path.join(appOut, 'resources', 'manager-engine', 'DinoPatchManagerEngine.exe'), path.join(appOut, 'resources', 'manager-engine', '_internal', 'patches', 'patch03', 'manifest.json'), path.join(appOut, 'resources', 'manager-node', 'node.exe'), path.join(appOut, 'resources', 'manager-node', 'node_modules', 'classic-level', 'package.json'), path.join(appOut, 'resources', 'app.asar')]) {
     if (!fs.existsSync(required)) throw new Error(`빌드 산출물 검증 실패: ${required}`);
   }
