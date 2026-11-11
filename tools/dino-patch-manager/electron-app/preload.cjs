@@ -5,6 +5,7 @@ const api = Object.freeze({
   startup: () => ipcRenderer.invoke('manager:startup'),
   chooseRoot: () => ipcRenderer.invoke('manager:chooseRoot'),
   inspect: () => ipcRenderer.invoke('manager:inspect'),
+  recover: () => ipcRenderer.invoke('manager:recover'),
   apply: () => ipcRenderer.invoke('manager:apply'),
   uninstall: () => ipcRenderer.invoke('manager:uninstall'),
   backups: () => ipcRenderer.invoke('manager:backups'),
