@@ -12,6 +12,11 @@ on:
       - tools/dino-patch-manager/manager_bridge.py
       - tools/dino-patch-manager/electron-app/main.cjs
       - tools/dino-patch-manager/electron-app/renderer.js
+      - tools/dino-patch-manager/electron-app/manager.css
+      - tools/dino-patch-manager/electron-app/index.html
+      - tools/dino-patch-manager/manager_core.py
+      - tools/dino-patch-manager/tests/electron_ui_smoke.cjs
+      - tests/dino-manager-ui.test.cjs
   workflow_dispatch:
 
 permissions:
@@ -51,6 +56,8 @@ jobs:
         run: |
           & .\.venv-dino-build\Scripts\python.exe -m unittest discover -s tools/dino-patch-manager/tests -p test_installed_asar.py -v
           if ($LASTEXITCODE -ne 0) { throw "Installed ASAR regression tests failed" }
+          node --test tests/dino-manager-ui.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw "Compact manager UI regression tests failed" }
           node --check tools/dino-patch-manager/electron-app/main.cjs
           if ($LASTEXITCODE -ne 0) { throw "Electron manager syntax check failed" }
           node --check tools/dino-patch-manager/electron-app/renderer.js
