@@ -91,6 +91,9 @@ jobs:
             $psi.UseShellExecute = $false
             $psi.WorkingDirectory = Split-Path -Parent $exe
             $psi.CreateNoWindow = $true
+            $psi.RedirectStandardError = $true
+            $psi.RedirectStandardOutput = $true
+            $psi.Environment['ELECTRON_ENABLE_LOGGING'] = '1'
             $psi.ArgumentList.Add('--disable-gpu')
             $psi.ArgumentList.Add('--no-sandbox')
             $process = [System.Diagnostics.Process]::Start($psi)
@@ -99,6 +102,12 @@ jobs:
               $alive = -not $process.HasExited
               $code = if ($alive) { 'running' } else { "$($process.ExitCode)" }
               Write-Host "Process probe: $code"
+              if (-not $alive) {
+                $errorLines = $process.StandardError.ReadToEnd()
+                $outLines = $process.StandardOutput.ReadToEnd()
+                Write-Host "Process stderr: $($errorLines.Substring(0, [Math]::Min($errorLines.Length, 2500)))"
+                Write-Host "Process stdout: $($outLines.Substring(0, [Math]::Min($outLines.Length, 1200)))"
+              }
               return @{ alive = $alive; exitCode = $code }
             } finally {
               if (-not $process.HasExited) { $process.Kill($true) }
@@ -108,6 +117,15 @@ jobs:
           }
           try {
             $baseline = Invoke-AppProbe
+            Start-Sleep -Seconds 2
+            $survivors = @(Get-CimInstance Win32_Process | Where-Object {
+              $_.Name -ieq 'LilacAnime.exe' -and $_.ExecutablePath -and $_.ExecutablePath -ieq $exe
+            })
+            Write-Host "Previous app instances after cleanup: $($survivors.Count)"
+            if ($survivors.Count -gt 0) {
+              $survivors | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop }
+              Start-Sleep -Seconds 2
+            }
             Copy-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'verified-patched-app.asar') -Destination $asar -Force
             $patched = Invoke-AppProbe
             if ($baseline.alive -and -not $patched.alive) {
