@@ -240,7 +240,7 @@ class TestInstalledAsar(unittest.TestCase):
         self.assertFalse((self.install / "package.json").exists())
         temporary.rename(self.archive)
         self.assertEqual(self.archive.read_bytes(), original)
-        self.assertEqual(bridge.dispatch({"operation": "inspect", "root": str(self.install))["status"], "UNPATCHED")
+        self.assertEqual(bridge.dispatch({"operation": "inspect", "root": str(self.install)})["status"], "UNPATCHED")
 
     def test_pending_transaction_blocks_changes(self):
         state_root = ia._state_root(ia._root(self.install))
