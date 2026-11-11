@@ -18,10 +18,10 @@ jobs:
     timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
-      EXPECTED_COMMIT: 857834cd7491f399119d62fcd572a4c18c261234
-      RELEASE_TARGET: release/dino-beta4-source
-      BUILD_RUN: "43029640074"
-      RELEASE_TAG: dino-v0.1.0-beta.4
+      EXPECTED_COMMIT: f9d6c65c8071b1bad17bcfa853c8c09e61280079
+      RELEASE_TARGET: release/dino-beta5-source
+      BUILD_RUN: "43035036379"
+      RELEASE_TAG: dino-v0.1.0-beta.5
       ZIP_NAME: LilacAnime-DinoPatch-Windows-x64.zip
     steps:
       - name: Check out scoped redistribution review
@@ -89,7 +89,7 @@ jobs:
           set -euo pipefail
           cd release-files
           sha256sum --check SHA256SUMS.txt
-          printf "%s  %s\n" "B1FC0E388984C1FF3676F6ACFFF1EC78C70751C48400452BBCB8FE1C13C6B378" "$ZIP_NAME" | sha256sum --check --status
+          printf "%s  %s\n" "FEDE93AAFF4980E18A6C03D5E694B279ED8B52B38FB5BC90417D27C3D0D026BD" "$ZIP_NAME" | sha256sum --check --status
           unzip -tqq "$ZIP_NAME"
           unzip -Z1 "$ZIP_NAME" > zip-entries.txt
           for file in \
@@ -140,7 +140,7 @@ jobs:
           set -euo pipefail
           sha="$(sha256sum "release-files/$ZIP_NAME" | cut -d' ' -f1)"
           cat > release-notes.md <<'EOF'
-          ## LilacAnime DinoPatch 0.1.0 Beta 4
+          ## LilacAnime DinoPatch 0.1.0 Beta 5
 
           비공식 Windows x64용 **독립 패치 관리자**입니다. 공식 LilacAnime Desktop 설치 파일이나 전체 소스는 포함하지 않습니다.
 
@@ -149,6 +149,12 @@ jobs:
           경량화: 중복 Node.js 실행 파일과 다른 운영체제용 바이너리, 중복 네이티브 모듈, 사용하지 않는 언어팩을 제거했습니다. 한국어와 영어 UI는 유지합니다. 내장 Node 검사, LevelDB, Python 패치 엔진 연결 검사를 통과했습니다.
 
           UI 변경: **고급 도구 접기 기능을 없애서** 재검사, 패치 해제, 백업·복원, 업데이트 확인 버튼이 항상 보입니다. 중복 세부 정보와 불필요한 안내문, 상태창 앞 빈 여백을 제거했습니다.
+
+          오류 수정: 설치본 `resources/app.asar` 교체 중 일시적인 `ENOENT`가 발생해도 설치 폴더를 소스 폴더로 오인하고 `package.json`을 찾지 않습니다. 파일 감시가 잠시 불안정할 때는 제한된 재시도로 재검사하며, 패치·백업의 실제 상태 판정은 별도로 유지합니다. 실제 ASAR가 없거나 상태 검증이 실패하면 안전을 위해 파일 수정을 중단합니다.
+
+          안전성: 사용자가 직접 해제한 설치본 패치가 파일 변경 감시 때문에 자동 재적용되는 현상을 방지했습니다.
+
+          **버전 교체 시 주의:** 기존 `DinoPatchManager/runtime` 폴더를 삭제하지 마세요. 해당 폴더에 원본 백업·상태 기록 및 관리자 사용자 데이터가 있을 수 있습니다. 관리자를 완전히 종료하고 기존 runtime 폴더를 보존한 채 새 ZIP의 프로그램 파일을 교체하세요.
 
           설치본 지원: **버전 번호만으로 차단하지 않고** `app.asar` 내부 실제 파일, 패치 연결점, 검색·상세·재생 IPC 호출 계약을 검사합니다. 기존 공식 v0.5.54·v0.5.55는 파일 지문 검사도 유지합니다. 공식 v0.5.63까지 Windows 설치본에서 패치·원복·실행 검사를 통과했습니다. 다른 버전도 필수 구조가 호환되는 경우에만 적용하며, 변경 또는 확인 불가 시에는 원본을 보호하고 중단합니다. 앱 종료 후 원본 ASAR 전체를 백업합니다.
 
@@ -162,6 +168,6 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$RELEASE_TARGET" \
             --prerelease \
-            --title "LilacAnime DinoPatch 0.1.0 Beta 4" \
+            --title "LilacAnime DinoPatch 0.1.0 Beta 5" \
             --notes-file release-notes.md
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url,tagName,isPrerelease,assets
