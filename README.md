@@ -81,3 +81,5 @@ v0.5.58은 실제 격리 앱 실행까지 기록된 검증 기준입니다. 새 
 - [권리 검토 기록](docs/RIGHTS_REVIEW.md)
 - [공식 원본 저장소 연결](docs/UPSTREAM_LINK.md)
 - [0.1.0 Beta 1 릴리즈 설명 초안](docs/releases/dino-v0.1.0-beta.1.md)
+- [Windows 관리자 실제 릴리즈 실행 절차](docs/releases/RELEASE_OPERATIONS.md)
+- [0.1.0 Beta 1 사용자용 릴리즈 노트 후보](docs/releases/RELEASE_NOTES_CANDIDATE.md)
