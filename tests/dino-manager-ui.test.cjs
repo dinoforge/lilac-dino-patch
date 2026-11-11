@@ -37,7 +37,7 @@ test('patch-list screen keeps source, global actions, backups, history and botto
   const html = read('electron-app/index.html');
   const css = read('electron-app/manager.css');
   const renderer = read('electron-app/renderer.js');
-  for (const id of ['managerVersion', 'targetPath', 'officialVersion', 'targetPatchVersion', 'patchBadge', 'autoManageStatus', 'message', 'detail', 'busyBadge', 'safetyCard', 'safetyTitle', 'safetyMessage', 'history', 'inspect', 'uninstall', 'backupSelect', 'restore']) {
+  for (const id of ['managerVersion', 'targetPath', 'officialVersion', 'targetPatchVersion', 'patchBadge', 'autoManageStatus', 'message', 'detail', 'busyBadge', 'safetyCard', 'safetyTitle', 'safetyMessage', 'history', 'inspect', 'recover', 'uninstall', 'backupSelect', 'restore']) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.doesNotMatch(html, /id="(?:compatBadge|patchState|patchVersion)"/);
@@ -55,7 +55,7 @@ test('patch-list screen keeps source, global actions, backups, history and botto
   assert.match(html, /<section class="card advanced-tools" aria-label="고급 도구">/);
   assert.doesNotMatch(html, /<details class="card advanced-tools"/);
   const advanced = html.match(/<section class="card advanced-tools"[^>]*>([\s\S]*?)<\/section>\s*<section class="result-card"/)?.[1] || '';
-  assert.match(advanced, /id="inspect"[\s\S]*id="apply"[\s\S]*id="uninstall"[\s\S]*id="backupSelect"[\s\S]*id="restore"[\s\S]*id="history"/);
+  assert.match(advanced, /id="inspect"[\s\S]*id="apply"[\s\S]*id="recover"[\s\S]*id="uninstall"[\s\S]*id="backupSelect"[\s\S]*id="restore"[\s\S]*id="history"/);
   assert.match(advanced, /id="checkUpdates"[\s\S]*id="diagnostics"[\s\S]*class="log-details"/);
   assert.doesNotMatch(advanced, /id="approveUpdate"/);
   assert.match(html, /id="history"/);
@@ -91,6 +91,8 @@ test('patch-list screen keeps source, global actions, backups, history and botto
   assert.match(renderer, /elements\.apply\.disabled = state\.busy \|\| !hasRoot \|\| applied/);
   assert.match(renderer, /window\.dinoManager\.confirm\('apply'\)/);
   assert.match(renderer, /window\.dinoManager\.apply\(\)/);
+  assert.match(renderer, /window\.dinoManager\.recover\(\)/);
+  assert.match(renderer, /state\.recoveryAvailable/);
   assert.doesNotMatch(renderer, /rowApply|canApply/);
   assert.match(renderer, /managementSummaryByStatus/);
   assert.doesNotMatch(renderer, /elements\.(?:compatBadge|patchState)/);
@@ -454,6 +456,15 @@ test('installed ASAR directory errors show type and never fall through to packag
   } finally {
     fs.rmSync(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
+});
+
+test('invalid installed ASAR stops watcher retries rather than spamming logs', () => {
+  const main = read('electron-app/main.cjs');
+  assert.match(main, /error\.code !== 'ENOENT'/);
+  assert.match(main, /sourceMonitor\.pending = false/);
+  assert.match(main, /app\.asar가 실제 파일이 되기 전까지 자동 재시도하지 않습니다/);
+  const snapshot = read('electron-app/source-snapshot.cjs');
+  assert.match(snapshot, /error\.code = 'INVALID_ARCHIVE'/);
 });
 
 test('source monitoring keeps official release lookup separate from source installation', () => {
