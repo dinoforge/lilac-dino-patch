@@ -1,4 +1,4 @@
-"""Local-only installed LilacAnime ASAR patch target, with strict pinned-version checks.
+"""Local-only installed LilacAnime ASAR patch target, with structural compatibility checks.
 
 Only the user's installed resources/app.asar is changed. No upstream application
 files are bundled or downloaded. The complete original ASAR is backed up first.
@@ -261,10 +261,59 @@ def _identity(asar: Archive, version: str) -> None:
             )
 
 
-def _manifest(version: str):
+def _manifest(asar: Archive, version: str):
+    """Resolve an installed target by code contracts, not a fixed version allowlist.
+
+    Known releases retain their exact identity pin. Other versions must pass all
+    connection anchors plus the official IPC/search/detail/playback structural
+    contracts before any installed ASAR is changed.
+    """
     patch_root, manifest = core.load_manifest(core.patch_source_root(), version)
-    if not manifest.get("_profilePinned"):
-        raise core.CompatibilityBlocked("설치본의 패치 프로필이 등록되지 않았습니다.", "UNSUPPORTED")
+    if manifest.get("_profilePinned"):
+        _identity(asar, version)
+        manifest["compatibilityMode"] = "PINNED"
+        manifest["sourceIdentityVerified"] = True
+        return patch_root, manifest
+
+    if not __import__("re").fullmatch(r"\d+\.\d+\.\d+", version):
+        raise core.CompatibilityBlocked("공식 앱 버전 형식이 올바르지 않습니다.", "UNSUPPORTED")
+
+    required = (
+        "src/app.js", "src/index.html", "src/player.js",
+        "electron/main.cjs", "electron/preload.cjs",
+    )
+    content = {}
+    for relative in required:
+        data = asar.read(relative)
+        if len(data) > 12 * 1024 * 1024 or b"\x00" in data:
+            raise core.CompatibilityBlocked(f"설치본 필수 코드 파일이 검증 범위를 벗어납니다: {relative}", "UNSUPPORTED")
+        crlf, lf = data.count(b"\r\n"), data.count(b"\n")
+        if crlf not in (0, lf):
+            raise core.CompatibilityBlocked(f"설치본 {relative}의 줄바꿈이 혼합되어 있습니다.", "CONFLICT")
+        content[relative] = data.replace(b"\r\n", b"\n")
+
+    try:
+        connections = core._select_structural_connections(manifest, content)
+        with tempfile.TemporaryDirectory(prefix="dino-installed-contract-") as folder:
+            root = Path(folder)
+            for relative, data in content.items():
+                output = root / relative
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_bytes(data)
+            evidence = core._verify_structural_official_contracts(root, manifest)
+    except core.CompatibilityBlocked:
+        raise
+    except (core.ManagerError, UnicodeError, ValueError) as exc:
+        raise core.CompatibilityBlocked(
+            f"설치본 v{version}의 필수 검색·상세·재생 호출 계약을 검증하지 못했습니다: {exc}",
+            "UNSUPPORTED",
+        ) from exc
+
+    manifest["connections"] = connections
+    manifest["compatibilityMode"] = "STRUCTURAL"
+    manifest["sourceIdentityVerified"] = False  # Contract match is not proof of source provenance.
+    manifest["runtimePlaybackVerified"] = False
+    manifest["_sourceContractEvidence"] = evidence
     return patch_root, manifest
 
 
@@ -308,11 +357,15 @@ def inspect(root_value):
     if any(relative in asar.files for relative in core.EXPECTED_MODULES):
         return {**result, "status": "PARTIAL_OR_UNKNOWN", "reason": "이미 설치된 패치 모듈이 있지만 검증된 상태 기록은 없습니다."}
     try:
-        _identity(asar, version)
-        _manifest(version)
+        _patch_root, matched_manifest = _manifest(asar, version)
     except core.CompatibilityBlocked as exc:
         return {**result, "status": exc.status, "reason": str(exc), "sourceIdentityVerified": False}
-    return {**result, "status": "UNPATCHED", "sourceIdentityVerified": True, "runtimePlaybackVerified": False}
+    return {
+        **result, "status": "UNPATCHED",
+        "compatibilityMode": matched_manifest.get("compatibilityMode", "PINNED"),
+        "sourceIdentityVerified": bool(matched_manifest.get("sourceIdentityVerified", False)),
+        "runtimePlaybackVerified": False,
+    }
 
 
 def _replacement_bytes(asar: Archive, manifest: dict, patch_root: Path):
@@ -422,8 +475,7 @@ def _apply(root: Path, *, process_check):
     original_sha = _sha(archive_path)
     asar = Archive(archive_path)
     version = _version(asar)
-    _identity(asar, version)
-    patch_root, manifest = _manifest(version)
+    patch_root, manifest = _manifest(asar, version)
     replacements = _replacement_bytes(asar, manifest, patch_root)
     _preflight_patch(replacements, manifest)
     data_root = _state_root(root)
