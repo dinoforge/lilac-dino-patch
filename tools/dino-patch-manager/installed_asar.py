@@ -194,9 +194,11 @@ class Archive:
                     offset += size
         assign(header)
         serial = json.dumps(header, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        payload_size = 4 + len(serial)
-        pickle = struct.pack("<II", payload_size, len(serial)) + serial
-        pickle += b"\0" * ((-len(serial)) % 4)
+        # The Pickle payload includes alignment padding after its string value.
+        # Electron rejects non-aligned JSON headers if this length omits padding.
+        padding = (-len(serial)) % 4
+        payload_size = 4 + len(serial) + padding
+        pickle = struct.pack("<II", payload_size, len(serial)) + serial + (b"\0" * padding)
         size_pickle = struct.pack("<II", 4, len(pickle))
         with output.open("xb") as out, self.path.open("rb") as original:
             out.write(size_pickle)
