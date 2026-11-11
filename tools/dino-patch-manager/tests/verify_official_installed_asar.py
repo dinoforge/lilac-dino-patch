@@ -22,8 +22,9 @@ def main():
         raise SystemExit("asar path, version and optional patched-output path required")
     original = Path(sys.argv[1]).resolve(strict=True)
     version = sys.argv[2]
-    if version not in ("0.5.54", "0.5.55"):
-        raise SystemExit("Only pinned official versions are allowed")
+    import re
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise SystemExit("Official semantic version is required")
     with tempfile.TemporaryDirectory(prefix="dino-genuine-asar-") as td:
         base = Path(td)
         install = base / "LilacAnime"
@@ -36,13 +37,14 @@ def main():
         before = digest(copied)
         detected = installed_asar.inspect(install)
         if detected["status"] != "UNPATCHED" or detected["version"] != version:
-            import manager_core as core
-            archive = installed_asar.Archive(copied)
-            for name, expected in installed_asar.SUPPORTED[version].items():
-                data = archive.read(name)
-                normalized = data.replace(bytes([13, 10]), bytes([10]))
-                print(f"File {name}: raw={core._git_blob_sha1(data)} normalized={core._git_blob_sha1(normalized)} expected={expected} crlf={data.count(bytes([13,10]))} lf={data.count(bytes([10]))}", flush=True)
-            raise AssertionError(f"v{version} official ASAR failed pin check: {detected}")
+            if version in installed_asar.SUPPORTED:
+                import manager_core as core
+                archive = installed_asar.Archive(copied)
+                for name, expected in installed_asar.SUPPORTED[version].items():
+                    data = archive.read(name)
+                    normalized = data.replace(bytes([13, 10]), bytes([10]))
+                    print(f"File {name}: raw={core._git_blob_sha1(data)} normalized={core._git_blob_sha1(normalized)} expected={expected}", flush=True)
+            raise AssertionError(f"v{version} official ASAR failed compatibility: {detected}")
         result = installed_asar.startup(install, process_check=lambda _root: None)
         if result["status"] != "APPLIED":
             raise AssertionError(f"v{version} patch failed: {result}")
@@ -58,7 +60,7 @@ def main():
         restored = installed_asar.uninstall(install, process_check=lambda _root: None)
         if restored["status"] != "UNPATCHED" or digest(copied) != before:
             raise AssertionError(f"v{version} ASAR backup did not restore exactly")
-        print(f"PASS official v{version}: pin, preflight, ASAR repack, backup, restore")
+        print(f"PASS official v{version}: structural or pinned compatibility, preflight, ASAR repack, backup, restore")
 
 if __name__ == "__main__":
     main()
