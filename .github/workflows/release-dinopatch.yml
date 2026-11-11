@@ -18,9 +18,9 @@ jobs:
     timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
-      EXPECTED_COMMIT: ec440df476d4fc47738d0d3f3497c148339a6fcc
-      BUILD_RUN: "43012176628"
-      RELEASE_TAG: dino-v0.1.0-beta.1
+      EXPECTED_COMMIT: b159eb7f02b29f52b68f85a61ebc758b6f455eb5
+      BUILD_RUN: "43015434982"
+      RELEASE_TAG: dino-v0.1.0-beta.2
       ZIP_NAME: LilacAnime-DinoPatch-Windows-x64.zip
     steps:
       - name: Check out scoped redistribution review
@@ -71,6 +71,7 @@ jobs:
           set -euo pipefail
           cd release-files
           sha256sum --check SHA256SUMS.txt
+          printf "%s  %s\n" "3A1B2C94765A020BA10D0D654ED9A9834F70332635E92146C70A7B2725F2B599" "$ZIP_NAME" | sha256sum --check --status
           unzip -tqq "$ZIP_NAME"
           unzip -Z1 "$ZIP_NAME" > zip-entries.txt
           for file in \
@@ -81,12 +82,23 @@ jobs:
             "DinoPatchManager/resources/manager-engine/_internal/src/integrated-search.js" \
             "DinoPatchManager/resources/manager-engine/_internal/src/integrated-search.css" \
             "DinoPatchManager/resources/manager-engine/_internal/patches/patch03/patch03-bridge.js" \
-            "DinoPatchManager/resources/manager-node/node.exe" \
+            "DinoPatchManager/resources/manager-node/node_modules/classic-level/package.json" \
             "DinoPatchManager/LICENSE.electron.txt" \
             "DinoPatchManager/LICENSES.chromium.html" \
             "DinoPatchManager/THIRD_PARTY_LICENSES/Node.js-LICENSE.txt" \
             "DinoPatchManager/THIRD_PARTY_LICENSES/Python-LICENSE.txt"; do
             grep -xF "$file" zip-entries.txt >/dev/null || { echo "::error::Required patch or license missing: $file"; exit 1; }
+          done
+          if grep -xF "DinoPatchManager/resources/manager-node/node.exe" zip-entries.txt; then
+            echo "::error::Duplicate node.exe must not be bundled."
+            exit 1
+          fi
+          if grep -F "DinoPatchManager/resources/app.asar.unpacked/node_modules/" zip-entries.txt; then
+            echo "::error::Duplicate bundled Electron native modules present."
+            exit 1
+          fi
+          for locale in ko en-US; do
+            grep -xF "DinoPatchManager/locales/$locale.pak" zip-entries.txt >/dev/null || { echo "::error::Essential locale missing: $locale"; exit 1; }
           done
           if grep -Ei '\.(mp4|mkv|avi|srt|vtt|ass)$' zip-entries.txt; then
             echo "::error::Video or subtitle files must not be bundled."
@@ -109,24 +121,25 @@ jobs:
         run: |
           set -euo pipefail
           sha="$(sha256sum "release-files/$ZIP_NAME" | cut -d' ' -f1)"
-          cat > release-notes.md <<EOF
-          ## LilacAnime DinoPatch 0.1.0 Beta 1
+          cat > release-notes.md <<'EOF'
+          ## LilacAnime DinoPatch 0.1.0 Beta 2
 
           비공식 Windows x64용 **독립 패치 관리자**입니다. 공식 LilacAnime Desktop 설치 파일이나 전체 소스는 포함하지 않습니다.
 
           통합 검색, 공급원 선택, 호환성 확인, 패치 자동 적용, 해제 및 백업 복원을 제공합니다.
 
+          경량화: 중복 Node.js 실행 파일과 다른 운영체제용 바이너리, 중복 네이티브 모듈, 사용하지 않는 언어팩을 제거했습니다. 한국어와 영어 UI는 유지합니다. 내장 Node 검사, LevelDB, Python 패치 엔진 연결 검사를 통과했습니다.
+
           사용법: LilacAnime를 종료한 뒤 ZIP을 풀고 `DinoPatchManager` 폴더 전체를 공식 LilacAnime **소스 폴더**(`package.json`, `src/`, `electron/`이 있는 폴더)에 넣은 다음 `LilacAnime-DinoPatch.exe`를 실행하세요. 일반 설치본만으로는 적용할 수 없습니다.
 
           내장 Node.js/Python/Electron 및 npm 런타임에 대한 제3자 라이선스 고지가 패키지에 포함되어 있습니다. 영상과 자막 파일은 제공하지 않습니다. 공식 LilacAnime 프로젝트의 승인을 받은 제품이 아닙니다.
 
-          소스 커밋: ${EXPECTED_COMMIT}
-          ZIP SHA-256: ${sha}
           EOF
+          printf "\n소스 커밋: %s\nZIP SHA-256: %s\n" "$EXPECTED_COMMIT" "$sha" >> release-notes.md
           gh release create "$RELEASE_TAG" "release-files/$ZIP_NAME" "release-files/SHA256SUMS.txt" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$EXPECTED_COMMIT" \
             --prerelease \
-            --title "LilacAnime DinoPatch 0.1.0 Beta 1" \
+            --title "LilacAnime DinoPatch 0.1.0 Beta 2" \
             --notes-file release-notes.md
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url,tagName,isPrerelease,assets
