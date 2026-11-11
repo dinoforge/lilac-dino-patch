@@ -1,0 +1,96 @@
+name: Build LilacAnime DinoPatch Windows ZIP
+
+on:
+  push:
+    branches:
+      - test/dino-full-functional-integration
+    paths:
+      - .github/workflows/build-dinopatch-windows.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - name: Check out manager source
+        uses: actions/checkout@v4
+
+      - name: Set up locked Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.1'
+
+      - name: Set up locked Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14.7'
+          architecture: x64
+
+      - name: Prepare locked build tools
+        shell: pwsh
+        run: |
+          npm install --global npm@11.11.0
+          if ($LASTEXITCODE -ne 0) { throw "npm setup failed" }
+          python -m venv .venv-dino-build
+          if ($LASTEXITCODE -ne 0) { throw "Python venv setup failed" }
+          & .\.venv-dino-build\Scripts\python.exe -m pip install -r tools\dino-patch-manager\requirements-build.txt
+          if ($LASTEXITCODE -ne 0) { throw "Python locked dependencies failed" }
+
+      - name: Build LilacAnime DinoPatch x64
+        shell: pwsh
+        run: |
+          & .\tools\dino-patch-manager\build_electron_windows.ps1 -PythonExe .\.venv-dino-build\Scripts\python.exe -BuildName github-renamed
+          if ($LASTEXITCODE -ne 0) { throw "Manager Windows build failed" }
+
+      - name: Create ZIP and SHA-256
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $built = 'tools/dino-patch-manager/release/LilacAnime-DinoPatch-Electron-v1.2.4-github-renamed/win-unpacked'
+          $stage = Join-Path (Get-Location).Path 'package-staging'
+          $manager = Join-Path $stage 'DinoPatchManager'
+          $artifacts = Join-Path (Get-Location).Path 'build-artifacts'
+          $zip = Join-Path $artifacts 'LilacAnime-DinoPatch-Windows-x64.zip'
+          New-Item -ItemType Directory -Path $manager,$artifacts -Force | Out-Null
+          Get-ChildItem -LiteralPath $built -Force | Copy-Item -Destination $manager -Recurse -Force
+          foreach ($required in @(
+            'LilacAnime-DinoPatch.exe',
+            'resources/app.asar',
+            'resources/manager-engine/DinoPatchManagerEngine.exe',
+            'resources/manager-engine/_internal/patches/patch03/manifest.json',
+            'resources/manager-node/node.exe',
+            'resources/manager-node/node_modules/classic-level/package.json'
+          )) {
+            if (-not (Test-Path -LiteralPath (Join-Path $manager $required) -PathType Leaf)) {
+              throw "ZIP input is incomplete: $required"
+            }
+          }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip)
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $zipFiles = @($archive.Entries | Where-Object { -not $_.FullName.EndsWith('/') })
+            $sourceFiles = @(Get-ChildItem -LiteralPath $manager -File -Recurse -Force)
+            if ($zipFiles.Count -ne $sourceFiles.Count) {
+              throw "ZIP file count mismatch: archive=$($zipFiles.Count) source=$($sourceFiles.Count)"
+            }
+          } finally {
+            $archive.Dispose()
+          }
+          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+          Set-Content -LiteralPath (Join-Path $artifacts 'SHA256SUMS.txt') -Value "$hash  LilacAnime-DinoPatch-Windows-x64.zip" -Encoding ascii
+          Write-Host "ZIP: LilacAnime-DinoPatch-Windows-x64.zip"
+          Write-Host "SHA-256: $hash"
+          Write-Host "Source commit: $env:GITHUB_SHA"
+
+      - name: Save private build artifact (not a GitHub Release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: LilacAnime-DinoPatch-Windows-x64
+          path: build-artifacts/*
+          if-no-files-found: error
+          retention-days: 14
