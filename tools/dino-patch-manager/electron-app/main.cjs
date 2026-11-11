@@ -262,9 +262,9 @@ async function readSourceSnapshotWithRetry(root, retries = 3) {
     try {
       return takeSourceSnapshot(root);
     } catch (error) {
-      // Atomic app.asar replacements can briefly remove the directory entry.
-      // A persistent missing file still fails closed after bounded retries.
-      if (error.code !== 'ENOENT' || attempt >= retries) throw error;
+      // Atomic installers may briefly replace the archive entry with a directory
+      // or make it disappear entirely. We retry but never accept an invalid file.
+      if (!['ENOENT', 'INVALID_ARCHIVE'].includes(error.code) || attempt >= retries) throw error;
       await delay(200 * (attempt + 1));
     }
   }
@@ -297,10 +297,10 @@ async function verifyStableSourceChange(reason, attempt = 0) {
     if (previous && previous.signature !== third.signature) sendSourceChange(third, reason);
   } catch (error) {
     sourceMonitor.warningSent = true;
-    if (error.code === 'ENOENT' && attempt < 3) {
+    if (['ENOENT', 'INVALID_ARCHIVE'].includes(error.code) && attempt < 3) {
       // Keep the parent-directory watchers while an updater swaps app.asar.
       retryMissingArchive = true;
-      sendProgress('공식 설치본 app.asar 파일 교체 중입니다. 원본을 변경하지 않고 안정화 후 다시 확인합니다.');
+      sendProgress(`공식 설치본 app.asar가 일시적으로 불안정합니다 (${error.code}). 원본을 변경하지 않고 안정화 후 다시 확인합니다.`);
     } else {
       closeSourceWatchers();
       sendProgress(`실시간 원본 변경 감시 중단 (${error.code || error.name}): ${String(error.message || error).slice(0, 300)}. 자동 감시와 별개로 수동 적용 버튼에서 안전 검사를 다시 요청할 수 있습니다.`);
@@ -339,8 +339,8 @@ async function refreshSourceMonitorAfterOperation(operation, result) {
     // convert an already verified patch state to an unknown/failed operation.
     sourceMonitor.pending = true;
     sourceMonitor.pendingReason = '작업 후 설치본 변경 감시 재확인';
-    if (error.code === 'ENOENT') {
-      sendProgress('설치본 app.asar 파일이 교체 중입니다. 패치 상태는 별도로 유지하고 원본 감시만 다시 확인합니다.');
+    if (['ENOENT', 'INVALID_ARCHIVE'].includes(error.code)) {
+      sendProgress(`설치본 app.asar 상태가 변하는 중입니다 (${error.code}). 패치 결과는 따로 유지하고 원본 감시를 다시 시도합니다.`);
     } else {
       sendProgress(`실시간 원본 감시만 갱신하지 못했습니다 (${error.code || error.name}): ${String(error.message || error).slice(0, 250)}. 수동 적용은 독립 검사로 진행할 수 있습니다.`);
     }
