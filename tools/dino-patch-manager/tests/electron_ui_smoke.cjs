@@ -984,10 +984,10 @@ async function main() {
     layoutComparison.fixtureLayouts = fixtureLayouts;
     fs.writeFileSync(layoutComparisonPath, JSON.stringify(layoutComparison, null, 2), { flag: 'w' });
 
-    const manualDetails = await evaluate(first.cdp, `(() => { const details=document.querySelector('.advanced-tools'); return {visible:details.getBoundingClientRect().height > 100, controls:['inspect','history','uninstall','backupSelect','restore','checkUpdates','diagnostics'].every((id)=>document.getElementById(id)), noDuplicateApply:!document.getElementById('apply')&&!document.getElementById('rowApply'), logsInsideAdvanced:details.contains(document.querySelector('.log-details')), updateControlsOutsideMain:!document.querySelector('.patch-list-card').contains(document.getElementById('checkUpdates')), contentHeight:Math.round(details.getBoundingClientRect().height)}; })()`);
+    const manualDetails = await evaluate(first.cdp, `(() => { const details=document.querySelector('.advanced-tools'); return {visible:details.getBoundingClientRect().height > 100, controls:['inspect','apply','history','uninstall','backupSelect','restore','checkUpdates','diagnostics'].every((id)=>document.getElementById(id)), oneManualApply:document.querySelectorAll('#apply').length===1&&!document.getElementById('rowApply'), logsInsideAdvanced:details.contains(document.querySelector('.log-details')), updateControlsOutsideMain:!document.querySelector('.patch-list-card').contains(document.getElementById('checkUpdates')), contentHeight:Math.round(details.getBoundingClientRect().height)}; })()`);
     assert.equal(manualDetails.visible, true, 'Advanced tools must always be visible.');
     assert.equal(manualDetails.controls, true, 'Existing inspect, history, patch, restore, update and diagnostic controls must remain present.');
-    assert.equal(manualDetails.noDuplicateApply, true, 'Manual apply duplicates must be removed because startup and recheck apply automatically.');
+    assert.equal(manualDetails.oneManualApply, true, 'Manual apply must exist exactly once and stay outside the patch-list row.');
     assert.equal(manualDetails.logsInsideAdvanced, true, 'Detailed logs must stay inside the tool section.');
     assert.equal(manualDetails.updateControlsOutsideMain, true, 'Official updater controls must stay out of the main patch-list area.');
     const manualToolsLayout = await readLayout(first.cdp);
