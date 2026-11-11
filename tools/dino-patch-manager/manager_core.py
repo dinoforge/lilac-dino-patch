@@ -1335,7 +1335,20 @@ def _verify_patched_contracts(source_root: Path, manifest: dict[str, Any]) -> No
 
 
 def _node_executable() -> str | None:
+    packaged_exe = os.environ.get("DINO_MANAGER_NODE_EXE", "").strip()
+    if packaged_exe:
+        candidate = Path(packaged_exe)
+        return str(candidate) if candidate.is_file() else None
     return shutil.which("node")
+
+
+def _node_subprocess_environment() -> dict[str, str]:
+    env = os.environ.copy()
+    if env.get("DINO_MANAGER_NODE_EXE"):
+        # Only the Node contract-check subprocess uses Electron's CLI mode.
+        # Do not contaminate the Python bridge or the official Electron app.
+        env["ELECTRON_RUN_AS_NODE"] = "1"
+    return env
 
 
 def run_node_contracts(source_root: Path, project_root: Path = PROJECT_ROOT, *, timeout: int = 120) -> dict[str, Any]:
@@ -1356,7 +1369,7 @@ def run_node_contracts(source_root: Path, project_root: Path = PROJECT_ROOT, *, 
         relative_target = target.relative_to(source_root).as_posix()
         result = subprocess.run(
             [node, "--check", relative_target], cwd=source_cwd, capture_output=True,
-            text=True, encoding="utf-8", errors="replace", timeout=timeout,
+            env=_node_subprocess_environment(), text=True, encoding="utf-8", errors="replace", timeout=timeout,
             **_hidden_subprocess_options(),
         )
         if result.returncode:
@@ -1364,7 +1377,7 @@ def run_node_contracts(source_root: Path, project_root: Path = PROJECT_ROOT, *, 
     contract = project_root / CONTRACT_TEST_RELATIVE
     if not contract.is_file():
         raise ManagerError("공식 원본용 계약 테스트 파일이 없습니다.")
-    env = os.environ.copy()
+    env = _node_subprocess_environment()
     env["PATCH03_SOURCE_ROOT"] = source_cwd
     result = subprocess.run(
         [node, "--test", CONTRACT_TEST_RELATIVE.as_posix()], cwd=project_cwd, env=env, capture_output=True,
@@ -1450,8 +1463,8 @@ def _run_existing_validator(archive: Path, project_root: Path = PROJECT_ROOT, *,
             raise ManagerError("Electron 외부 검증에는 OS Temp에 준비된 의존성 폴더를 직접 선택해야 합니다.")
         args.extend(["--dependencies-from", dependencies_from, "--run-electron"])
     result = subprocess.run(
-        args, cwd=root, capture_output=True, text=True, encoding="utf-8",
-        errors="replace", timeout=600, **_hidden_subprocess_options(),
+        args, cwd=root, env=_node_subprocess_environment(), capture_output=True,
+        text=True, encoding="utf-8", errors="replace", timeout=600, **_hidden_subprocess_options(),
     )
     output = _redact((result.stdout or "") + (result.stderr or ""))
     if result.returncode:
