@@ -1,0 +1,16 @@
+[package]
+name = "dino-asar-inspect"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Read-only preflight inspector for locally installed LilacAnime ASAR files"
+
+[dependencies]
+serde_json = "1.0"
+sha2 = "0.10"
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
+panic = "abort"
