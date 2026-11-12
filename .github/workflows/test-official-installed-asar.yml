@@ -6,6 +6,8 @@ on:
     paths:
       - .github/workflows/test-official-installed-asar.yml
       - tools/dino-patch-manager/installed_asar.py
+      - tools/dino-patch-manager/manager_core.py
+      - tools/dino-patch-manager/tests/test_ipc_contract_v064.py
       - tools/dino-patch-manager/tests/verify_official_installed_asar.py
   workflow_dispatch:
 
@@ -37,6 +39,10 @@ jobs:
             --dir "$RUNNER_TEMP/official-download"
           dpkg-deb -x "$RUNNER_TEMP/official-download/LilacAnime-linux-amd64.deb" "$RUNNER_TEMP/official-unpacked"
           find "$RUNNER_TEMP/official-unpacked" -name app.asar -type f -print
+
+      - name: Verify guarded old and delegated IPC contracts
+        shell: bash
+        run: python3 -m unittest discover -s tools/dino-patch-manager/tests -p test_ipc_contract_v064.py -v
 
       - name: Verify exact official version, patch and restore only in temp copy
         shell: bash
