@@ -15,14 +15,55 @@
 .detail-playback-info small{color:var(--muted);font-size:10.5px}
 @media(max-width:650px){.search-provider-filters{gap:6px}.search-provider-chip{padding:7px 10px;font-size:10px}.detail-source-picker{padding:10px}.detail-source-picker>div{gap:6px}}
 
-/* Global integrated detail picker: one selectable, verified source per card. */
-.detail-source-picker>div{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}
-.detail-source-picker .dino-source-option{min-height:46px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);font-size:11px;line-height:1.55;text-align:left;white-space:normal;overflow-wrap:anywhere}
-.detail-source-picker .dino-source-option:hover{border-color:var(--lilac)}
-.detail-source-picker .dino-source-option[aria-pressed="true"]{border-color:var(--lilac);background:color-mix(in srgb,var(--lilac) 15%,var(--panel));font-weight:700}
+/* Integrated source tabs: one horizontal rail, never a vertical card grid. */
+.detail-source-picker .dino-source-track{
+  display:flex;
+  flex-wrap:nowrap;
+  gap:8px;
+  min-width:0;
+  overflow-x:auto;
+  overflow-y:hidden;
+  padding:2px 2px 9px;
+  scrollbar-width:thin;
+  scrollbar-color:var(--lilac2) transparent;
+  overscroll-behavior-x:contain;
+  scroll-snap-type:x proximity;
+  -webkit-overflow-scrolling:touch
+}
+.detail-source-picker .dino-source-option{
+  display:block;
+  flex:0 0 218px;
+  width:218px;
+  min-height:58px;
+  padding:10px 12px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--panel);
+  color:var(--muted);
+  font-size:11px;
+  line-height:1.6;
+  text-align:left;
+  white-space:pre-line;
+  overflow-wrap:normal;
+  word-break:keep-all;
+  scroll-snap-align:start;
+  cursor:pointer;
+  transition:background .15s,border-color .15s
+}
+.detail-source-picker .dino-source-option::first-line{font-size:12px;font-weight:750;color:var(--text)}
+.detail-source-picker .dino-source-option:hover{border-color:var(--lilac2)}
+.detail-source-picker .dino-source-option[aria-pressed="true"]{
+  border-color:var(--lilac);
+  background:color-mix(in srgb,var(--lilac) 17%,var(--panel));
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--lilac) 35%,transparent)
+}
+.detail-source-picker .dino-source-option:focus-visible{
+  outline:2px solid var(--lilac);
+  outline-offset:2px
+}
+@media(max-width:520px){.detail-source-picker .dino-source-option{flex-basis:190px;width:190px}}
 .detail-source-picker .source-search-note{line-height:1.5}
 .dino-fixed-quality{font-size:11px}
-@media(max-width:520px){.detail-source-picker>div{grid-template-columns:1fr}}
 .detail-source-picker .dino-source-retry{margin-top:10px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--muted);font-size:11px}
 .detail-source-picker .dino-source-retry:hover:not(:disabled){border-color:var(--lilac);color:var(--text)}
 .detail-source-picker .dino-source-retry:disabled{opacity:.6;cursor:wait}
