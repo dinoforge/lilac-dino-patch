@@ -107,7 +107,17 @@ pub fn sha(path: &Path) -> Result<String> {
 }
 
 fn git_blob_sha(data:&[u8])->String {
-    let normalized = data.replace(b"\r\n", b"\n");
+    let mut normalized = Vec::with_capacity(data.len());
+    let mut index = 0;
+    while index < data.len() {
+        if data[index] == b'\r' && data.get(index + 1) == Some(&b'\n') {
+            normalized.push(b'\n');
+            index += 2;
+        } else {
+            normalized.push(data[index]);
+            index += 1;
+        }
+    }
     let mut hash=Sha1::new();
     hash.update(format!("blob {}\0",normalized.len()).as_bytes());
     hash.update(&normalized);
