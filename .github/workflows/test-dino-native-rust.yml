@@ -7,6 +7,7 @@ on:
       - tools/dino-patch-manager/native-rust/**
       - src/integrated-search.js
       - src/integrated-search.css
+      - tests/patch03-global-integration.test.cjs
       - patches/patch03/**
       - .github/workflows/test-dino-native-rust.yml
   workflow_dispatch:
