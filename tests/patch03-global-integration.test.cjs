@@ -188,3 +188,21 @@ test('a missing supplier can be retried explicitly without changing the global i
   assert.equal(app.storage.get('lilacDinoPatch.searchMode'),'integrated');
   assert.ok(miruroChecks>=2);
 });
+
+test('translated aliases recover ID-less providers only for the same season and year', async () => {
+  const makeCandidate = year => {
+    const app=harness();
+    const candidate={...app.other,anilistId:undefined,malId:undefined,
+      title:'Alternate Title',title_english:'Alternate Title',year};
+    app.window.lilac.titleVariants=async()=>['Alternate Title'];
+    app.window.lilac.providerCatalog=async(provider,query)=>
+      provider==='miruro'&&query==='Alternate Title'?{data:[candidate]}:{data:[]};
+    return app;
+  };
+  const same=makeCandidate(2026);
+  await same.window.openDetail(same.home.mal_id);
+  assert.equal(buttons(same).length,2);
+  const different=makeCandidate(2025);
+  await different.window.openDetail(different.home.mal_id);
+  assert.equal(buttons(different).length,1,'an alternate title must not override a conflicting release year');
+});
