@@ -323,47 +323,147 @@
   };
 
   function renderSourcePicker(group, activeId) {
-    if (!group || (group.sourceItems || []).length < 2) return;
+    if (!integratedMode() || !Array.isArray(group?.sourceItems) || !group.sourceItems.length) return;
     const content = document.querySelector('#detailContent');
     const dialog = document.querySelector('#detailDialog');
     if (!dialog?.open || !content?.querySelector('.detail-actions')) return;
     content.querySelector('.detail-source-picker')?.remove();
     const section = document.createElement('section');
     section.className = 'detail-source-picker';
-    section.setAttribute('aria-label', '작품 공급원 선택');
+    section.setAttribute('aria-label', '통합 공급원 선택');
     const title = document.createElement('b');
-    title.textContent = '공급원 · 회차 목록';
+    title.textContent = '재생 공급원';
     const choices = document.createElement('div');
     choices.setAttribute('role', 'group');
-    choices.setAttribute('aria-label', '공급원 선택');
+    choices.setAttribute('aria-label', '재생 공급원 선택');
     for (const item of group.sourceItems) {
+      const id = sourceKey(item);
+      const info = detailFacts.get(id);
+      const quality = verifiedVideoQuality.get(item.provider);
       const button = document.createElement('button');
       button.type = 'button';
-      button.dataset.providerSource = String(item.mal_id);
-      button.setAttribute('aria-pressed', String(String(item.mal_id) === String(activeId)));
-      button.textContent = labels[item.provider] || item.provider;
-      button.addEventListener('click', () => window.openDetail(String(item.mal_id), { sourceSelection: true }));
+      button.className = 'dino-source-option';
+      button.dataset.providerSource = id;
+      button.setAttribute('aria-pressed', String(id === String(activeId)));
+      // The search catalog's episode count is only an estimate. Use only the
+      // actual fetched episode list, and only measured video resolutions.
+      const count = info?.unavailable ? '재생 불가'
+        : Number.isInteger(info?.episodes) ? String(info.episodes) + '화' : '회차 확인 중';
+      const resolution = quality ? '최근 재생 ' + quality : '화질 재생 시 확인';
+      button.textContent = (labels[item.provider] || item.provider) + ' · ' + count + ' · ' + resolution;
+      button.title = button.textContent;
+      button.addEventListener('click', () => window.openDetail(id, { sourceSelection: true }));
       choices.append(button);
     }
     section.append(title, choices);
+    if (group.sourceItems.length === 1) {
+      const note = document.createElement('small');
+      note.className = 'source-search-note';
+      note.textContent = '다른 공급원에서 같은 작품을 확인하지 못했습니다. 다른 시즌은 자동으로 합치지 않습니다.';
+      section.append(note);
+    }
     const anchor = content.querySelector('.detail-meta') || content.querySelector('.detail-actions');
     anchor?.before(section);
   }
 
+  async function loadVerifiedEpisodeCounts(group, activeId, sequence) {
+    if (!Array.isArray(group?.sourceItems)) return;
+    const items = group.sourceItems.slice();
+    let index = 0;
+    await Promise.all(Array.from({ length: Math.min(2, items.length) }, async () => {
+      while (index < items.length) {
+        const item = items[index++], id = sourceKey(item);
+        if (detailFacts.has(id)) continue;
+        try {
+          const response = await window.lilac.providerDetail(item);
+          if (Array.isArray(response?.episodes)) {
+            detailFacts.set(id, {
+              episodes: response.episodes.filter(ep => ep?.playable !== false).length,
+              unavailable: Boolean(response?.unavailable)
+            });
+          } else if (response?.unavailable) {
+            detailFacts.set(id, { unavailable: true });
+          }
+        } catch { /* Do not claim a count on failed provider detail. */ }
+        if (sequence === detailSequence) renderSourcePicker(group, activeId);
+      }
+    }));
+    if (detailFacts.size > 500) detailFacts.delete(detailFacts.keys().next().value);
+  }
+
   window.openDetail = async function (id, options = {}) {
-    const inIntegratedSearch = integratedMode() && document.querySelector('#searchView')?.classList.contains('active');
-    const group = inIntegratedSearch ? groupBySourceId.get(String(id)) : null;
+    const isIntegrated = integratedMode();
+    const inIntegratedSearch = isIntegrated && document.querySelector('#searchView')?.classList.contains('active');
+    const group = isIntegrated ? (detailGroupsBySourceId.get(String(id))
+      || (inIntegratedSearch ? groupBySourceId.get(String(id)) : null)) : null;
+    const anchor = initialKnownSource(id, group);
     const sequence = ++detailSequence;
     const selected = group ? api.chooseSource(group, {
-      provider: currentFilter,
+      provider: inIntegratedSearch ? currentFilter : 'all',
       preferredProvider: selectedProvider(),
       sourceId: (options?.sourceSelection || currentFilter === 'all') ? id : ''
     }) : null;
     const selectedId = String(selected?.mal_id ?? id);
+    const known = initialKnownSource(selectedId, group) || anchor;
     const result = await officialOpenDetail.call(this, selectedId);
-    if (sequence === detailSequence && group) renderSourcePicker(group, selectedId);
+    if (sequence !== detailSequence || !isIntegrated) return result;
+
+    if (group) {
+      keepDetailGroup(group);
+      renderSourcePicker(group, selectedId);
+      loadVerifiedEpisodeCounts(group, selectedId, sequence).catch(() => {});
+    }
+    if (!isDinoProvider(known)) return result;
+    try {
+      const discovered = await discoverSources(known, group);
+      if (sequence !== detailSequence || !integratedMode()) return result;
+      keepDetailGroup(discovered);
+      renderSourcePicker(discovered, selectedId);
+      loadVerifiedEpisodeCounts(discovered, selectedId, sequence).catch(() => {});
+    } catch {
+      // Keep the official detail playable even if a remote provider fails.
+      if (sequence === detailSequence && !group) {
+        const single = verifiedGroupFor(known, []);
+        keepDetailGroup(single);
+        renderSourcePicker(single, selectedId);
+      }
+    }
     return result;
   };
+
+  function connectRealPlaybackQuality() {
+    const video = document.querySelector('#video');
+    if (!video || typeof video.addEventListener !== 'function') return;
+    const refresh = () => {
+      const height = Number(video.videoHeight), width = Number(video.videoWidth);
+      const context = typeof currentPlaybackContext !== 'undefined' ? currentPlaybackContext : null;
+      const provider = context?.episode?.provider || context?.anime?.provider;
+      if (!providers.includes(provider) || !Number.isFinite(height) || !Number.isFinite(width)
+        || height < 144 || width < 200 || height > 4320 || width > 7680) return;
+      verifiedVideoQuality.set(provider, String(height) + 'p');
+      // The official player hides the entire quality section when no
+      // selectable variants exist. Show the actual decoded fixed resolution.
+      const panel = document.querySelector('#psQuality');
+      const list = document.querySelector('#psQualityList');
+      if (panel?.classList.contains('hidden') && list) {
+        const info = document.createElement('small');
+        info.className = 'ps-note dino-fixed-quality';
+        info.textContent = '현재 재생 영상 · ' + width + '×' + height + ' (' + height + 'p) · 단일 화질';
+        list.replaceChildren(info);
+        panel.classList.remove('hidden');
+      }
+    };
+    for (const name of ['loadedmetadata', 'resize', 'playing']) video.addEventListener(name, refresh);
+    const originalRender = window.renderQualityChoices;
+    if (typeof originalRender === 'function') {
+      window.renderQualityChoices = function (...args) {
+        const result = originalRender.apply(this, args);
+        refresh();
+        return result;
+      };
+    }
+  }
+  document.addEventListener?.('DOMContentLoaded', connectRealPlaybackQuality, { once: true });
 
   window.__dinoPatch03Bridge = {
     active: true,
@@ -374,6 +474,8 @@
     getSearchSnapshot: () => resultGroups.map(group => ({
       title: String(group.displayTitle || group.title || ''),
       sourceItems: (group.sourceItems || []).map(item => ({ provider: item.provider, sourceId: String(item.mal_id) }))
-    }))
+    })),
+    getDetailSnapshot: id => (detailGroupsBySourceId.get(String(id))?.sourceItems || [])
+      .map(item => ({ provider: item.provider, sourceId: sourceKey(item) }))
   };
 })();
