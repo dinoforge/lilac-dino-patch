@@ -23,3 +23,6 @@
 .detail-source-picker .source-search-note{line-height:1.5}
 .dino-fixed-quality{font-size:11px}
 @media(max-width:520px){.detail-source-picker>div{grid-template-columns:1fr}}
+.detail-source-picker .dino-source-retry{margin-top:10px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--muted);font-size:11px}
+.detail-source-picker .dino-source-retry:hover:not(:disabled){border-color:var(--lilac);color:var(--text)}
+.detail-source-picker .dino-source-retry:disabled{opacity:.6;cursor:wait}
