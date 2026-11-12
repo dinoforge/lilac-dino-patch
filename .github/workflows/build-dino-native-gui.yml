@@ -28,6 +28,29 @@ jobs:
           cargo build --release --features gui
           if ($LASTEXITCODE -ne 0) { throw 'Rust desktop manager could not compile' }
           if (-not (Test-Path -LiteralPath 'target/release/dino-native-manager.exe' -PathType Leaf)) { throw 'Native Rust executable missing' }
+      - name: Smoke-test real Rust Windows GUI startup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Join-Path (Get-Location).Path 'target/release/dino-native-manager.exe'
+          $psi=[System.Diagnostics.ProcessStartInfo]::new($exe)
+          $psi.UseShellExecute=$false
+          $psi.CreateNoWindow=$false
+          $psi.RedirectStandardError=$true
+          $proc=[System.Diagnostics.Process]::Start($psi)
+          if (-not $proc) { throw 'Native Rust GUI did not launch' }
+          try {
+            Start-Sleep -Seconds 5
+            if ($proc.HasExited) {
+              $errorText=$proc.StandardError.ReadToEnd()
+              throw "Rust GUI terminated immediately (code=$($proc.ExitCode)): $errorText"
+            }
+            Write-Host 'Native Rust GUI remained running in the Windows test session'
+          } finally {
+            if (-not $proc.HasExited) { $proc.Kill($true) }
+            $proc.WaitForExit(10000) | Out-Null
+            $proc.Dispose()
+          }
       - name: Create Rust-only portable package
         shell: pwsh
         run: |
