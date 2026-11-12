@@ -112,12 +112,22 @@
       const terms = api.titleVariantTerms({
         query, displayTitles: nativeTitles, variants, limit: 5
       });
+      // Official title variants are candidate aliases, not sufficient alone
+      // to join anime. The existing identity matcher still demands matching
+      // release years, compatible season/format and non-conflicting IDs.
+      const verifiedAliases = [...new Set([...nativeTitles, ...variants])]
+        .filter(value => typeof value === 'string' && value.trim().length > 1)
+        .slice(0, 16);
+      const reference = {
+        ...anchor,
+        synonyms: [...(Array.isArray(anchor.synonyms) ? anchor.synonyms : []), ...verifiedAliases]
+      };
       const options = {
         search: (provider, text) => window.lilac.providerCatalog(provider, text),
         localSearch: localKoreanCatalog, concurrency: 5
       };
       const first = await api.searchProviders({ ...options, providers, query });
-      let group = verifiedGroupFor(anchor, [...seeds, ...first.items]);
+      let group = verifiedGroupFor(reference, [...seeds, ...first.items]);
       // A successful nonempty catalog response can contain unrelated anime.
       // Only an identity match proves that the requested work was found.
       const matched = new Set(group.sourceItems.map(item => item.provider));
@@ -127,7 +137,7 @@
           ...options, providers: missing, query: '', terms,
           localSearch: async () => null
         });
-        group = verifiedGroupFor(anchor, [...seeds, ...first.items, ...extra.items]);
+        group = verifiedGroupFor(reference, [...seeds, ...first.items, ...extra.items]);
       }
       return group;
     })();
