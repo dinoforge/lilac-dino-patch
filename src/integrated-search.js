@@ -338,7 +338,7 @@
     return items.find(item => item.provider === preferredProvider) || items[0] || null;
   }
 
-  async function searchProviders({ providers = PROVIDERS, query = '', terms = [], search, localSearch = async () => null, concurrency = 6 } = {}) {
+  async function searchProviders({ providers = PROVIDERS, query = '', terms = [], search, localSearch = async () => null, concurrency = 6, maxPages = 1 } = {}) {
     if (typeof search !== 'function') throw new TypeError('search must be a function');
     const selectedProviders = [...new Set(providers)].filter(provider => PROVIDERS.includes(provider));
     const seenTerms = new Set(), searchTerms = [];
@@ -347,7 +347,8 @@
       if (!term || seenTerms.has(key)) continue;
       seenTerms.add(key); searchTerms.push(term);
     }
-    const records = new Map(selectedProviders.map(provider => [provider, { items: [], attempts: 0, successes: 0, failures: 0 }]));
+    const pageLimit = Math.max(1, Math.min(3, Number.isInteger(maxPages) ? maxPages : 1));
+    const records = new Map(selectedProviders.map(provider => [provider, { items: [], attempts: 0, successes: 0, failures: 0, pages: 0, limited: false }]));
     const tasks = [];
     for (const provider of selectedProviders) {
       const record = records.get(provider);
@@ -372,12 +373,32 @@
       ...Array.from({ length: Math.max(1, Math.min(12, Number(concurrency) || 6, work.length || 1)) }, async () => {
         while (next < work.length) {
           const task = work[next++], record = records.get(task.provider);
-          try {
-            const result = await search(task.provider, task.term);
-            const items = Array.isArray(result) ? result : result?.data;
-            record.successes++;
-            if (Array.isArray(items)) record.items.push(...items.map(item => item?.provider ? item : { ...item, provider: task.provider }));
-          } catch { record.failures++; }
+          let cursor = null;
+          const seenCursors = new Set();
+          for (let page = 0; page < pageLimit; page++) {
+            if (page > 0) record.attempts++;
+            try {
+              const result = await search(task.provider, task.term, cursor);
+              const items = Array.isArray(result) ? result : result?.data;
+              record.successes++;
+              record.pages++;
+              if (Array.isArray(items)) record.items.push(...items.map(item => item?.provider ? item : { ...item, provider: task.provider }));
+              // Only follow cursors actually returned by the official provider
+              // API. Re:Anime uses an offset/limit/total response instead.
+              let nextCursor = result?.nextOffset ?? null;
+              if (task.provider === 'reanime' && nextCursor == null && Number.isFinite(Number(result?.total))
+                && Number.isFinite(Number(result?.offset)) && Number.isFinite(Number(result?.limit))
+                && Number(result.limit) > 0 && Number(result.offset) + Number(result.limit) < Number(result.total)) {
+                nextCursor = Number(result.offset) + Number(result.limit);
+              }
+              if (result?.done || !Array.isArray(items) || !items.length || nextCursor == null || nextCursor === '') break;
+              const signature = String(nextCursor);
+              if (signature === String(cursor) || seenCursors.has(signature) || signature.length > 128) break;
+              seenCursors.add(signature);
+              if (page + 1 >= pageLimit) { record.limited = true; break; }
+              cursor = nextCursor;
+            } catch { record.failures++; break; }
+          }
         }
       })
     ]);
@@ -395,6 +416,8 @@
         attempts: record.attempts,
         successes: record.successes,
         failures: record.failures,
+        pages: record.pages,
+        pageLimitReached: record.limited,
         resultCount: uniqueItems.size
       };
     });
@@ -410,7 +433,7 @@
 
   function mergeSearchResults(...runs) {
     const providers = [...new Set(runs.flatMap(run => (run?.statuses || []).map(status => status.provider)))];
-    const records = new Map(providers.map(provider => [provider, { items: new Map(), attempts: 0, successes: 0, failures: 0 }]));
+    const records = new Map(providers.map(provider => [provider, { items: new Map(), attempts: 0, successes: 0, failures: 0, pages: 0, limited: false }]));
     for (const run of runs) {
       for (const status of run?.statuses || []) {
         const record = records.get(status.provider);
@@ -418,6 +441,8 @@
         record.attempts += Number(status.attempts) || 0;
         record.successes += Number(status.successes) || 0;
         record.failures += Number(status.failures) || 0;
+        record.pages += Number(status.pages) || 0;
+        record.limited ||= Boolean(status.pageLimitReached);
       }
       for (const item of run?.items || []) {
         const record = records.get(item?.provider), id = String(item?.mal_id ?? item?.id ?? '').trim();
@@ -432,6 +457,8 @@
         attempts: record.attempts,
         successes: record.successes,
         failures: record.failures,
+        pages: record.pages,
+        pageLimitReached: record.limited,
         resultCount: record.items.size
       };
     });
