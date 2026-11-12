@@ -626,17 +626,38 @@ def _named_js_function_body(source: str, name: str, description: str) -> str:
 
 
 def _ipc_handler_contract(main: str, channel: str) -> tuple[list[tuple[str, str | None]], str]:
-    pattern = re.compile(
-        rf"ipcMain\.handle\(\s*['\"]{re.escape(channel)}['\"]\s*,\s*(?:async\s*)?"
-        r"\((?P<params>[^)]*)\)\s*=>\s*\{"
-    )
-    matches = list(pattern.finditer(main))
-    if len(matches) != 1:
-        raise ManagerError(f"공식 main IPC 계약이 없거나 중복됐습니다: {channel}")
-    match = matches[0]
-    body = _extract_js_braced_body(main, match.end() - 1, f"{channel} IPC")
-    return _js_parameter_contract(match.group("params")), body
+    """Verify exactly one IPC handler, including the v0.5.64 detail wrapper.
 
+    The new official detail handler delegates to a cached providerDetail(anime)
+    helper. Never accept an arbitrary expression handler: verify the exact
+    delegation and the helper's loadProviderDetail/Promise contract.
+    """
+    registration = re.compile(rf"ipcMain\.handle\(\s*['\"]{re.escape(channel)}['\"]\s*,")
+    registrations = list(registration.finditer(main))
+    if len(registrations) != 1:
+        raise ManagerError(f"공식 main IPC 계약이 없거나 중복됐습니다: {channel}")
+    handler = re.compile(
+        rf"ipcMain\.handle\(\s*['\"]{re.escape(channel)}['\"]\s*,\s*(?:async\s*)?"
+        r"\((?P<params>[^)]*)\)\s*=>\s*(?P<start>\{|providerDetail\s*\(\s*anime\s*\))"
+    )
+    match = handler.search(main, registrations[0].start())
+    if match is None or match.start() != registrations[0].start():
+        raise ManagerError(f"공식 main IPC 처리 형식을 확인할 수 없습니다: {channel}")
+
+    if match.group("start") == "{":
+        body = _extract_js_braced_body(main, match.end() - 1, f"{channel} IPC")
+    else:
+        if channel != "provider:detail":
+            raise ManagerError(f"공식 main IPC 위임 형태가 승인되지 않았습니다: {channel}")
+        helpers = list(re.finditer(r"\bconst\s+providerDetail\s*=\s*anime\s*=>\s*\{", main))
+        if len(helpers) != 1:
+            raise ManagerError("공식 상세 조회 위임 helper가 없거나 중복됐습니다.")
+        body = _extract_js_braced_body(main, helpers[0].end() - 1, "providerDetail 캐시 helper")
+        if (len(re.findall(r"\bconst\s+promise\s*=\s*loadProviderDetail\s*\(\s*anime\s*\)", body)) != 1
+                or len(re.findall(r"\breturn\s+promise\b", body)) != 1):
+            raise ManagerError("공식 상세 조회 캐시가 loadProviderDetail(anime)의 Promise를 반환하지 않습니다.")
+
+    return _js_parameter_contract(match.group("params")), body
 
 def _verify_structural_official_contracts(root: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     required = (
