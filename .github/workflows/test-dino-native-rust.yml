@@ -1,0 +1,85 @@
+name: Native Rust DinoPatch patch and restore
+
+on:
+  push:
+    branches: [feature/dino-native-rust-manager]
+    paths:
+      - tools/dino-patch-manager/native-rust/**
+      - .github/workflows/test-dino-native-rust.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-windows:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: tools/dino-patch-manager/native-rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Rust source formatting
+        run: cargo fmt --all -- --check
+      - name: Native Rust unit tests
+        run: cargo test --no-default-features
+      - name: Native Windows binary
+        run: cargo build --release --no-default-features
+      - name: Official Windows v0.5.64 patch, backup, manual reset and byte-exact restore
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:APPDATA = Join-Path $env:RUNNER_TEMP 'native-profile'
+          $download = Join-Path $env:RUNNER_TEMP 'official-download'
+          $extract = Join-Path $env:RUNNER_TEMP 'official-extract'
+          New-Item -ItemType Directory -Force -Path $env:APPDATA,$download,$extract | Out-Null
+          gh release download v0.5.64 --repo whispelyn-byte/LilacAnime-desktop --pattern LilacAnime-Setup.exe --dir $download
+          if ($LASTEXITCODE -ne 0) { throw 'Official installer download failed' }
+          $sevenZip = (Get-Command 7z.exe -ErrorAction SilentlyContinue).Source
+          if (-not $sevenZip) { $sevenZip = 'C:\Program Files\7-Zip\7z.exe' }
+          & $sevenZip x (Join-Path $download 'LilacAnime-Setup.exe') "-o$extract" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS extraction failed' }
+          $archives = @(Get-ChildItem -LiteralPath $extract -Filter app.asar -Recurse -File)
+          if ($archives.Count -eq 0) {
+            $payloads = @(Get-ChildItem -LiteralPath $extract -Recurse -File | Where-Object { $_.Name -match '^app-.*[.]7z$' })
+            foreach ($payload in $payloads) {
+              $dest = Join-Path $extract 'application-content'
+              New-Item -ItemType Directory -Force -Path $dest | Out-Null
+              & $sevenZip x $payload.FullName "-o$dest" -y | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "Nested archive extraction failed: $($payload.Name)" }
+            }
+            $archives = @(Get-ChildItem -LiteralPath $extract -Filter app.asar -Recurse -File)
+          }
+          if ($archives.Count -ne 1) { throw "Expected one official ASAR, found $($archives.Count)" }
+          $asar = $archives[0].FullName
+          $install = Split-Path (Split-Path $asar -Parent) -Parent
+          if (-not (Test-Path -LiteralPath (Join-Path $install 'LilacAnime.exe') -PathType Leaf)) { throw 'Official Windows EXE missing' }
+          $exe = Join-Path (Get-Location).Path 'target/release/dino-native-manager.exe'
+          $beforeHash = (Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash
+          function Run-Manager([string]$cmd) {
+            $output = (& $exe $cmd $install | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0) { throw "$cmd failed: $output" }
+            return ($output | ConvertFrom-Json)
+          }
+          $before = Run-Manager 'inspect'
+          if ($before.status -ne 'UNPATCHED' -or $before.version -ne '0.5.64') { throw "Unexpected original status: $($before | ConvertTo-Json -Compress)" }
+          $applied = Run-Manager 'apply'
+          if ($applied.status -ne 'APPLIED') { throw "Patch did not apply: $($applied | ConvertTo-Json -Compress)" }
+          if ((Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash -eq $beforeHash) { throw 'ASAR was not patched' }
+          $uninstalled = Run-Manager 'uninstall'
+          if ($uninstalled.status -ne 'UNPATCHED' -or -not $uninstalled.manualUninstall) { throw 'Manual uninstall was not recorded' }
+          if ((Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash -ne $beforeHash) { throw 'Restored ASAR differs from original' }
+          if ((Run-Manager 'startup').status -ne 'UNPATCHED') { throw 'Automatic check reinstalled a manually removed patch' }
+          if ((Run-Manager 'apply').status -ne 'APPLIED') { throw 'Manual reapply failed' }
+          [void](Run-Manager 'uninstall')
+          if ((Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash -ne $beforeHash) { throw 'Second restore differs from original' }
+          $backups = @(Get-ChildItem -LiteralPath $env:APPDATA -Recurse -File -Filter original-app.asar)
+          if ($backups.Count -ne 1) { throw "Expected one retained original backup; found $($backups.Count)" }
+          if ((Get-FileHash -LiteralPath $backups[0].FullName -Algorithm SHA256).Hash -ne $beforeHash) { throw 'Original backup corrupted' }
+          Write-Host 'PASS: native Rust installed-app apply/manual-uninstall/restore parity'
