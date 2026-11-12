@@ -258,7 +258,18 @@ pub fn inspect(root:&Path)->Status {
                 if actual!=patched {return Ok(Status::new("CONFLICT",&version,"현재 ASAR가 패치 상태 기록의 SHA-256과 다릅니다."));}
                 let backup=state_root(&root)?.join("original-app.asar");
                 if sha(&backup)?!=original {return Ok(Status::new("PARTIAL_OR_UNKNOWN",&version,"원본 ASAR 백업을 검증할 수 없습니다."));}
-                return Ok(Status::new("APPLIED",&version,"패치 적용 및 원본 백업 무결성 확인 완료"));
+                // A user's older verified patch is still safe to uninstall.
+                // Never silently replace it, but make the newly embedded
+                // integrated/quality runtime available as an explicit choice.
+                let bridge_current=archive.read("src/patch03-bridge.js").ok()
+                    .as_deref()==Some(PATCH_BRIDGE);
+                let css_current=archive.read("src/integrated-search.css").ok()
+                    .as_deref()==Some(INTEGRATED_CSS);
+                if !bridge_current || !css_current {
+                    return Ok(Status::new("APPLIED",&version,
+                        "검증된 기존 디노 패치가 적용돼 있습니다. 새 전역 통합 기능을 사용하려면 [디노 패치 해제] 후 [디노 패치 수동 적용]을 누르세요."));
+                }
+                return Ok(Status::new("APPLIED",&version,"최신 디노 패치 및 원본 백업 무결성 확인 완료"));
             }
             if state["status"]=="UNPATCHED" {
                 if actual!=original {return Ok(Status::new("CONFLICT",&version,"수동 해제 후 공식 ASAR가 변경되었습니다."));}
