@@ -57,7 +57,7 @@
     {
       "source": "patches/patch03/patch03-bridge.js",
       "destination": "src/patch03-bridge.js",
-      "sha256": "7AC2D3FCC8ABFB74BE617F86525B33F0D84E06A95DF62F532DAE432E94D2E11A"
+      "sha256": "F88649DD3BA5AC06F9E34DA8665CA951CD8A452B24498E3AF8F9F98A29028525"
     }
   ],
   "officialRuntimeModifiedAllowlist": [
