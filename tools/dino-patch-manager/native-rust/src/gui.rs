@@ -21,7 +21,6 @@ struct DinoUi {
     last_monitor: Instant,
     backup_id: String,
     show_log: bool,
-    show_advanced: bool,
 }
 
 impl Default for DinoUi {
@@ -38,7 +37,6 @@ impl Default for DinoUi {
             last_monitor: Instant::now(),
             backup_id: String::new(),
             show_log: false,
-            show_advanced: true,
         }
     }
 }
@@ -175,7 +173,8 @@ impl eframe::App for DinoUi {
                     egui::Button::new("복구 상태 검사")).clicked(){self.enqueue("복구 검증");}
             });
             ui.add_space(6.0);
-            ui.collapsing("고급 도구 · 원본 백업 및 진단",|ui|{
+            ui.group(|ui|{
+                ui.label(egui::RichText::new("고급 도구 · 원본 백업 및 진단").strong());
                 ui.horizontal_wrapped(|ui|{
                     ui.label(format!("백업 ID: {}",if self.backup_id.is_empty(){"없음"}else{&self.backup_id}));
                     if ui.add_enabled(!self.busy && !self.backup_id.is_empty() && self.status.status=="APPLIED",
@@ -188,7 +187,6 @@ impl eframe::App for DinoUi {
                     }
                 }
                 ui.label("공식 릴리즈 확인: github.com/whispelyn-byte/LilacAnime-desktop/releases");
-                self.show_log=true;
             });
             ui.add_space(10.0);
             ui.separator();
