@@ -322,7 +322,7 @@
     }
   };
 
-  function renderSourcePicker(group, activeId) {
+  function renderSourcePicker(group, activeId, searching = false) {
     if (!integratedMode() || !Array.isArray(group?.sourceItems) || !group.sourceItems.length) return;
     const content = document.querySelector('#detailContent');
     const dialog = document.querySelector('#detailDialog');
@@ -348,6 +348,7 @@
       // The search catalog's episode count is only an estimate. Use only the
       // actual fetched episode list, and only measured video resolutions.
       const count = info?.unavailable ? '재생 불가'
+        : info?.noEpisodes ? '회차 없음'
         : Number.isInteger(info?.episodes) ? String(info.episodes) + '화' : '회차 확인 중';
       const resolution = quality ? '최근 재생 ' + quality : '화질 재생 시 확인';
       button.textContent = (labels[item.provider] || item.provider) + ' · ' + count + ' · ' + resolution;
@@ -359,7 +360,7 @@
     if (group.sourceItems.length === 1) {
       const note = document.createElement('small');
       note.className = 'source-search-note';
-      note.textContent = '다른 공급원에서 같은 작품을 확인하지 못했습니다. 다른 시즌은 자동으로 합치지 않습니다.';
+      note.textContent = searching ? '다른 공급원에서 같은 작품을 확인하는 중...' : '다른 공급원에서 같은 작품을 확인하지 못했습니다. 다른 시즌은 자동으로 합치지 않습니다.';
       section.append(note);
     }
     const anchor = content.querySelector('.detail-meta') || content.querySelector('.detail-actions');
@@ -379,6 +380,7 @@
           if (Array.isArray(response?.episodes)) {
             detailFacts.set(id, {
               episodes: response.episodes.filter(ep => ep?.playable !== false).length,
+              noEpisodes: response.episodes.length === 0,
               unavailable: Boolean(response?.unavailable)
             });
           } else if (response?.unavailable) {
@@ -401,7 +403,7 @@
     const selected = group ? api.chooseSource(group, {
       provider: inIntegratedSearch ? currentFilter : 'all',
       preferredProvider: selectedProvider(),
-      sourceId: (options?.sourceSelection || currentFilter === 'all') ? id : ''
+      sourceId: (options?.sourceSelection || !inIntegratedSearch || currentFilter === 'all') ? id : ''
     }) : null;
     const selectedId = String(selected?.mal_id ?? id);
     const known = initialKnownSource(selectedId, group) || anchor;
@@ -414,6 +416,7 @@
       loadVerifiedEpisodeCounts(group, selectedId, sequence).catch(() => {});
     }
     if (!isDinoProvider(known)) return result;
+    if (!group) renderSourcePicker(verifiedGroupFor(known, []), selectedId, true);
     try {
       const discovered = await discoverSources(known, group);
       if (sequence !== detailSequence || !integratedMode()) return result;
