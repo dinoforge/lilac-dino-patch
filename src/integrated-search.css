@@ -67,3 +67,20 @@
 .detail-source-picker .dino-source-retry{margin-top:10px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--muted);font-size:11px}
 .detail-source-picker .dino-source-retry:hover:not(:disabled){border-color:var(--lilac);color:var(--text)}
 .detail-source-picker .dino-source-retry:disabled{opacity:.6;cursor:wait}
+
+/* Only shown after playback fails; stays compact in the official player header. */
+.dino-playback-alternate{
+  flex:0 0 auto;
+  max-width:190px;
+  padding:6px 10px;
+  border:1px solid var(--lilac);
+  border-radius:8px;
+  background:color-mix(in srgb,var(--lilac) 17%,var(--panel));
+  color:var(--text);
+  font-size:11px;
+  font-weight:650;
+  cursor:pointer
+}
+.dino-playback-alternate:hover{background:color-mix(in srgb,var(--lilac) 26%,var(--panel))}
+.dino-playback-alternate:disabled{opacity:.6;cursor:wait}
+@media(max-width:650px){.dino-playback-alternate{max-width:135px;font-size:10px;line-height:1.3}}
