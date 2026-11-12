@@ -8,7 +8,7 @@ license = "MIT"
 
 [features]
 default = []
-gui = ["dep:eframe", "dep:rfd"]
+gui = ["dep:eframe", "dep:rfd", "dep:wgpu"]
 
 [dependencies]
 serde_json = { version = "1", features = ["preserve_order"] }
@@ -20,6 +20,7 @@ rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "t
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp"] }
+wgpu = { version = "27", default-features = false, features = ["dx12"], optional = true }
 
 [profile.release]
 opt-level = "z"
