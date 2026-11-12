@@ -164,3 +164,27 @@ test('fixed quality displays measured decoded video pixels and never invents 108
   await app.window.openDetail(app.home.mal_id);
   assert.ok(buttons(app).some(x=>x.textContent.includes('최근 재생 1080p')));
 });
+
+test('a missing supplier can be retried explicitly without changing the global integrated preference', async () => {
+  const app=harness();
+  const original=app.window.lilac.providerCatalog;
+  let miruroChecks=0;
+  app.window.lilac.providerCatalog=async(provider,query)=>{
+    if(provider==='miruro' && query==='English Work'){
+      miruroChecks++;
+      if(miruroChecks===1)return {data:[]};
+    }
+    return original(provider,query);
+  };
+  await app.window.openDetail(app.home.mal_id);
+  assert.equal(buttons(app).length,1);
+  const section=app.nodes.get('#detailContent').querySelector('.detail-source-picker');
+  const retry=section.children.find(item=>item.className==='dino-source-retry');
+  assert.ok(retry, 'an unmatched source should be recoverable through a manual retry');
+  retry.send('click');
+  await settle();
+  await settle();
+  assert.equal(buttons(app).length,2);
+  assert.equal(app.storage.get('lilacDinoPatch.searchMode'),'integrated');
+  assert.ok(miruroChecks>=2);
+});
