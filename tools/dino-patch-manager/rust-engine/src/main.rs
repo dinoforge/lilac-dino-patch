@@ -339,7 +339,11 @@ fn main() {
             std::process::exit(2);
         }
         let patch_version = patch_version.to_string_lossy();
-        recovery::review_recovery(&PathBuf::from(root), &PathBuf::from(state_root), &patch_version)
+        recovery::review_recovery(
+            &PathBuf::from(root),
+            &PathBuf::from(state_root),
+            &patch_version,
+        )
     } else {
         if args.next().is_some() {
             eprintln!("Only one installed root argument is allowed.");
@@ -502,24 +506,36 @@ mod tests {
         if patched {
             fs::write(fixture.archive(), &patched_bytes).unwrap();
         }
-        let state_root = fixture.0.join("profile").join("installed-asar").join("target-id");
+        let state_root = fixture
+            .0
+            .join("profile")
+            .join("installed-asar")
+            .join("target-id");
         fs::create_dir_all(&state_root).unwrap();
         fs::write(state_root.join("original-app.asar"), &original).unwrap();
         let hex = |bytes: &[u8]| -> String {
             let mut sha = Sha256::new();
             sha.update(bytes);
-            sha.finalize().iter().map(|byte| format!("{byte:02X}")).collect()
+            sha.finalize()
+                .iter()
+                .map(|byte| format!("{byte:02X}"))
+                .collect()
         };
-        fs::write(state_root.join("pending.json"), serde_json::to_vec(&json!({
-            "schemaVersion": 1,
-            "target": fixture.0.to_string_lossy(),
-            "version": "0.5.64",
-            "patchVersion": "1.0.0",
-            "status": "APPLIED",
-            "originalSha256": hex(&original),
-            "patchedSha256": hex(&patched_bytes),
-            "backupId": "test-backup"
-        })).unwrap()).unwrap();
+        fs::write(
+            state_root.join("pending.json"),
+            serde_json::to_vec(&json!({
+                "schemaVersion": 1,
+                "target": fixture.0.to_string_lossy(),
+                "version": "0.5.64",
+                "patchVersion": "1.0.0",
+                "status": "APPLIED",
+                "originalSha256": hex(&original),
+                "patchedSha256": hex(&patched_bytes),
+                "backupId": "test-backup"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
         (state_root, original, patched_bytes)
     }
 
@@ -533,8 +549,14 @@ mod tests {
         assert_eq!(result["mode"], "APPLIED");
         assert_eq!(result["readOnly"], true);
         assert_eq!(fs::read(fixture.archive()).unwrap(), current_before);
-        assert_eq!(fs::read(state_root.join("original-app.asar")).unwrap(), backup_before);
-        assert_eq!(fs::read(state_root.join("pending.json")).unwrap(), pending_before);
+        assert_eq!(
+            fs::read(state_root.join("original-app.asar")).unwrap(),
+            backup_before
+        );
+        assert_eq!(
+            fs::read(state_root.join("pending.json")).unwrap(),
+            pending_before
+        );
     }
 
     #[test]
@@ -565,7 +587,9 @@ mod tests {
             let temp = fixture.0.join("resources").join(name);
             fs::write(&temp, b"partial").unwrap();
             assert_eq!(
-                recovery::review_recovery(&fixture.0, &state_root, "1.0.0").unwrap_err().code,
+                recovery::review_recovery(&fixture.0, &state_root, "1.0.0")
+                    .unwrap_err()
+                    .code,
                 "RECOVERY_BLOCKED"
             );
             fs::remove_file(temp).unwrap();
@@ -583,14 +607,18 @@ mod tests {
         document["target"] = json!("another-installation");
         fs::write(&marker, serde_json::to_vec(&document).unwrap()).unwrap();
         assert_eq!(
-            recovery::review_recovery(&fixture.0, &state_root, "1.0.0").unwrap_err().code,
+            recovery::review_recovery(&fixture.0, &state_root, "1.0.0")
+                .unwrap_err()
+                .code,
             "RECOVERY_BLOCKED"
         );
         document["target"] = json!(fixture.0.to_string_lossy().to_string());
         document["schemaVersion"] = json!(2);
         fs::write(&marker, serde_json::to_vec(&document).unwrap()).unwrap();
         assert_eq!(
-            recovery::review_recovery(&fixture.0, &state_root, "1.0.0").unwrap_err().code,
+            recovery::review_recovery(&fixture.0, &state_root, "1.0.0")
+                .unwrap_err()
+                .code,
             "RECOVERY_BLOCKED"
         );
     }
@@ -599,24 +627,36 @@ mod tests {
     fn recovery_review_blocks_conflicting_state_and_wrong_sha() {
         let fixture = Fixture::new();
         let (state_root, _, current_before) = setup_pending(&fixture, true);
-        let marker: Value = serde_json::from_slice(&fs::read(state_root.join("pending.json")).unwrap()).unwrap();
+        let marker: Value =
+            serde_json::from_slice(&fs::read(state_root.join("pending.json")).unwrap()).unwrap();
         let mut state = marker.clone();
         state["status"] = json!("APPLIED");
         state["patchedSha256"] = json!("B".repeat(64));
-        fs::write(state_root.join("state.json"), serde_json::to_vec(&state).unwrap()).unwrap();
+        fs::write(
+            state_root.join("state.json"),
+            serde_json::to_vec(&state).unwrap(),
+        )
+        .unwrap();
         assert_eq!(
-            recovery::review_recovery(&fixture.0, &state_root, "1.0.0").unwrap_err().code,
+            recovery::review_recovery(&fixture.0, &state_root, "1.0.0")
+                .unwrap_err()
+                .code,
             "RECOVERY_BLOCKED"
         );
         fs::remove_file(state_root.join("state.json")).unwrap();
         let mut bad = marker.clone();
         bad["originalSha256"] = json!("invalid");
-        fs::write(state_root.join("pending.json"), serde_json::to_vec(&bad).unwrap()).unwrap();
+        fs::write(
+            state_root.join("pending.json"),
+            serde_json::to_vec(&bad).unwrap(),
+        )
+        .unwrap();
         assert_eq!(
-            recovery::review_recovery(&fixture.0, &state_root, "1.0.0").unwrap_err().code,
+            recovery::review_recovery(&fixture.0, &state_root, "1.0.0")
+                .unwrap_err()
+                .code,
             "RECOVERY_BLOCKED"
         );
         assert_eq!(fs::read(fixture.archive()).unwrap(), current_before);
     }
-
 }
