@@ -52,12 +52,12 @@
     {
       "source": "src/integrated-search.css",
       "destination": "src/integrated-search.css",
-      "sha256": "FA2513F3D8652395E4B6E5275F07C6789E0A2D49008BCED7AA708B6273A24899"
+      "sha256": "6CE109FE3711E7CE0D3E73324F255F8BD0A011A2C35C61CFF638E0CD359F2E03"
     },
     {
       "source": "patches/patch03/patch03-bridge.js",
       "destination": "src/patch03-bridge.js",
-      "sha256": "34AD2EC49F62FAAC1878C032AB209E941EF30DF29EE7103337FECF7A1AF259D0"
+      "sha256": "8EFA461C8F0C44115C1C6686F8947560FB354FDB8203F2539F4791EA967BFEA0"
     }
   ],
   "officialRuntimeModifiedAllowlist": [
