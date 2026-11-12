@@ -58,7 +58,8 @@ impl DinoUi {
         let backup = self.backup_id.clone();
         let (sender, receiver) = mpsc::channel();
         self.response = Some(receiver);
-        std::thread::spawn(move || {
+        let spawned = std::thread::Builder::new().name("dino-native-gui-task".into())
+            .stack_size(16 * 1024 * 1024).spawn(move || {
             let result = match kind {
                 "원본 검사" => Ok(transaction::inspect(&root)),
                 "자동 검사" => transaction::apply(&root, false),
@@ -71,6 +72,11 @@ impl DinoUi {
             };
             let _ = sender.send(ResultMessage { name: kind.into(), result });
         });
+        if let Err(error) = spawned {
+            self.record(format!("Rust 작업 실행 실패: {error}"));
+            self.busy = false;
+            self.response = None;
+        }
     }
 
     fn poll_result(&mut self) {
