@@ -3,6 +3,8 @@
 //! NOT permission to patch. Python's existing contract, backup and process
 //! checks remain authoritative until the Rust engine reaches full parity.
 
+mod recovery;
+
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, Metadata};
@@ -314,25 +316,48 @@ fn verify_installed(root: &Path) -> Checked<Value> {
 }
 
 fn main() {
-    let mut args = std::env::args_os();
-    let _program = args.next();
-    let Some(root) = args.next() else {
-        eprintln!("Usage: dino-asar-inspect <installed LilacAnime root>");
+    let mut args = std::env::args_os().skip(1);
+    let Some(first) = args.next() else {
+        eprintln!("Usage: dino-asar-inspect <installed-root> | --review-recovery <installed-root> <existing-state-dir> <patch-version>");
         std::process::exit(2);
     };
-    if args.next().is_some() {
-        eprintln!("Only one installed root argument is allowed.");
-        std::process::exit(2);
-    }
-    let result = match verify_installed(&PathBuf::from(root)) {
+    let result = if first == "--review-recovery" {
+        let Some(root) = args.next() else {
+            eprintln!("Missing installed root");
+            std::process::exit(2);
+        };
+        let Some(state_root) = args.next() else {
+            eprintln!("Missing existing manager state directory");
+            std::process::exit(2);
+        };
+        let Some(patch_version) = args.next() else {
+            eprintln!("Missing patch version");
+            std::process::exit(2);
+        };
+        if args.next().is_some() {
+            eprintln!("Too many arguments");
+            std::process::exit(2);
+        }
+        let patch_version = patch_version.to_string_lossy();
+        recovery::review_recovery(&PathBuf::from(root), &PathBuf::from(state_root), &patch_version)
+    } else {
+        if args.next().is_some() {
+            eprintln!("Only one installed root argument is allowed.");
+            std::process::exit(2);
+        }
+        verify_installed(&PathBuf::from(first))
+    };
+    let output = match result {
         Ok(value) => value,
         Err(failure) => json!({
-            "status": "BLOCKED", "code": failure.code,
-            "readOnly": true, "reason": failure.reason
+            "status": "BLOCKED",
+            "code": failure.code,
+            "readOnly": true,
+            "reason": failure.reason
         }),
     };
-    println!("{result}");
-    if result["status"] == "BLOCKED" {
+    println!("{output}");
+    if output["status"] == "BLOCKED" {
         std::process::exit(1);
     }
 }
