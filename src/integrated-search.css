@@ -14,3 +14,12 @@
 .detail-playback-info span{color:var(--text)}
 .detail-playback-info small{color:var(--muted);font-size:10.5px}
 @media(max-width:650px){.search-provider-filters{gap:6px}.search-provider-chip{padding:7px 10px;font-size:10px}.detail-source-picker{padding:10px}.detail-source-picker>div{gap:6px}}
+
+/* Global integrated detail picker: one selectable, verified source per card. */
+.detail-source-picker>div{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}
+.detail-source-picker .dino-source-option{min-height:46px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);font-size:11px;line-height:1.55;text-align:left;white-space:normal;overflow-wrap:anywhere}
+.detail-source-picker .dino-source-option:hover{border-color:var(--lilac)}
+.detail-source-picker .dino-source-option[aria-pressed="true"]{border-color:var(--lilac);background:color-mix(in srgb,var(--lilac) 15%,var(--panel));font-weight:700}
+.detail-source-picker .source-search-note{line-height:1.5}
+.dino-fixed-quality{font-size:11px}
+@media(max-width:520px){.detail-source-picker>div{grid-template-columns:1fr}}
