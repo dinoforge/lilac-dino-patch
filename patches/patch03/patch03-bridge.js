@@ -363,6 +363,32 @@
       note.textContent = searching ? '다른 공급원에서 같은 작품을 확인하는 중...' : '다른 공급원에서 같은 작품을 확인하지 못했습니다. 다른 시즌은 자동으로 합치지 않습니다.';
       section.append(note);
     }
+    if (!searching && group.sourceItems.length < providers.length) {
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'dino-source-retry';
+      retry.textContent = '다른 공급원 다시 찾기';
+      retry.addEventListener('click', async () => {
+        const current = group.sourceItems.find(item => sourceKey(item) === String(activeId)) || group.sourceItems[0];
+        if (!isDinoProvider(current)) return;
+        const seq = detailSequence;
+        detailDiscoveryCache.delete(current.provider + ':' + sourceKey(current));
+        retry.disabled = true;
+        retry.textContent = '다른 공급원 다시 확인 중...';
+        try {
+          const discovered = await discoverSources(current, group);
+          if (seq !== detailSequence || !integratedMode()) return;
+          keepDetailGroup(discovered);
+          renderSourcePicker(discovered, activeId);
+          loadVerifiedEpisodeCounts(discovered, activeId, seq).catch(() => {});
+        } catch {
+          if (seq !== detailSequence) return;
+          retry.disabled = false;
+          retry.textContent = '확인 실패 · 다시 시도';
+        }
+      });
+      section.append(retry);
+    }
     const anchor = content.querySelector('.detail-meta') || content.querySelector('.detail-actions');
     anchor?.before(section);
   }
@@ -415,6 +441,9 @@
       renderSourcePicker(group, selectedId);
       loadVerifiedEpisodeCounts(group, selectedId, sequence).catch(() => {});
     }
+    // Explicit source switching preserves the already verified group instead
+    // of narrowing it again to whatever metadata the newly chosen site omits.
+    if (options?.sourceSelection && group) return result;
     if (!isDinoProvider(known)) return result;
     if (!group) renderSourcePicker(verifiedGroupFor(known, []), selectedId, true);
     try {
