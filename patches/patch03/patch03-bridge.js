@@ -52,6 +52,21 @@
   const verifiedVideoQuality = new Map();
   const detailDiscoveryCache = new Map();
   const DISCOVERY_TTL_MS = 5 * 60 * 1000;
+  const catalogRequestCache = new Map();
+  const detailSearchDiagnostics = new Map();
+  const SEARCH_CACHE_TTL_MS = 90 * 1000;
+  function cachedCatalog(provider, query, offset = undefined) {
+    const key = JSON.stringify([provider, String(query || ''), offset ?? null]);
+    const cached = catalogRequestCache.get(key);
+    if (cached && Date.now() - cached.at < SEARCH_CACHE_TTL_MS) return cached.promise;
+    const promise = Promise.resolve().then(() => window.lilac.providerCatalog(provider, query, offset));
+    catalogRequestCache.set(key, { at: Date.now(), promise });
+    if (catalogRequestCache.size > 260) catalogRequestCache.delete(catalogRequestCache.keys().next().value);
+    promise.catch(() => {
+      if (catalogRequestCache.get(key)?.promise === promise) catalogRequestCache.delete(key);
+    });
+    return promise;
+  }
   const sourceKey = item => String(item?.mal_id ?? item?.id ?? '');
   const isDinoProvider = item => !!item && providers.includes(item.provider) && !!sourceKey(item);
   const localKoreanCatalog = async (provider, query) => {
@@ -123,10 +138,11 @@
         synonyms: [...(Array.isArray(anchor.synonyms) ? anchor.synonyms : []), ...verifiedAliases]
       };
       const options = {
-        search: (provider, text) => window.lilac.providerCatalog(provider, text),
-        localSearch: localKoreanCatalog, concurrency: 5
+        search: cachedCatalog,
+        localSearch: localKoreanCatalog, concurrency: 5, maxPages: 2
       };
       const first = await api.searchProviders({ ...options, providers, query });
+      let diagnostics = first;
       let group = verifiedGroupFor(reference, [...seeds, ...first.items]);
       // A successful nonempty catalog response can contain unrelated anime.
       // Only an identity match proves that the requested work was found.
@@ -138,7 +154,10 @@
           localSearch: async () => null
         });
         group = verifiedGroupFor(reference, [...seeds, ...first.items, ...extra.items]);
+        diagnostics = api.mergeSearchResults(first, extra);
       }
+      detailSearchDiagnostics.set(key, diagnostics.statuses || []);
+      if (detailSearchDiagnostics.size > 120) detailSearchDiagnostics.delete(detailSearchDiagnostics.keys().next().value);
       return group;
     })();
     detailDiscoveryCache.set(key, { at: Date.now(), promise });
@@ -216,10 +235,14 @@
     const summary = currentFilter === 'all'
       ? `${visible.length}개 작품 · ${checked}/${resultStatuses.length}개 공급원 응답`
       : `${labels[currentFilter] || currentFilter} 결과 ${visible.length}개`;
+    const notFound = resultStatuses.filter(item => item.state === 'ready' && item.resultCount === 0);
+    const limited = resultStatuses.filter(item => item.pageLimitReached);
     const failureText = failures.length
-      ? ` · 확인 필요: ${failures.map(item => labels[item.provider] || item.provider).join(', ')}`
-      : '';
-    document.querySelector('#searchStatus').textContent = `“${currentQuery}” 검색 결과 ${summary}${failureText}`;
+      ? ` · 응답 오류: ${failures.map(item => labels[item.provider] || item.provider).join(', ')}` : '';
+    const missingText = notFound.length
+      ? ` · 미발견: ${notFound.map(item => labels[item.provider] || item.provider).join(', ')}` : '';
+    const limitedText = limited.length ? ' · 일부 공급원은 다음 페이지가 더 있을 수 있음' : '';
+    document.querySelector('#searchStatus').textContent = `“${currentQuery}” 검색 결과 ${summary}${failureText}${missingText}${limitedText}`;
   }
 
   function renderFilters() {
@@ -234,7 +257,9 @@
       button.dataset.provider = provider;
       button.dataset.state = state;
       button.setAttribute('aria-pressed', String(currentFilter === provider));
-      const suffix = state === 'failed' ? ' · 실패' : state === 'partial' ? ' · 일부 실패' : ` · ${count}`;
+      const suffix = state === 'failed' ? ' · 실패'
+        : state === 'partial' ? ' · 일부 실패'
+        : count === 0 ? ' · 미발견' : ` · ${count}`;
       button.textContent = `${label}${suffix}`;
       button.addEventListener('click', () => {
         currentFilter = provider;
@@ -298,7 +323,8 @@
     const options = {
       providers,
       concurrency: 6,
-      search: (provider, text) => window.lilac.providerCatalog(provider, text),
+      maxPages: 2,
+      search: cachedCatalog,
       localSearch: localKoreanCatalog
     };
     try {
@@ -317,7 +343,8 @@
       if (missing.length && typeof window.lilac.titleVariants === 'function') {
         const variants = await window.lilac.titleVariants(query).then(value => Array.isArray(value) ? value : []).catch(() => []);
         if (sequence !== searchSequence) return;
-        const terms = api.titleVariantTerms({ query, variants, limit: 3 });
+        const nativeTitles = reference?.sourceItems?.flatMap(item => [item.title, item.title_english, item.title_japanese, item.romaji]) || [];
+        const terms = api.titleVariantTerms({ query, displayTitles: nativeTitles, variants, limit: 3 });
         if (terms.length) {
           const extra = await api.searchProviders({ ...options, providers: missing, query: '', terms });
           if (sequence !== searchSequence) return;
@@ -390,6 +417,7 @@
         if (!isDinoProvider(current)) return;
         const seq = detailSequence;
         detailDiscoveryCache.delete(current.provider + ':' + sourceKey(current));
+        catalogRequestCache.clear();
         retry.disabled = true;
         retry.textContent = '다른 공급원 다시 확인 중...';
         try {
@@ -524,6 +552,10 @@
     apiContracts: ['providerCatalog', 'providerDetail', 'providerResolve'],
     getMode: () => integratedMode() ? 'integrated' : 'provider',
     getSelectedProvider: selectedProvider,
+    getSearchDiagnostics: () => resultStatuses.map(item => ({
+      provider: item.provider, state: item.state, results: item.resultCount,
+      pages: item.pages || 0, pageLimitReached: !!item.pageLimitReached
+    })),
     getSearchSnapshot: () => resultGroups.map(group => ({
       title: String(group.displayTitle || group.title || ''),
       sourceItems: (group.sourceItems || []).map(item => ({ provider: item.provider, sourceId: String(item.mal_id) }))
