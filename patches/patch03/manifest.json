@@ -118,5 +118,12 @@
         }
       ]
     }
-  ]
+  ],
+  "integratedRuntimeNotes": {
+    "enabledBy": "lilacDinoPatch.searchMode = integrated",
+    "scope": "Shared source discovery for official anime detail entry points, including home and search",
+    "sourceVerification": "Matching external IDs or conservative alternate-title, release-year and season checks",
+    "quality": "Decoded video height shown only after verified playback; never inferred from a catalog",
+    "retry": "Manual retry for an initially undetected provider"
+  }
 }
