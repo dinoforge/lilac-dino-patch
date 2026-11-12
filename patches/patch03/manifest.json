@@ -47,17 +47,17 @@
     {
       "source": "src/integrated-search.js",
       "destination": "src/integrated-search.js",
-      "sha256": "5024ECBFB5CA7488CB99EC16FDCF4DA5F5CA65238EAD09D49DDF9429EA3790F0"
+      "sha256": "776259692A15E79E1A680177A3C405DCDAA0055AA961B89C5514FA450E0CC899"
     },
     {
       "source": "src/integrated-search.css",
       "destination": "src/integrated-search.css",
-      "sha256": "F40F07E11C1BA23A708811C2958FB3CFB2FC4CFE10C02AB6E8EEBDA67AC74B0E"
+      "sha256": "995A5B9107B3CB0396AFD374BD6B1E926AFD780E001B64C2E5E1C4211DC163EB"
     },
     {
       "source": "patches/patch03/patch03-bridge.js",
       "destination": "src/patch03-bridge.js",
-      "sha256": "41ED618073C83C3A1C35DA4CF7680E4731A73969CD4ED55C5F9CE53FE3A4060A"
+      "sha256": "1CD084610FE4FA3F7DB55BEDE1B7F01CFE93CB95BA1D730F140513C6F6B44527"
     }
   ],
   "officialRuntimeModifiedAllowlist": [
