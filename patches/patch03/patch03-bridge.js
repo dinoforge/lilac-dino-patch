@@ -45,6 +45,101 @@
   let currentQuery = '';
   let filterRoot = document.querySelector('#searchProviderFilters');
 
+  // Integrated mode applies to every detail entry point, not only search.
+  // Discoveries are read-only and require a verified anime identity.
+  const detailGroupsBySourceId = new Map();
+  const detailFacts = new Map();
+  const verifiedVideoQuality = new Map();
+  const detailDiscoveryCache = new Map();
+  const DISCOVERY_TTL_MS = 5 * 60 * 1000;
+  const sourceKey = item => String(item?.mal_id ?? item?.id ?? '');
+  const isDinoProvider = item => !!item && providers.includes(item.provider) && !!sourceKey(item);
+  const localKoreanCatalog = async (provider, query) => {
+    if (!/[가-힣]/.test(String(query)) || !['reanime', 'animenosub'].includes(provider)
+      || typeof window.lilac.catalogKoreanSearch !== 'function') return null;
+    const result = await window.lilac.catalogKoreanSearch(provider, query);
+    return Array.isArray(result) ? result : [];
+  };
+  function keepDetailGroup(group) {
+    if (!Array.isArray(group?.sourceItems)) return;
+    for (const item of group.sourceItems) {
+      if (isDinoProvider(item)) {
+        detailGroupsBySourceId.set(sourceKey(item), group);
+        if (typeof window.rememberAnime === 'function') window.rememberAnime(item);
+      }
+    }
+    if (detailGroupsBySourceId.size > 600) {
+      for (const key of [...detailGroupsBySourceId.keys()].slice(0, 100)) detailGroupsBySourceId.delete(key);
+    }
+  }
+  function initialKnownSource(id, group) {
+    const known = group?.sourceItems?.find(item => sourceKey(item) === String(id));
+    return known || (typeof window.animeById === 'function' ? window.animeById(id) : null);
+  }
+  function verifiedGroupFor(anchor, candidates) {
+    const accepted = [anchor], seen = new Set([anchor.provider + ':' + sourceKey(anchor)]);
+    for (const item of candidates) {
+      if (!isDinoProvider(item) || !api.identityMatch(anchor, item)) continue;
+      const key = item.provider + ':' + sourceKey(item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      accepted.push(item);
+    }
+    const groups = api.groupResults(accepted, selectedProvider());
+    return groups.find(group => group.sourceItems.some(item => item.provider === anchor.provider
+      && sourceKey(item) === sourceKey(anchor))) || api.groupResults([anchor], selectedProvider())[0];
+  }
+  async function discoverSources(anchor, knownGroup) {
+    const key = anchor.provider + ':' + sourceKey(anchor);
+    const cached = detailDiscoveryCache.get(key);
+    if (cached && Date.now() - cached.at < DISCOVERY_TTL_MS) return cached.promise;
+    const promise = (async () => {
+      const seeds = Array.isArray(knownGroup?.sourceItems) ? knownGroup.sourceItems : [];
+      const nativeTitles = [anchor.displayTitle, anchor.title, anchor.title_english,
+        anchor.title_japanese, anchor.title_native, anchor.title_romaji, anchor.romaji,
+        ...(Array.isArray(anchor.synonyms) ? anchor.synonyms : [])]
+        .filter(value => typeof value === 'string' && value.trim().length > 1);
+      const query = String((typeof window.titleOf === 'function' && window.titleOf(anchor))
+        || anchor.title || nativeTitles[0] || '').trim();
+      if (!query) return verifiedGroupFor(anchor, seeds);
+      let variants = [];
+      if (typeof window.lilac.titleVariants === 'function') {
+        try {
+          const received = await window.lilac.titleVariants(query);
+          variants = Array.isArray(received) ? received : [];
+        } catch { /* Original aliases remain usable. */ }
+      }
+      const terms = api.titleVariantTerms({
+        query, displayTitles: nativeTitles, variants, limit: 5
+      });
+      const options = {
+        search: (provider, text) => window.lilac.providerCatalog(provider, text),
+        localSearch: localKoreanCatalog, concurrency: 5
+      };
+      const first = await api.searchProviders({ ...options, providers, query });
+      let group = verifiedGroupFor(anchor, [...seeds, ...first.items]);
+      // A successful nonempty catalog response can contain unrelated anime.
+      // Only an identity match proves that the requested work was found.
+      const matched = new Set(group.sourceItems.map(item => item.provider));
+      const missing = providers.filter(provider => !matched.has(provider));
+      if (missing.length && terms.length) {
+        const extra = await api.searchProviders({
+          ...options, providers: missing, query: '', terms,
+          localSearch: async () => null
+        });
+        group = verifiedGroupFor(anchor, [...seeds, ...first.items, ...extra.items]);
+      }
+      return group;
+    })();
+    detailDiscoveryCache.set(key, { at: Date.now(), promise });
+    if (detailDiscoveryCache.size > 120) detailDiscoveryCache.delete(detailDiscoveryCache.keys().next().value);
+    promise.catch(() => {
+      if (detailDiscoveryCache.get(key)?.promise === promise) detailDiscoveryCache.delete(key);
+    });
+    return promise;
+  }
+
+
   window.switchView = function (view, ...args) {
     if (view !== 'search') searchSequence++;
     return officialSwitchView.call(this, view, ...args);
@@ -194,12 +289,21 @@
       providers,
       concurrency: 6,
       search: (provider, text) => window.lilac.providerCatalog(provider, text),
-      localSearch: async () => null
+      localSearch: localKoreanCatalog
     };
     try {
       let result = await api.searchProviders({ ...options, query });
       if (sequence !== searchSequence) return;
       const missing = api.providersNeedingTitleVariants(result, providers);
+      const groups = api.groupResults(result.items, selectedProvider());
+      const reference = groups.find(group => group.sourceItems.some(item => item.provider === selectedProvider())) || groups[0];
+      if (reference) {
+        for (const status of result.statuses || []) {
+          if ((status.state === 'ready' || status.state === 'partial')
+            && !reference.sourceItems.some(item => item.provider === status.provider)
+            && !missing.includes(status.provider)) missing.push(status.provider);
+        }
+      }
       if (missing.length && typeof window.lilac.titleVariants === 'function') {
         const variants = await window.lilac.titleVariants(query).then(value => Array.isArray(value) ? value : []).catch(() => []);
         if (sequence !== searchSequence) return;
