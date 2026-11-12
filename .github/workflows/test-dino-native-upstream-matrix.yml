@@ -7,6 +7,9 @@ on:
       - tools/dino-patch-manager/native-rust/src/asar.rs
       - tools/dino-patch-manager/native-rust/src/transaction.rs
       - tools/dino-patch-manager/native-rust/Cargo.toml
+      - src/integrated-search.js
+      - src/integrated-search.css
+      - patches/patch03/**
       - .github/workflows/test-dino-native-upstream-matrix.yml
   workflow_dispatch:
 
