@@ -155,7 +155,7 @@ test('fixed quality displays measured decoded video pixels and never invents 108
   const app=harness();
   await app.window.openDetail(app.home.mal_id);
   assert.ok(buttons(app).every(x=>x.textContent.includes('화질 재생 시 확인')));
-  app.sandbox.currentPlaybackContext={episode:{provider:'reanime'}};
+  app.sandbox.currentPlaybackContext={episode:{provider:'reanime'},anime:{mal_id:app.home.mal_id}};
   app.video.videoWidth=1920;app.video.videoHeight=1080;
   app.events.get('DOMContentLoaded')();
   app.video.send('loadedmetadata');
