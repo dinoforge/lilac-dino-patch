@@ -1,0 +1,78 @@
+name: Native Rust backward compatibility with official LilacAnime
+
+on:
+  push:
+    branches: [feature/dino-native-rust-manager]
+    paths:
+      - tools/dino-patch-manager/native-rust/src/asar.rs
+      - tools/dino-patch-manager/native-rust/src/transaction.rs
+      - tools/dino-patch-manager/native-rust/Cargo.toml
+      - .github/workflows/test-dino-native-upstream-matrix.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  historical-win-asar:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['0.5.54', '0.5.55', '0.5.63']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile standalone Rust CLI
+        shell: pwsh
+        run: |
+          Push-Location tools/dino-patch-manager/native-rust
+          try {
+            cargo build --release --no-default-features
+            if ($LASTEXITCODE -ne 0) { throw 'Rust CLI build failed' }
+          } finally { Pop-Location }
+      - name: Check genuine official Windows ASAR patch and exact restore
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:APPDATA=Join-Path $env:RUNNER_TEMP 'native-history-profile'
+          $download=Join-Path $env:RUNNER_TEMP 'official-download'
+          $extract=Join-Path $env:RUNNER_TEMP 'official-extracted'
+          New-Item -ItemType Directory -Force -Path $env:APPDATA,$download,$extract | Out-Null
+          gh release download 'v${{ matrix.version }}' --repo whispelyn-byte/LilacAnime-desktop --pattern 'LilacAnime-Setup.exe' --dir $download
+          if ($LASTEXITCODE -ne 0) { throw 'Official Windows installer unavailable' }
+          $sevenZip=(Get-Command 7z.exe -ErrorAction SilentlyContinue).Source
+          if (-not $sevenZip) { $sevenZip='C:\Program Files\7-Zip\7z.exe' }
+          & $sevenZip x (Join-Path $download 'LilacAnime-Setup.exe') "-o$extract" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS extraction failed' }
+          $asarFiles=@(Get-ChildItem -LiteralPath $extract -Filter app.asar -Recurse -File)
+          if ($asarFiles.Count -eq 0) {
+            $payloads=@(Get-ChildItem -LiteralPath $extract -Recurse -File | Where-Object { $_.Name -match '^app-.*[.]7z$' })
+            foreach ($payload in $payloads) {
+              $dest=Join-Path $extract 'application'
+              New-Item -ItemType Directory -Force -Path $dest | Out-Null
+              & $sevenZip x $payload.FullName "-o$dest" -y | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw 'Nested installer extraction failed' }
+            }
+            $asarFiles=@(Get-ChildItem -LiteralPath $extract -Filter app.asar -Recurse -File)
+          }
+          if ($asarFiles.Count -ne 1) { throw "Expected one official app.asar, found $($asarFiles.Count)" }
+          $asar=$asarFiles[0].FullName
+          $root=Split-Path (Split-Path $asar -Parent) -Parent
+          $exe=Join-Path (Get-Location).Path 'tools/dino-patch-manager/native-rust/target/release/dino-native-manager.exe'
+          $initial=(Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash
+          function Invoke-Rust([string]$Operation) {
+            $json=(& $exe $Operation $root | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0) { throw "Rust $Operation rejected official version: $json" }
+            return ($json | ConvertFrom-Json)
+          }
+          $scan=Invoke-Rust inspect
+          if ($scan.status -ne 'UNPATCHED' -or $scan.version -ne '${{ matrix.version }}') { throw "Official version fingerprint check failed: $($scan|ConvertTo-Json -Compress)" }
+          if ((Invoke-Rust apply).status -ne 'APPLIED') { throw 'Rust patch did not apply' }
+          if ((Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash -eq $initial) { throw 'ASAR was unchanged' }
+          if ((Invoke-Rust uninstall).status -ne 'UNPATCHED') { throw 'Rust uninstall did not complete' }
+          if ((Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash -ne $initial) { throw 'Rust restore did not return exact original' }
+          Write-Host 'PASS official Windows v${{ matrix.version }} Rust patch and byte-identical rollback'
