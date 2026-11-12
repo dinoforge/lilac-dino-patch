@@ -82,7 +82,25 @@ jobs:
           $backups = @(Get-ChildItem -LiteralPath $env:APPDATA -Recurse -File -Filter original-app.asar)
           if ($backups.Count -ne 1) { throw "Expected one retained original backup; found $($backups.Count)" }
           if ((Get-FileHash -LiteralPath $backups[0].FullName -Algorithm SHA256).Hash -ne $beforeHash) { throw 'Original backup corrupted' }
-          Write-Host 'PASS: native Rust installed-app apply/manual-uninstall/restore parity'
+          # A verified, interrupted transaction can only be reconciled after
+          # checking current ASAR and retained original backup.
+          $stateFiles=@(Get-ChildItem -LiteralPath $env:APPDATA -Recurse -File -Filter state.json)
+          if ($stateFiles.Count -ne 1) { throw 'Expected exactly one native manager state file' }
+          $dataDir=$stateFiles[0].DirectoryName
+          $pending=Join-Path $dataDir 'pending.json'
+          $pendingJson=Get-Content -LiteralPath $stateFiles[0].FullName -Raw | ConvertFrom-Json
+          $pendingJson.status='APPLIED'
+          $pendingJson | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $pending -Encoding UTF8
+          $blocked=Run-Manager 'inspect'
+          if ($blocked.status -ne 'PARTIAL_OR_UNKNOWN') { throw 'Pending record did not block new patch' }
+          $review=Run-Manager 'review'
+          if (-not $review.recoveryAvailable) { throw 'Verified backup and pending state were not recognized' }
+          $recovered=Run-Manager 'recover'
+          if ($recovered.status -ne 'UNPATCHED' -or -not $recovered.manualUninstall) { throw 'Recovered original state was not preserved' }
+          if (Test-Path -LiteralPath $pending) { throw 'Reconciled pending marker was not archived' }
+          if (@(Get-ChildItem -LiteralPath $dataDir -File -Filter 'pending.reconciled-*.json').Count -ne 1) { throw 'Reconciled marker audit archive missing' }
+          if ((Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash -ne $beforeHash) { throw 'Recovery unexpectedly modified the original ASAR' }
+          Write-Host 'PASS: native Rust installed-app apply/manual-uninstall/restore and pending reconciliation parity'
 
       - name: Compile standalone Rust desktop UI without Electron
         shell: pwsh
