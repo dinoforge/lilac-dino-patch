@@ -234,8 +234,9 @@ impl Archive {
             }
             out.sync_all()?;
             let verification = Self::open(output)?;
-            if verification.positions.keys().collect::<Vec<_>>()
-                != header_files(&self.positions, replacements).iter().collect::<Vec<_>>() {
+            let expected: BTreeSet<&str> = self.positions.keys().chain(replacements.keys())
+                .map(String::as_str).collect();
+            if verification.files() != expected {
                 return Err(fail("ASAR 파일 목록 검증에 실패했습니다."));
             }
             for (path, data) in replacements {
@@ -246,12 +247,6 @@ impl Archive {
         if result.is_err() { let _ = fs::remove_file(output); }
         result
     }
-}
-
-fn header_files(
-    original: &BTreeMap<String, (u64,u64)>, replacements: &BTreeMap<String,Vec<u8>>
-) -> BTreeMap<String,()> {
-    original.keys().chain(replacements.keys()).map(|p|(p.clone(),())).collect()
 }
 
 fn assign_offsets(
