@@ -359,6 +359,27 @@
     }
   };
 
+  const playableEpisodeNumber = episode => {
+    if (!episode || episode.special || episode.playable === false) return null;
+    const numeric = Number(episode.number);
+    if (Number.isInteger(numeric) && numeric > 0 && numeric < 10000) return numeric;
+    const match = String(episode.name || '').match(/^(?:제?\s*)?(\d{1,4})(?:화|\s*$)/);
+    return match ? Number(match[1]) : null;
+  };
+  function providerReportedQuality(response) {
+    // Some providers publish a quality label with their detail/episode data.
+    // This is advertised metadata, not a decoded or verified video resolution.
+    const candidates = [response?.data?.quality, response?.data?.resolution,
+      ...(Array.isArray(response?.episodes) ? response.episodes.slice(0, 40).flatMap(ep => [
+        ep?.quality, ep?.resolution, ...(Array.isArray(ep?.qualities) ? ep.qualities : [])
+      ]) : [])];
+    const heights = candidates.flatMap(value => {
+      const match = typeof value === 'string' ? value.match(/\b(240|360|480|540|720|1080|1440|2160|4320)p\b/i) : null;
+      const height = match ? Number(match[1]) : null;
+      return height ? [height] : [];
+    });
+    return heights.length ? Math.max(...heights) + 'p' : '';
+  }
   function renderSourcePicker(group, activeId, searching = false) {
     if (!integratedMode() || !Array.isArray(group?.sourceItems) || !group.sourceItems.length) return;
     const content = document.querySelector('#detailContent');
@@ -376,6 +397,7 @@
     choices.className = 'dino-source-track';
     choices.setAttribute('role', 'group');
     choices.setAttribute('aria-label', '재생 공급원 선택');
+    const latestAvailable = Math.max(0, ...group.sourceItems.map(item => detailFacts.get(sourceKey(item))?.latest || 0));
     for (const item of group.sourceItems) {
       const id = sourceKey(item);
       const info = detailFacts.get(id);
@@ -388,14 +410,20 @@
       // The search catalog's episode count is only an estimate. Use only the
       // actual fetched episode list, and only measured video resolutions.
       const count = info?.unavailable ? '재생 불가'
+        : info?.error ? '회차 확인 실패'
         : info?.noEpisodes ? '회차 없음'
         : Number.isInteger(info?.episodes) ? String(info.episodes) + '화' : '회차 확인 중';
-      const resolution = quality ? '최근 재생 ' + quality : '화질 재생 시 확인';
+      const latest = info?.latest || 0;
+      const comparison = latest && latestAvailable
+        ? latest < latestAvailable ? ' · ' + (latestAvailable - latest) + '화 차이' : ' · 최신화'
+        : '';
+      const resolution = quality ? '재생 ' + quality : info?.reportedQuality
+        ? '표기 ' + info.reportedQuality : '화질 미확인';
       const displayName = labels[item.provider] || item.provider;
       // One compact two-line tab; the track itself stays on a single
       // horizontal row even when five providers are available.
-      button.textContent = displayName + '\n' + count + ' · ' + resolution;
-      button.title = displayName + ' · ' + count + ' · ' + resolution;
+      button.textContent = displayName + '\n' + count + comparison + ' · ' + resolution;
+      button.title = displayName + ' · ' + count + comparison + ' · ' + resolution;
       button.setAttribute('aria-label', button.title + (id === String(activeId) ? ' · 선택됨' : ''));
       button.addEventListener('click', () => window.openDetail(id, { sourceSelection: true }));
       choices.append(button);
@@ -408,6 +436,19 @@
       section.append(note);
     }
     if (!searching && group.sourceItems.length < providers.length) {
+      const reference = group.sourceItems.find(item => sourceKey(item) === String(activeId)) || group.sourceItems[0];
+      const scan = detailSearchDiagnostics.get(reference.provider + ':' + sourceKey(reference)) || [];
+      const missing = scan.filter(item => item.state === 'ready' && item.resultCount === 0);
+      const failed = scan.filter(item => item.state === 'failed' || item.state === 'partial');
+      if (missing.length || failed.length) {
+        const diagnostic = document.createElement('small');
+        diagnostic.className = 'source-search-note';
+        diagnostic.textContent = [
+          missing.length ? '미발견: ' + missing.map(item => labels[item.provider] || item.provider).join(', ') : '',
+          failed.length ? '응답 오류: ' + failed.map(item => labels[item.provider] || item.provider).join(', ') : ''
+        ].filter(Boolean).join(' · ');
+        section.append(diagnostic);
+      }
       const retry = document.createElement('button');
       retry.type = 'button';
       retry.className = 'dino-source-retry';
@@ -452,15 +493,21 @@
         try {
           const response = await window.lilac.providerDetail(item);
           if (Array.isArray(response?.episodes)) {
+            const playable = response.episodes.filter(ep => ep?.playable !== false);
             detailFacts.set(id, {
-              episodes: response.episodes.filter(ep => ep?.playable !== false).length,
+              episodes: playable.length,
+              latest: Math.max(0, ...playable.map(playableEpisodeNumber).filter(Boolean)),
+              reportedQuality: providerReportedQuality(response),
               noEpisodes: response.episodes.length === 0,
               unavailable: Boolean(response?.unavailable)
             });
           } else if (response?.unavailable) {
             detailFacts.set(id, { unavailable: true });
           }
-        } catch { /* Do not claim a count on failed provider detail. */ }
+        } catch {
+          // An error is not proof that this provider has no episodes.
+          detailFacts.set(id, { error: true });
+        }
         if (sequence === detailSequence) renderSourcePicker(group, activeId);
       }
     }));
