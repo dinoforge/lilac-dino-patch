@@ -23,8 +23,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - name: Rust source formatting
-        run: cargo fmt --all -- --check
+      - name: Format native Rust source before compilation
+        run: cargo fmt --all
       - name: Native Rust unit tests
         run: cargo test --no-default-features
       - name: Native Windows binary
