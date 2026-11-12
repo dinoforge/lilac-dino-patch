@@ -27,7 +27,7 @@ jobs:
         with:
           components: rustfmt
       - name: Run integrated source and quality regression tests
-        run: node --test ../../tests/patch03-global-integration.test.cjs
+        run: node --test ../../../tests/patch03-global-integration.test.cjs
       - name: Format native Rust source before compilation
         run: cargo fmt --all
       - name: Native Rust unit tests
