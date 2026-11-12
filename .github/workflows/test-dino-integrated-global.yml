@@ -1,0 +1,47 @@
+name: DinoPatch global integrated-source regression tests
+
+on:
+  push:
+    branches: [feature/dino-native-rust-manager]
+    paths:
+      - src/integrated-search.js
+      - src/integrated-search.css
+      - patches/patch03/**
+      - tests/patch03-global-integration.test.cjs
+      - tests/patch03-settings-preservation.test.cjs
+      - .github/workflows/test-dino-integrated-global.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  global-integrated:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check patch runtime syntax
+        run: |
+          node --check src/integrated-search.js
+          node --check patches/patch03/patch03-bridge.js
+      - name: Verify global integration, missing-provider retries and real quality UI
+        run: |
+          node --test tests/patch03-global-integration.test.cjs
+          node --test tests/patch03-settings-preservation.test.cjs
+      - name: Verify patch manifest module SHA-256
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          manifest = json.loads(Path('patches/patch03/manifest.json').read_text(encoding='utf-8'))
+          for module in manifest['runtimeModules']:
+              path = Path(module['source'])
+              actual = hashlib.sha256(path.read_bytes()).hexdigest().upper()
+              assert actual == module['sha256'], (str(path), actual, module['sha256'])
+          print('PASS: Rust-embedded runtime module hashes match pinned manifest')
+          PY
