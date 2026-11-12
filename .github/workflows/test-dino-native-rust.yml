@@ -101,6 +101,9 @@ jobs:
           if (@(Get-ChildItem -LiteralPath $dataDir -File -Filter 'pending.reconciled-*.json').Count -ne 1) { throw 'Reconciled marker audit archive missing' }
           if ((Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash -ne $beforeHash) { throw 'Recovery unexpectedly modified the original ASAR' }
           Write-Host 'PASS: native Rust installed-app apply/manual-uninstall/restore and pending reconciliation parity'
+          "DINO_GUI_SMOKE_ROOT=$install" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DINO_GUI_SMOKE_APPDATA=$env:APPDATA" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DINO_GUI_SMOKE_ASAR_SHA=$beforeHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Compile standalone Rust desktop UI without Electron
         shell: pwsh
@@ -108,6 +111,39 @@ jobs:
           cargo build --release --features gui
           if ($LASTEXITCODE -ne 0) { throw 'Native Rust GUI compilation failed' }
           if (-not (Test-Path -LiteralPath 'target/release/dino-native-manager.exe' -PathType Leaf)) { throw 'Rust GUI binary missing' }
+      - name: Keep Electron-style Rust GUI alive during automatic check on genuine official ASAR
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:DINO_ORIGINAL_ROOT=$env:DINO_GUI_SMOKE_ROOT
+          $env:APPDATA=$env:DINO_GUI_SMOKE_APPDATA
+          $exe=Join-Path (Get-Location).Path 'target/release/dino-native-manager.exe'
+          $psi=[System.Diagnostics.ProcessStartInfo]::new($exe)
+          $psi.UseShellExecute=$false
+          $psi.CreateNoWindow=$false
+          $psi.RedirectStandardError=$true
+          $proc=[System.Diagnostics.Process]::Start($psi)
+          if (-not $proc) { throw 'Unable to launch Rust UI on official installation test fixture' }
+          try {
+            Start-Sleep -Seconds 18
+            if ($proc.HasExited) {
+              $stderr=$proc.StandardError.ReadToEnd()
+              throw "Rust UI exited during official ASAR auto-check: code=$($proc.ExitCode), $stderr"
+            }
+            $asar=Join-Path $env:DINO_ORIGINAL_ROOT 'resources/app.asar'
+            if ((Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash -ne $env:DINO_GUI_SMOKE_ASAR_SHA) {
+              throw 'Rust UI automatic monitor modified a manually uninstalled official ASAR'
+            }
+            $log=Join-Path $env:APPDATA 'DinoPatchManager/native-manager.log'
+            if (-not (Test-Path -LiteralPath $log -PathType Leaf)) {
+              throw 'Missing persistent native Rust GUI diagnostic log'
+            }
+            Write-Host 'PASS Rust UI stayed open during actual Windows v0.5.64 original ASAR automatic inspection'
+          } finally {
+            if (-not $proc.HasExited) { $proc.Kill($true) }
+            [void]$proc.WaitForExit(10000)
+            $proc.Dispose()
+          }
       - name: Package a minimal single-executable Windows ZIP
         shell: pwsh
         run: |
