@@ -300,7 +300,7 @@ test('provider failures remain distinct from empty results and do not suppress h
   const statuses = app.document.querySelector('#searchProviderFilters').querySelectorAll('button');
   assert.ok(statuses.some(button => button.dataset.provider === 'miruro' && button.dataset.state === 'failed'));
   assert.ok(statuses.some(button => button.dataset.provider === 'animenosub' && button.dataset.state === 'ready'));
-  assert.match(app.document.querySelector('#searchStatus').textContent, /확인 필요: Miruro/);
+  assert.match(app.document.querySelector('#searchStatus').textContent, /응답 오류: Miruro/);
 });
 
 test('title variants query ready-empty and skipped providers, avoid failed providers, and remain capped at three terms', { skip: cleanSourceOnly }, async () => {
