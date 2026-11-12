@@ -1,0 +1,20 @@
+# DinoPatch native Rust migration (experimental)
+
+A standalone Rust manager for an **existing** official LilacAnime installation. This replaces the manager's Python, Node.js and Electron runtimes. The original LilacAnime desktop app is not redistributed. The integration payload remains JavaScript only because the upstream Electron app loads JavaScript.
+
+Native modules:
+- src/asar.rs: strict ASAR parsing, controlled repacking and payload verification
+- src/transaction.rs: original identity, backup, pending transactions, apply/uninstall, recovery
+- src/gui.rs: Rust egui desktop window, manual control, source monitoring, diagnostics
+- src/main.rs: portable JSON CLI and native GUI entrypoint
+
+Build: cargo build --release --features gui
+Test: cargo test --no-default-features
+CLI inspection: dino-native-manager.exe inspect "D:\LilacAnime"
+Manual patch: dino-native-manager.exe apply "D:\LilacAnime"
+Uninstall: dino-native-manager.exe uninstall "D:\LilacAnime"
+Pending review: dino-native-manager.exe review "D:\LilacAnime"
+
+Only reviewed official 0.5.54, 0.5.55, 0.5.63 and 0.5.64 source fingerprints permit writes. A damaged or missing ASAR, mismatch, pending work, or invalid backup blocks modifications. Manual patch does not bypass safety checks. An existing APPDATA backup and runtime folder must not be removed. The official LilacAnime executable and original ASAR are never included in DinoPatch's distribution.
+
+This is an experimental branch, NOT an official Beta 8 release. Old source-checkout patching, native LevelDB theme handling, advanced update metadata and some legacy history functions still need parity work. Do not replace a working Beta 7 until all native Windows safety and GUI tests pass.
