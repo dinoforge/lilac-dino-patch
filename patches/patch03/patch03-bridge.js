@@ -593,6 +593,124 @@
   }
   document.addEventListener?.('DOMContentLoaded', connectRealPlaybackQuality, { once: true });
 
+  // Only offer cross-provider fallback after a terminal player error.
+  // The user explicitly chooses whether to switch; official HLS recovery
+  // and server retries remain in control until they report failure.
+  function connectPlaybackFallback() {
+    const video = document.querySelector('#video');
+    const status = document.querySelector('#downloadStatus');
+    if (!video || !status || typeof video.addEventListener !== 'function') return;
+    const positions = new Map();
+    let offerSequence = 0;
+    let switching = false;
+    const contextNow = () => typeof currentPlaybackContext !== 'undefined' ? currentPlaybackContext : null;
+    const contextKey = context => {
+      const episode = context?.episode;
+      return episode ? String(episode.provider || '') + ':' +
+        String(episode.url || episode.token || episode.id || episode.number || '') : '';
+    };
+    const clearOffer = () => {
+      offerSequence++;
+      document.querySelector('#dinoPlaybackAlternate')?.remove();
+    };
+    video.addEventListener('timeupdate', () => {
+      const context = contextNow(), key = contextKey(context);
+      const seconds = Number(video.currentTime);
+      if (!key || !Number.isFinite(seconds) || seconds <= 0) return;
+      positions.set(key, seconds);
+      if (positions.size > 100) positions.delete(positions.keys().next().value);
+    });
+    video.addEventListener('playing', clearOffer);
+    async function offerAlternative() {
+      if (!integratedMode() || switching) return;
+      const context = contextNow(), anime = context?.anime, episode = context?.episode;
+      if (!isDinoProvider(anime) || !episode || !playableEpisodeNumber(episode)) return;
+      const originKey = contextKey(context), sequence = ++offerSequence;
+      let group = detailGroupsBySourceId.get(sourceKey(anime));
+      if (!group) {
+        try { group = await discoverSources(anime, null); keepDetailGroup(group); }
+        catch { return; }
+      }
+      if (sequence !== offerSequence || contextKey(contextNow()) !== originKey
+        || !group?.sourceItems?.some(item => item.provider !== episode.provider)) return;
+      const prior = document.querySelector('#dinoPlaybackAlternate');
+      prior?.remove();
+      const button = document.createElement('button');
+      button.id = 'dinoPlaybackAlternate';
+      button.className = 'dino-playback-alternate';
+      button.type = 'button';
+      button.textContent = '다른 공급원에서 이 회차 재생';
+      button.title = '같은 작품과 화수를 확인한 다른 공급원으로 전환합니다';
+      button.addEventListener('click', async () => {
+        if (switching || contextKey(contextNow()) !== originKey) return;
+        switching = true;
+        button.disabled = true;
+        button.textContent = '동일 회차 확인 중...';
+        try {
+          const reference = contextNow(), number = playableEpisodeNumber(reference.episode);
+          const sameKind = candidate => candidate?.playable !== false && !candidate?.special
+            && playableEpisodeNumber(candidate) === number
+            && Boolean(candidate.dub) === Boolean(reference.episode.dub);
+          for (const item of group.sourceItems) {
+            if (item.provider === reference.episode.provider) continue;
+            let response;
+            try { response = await window.lilac.providerDetail(item); }
+            catch { continue; }
+            const candidate = Array.isArray(response?.episodes) ? response.episodes.find(sameKind) : null;
+            if (!candidate || contextKey(contextNow()) !== originKey) continue;
+            if (typeof resolveIntoPlayer !== 'function') {
+              window.toast?.('재생 전환 기능을 사용할 수 없습니다.');
+              return;
+            }
+            const seconds = Math.max(0, Number(video.currentTime) || 0, positions.get(originKey) || 0,
+              Number(reference.resumeSeconds) || 0);
+            const duration = Number(video.duration);
+            const progress = Number.isFinite(duration) && duration > 0 ? Math.min(94, seconds / duration * 100) : 0;
+            const nextAnime = response?.data || item;
+            const name = String(reference.subtitleTitle || nextAnime.title || item.title || '');
+            const { currentUrl, offline, videoServers, videoServer, streamHeaders, resolving, ...rest } = reference;
+            clearOffer();
+            await resolveIntoPlayer(
+              () => window.lilac.providerResolve(candidate),
+              name + ' · ' + number + '화',
+              { ...rest, episode: candidate, anime: nextAnime, seriesEpisodes: response.episodes,
+                resolveKind: 'provider', resumeSeconds: seconds, resumeProgress: progress,
+                subtitleTitle: name, comparisonEpisodes: [] },
+              name, number
+            );
+            return;
+          }
+          window.toast?.('다른 공급원에서 동일한 회차를 확인하지 못했습니다.');
+          button.textContent = '동일 회차 없음 · 다시 확인';
+        } finally {
+          switching = false;
+          button.disabled = false;
+        }
+      });
+      status.insertAdjacentElement('afterend', button);
+    }
+    video.addEventListener('error', () => {
+      // Removing a source while loading a new episode can emit a transient
+      // native error. Do not suggest switching during that normal transition.
+      const context = contextNow();
+      const errorText = String(status.textContent || '');
+      if (context?.resolving && !/오류|실패|불러오지 못했/.test(errorText)) return;
+      offerAlternative().catch(() => {});
+    });
+    if (typeof MutationObserver === 'function') {
+      const observer = new MutationObserver(() => {
+        const text = String(status.textContent || '');
+        const emptyText = String(document.querySelector('#playerEmpty p')?.textContent || '');
+        if (/^HLS 오류[:：]|^재생 실패[:：]/.test(text)
+          || emptyText === '영상을 불러오지 못했어요') offerAlternative().catch(() => {});
+      });
+      observer.observe(status, { childList: true, subtree: true, characterData: true });
+    }
+  }
+  document.addEventListener?.('DOMContentLoaded', connectPlaybackFallback, { once: true });
+
+
+
   window.__dinoPatch03Bridge = {
     active: true,
     providers: providers.slice(),
