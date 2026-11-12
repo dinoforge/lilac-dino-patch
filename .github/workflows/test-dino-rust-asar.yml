@@ -1,0 +1,82 @@
+name: Verify DinoPatch Rust read-only ASAR inspector
+
+on:
+  push:
+    branches:
+      - feature/dino-rust-asar-verifier
+    paths:
+      - tools/dino-patch-manager/rust-engine/**
+      - .github/workflows/test-dino-rust-asar.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-windows:
+    name: Compile and test on Windows x64
+    runs-on: windows-2025
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: tools/dino-patch-manager/rust-engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check Rust formatting
+        shell: pwsh
+        run: cargo fmt --all -- --check
+      - name: Run read-only safety tests
+        shell: pwsh
+        run: cargo test --all-targets --verbose
+      - name: Produce internal test binary (not a release)
+        shell: pwsh
+        run: |
+          cargo build --release
+          if ($LASTEXITCODE -ne 0) { throw "Rust build failed" }
+          if (-not (Test-Path -LiteralPath 'target/release/dino-asar-inspect.exe' -PathType Leaf)) {
+            throw "Rust binary missing"
+          }
+
+  official-linux-asar:
+    name: Verify upstream v0.5.64 ASAR header and identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: tools/dino-patch-manager/rust-engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build read-only verifier
+        run: cargo build --release
+      - name: Fetch official ASAR into isolated CI temporary directory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/official-deb" "$RUNNER_TEMP/official-extract" "$RUNNER_TEMP/asar-fixture/resources"
+          gh release download v0.5.64 \
+            --repo whispelyn-byte/LilacAnime-desktop \
+            --pattern LilacAnime-linux-amd64.deb \
+            --dir "$RUNNER_TEMP/official-deb"
+          dpkg-deb -x "$RUNNER_TEMP/official-deb/LilacAnime-linux-amd64.deb" "$RUNNER_TEMP/official-extract"
+          ASAR="$(find "$RUNNER_TEMP/official-extract" -type f -name app.asar | head -n 1)"
+          test -f "$ASAR"
+          cp -- "$ASAR" "$RUNNER_TEMP/asar-fixture/resources/app.asar"
+          # Linux package lacks LilacAnime.exe. This only tests the official
+          # ASAR bytes against the scanner, not an actual Windows installation.
+          touch "$RUNNER_TEMP/asar-fixture/LilacAnime.exe"
+          "$GITHUB_WORKSPACE/tools/dino-patch-manager/rust-engine/target/release/dino-asar-inspect" "$RUNNER_TEMP/asar-fixture" | tee "$RUNNER_TEMP/rust-inspect-result.json"
+          python3 - "$RUNNER_TEMP/rust-inspect-result.json" <<'PY'
+          import json, sys
+          result = json.load(open(sys.argv[1], encoding='utf-8'))
+          assert result['status'] == 'ARCHIVE_VALID', result
+          assert result['version'] == '0.5.64', result
+          assert result['readOnly'] is True, result
+          assert len(result['sha256']) == 64, result
+          print('Read-only official ASAR verification passed')
+          PY
