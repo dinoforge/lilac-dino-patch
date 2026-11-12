@@ -80,3 +80,64 @@ jobs:
           assert len(result['sha256']) == 64, result
           print('Read-only official ASAR verification passed')
           PY
+
+  official-windows-v064:
+    name: Verify genuine official Windows v0.5.64 installation ASAR
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build native Windows read-only verifier
+        shell: pwsh
+        run: |
+          Push-Location tools/dino-patch-manager/rust-engine
+          try {
+            cargo build --release
+            if ($LASTEXITCODE -ne 0) { throw 'Native Rust inspector build failed' }
+          } finally {
+            Pop-Location
+          }
+      - name: Download and extract genuine official Windows installer into temporary CI storage
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $download = Join-Path $env:RUNNER_TEMP 'official-windows-download'
+          $extract = Join-Path $env:RUNNER_TEMP 'official-windows-extract'
+          New-Item -ItemType Directory -Force -Path $download,$extract | Out-Null
+          gh release download 'v0.5.64' --repo whispelyn-byte/LilacAnime-desktop --pattern 'LilacAnime-Setup.exe' --dir $download
+          if ($LASTEXITCODE -ne 0) { throw 'Official installer download failed' }
+          $sevenZip = (Get-Command 7z.exe -ErrorAction SilentlyContinue).Source
+          if (-not $sevenZip) { $sevenZip = 'C:\Program Files\7-Zip\7z.exe' }
+          if (-not (Test-Path -LiteralPath $sevenZip -PathType Leaf)) { throw 'Windows 7-Zip is unavailable' }
+          & $sevenZip x (Join-Path $download 'LilacAnime-Setup.exe') "-o$extract" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS extraction failed' }
+          $archives = @(Get-ChildItem -LiteralPath $extract -Filter app.asar -Recurse -File)
+          if ($archives.Count -eq 0) {
+            $payloads = @(Get-ChildItem -LiteralPath $extract -Recurse -File | Where-Object { $_.Name -match '^app-.*[.]7z$' })
+            foreach ($payload in $payloads) {
+              $inside = Join-Path $extract 'application-content'
+              New-Item -ItemType Directory -Force -Path $inside | Out-Null
+              & $sevenZip x $payload.FullName "-o$inside" -y | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "Nested payload extraction failed: $($payload.Name)" }
+            }
+            $archives = @(Get-ChildItem -LiteralPath $extract -Filter app.asar -Recurse -File)
+          }
+          if ($archives.Count -ne 1) { throw "Expected exactly one official app.asar, found $($archives.Count)" }
+          $asar = $archives[0].FullName
+          $install = Split-Path (Split-Path $asar -Parent) -Parent
+          $exe = Join-Path $install 'LilacAnime.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Official LilacAnime.exe missing' }
+          $initial = (Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash
+          $inspector = Join-Path (Get-Location).Path 'tools/dino-patch-manager/rust-engine/target/release/dino-asar-inspect.exe'
+          $json = (& $inspector $install | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0) { throw "Rust inspection rejected official Windows ASAR: $json" }
+          $result = $json | ConvertFrom-Json
+          if ($result.status -ne 'ARCHIVE_VALID' -or $result.version -ne '0.5.64' -or $result.readOnly -ne $true) {
+            throw "Unexpected official Windows ASAR result: $json"
+          }
+          if ($result.sha256 -ne $initial) { throw 'Rust and PowerShell SHA-256 do not match' }
+          if ((Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash -ne $initial) { throw 'Inspection modified original app.asar' }
+          Write-Host 'Official Windows ASAR v0.5.64 read-only verification passed'
