@@ -3,6 +3,7 @@
 
 mod asar;
 mod transaction;
+mod diagnostics;
 #[cfg(feature = "gui")]
 mod gui;
 
@@ -68,7 +69,7 @@ fn execute(args: &[String]) -> Result<Value> {
             Ok(status_json(transaction::restore(&path,id)?))
         },
         "diagnostics" => {
-            let file=std::env::current_exe()?.parent().ok_or_else(||fail("관리자 폴더 오류"))?.join("manager.log");
+            let file = diagnostics::log_path().ok_or_else(||fail("진단 로그 폴더를 알 수 없습니다."))?;
             let raw=std::fs::read_to_string(file).unwrap_or_default();
             let lines:Vec<&str>=raw.lines().rev().take(400).collect();
             Ok(json!({"items":lines.into_iter().rev().collect::<Vec<_>>() }))
@@ -79,14 +80,23 @@ fn execute(args: &[String]) -> Result<Value> {
 }
 
 fn main() {
+    diagnostics::install_panic_hook();
     let args:Vec<String>=std::env::args().skip(1).collect();
     #[cfg(feature="gui")]
     if args.is_empty() || args.first().map(String::as_str)==Some("--gui"){
-        if let Err(err)=gui::start(){
-            eprintln!("Native GUI failed: {err}");
-            std::process::exit(1);
-        }
-        return;
+        diagnostics::write("DinoPatch Rust GUI starting");
+        let outcome=std::panic::catch_unwind(gui::start);
+        let failure=match outcome {
+            Ok(Ok(())) => {
+                diagnostics::write("DinoPatch Rust GUI closed normally");
+                return;
+            },
+            Ok(Err(err)) => err.to_string(),
+            Err(_) => "관리자 GUI 내부 오류가 발생해 작업이 중단됐습니다.".to_string(),
+        };
+        diagnostics::write(&format!("GUI FAILED: {failure}"));
+        diagnostics::show_fatal_error(&failure);
+        std::process::exit(1);
     }
     // The real official ASAR has a large nested header. Give the Rust JSON
     // validation a bounded worker stack, including Windows native CLI mode.
