@@ -315,28 +315,28 @@ fn verify_installed(root: &Path) -> Checked<Value> {
     }))
 }
 
-fn main() {
+fn run_cli() -> i32 {
     let mut args = std::env::args_os().skip(1);
     let Some(first) = args.next() else {
         eprintln!("Usage: dino-asar-inspect <installed-root> | --review-recovery <installed-root> <existing-state-dir> <patch-version>");
-        std::process::exit(2);
+        return 2;
     };
     let result = if first == "--review-recovery" {
         let Some(root) = args.next() else {
             eprintln!("Missing installed root");
-            std::process::exit(2);
+            return 2;
         };
         let Some(state_root) = args.next() else {
             eprintln!("Missing existing manager state directory");
-            std::process::exit(2);
+            return 2;
         };
         let Some(patch_version) = args.next() else {
             eprintln!("Missing patch version");
-            std::process::exit(2);
+            return 2;
         };
         if args.next().is_some() {
             eprintln!("Too many arguments");
-            std::process::exit(2);
+            return 2;
         }
         let patch_version = patch_version.to_string_lossy();
         recovery::review_recovery(
@@ -347,7 +347,7 @@ fn main() {
     } else {
         if args.next().is_some() {
             eprintln!("Only one installed root argument is allowed.");
-            std::process::exit(2);
+            return 2;
         }
         verify_installed(&PathBuf::from(first))
     };
@@ -361,9 +361,32 @@ fn main() {
         }),
     };
     println!("{output}");
-    if output["status"] == "BLOCKED" {
-        std::process::exit(1);
-    }
+    if output["status"] == "BLOCKED" { 1 } else { 0 }
+}
+
+fn main() {
+    // Official Windows ASAR JSON can contain a large, nested file tree.
+    // On Windows the default main-thread stack is small enough for serde_json
+    // recursion to overflow before our MAX_DEPTH validation. Run exactly one
+    // bounded read-only check on a dedicated 16 MiB stack.
+    let worker = std::thread::Builder::new()
+        .name("dino-asar-readonly".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(run_cli);
+    let code = match worker {
+        Ok(handle) => match handle.join() {
+            Ok(value) => value,
+            Err(_) => {
+                eprintln!("Rust ASAR inspection panicked; no file was changed.");
+                1
+            }
+        },
+        Err(_) => {
+            eprintln!("Rust ASAR inspection thread could not start.");
+            1
+        }
+    };
+    std::process::exit(code);
 }
 
 #[cfg(test)]
