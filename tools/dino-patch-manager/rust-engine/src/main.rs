@@ -361,7 +361,11 @@ fn run_cli() -> i32 {
         }),
     };
     println!("{output}");
-    if output["status"] == "BLOCKED" { 1 } else { 0 }
+    if output["status"] == "BLOCKED" {
+        1
+    } else {
+        0
+    }
 }
 
 fn main() {
