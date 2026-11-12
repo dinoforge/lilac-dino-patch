@@ -88,7 +88,15 @@ fn main() {
         }
         return;
     }
-    let output=match execute(&args) {
+    // The real official ASAR has a large nested header. Give the Rust JSON
+    // validation a bounded worker stack, including Windows native CLI mode.
+    let task = std::thread::Builder::new().name("dino-native-asar".into())
+        .stack_size(16 * 1024 * 1024).spawn(move || execute(&args));
+    let outcome = match task {
+        Ok(worker) => worker.join().unwrap_or_else(|_|Err(fail("Rust ASAR 검사 작업이 비정상 종료됐습니다."))),
+        Err(error) => Err(fail(format!("Rust 검사 작업 생성 실패: {error}"))),
+    };
+    let output=match outcome {
         Ok(result)=>result,
         Err(error)=>json!({"status":"BLOCKED","readOnly":true,"reason":error.to_string()}),
     };
