@@ -61,7 +61,8 @@ pub fn installed_root(input: &Path) -> Result<PathBuf> {
     {
         // No UNC/network-path or redirected installations.
         let normalized=root.to_string_lossy();
-        if normalized.starts_with(r"\\?\UNC\") || normalized.starts_with(r"\\") {
+        if normalized.starts_with(r"\\?\UNC\") ||
+            (normalized.starts_with(r"\\") && !normalized.starts_with(r"\\?\")) {
             return Err(fail("네트워크 설치 경로는 지원하지 않습니다."));
         }
     }
