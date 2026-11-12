@@ -662,18 +662,20 @@
               window.toast?.('재생 전환 기능을 사용할 수 없습니다.');
               return;
             }
-            const seconds = Math.max(0, Number(video.currentTime) || 0, positions.get(originKey) || 0,
-              Number(reference.resumeSeconds) || 0);
+            const seconds = Number(video.currentTime) > 0
+              ? Number(video.currentTime)
+              : (positions.get(originKey) || Number(reference.resumeSeconds) || 0);
             const duration = Number(video.duration);
             const progress = Number.isFinite(duration) && duration > 0 ? Math.min(94, seconds / duration * 100) : 0;
-            const nextAnime = response?.data || item;
+            const nextAnime = { ...item, ...(response?.data || {}), provider: item.provider, mal_id: sourceKey(item) };
+            const nextEpisode = candidate.provider ? candidate : { ...candidate, provider: item.provider };
             const name = String(reference.subtitleTitle || nextAnime.title || item.title || '');
             const { currentUrl, offline, videoServers, videoServer, streamHeaders, resolving, ...rest } = reference;
             clearOffer();
             await resolveIntoPlayer(
-              () => window.lilac.providerResolve(candidate),
+              () => window.lilac.providerResolve(nextEpisode),
               name + ' · ' + number + '화',
-              { ...rest, episode: candidate, anime: nextAnime, seriesEpisodes: response.episodes,
+              { ...rest, episode: nextEpisode, anime: nextAnime, seriesEpisodes: response.episodes,
                 resolveKind: 'provider', resumeSeconds: seconds, resumeProgress: progress,
                 subtitleTitle: name, comparisonEpisodes: [] },
               name, number
