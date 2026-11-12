@@ -220,7 +220,7 @@ test('integrated picker keeps providers on one horizontally scrollable row and p
   const rail=picker.querySelector('.dino-source-track');
   assert.ok(rail,'source tabs must render in one horizontal scroll track');
   assert.equal(buttons(app).length,2);
-  assert.ok(buttons(app).every(button=>button.textContent.includes('\\n')),'source labels use compact two-line tabs');
+  assert.ok(buttons(app).every(button=>button.textContent.includes("\n")),'source labels use compact two-line tabs');
   rail.scrollLeft=113;
   await app.window.openDetail(app.home.mal_id);
   assert.equal(app.nodes.get('#detailContent').querySelector('.dino-source-track').scrollLeft,113);
