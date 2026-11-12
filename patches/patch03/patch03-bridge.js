@@ -349,7 +349,7 @@
     for (const item of group.sourceItems) {
       const id = sourceKey(item);
       const info = detailFacts.get(id);
-      const quality = verifiedVideoQuality.get(item.provider);
+      const quality = verifiedVideoQuality.get(id);
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'dino-source-option';
@@ -482,7 +482,8 @@
       const provider = context?.episode?.provider || context?.anime?.provider;
       if (!providers.includes(provider) || !Number.isFinite(height) || !Number.isFinite(width)
         || height < 144 || width < 200 || height > 4320 || width > 7680) return;
-      verifiedVideoQuality.set(provider, String(height) + 'p');
+      const workId = String(context?.anime?.mal_id ?? '');
+      if (workId) verifiedVideoQuality.set(workId, String(height) + 'p');
       // The official player hides the entire quality section when no
       // selectable variants exist. Show the actual decoded fixed resolution.
       const panel = document.querySelector('#psQuality');
