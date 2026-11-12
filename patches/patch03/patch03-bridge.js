@@ -337,13 +337,16 @@
     const content = document.querySelector('#detailContent');
     const dialog = document.querySelector('#detailDialog');
     if (!dialog?.open || !content?.querySelector('.detail-actions')) return;
-    content.querySelector('.detail-source-picker')?.remove();
+    const oldPicker = content.querySelector('.detail-source-picker');
+    const previousScroll = oldPicker?.querySelector('.dino-source-track')?.scrollLeft || 0;
+    oldPicker?.remove();
     const section = document.createElement('section');
     section.className = 'detail-source-picker';
     section.setAttribute('aria-label', '통합 공급원 선택');
     const title = document.createElement('b');
     title.textContent = '재생 공급원';
     const choices = document.createElement('div');
+    choices.className = 'dino-source-track';
     choices.setAttribute('role', 'group');
     choices.setAttribute('aria-label', '재생 공급원 선택');
     for (const item of group.sourceItems) {
@@ -361,8 +364,12 @@
         : info?.noEpisodes ? '회차 없음'
         : Number.isInteger(info?.episodes) ? String(info.episodes) + '화' : '회차 확인 중';
       const resolution = quality ? '최근 재생 ' + quality : '화질 재생 시 확인';
-      button.textContent = (labels[item.provider] || item.provider) + ' · ' + count + ' · ' + resolution;
-      button.title = button.textContent;
+      const displayName = labels[item.provider] || item.provider;
+      // One compact two-line tab; the track itself stays on a single
+      // horizontal row even when five providers are available.
+      button.textContent = displayName + '\n' + count + ' · ' + resolution;
+      button.title = displayName + ' · ' + count + ' · ' + resolution;
+      button.setAttribute('aria-label', button.title + (id === String(activeId) ? ' · 선택됨' : ''));
       button.addEventListener('click', () => window.openDetail(id, { sourceSelection: true }));
       choices.append(button);
     }
@@ -401,6 +408,9 @@
     }
     const anchor = content.querySelector('.detail-meta') || content.querySelector('.detail-actions');
     anchor?.before(section);
+    // Each verified count refresh recreates the picker. Keep the user's
+    // horizontal position rather than jumping back to the first supplier.
+    choices.scrollLeft = previousScroll;
   }
 
   async function loadVerifiedEpisodeCounts(group, activeId, sequence) {
