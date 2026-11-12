@@ -371,31 +371,40 @@ impl DinoUi {
     fn source_card(&mut self, ui: &mut Ui) {
         card(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    label(ui, "LilacAnime 버전");
-                    ui.label(RichText::new(if self.status.version.is_empty() {
-                        "확인 전".to_string()
-                    } else {
-                        format!("v{}", self.status.version)
-                    }).size(13.0).strong().color(rgb(TEXT)));
-                });
-                ui.add_space(26.0);
-                ui.vertical(|ui| {
-                    label(ui, "원본 폴더");
-                    let path = if self.root.is_empty() {
-                        "원본을 검색하고 있습니다.".to_string()
-                    } else {
-                        self.root.clone()
-                    };
-                    ui.add(egui::Label::new(
-                        RichText::new(path).size(12.0).strong().color(rgb(TEXT))
-                    ).truncate());
-                });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if action(ui, "원본 폴더 변경", ButtonTone::Secondary, !self.busy) {
-                        self.choose_folder();
-                    }
-                });
+                ui.allocate_ui_with_layout(
+                    Vec2::new(112.0, 44.0),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        label(ui, "LilacAnime 버전");
+                        ui.label(RichText::new(if self.status.version.is_empty() {
+                            "확인 전".to_string()
+                        } else {
+                            format!("v{}", self.status.version)
+                        }).size(13.0).strong().color(rgb(TEXT)));
+                    },
+                );
+                ui.add_space(10.0);
+                // Reserve width for the source-change button before rendering
+                // the often very long Windows installation path.
+                let path_width = (ui.available_width() - 148.0).max(180.0);
+                ui.allocate_ui_with_layout(
+                    Vec2::new(path_width, 44.0),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        label(ui, "원본 폴더");
+                        let path = if self.root.is_empty() {
+                            "원본을 검색하고 있습니다.".to_string()
+                        } else {
+                            self.root.clone()
+                        };
+                        ui.add(egui::Label::new(
+                            RichText::new(path).size(12.0).strong().color(rgb(TEXT))
+                        ).truncate());
+                    },
+                );
+                if action(ui, "원본 폴더 변경", ButtonTone::Secondary, !self.busy) {
+                    self.choose_folder();
+                }
             });
             if self.show_path_editor {
                 ui.add_space(8.0);
