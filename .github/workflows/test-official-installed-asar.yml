@@ -2,7 +2,7 @@ name: Verify installed LilacAnime ASAR pinned and latest
 
 on:
   push:
-    branches: [test/dino-full-functional-integration]
+    branches: [test/dino-full-functional-integration, feature/dino-rust-asar-verifier]
     paths:
       - .github/workflows/test-official-installed-asar.yml
       - tools/dino-patch-manager/installed_asar.py
@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: ['0.5.54', '0.5.55', '0.5.63']
+        version: ['0.5.54', '0.5.55', '0.5.63', '0.5.64']
     steps:
       - name: Check out independent patch code
         uses: actions/checkout@v4
