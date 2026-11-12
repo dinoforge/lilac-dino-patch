@@ -450,12 +450,18 @@ mod tests {
         fixture.build();
         let archive = fixture.archive();
         let mut bytes = fs::read(&archive).unwrap();
-        let text = b"lilacanime-desktop";
-        let at = bytes
-            .windows(text.len())
-            .position(|item| item == text)
-            .unwrap();
-        bytes[at..at + text.len()].fill(b'x');
+        // The official identifier is accepted by name OR appId. To test an
+        // unrelated product, both identity fields must be changed.
+        for text in [
+            b"lilacanime-desktop".as_slice(),
+            b"com.lilac.anime.desktop".as_slice(),
+        ] {
+            let at = bytes
+                .windows(text.len())
+                .position(|item| item == text)
+                .unwrap();
+            bytes[at..at + text.len()].fill(b'x');
+        }
         fs::write(&archive, &bytes).unwrap();
         assert_eq!(
             verify_installed(&fixture.0).unwrap_err().code,
