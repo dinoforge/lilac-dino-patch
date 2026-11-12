@@ -33,6 +33,14 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $exe=Join-Path (Get-Location).Path 'target/release/dino-native-manager.exe'
+          # Reproduce the reported app.asar-as-directory state without
+          # modifying or deleting a real installation or an existing backup.
+          $fixture=Join-Path $env:RUNNER_TEMP 'dino-invalid-asar-fixture'
+          New-Item -ItemType Directory -Force -Path (Join-Path $fixture 'resources/app.asar') | Out-Null
+          Set-Content -LiteralPath (Join-Path $fixture 'LilacAnime.exe') -Value 'CI marker'
+          $env:DINO_ORIGINAL_ROOT=$fixture
+          $env:APPDATA=Join-Path $env:RUNNER_TEMP 'dino-native-smoke-profile'
+          New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
           $psi=[System.Diagnostics.ProcessStartInfo]::new($exe)
           $psi.UseShellExecute=$false
           $psi.CreateNoWindow=$false
@@ -40,12 +48,22 @@ jobs:
           $proc=[System.Diagnostics.Process]::Start($psi)
           if (-not $proc) { throw 'Native Rust GUI did not launch' }
           try {
-            Start-Sleep -Seconds 5
+            Start-Sleep -Seconds 18
             if ($proc.HasExited) {
               $errorText=$proc.StandardError.ReadToEnd()
               throw "Rust GUI terminated immediately (code=$($proc.ExitCode)): $errorText"
             }
-            Write-Host 'Native Rust GUI remained running in the Windows test session'
+            if (-not (Test-Path -LiteralPath (Join-Path $fixture 'resources/app.asar') -PathType Container)) {
+              throw 'Native Rust GUI modified the invalid original ASAR folder'
+            }
+            if (@(Get-ChildItem -LiteralPath $env:APPDATA -Recurse -File -Filter original-app.asar).Count -ne 0) {
+              throw 'GUI created an unexpected original ASAR backup for an invalid folder'
+            }
+            $log=Join-Path $env:APPDATA 'DinoPatchManager/native-manager.log'
+            if (-not (Test-Path -LiteralPath $log -PathType Leaf)) {
+              throw 'Rust native startup diagnostic log was not generated'
+            }
+            Write-Host 'Native Rust GUI stayed open for 18 seconds with invalid ASAR directory and preserved the source'
           } finally {
             if (-not $proc.HasExited) { $proc.Kill($true) }
             $proc.WaitForExit(10000) | Out-Null
