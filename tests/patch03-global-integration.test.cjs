@@ -57,6 +57,7 @@ function harness({ integrated=true, firstReturnsUnrelated=false }={}) {
   element('detailDialog').open=true;
   const searchView=element('searchView');
   const status=element('searchStatus'); element('searchGrid');
+  const playbackStatus=element('downloadStatus');
   element('pageSearch');element('globalSearch');
   const video=element('video','video');
   const psQuality=element('psQuality');psQuality.classList.add('hidden');
@@ -65,7 +66,7 @@ function harness({ integrated=true, firstReturnsUnrelated=false }={}) {
   const document={
     querySelector:selector=>nodes.get(selector)||null,
     createElement:name=>new Elements(name),
-    addEventListener:(name,fn)=>events.set(name,fn)
+    addEventListener:(name,fn)=>{const previous=events.get(name);events.set(name,previous?()=>{previous();fn()}:fn);}
   };
   const storage=new Map([['contentSource','reanime']]);
   if(integrated)storage.set('lilacDinoPatch.searchMode','integrated');
@@ -115,7 +116,7 @@ function harness({ integrated=true, firstReturnsUnrelated=false }={}) {
   const sandbox=vm.createContext({window,document,localStorage,setTimeout:()=>1,console});
   vm.runInContext(bridge,sandbox,{filename:'patch03-bridge.js'});
   assert.equal(window.__dinoPatch03Bridge?.active,true);
-  return {window,document,storage,nodes,calls,events,home,other,unrelated,video,psQuality,psQualityList,sandbox,status,sourceSelect};
+  return {window,document,storage,nodes,calls,events,home,other,unrelated,video,psQuality,psQualityList,sandbox,status,sourceSelect,playbackStatus};
 }
 const buttons=app=>app.nodes.get('#detailContent').querySelector('.detail-source-picker')?.querySelectorAll('[data-provider-source]')||[];
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
@@ -132,7 +133,7 @@ test('integrated settings apply to home cards and resolve all matching provider 
   assert.ok(app.calls.search.some(x=>x.provider==='miruro'&&x.query==='English Work'));
   assert.ok(sources.some(x=>x.textContent.includes('12화')));
   assert.ok(sources.some(x=>x.textContent.includes('10화')));
-  assert.ok(sources.every(x=>x.textContent.includes('화질 재생 시 확인')));
+  assert.ok(sources.every(x=>x.textContent.includes('화질 미확인')));
   sources.find(x=>x.dataset.providerSource==='miruro:miruro-show').send('click');
   await settle();
   assert.equal(app.calls.detail.at(-1),'miruro:miruro-show');
@@ -154,7 +155,7 @@ test('an individual provider mode delegates without any integrated probing',asyn
 test('fixed quality displays measured decoded video pixels and never invents 1080p from catalog',async()=>{
   const app=harness();
   await app.window.openDetail(app.home.mal_id);
-  assert.ok(buttons(app).every(x=>x.textContent.includes('화질 재생 시 확인')));
+  assert.ok(buttons(app).every(x=>x.textContent.includes('화질 미확인')));
   app.sandbox.currentPlaybackContext={episode:{provider:'reanime'},anime:{mal_id:app.home.mal_id}};
   app.video.videoWidth=1920;app.video.videoHeight=1080;
   app.events.get('DOMContentLoaded')();
@@ -162,7 +163,7 @@ test('fixed quality displays measured decoded video pixels and never invents 108
   assert.equal(app.psQuality.classList.contains('hidden'),false);
   assert.match(app.psQualityList.children[0].textContent,/1920×1080/);
   await app.window.openDetail(app.home.mal_id);
-  assert.ok(buttons(app).some(x=>x.textContent.includes('최근 재생 1080p')));
+  assert.ok(buttons(app).some(x=>x.textContent.includes('재생 1080p')));
 });
 
 test('a missing supplier can be retried explicitly without changing the global integrated preference', async () => {
@@ -224,4 +225,109 @@ test('integrated picker keeps providers on one horizontally scrollable row and p
   rail.scrollLeft=113;
   await app.window.openDetail(app.home.mal_id);
   assert.equal(app.nodes.get('#detailContent').querySelector('.dino-source-track').scrollLeft,113);
+});
+
+test('a paginated provider search finds the second page and keeps first-page hits on a later failure', async()=>{
+  const requests=[];
+  const paged=await api.searchProviders({
+    providers:['miruro'],query:'English Work',maxPages:2,
+    search:async(_provider,_query,cursor)=>{
+      requests.push(cursor);
+      return cursor===null
+        ? {data:[{provider:'miruro',mal_id:'miruro:other',title:'Other'}],nextOffset:'second',done:false}
+        : {data:[{provider:'miruro',mal_id:'miruro:found',title:'English Work'}],done:true};
+    }
+  });
+  assert.deepEqual(requests,[null,'second']);
+  assert.equal(paged.items.length,2);
+  assert.equal(paged.statuses[0].pages,2);
+  assert.equal(paged.statuses[0].pageLimitReached,false);
+  const partial=await api.searchProviders({
+    providers:['miruro'],query:'English Work',maxPages:2,
+    search:async(_provider,_query,cursor)=>{
+      if(cursor!==null)throw Error('second page unavailable');
+      return {data:[{provider:'miruro',mal_id:'miruro:kept'}],nextOffset:'second'};
+    }
+  });
+  assert.equal(partial.statuses[0].state,'partial');
+  assert.equal(partial.items.length,1);
+});
+
+test('global detail discovery finds a verified match beyond the first provider page',async()=>{
+  const app=harness();
+  const catalog=app.window.lilac.providerCatalog;
+  app.window.lilac.providerCatalog=async(provider,query,offset)=>{
+    if(provider==='miruro'&&query==='English Work')
+      return offset==='next' ? {data:[app.other],done:true}
+        : {data:[app.unrelated],nextOffset:'next',done:false};
+    return catalog(provider,query,offset);
+  };
+  await app.window.openDetail(app.home.mal_id);
+  assert.equal(buttons(app).length,2);
+  assert.ok(!buttons(app).some(button=>button.dataset.providerSource==='miruro:unrelated'));
+  assert.equal(app.window.__dinoPatch03Bridge.getDetailSnapshot(app.home.mal_id).length,2);
+});
+
+test('verified episode comparison reports the latest supplier and the count gap',async()=>{
+  const app=harness();
+  await app.window.openDetail(app.home.mal_id);
+  await settle();await settle();
+  const values=buttons(app).map(button=>button.textContent);
+  assert.ok(values.some(value=>value.includes('RE:Anime')&&value.includes('최신화')));
+  assert.ok(values.some(value=>value.includes('Miruro')&&value.includes('2화 차이')));
+});
+
+test('quality announced by a provider is labeled as reported, not measured',async()=>{
+  const app=harness();
+  app.window.lilac.providerDetail=async item=>({
+    data:{...item,quality:item.provider==='miruro'?'720p':undefined},
+    episodes:Array.from({length:8},(_,i)=>({provider:item.provider,number:i+1}))
+  });
+  await app.window.openDetail(app.home.mal_id);
+  await settle();await settle();
+  const miruro=buttons(app).find(button=>button.dataset.providerSource===app.other.mal_id);
+  assert.match(miruro.textContent,/표기 720p/);
+  assert.doesNotMatch(miruro.textContent,/재생 720p/);
+});
+
+test('integrated search distinguishes verified missing results from provider failure',async()=>{
+  const app=harness();
+  const search=app.window.lilac.providerCatalog;
+  app.window.lilac.providerCatalog=(provider,query,offset)=>
+    provider==='miruro'?Promise.reject(Error('source offline')):search(provider,query,offset);
+  await app.window.doSearch('absent work');
+  const diagnostics=app.window.__dinoPatch03Bridge.getSearchDiagnostics();
+  assert.equal(diagnostics.find(s=>s.provider==='miruro').state,'failed');
+  assert.equal(diagnostics.find(s=>s.provider==='linkani').state,'ready');
+  assert.equal(diagnostics.find(s=>s.provider==='linkani').results,0);
+  assert.match(app.status.textContent,/응답 오류/);
+  assert.match(app.status.textContent,/미발견/);
+});
+
+test('terminal playback error offers a verified same-episode alternative and preserves position',async()=>{
+  const app=harness();
+  await app.window.openDetail(app.home.mal_id);
+  app.sandbox.currentPlaybackContext={
+    anime:app.home,episode:{provider:'reanime',number:7,id:'ep-7'},
+    subtitleTitle:'English Work',resolving:false
+  };
+  let switched=null;
+  app.sandbox.resolveIntoPlayer=async(_resolver,title,context,subtitleTitle,number)=>{
+    switched={title,context,subtitleTitle,number};
+  };
+  app.video.currentTime=123;
+  app.video.duration=1200;
+  app.events.get('DOMContentLoaded')();
+  app.video.send('timeupdate');
+  app.video.send('error');
+  await settle();await settle();
+  const button=app.playbackStatus.children.find(el=>el.id==='dinoPlaybackAlternate');
+  assert.ok(button,'same-episode fallback offered after terminal playback error');
+  button.send('click');
+  await settle();await settle();
+  assert.ok(switched);
+  assert.equal(switched.context.episode.provider,'miruro');
+  assert.equal(switched.context.episode.number,7);
+  assert.equal(switched.context.resumeSeconds,123);
+  assert.equal(switched.context.anime.mal_id,app.other.mal_id);
 });
