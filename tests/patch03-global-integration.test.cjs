@@ -31,7 +31,7 @@ class Elements {
   insertAdjacentElement(_position,item){this.append(item);}
   querySelectorAll(selector){
     const matching = element => {
-      if(selector==='.detail-source-picker'||selector==='.detail-actions'||selector==='.detail-meta')
+      if(selector==='.detail-source-picker'||selector==='.detail-actions'||selector==='.detail-meta'||selector==='.dino-source-track')
         return element.className.split(' ').includes(selector.slice(1));
       if(selector==='[data-provider-source]')
         return element.dataset.providerSource!==undefined;
@@ -205,4 +205,23 @@ test('translated aliases recover ID-less providers only for the same season and 
   const different=makeCandidate(2025);
   await different.window.openDetail(different.home.mal_id);
   assert.equal(buttons(different).length,1,'an alternate title must not override a conflicting release year');
+});
+
+
+test('integrated picker keeps providers on one horizontally scrollable row and preserves scroll during updates',async()=>{
+  const style=fs.readFileSync(path.join(__dirname,'../src/integrated-search.css'),'utf8');
+  assert.match(style,/\.detail-source-picker \.dino-source-track\s*\{[^}]*display:flex;[^}]*flex-wrap:nowrap;[^}]*overflow-x:auto;/s);
+  assert.match(style,/\.dino-source-option\s*\{[^}]*flex:0 0 218px;/s);
+  assert.doesNotMatch(style,/grid-template-columns:repeat\(auto-fit/);
+  const app=harness();
+  await app.window.openDetail(app.home.mal_id);
+  await settle();await settle();
+  const picker=app.nodes.get('#detailContent').querySelector('.detail-source-picker');
+  const rail=picker.querySelector('.dino-source-track');
+  assert.ok(rail,'source tabs must render in one horizontal scroll track');
+  assert.equal(buttons(app).length,2);
+  assert.ok(buttons(app).every(button=>button.textContent.includes('\\n')),'source labels use compact two-line tabs');
+  rail.scrollLeft=113;
+  await app.window.openDetail(app.home.mal_id);
+  assert.equal(app.nodes.get('#detailContent').querySelector('.dino-source-track').scrollLeft,113);
 });
