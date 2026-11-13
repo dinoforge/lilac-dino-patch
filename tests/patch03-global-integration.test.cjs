@@ -46,7 +46,7 @@ class Elements {
   querySelector(selector){return this.querySelectorAll(selector)[0]||null;}
 }
 
-function harness({ integrated=true, firstReturnsUnrelated=false, persistedStorage=null }={}) {
+function harness({ integrated=true, firstReturnsUnrelated=false, persistedStorage=null, catalogState=null, catalogItems=[] }={}) {
   const nodes=new Map();
   const element=(id,name='div')=>{const node=new Elements(name);nodes.set('#'+id,node);return node;};
   const sourceSelect=element('contentSource','select');
@@ -98,8 +98,11 @@ function harness({ integrated=true, firstReturnsUnrelated=false, persistedStorag
     renderCards:(target,items)=>calls.render.push({target,items}),
     cancelPendingPlaybackLookups:()=>{},saveRecentSearch:()=>{},
     lilac:{
-      providerCatalog:async(provider,query)=>{
-        calls.search.push({provider,query});
+      providerCatalog:async(provider,query,offset=0,sort='')=>{
+        calls.search.push({provider,query,offset,sort});
+        if(provider==='reanime' && !query && sort==='popular')
+          return {data:catalogItems.slice(Number(offset)||0,(Number(offset)||0)+36),
+            offset:Number(offset)||0,total:catalogItems.length,done:(Number(offset)||0)+36>=catalogItems.length};
         if(provider==='miruro'){
           if(firstReturnsUnrelated&&query==='English Work')return {data:[unrelated]};
           if(query==='English Work'||query==='Alternate Title')return {data:[other]};
@@ -113,6 +116,7 @@ function harness({ integrated=true, firstReturnsUnrelated=false, persistedStorag
       providerResolve:async episode=>episode
     }
   };
+  if(catalogState) window.lilac.catalogIndexState=async()=>catalogState;
   const sandbox=vm.createContext({window,document,localStorage,
     setTimeout:(fn)=>{scheduled.push(fn);return scheduled.length;},console});
   vm.runInContext(bridge,sandbox,{filename:'patch03-bridge.js'});
@@ -467,4 +471,82 @@ test('source index records missing versus provider outage for separate expiry po
   const failedRow=failedStore.works.find(row=>row.sources.some(item=>item.mal_id===failed.home.mal_id));
   assert.equal(failedRow.outcome,'error','incomplete scan gets short retry without deleting known links');
   assert.ok(failedRow.attemptedAt>0);
+});
+
+
+test('original local Re:Anime index seeds 36 titles without a five-provider network search', async()=>{
+  const works=Array.from({length:72},(_,i)=>({
+    provider:'reanime',id:'local-'+i,mal_id:'reanime:local-'+i,
+    title:'Local Indexed Anime '+i,anilistId:100000+i,year:2026,type:'TV'
+  }));
+  const state={sources:[{provider:'reanime',total:works.length,status:'ready'}]};
+  const storage=new Map([['contentSource','reanime']]);
+  const first=harness({persistedStorage:storage,catalogState:state,catalogItems:works});
+  assert.equal(first.calls.search.length,0,'index import starts after the UI is ready');
+  assert.equal(first.scheduled.length,1,'one deferred local read');
+  first.scheduled.shift()();
+  await settle();await settle();await settle();
+  const originalCalls=first.calls.search;
+  assert.equal(originalCalls.length,1,'one original indexed page only');
+  assert.equal(originalCalls[0].provider,'reanime');
+  assert.equal(originalCalls[0].query,'');
+  assert.equal(originalCalls[0].sort,'popular');
+  assert.ok(!originalCalls.some(request=>request.provider==='miruro'),'no remote supplier searches');
+  assert.equal(first.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().importedThisSession,36);
+  assert.equal(first.window.__dinoPatch03Bridge.getWorkIndexStats().works,36);
+  first.window.__dinoPatch03Bridge.flushWorkIndex();
+  const data=JSON.parse(storage.get(api.WORK_INDEX_KEY));
+  assert.equal(data.works.length,36);
+  assert.ok(data.works.every(row=>row.checkedAt===0 && !row.outcome),'catalog-only titles must not be marked verified');
+  assert.equal(first.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().nextOffset,36);
+
+  const repeat=harness({persistedStorage:storage,catalogState:state,catalogItems:works});
+  assert.equal(repeat.scheduled.length,0,'no local catalog reading on every launch');
+  assert.equal(repeat.calls.search.length,0);
+  const checkpointKey='lilacDinoPatch.workIndex.originalCatalogSeed.v1';
+  const checkpoint=JSON.parse(storage.get(checkpointKey));
+  storage.set(checkpointKey,JSON.stringify({...checkpoint,time:Date.now()-25*60*60*1000}));
+  const next=harness({persistedStorage:storage,catalogState:state,catalogItems:works});
+  assert.equal(next.scheduled.length,1);
+  next.scheduled.shift()();
+  await settle();await settle();await settle();
+  assert.equal(next.calls.search[0].offset,36,'next day imports next page, not first page');
+  assert.equal(next.window.__dinoPatch03Bridge.getWorkIndexStats().works,72);
+  assert.equal(next.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().nextOffset,0);
+});
+
+test('missing original index and non-integrated mode cause no new catalog or supplier requests', async()=>{
+  const empty=harness({catalogState:{sources:[]},catalogItems:[]});
+  assert.equal(empty.scheduled.length,1);
+  empty.scheduled.shift()();
+  await settle();await settle();
+  assert.equal(empty.calls.search.length,0);
+  assert.equal(empty.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().status,'no-local-index');
+  const individual=harness({integrated:false,catalogState:{sources:[{provider:'reanime',total:900}]},
+    catalogItems:[{provider:'reanime',id:'a',mal_id:'reanime:a',title:'A'}]});
+  assert.equal(individual.scheduled.length,0);
+  assert.equal(individual.calls.search.length,0);
+});
+
+test('already verified connections are not overwritten by the original catalog seed',async()=>{
+  const storage=new Map([['contentSource','reanime']]);
+  const first=harness({persistedStorage:storage});
+  await first.window.openDetail(first.home.mal_id);
+  first.window.__dinoPatch03Bridge.flushWorkIndex();
+  const before=JSON.parse(storage.get(api.WORK_INDEX_KEY));
+  const original=before.works.find(row=>row.sources.some(source=>source.mal_id===first.home.mal_id));
+  assert.ok(original && original.sources.length===2 && original.checkedAt>0);
+  const read=harness({
+    persistedStorage:storage,
+    catalogState:{sources:[{provider:'reanime',total:1,status:'ready'}]},
+    catalogItems:[first.home]
+  });
+  assert.equal(read.scheduled.length,1);
+  read.scheduled.shift()();
+  await settle();await settle();
+  read.window.__dinoPatch03Bridge.flushWorkIndex();
+  const after=JSON.parse(storage.get(api.WORK_INDEX_KEY));
+  const saved=after.works.find(row=>row.sources.some(source=>source.mal_id===first.home.mal_id));
+  assert.equal(saved.sources.length,2,'existing verified supplier mapping survives');
+  assert.equal(saved.checkedAt,original.checkedAt,'local list data does not change verification timestamp');
 });
