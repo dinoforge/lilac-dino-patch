@@ -8,8 +8,20 @@ Native modules:
 - src/gui.rs: Rust egui desktop window, manual control, source monitoring, diagnostics
 - src/main.rs: portable JSON CLI and native GUI entrypoint
 
-Build: cargo build --release --features gui
+Windows GUI build (no CMD/console window): cargo build --release --features gui
+CLI-only build (JSON stdout, console): cargo build --release --no-default-features
 Test: cargo test --no-default-features
+
+On Windows, launch the GUI-enabled `dino-native-manager.exe` directly. It uses
+the Windows GUI subsystem, so a black console window is not allocated. The
+GUI runs file validation and patch transactions in Rust worker threads rather
+than launching cmd.exe/PowerShell. For a true command-line executable, build
+without the `gui` feature as shown above. GUI startup failures are reported
+through a Windows dialog and the persistent `native-manager.log` diagnostics.
+
+The Windows release workflow checks the built PE header's subsystem field:
+`2` (Windows GUI) is required; `3` (Console) is rejected.
+A source-only test is not a substitute for a real Windows startup check.
 CLI inspection: dino-native-manager.exe inspect "D:\LilacAnime"
 Manual patch: dino-native-manager.exe apply "D:\LilacAnime"
 Uninstall: dino-native-manager.exe uninstall "D:\LilacAnime"
