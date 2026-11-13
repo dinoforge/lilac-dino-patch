@@ -239,8 +239,10 @@ test('Dino work index behaves like the original local Korean title cache without
   now+=7*60*60*1000;
   assert.equal(second.readSearch('한국 제목'),null,'successful query cache expires');
   assert.equal(second.find(anchor).fresh,true,'verified source mapping lives longer than query results');
-  now+=2*24*60*60*1000;
-  assert.equal(second.find(anchor).fresh,false,'stale entries remain visible but require remote validation');
+  now+=29*24*60*60*1000;
+  assert.equal(second.find(anchor).fresh,true,'verified connections remain reusable for 30 days');
+  now+=24*60*60*1000;
+  assert.equal(second.find(anchor).fresh,false,'verified connection TTL triggers revalidation after 30 days');
   second.invalidate(anchor);
   second.flush();
   assert.equal(second.find(anchor).fresh,false);
@@ -262,4 +264,57 @@ test('corrupted work cache is isolated from official settings and conflicting se
   index.flush();
   assert.equal(values.get('contentSource'),'miruro');
   assert.equal(values.get('userTheme'),'dark');
+});
+
+
+test('verified sources, missing matches and transient errors use distinct 30/7/3-day revalidation TTLs', () => {
+  const {createWorkIndex,WORK_INDEX_KEY}=require('../src/integrated-search.js');
+  let now=1900000000000;
+  const stored=new Map();
+  const storage={getItem:key=>stored.get(key)||null,setItem:(key,value)=>stored.set(key,String(value))};
+  const idx=createWorkIndex(storage,{clock:()=>now});
+  const anchor=item('reanime','test-unique',{title:'Unique Anime',anilistId:777777,year:2026,type:'TV'});
+  const other=item('miruro','test-match',{title:'Unique Anime',anilistId:777777,year:2026,type:'TV'});
+  const sources={sourceItems:[anchor,other]};
+  const DAY=24*60*60*1000;
+  idx.remember(sources,{checked:true,attempted:true,outcome:'verified'});
+  assert.equal(idx.find(anchor).outcome,'verified');
+  now+=29*DAY;
+  assert.equal(idx.find(anchor).fresh,true);
+  now+=DAY;
+  assert.equal(idx.find(anchor).fresh,false,'30-day positive refresh threshold');
+
+  idx.remember(sources,{checked:true,attempted:true,outcome:'missing'});
+  assert.equal(idx.find(anchor).outcome,'missing');
+  now+=6*DAY;
+  assert.equal(idx.find(anchor).fresh,true);
+  now+=DAY;
+  assert.equal(idx.find(anchor).fresh,false,'7-day verified-missing refresh threshold');
+
+  idx.remember(sources,{attempted:true,outcome:'error'});
+  assert.equal(idx.find(anchor).outcome,'error');
+  now+=2*DAY;
+  assert.equal(idx.find(anchor).fresh,true);
+  now+=DAY;
+  assert.equal(idx.find(anchor).fresh,false,'3-day transient-error refresh threshold');
+  assert.equal(idx.find(anchor).sources.length,2,'cached verified links survive expiry and temporary errors');
+  idx.flush();
+
+  const fresh=createWorkIndex(storage,{clock:()=>now});
+  assert.equal(fresh.find(anchor).outcome,'error','scan outcome persists after restart');
+  assert.equal(fresh.find(anchor).sources.length,2);
+  fresh.invalidate(anchor);
+  assert.equal(fresh.find(anchor).fresh,false,'manual refresh bypasses all policy TTLs');
+  assert.ok(stored.has(WORK_INDEX_KEY));
+});
+
+test('old local-index entries without scan outcome stay readable and revalidate after 7 days', () => {
+  const {createWorkIndex,WORK_INDEX_KEY}=require('../src/integrated-search.js');
+  const DAY=24*60*60*1000,now=1900000000000;
+  const anchor=item('reanime','older',{title:'Legacy Work',anilistId:987654,year:2024,type:'TV'});
+  const old={version:1,works:[{id:'reanime:older',sources:[anchor],names:['Legacy Work'],checkedAt:now-8*DAY,updatedAt:now-8*DAY}],searches:[]};
+  const storage={getItem:key=>key===WORK_INDEX_KEY?JSON.stringify(old):null,setItem:()=>{}};
+  const idx=createWorkIndex(storage,{clock:()=>now});
+  assert.equal(idx.find(anchor).sources.length,1);
+  assert.equal(idx.find(anchor).fresh,false);
 });
