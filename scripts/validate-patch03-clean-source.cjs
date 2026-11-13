@@ -120,7 +120,10 @@ function applyPatch(sourceRoot) {
   ].filter(relative => original.has(relative));
   if (forbiddenExisting.length) throw new Error(`Patch files already exist in the official archive: ${forbiddenExisting.join(', ')}`);
 
-  for (const connection of MANIFEST.connections) {
+  // Additive SQLite IPC endpoints are guarded by the same exactly-one
+  // anchor rule as the original five connections. No other official files
+  // or IPC surfaces may be modified.
+  for (const connection of [...MANIFEST.connections, ...(MANIFEST.optionalConnections || [])]) {
     const target = relativeSafe(sourceRoot, connection.file);
     const content = fs.readFileSync(target, 'utf8');
     fs.writeFileSync(target, replaceExactly(content, connection.before, connection.after, connection.description), 'utf8');
