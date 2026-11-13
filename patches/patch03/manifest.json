@@ -47,17 +47,17 @@
     {
       "source": "src/integrated-search.js",
       "destination": "src/integrated-search.js",
-      "sha256": "A4E9DDB1BD49B11B279FB18A2BF864D8E0061B5E75E6B158D68A20EC2512640B"
+      "sha256": "9AEC83E5903C657201713D5ABAE76A4EA28B73E97D0933D60B47D3E7B6EF0453"
     },
     {
       "source": "src/integrated-search.css",
       "destination": "src/integrated-search.css",
-      "sha256": "5E2D71304D0F3D2215C136F6246B77DBD9A28B1140FA606AB81FEB8D3CAF8BF9"
+      "sha256": "7628C11EC8A017EEFDA84E14C14F9197B75BDC3BB48F826CB884884236727784"
     },
     {
       "source": "patches/patch03/patch03-bridge.js",
       "destination": "src/patch03-bridge.js",
-      "sha256": "E7D4B2EEF6C25CE0F970CDE6E9FE621A5417652E88E90D282AC20B52719D66EF"
+      "sha256": "B63CE3CCC6FEF0A4BADDE7F76E10286132F52F949E5102EF3BEE2457D7D87E67"
     },
     {
       "source": "src/dino-sqlite-sync.js",
