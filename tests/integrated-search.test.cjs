@@ -409,3 +409,104 @@ test('work index reports disk quota errors and retains retryable in-memory chang
   assert.equal(index.flush(),true);
   assert.equal(createWorkIndex(storage).stats().works,1);
 });
+
+
+test('one work keeps shared Korean, English and Japanese titles above all five suppliers', () => {
+  const {createWorkIndex,PROVIDERS,WORK_INDEX_KEY}=require('../src/integrated-search.js');
+  const map=new Map([['contentSource','reanime'],['userTheme','dark']]);
+  let now=1900000000000;
+  const storage={getItem:k=>map.get(k)||null,setItem:(k,v)=>map.set(k,String(v))};
+  const idx=createWorkIndex(storage,{clock:()=>now});
+  const sources=PROVIDERS.map((provider,i)=>({
+    provider,id:'canonical-'+i,mal_id:provider+':canonical-'+i,
+    title:i===3?'공급원 한국어 제목':'Japanese Anime Title',
+    title_english:'Japanese Anime Title',
+    title_japanese:'日本語の作品名',
+    year:2026,type:'TV',anilistId:551199
+  }));
+  const passive=idx.observe(sources);
+  assert.equal(passive.added,5);
+  assert.equal(idx.stats().works,1,'all five providers share a single work row');
+  assert.equal(idx.find(sources[0]).titles.ko,'공급원 한국어 제목');
+  assert.equal(idx.find(sources[0]).titles.koSource,'provider');
+  assert.equal(idx.find(sources[0]).titles.en,'Japanese Anime Title');
+  assert.equal(idx.find(sources[0]).titles.ja,'日本語の作品名');
+
+  now+=1000;
+  idx.rememberTitles(sources[1],{ko:'원본에서 확인한 공식 한국어 제목',en:'Official English Title'},
+    {source:'official'});
+  for(const source of sources){
+    assert.equal(idx.find(source).titles.ko,'원본에서 확인한 공식 한국어 제목');
+    assert.equal(idx.find(source).titles.koSource,'official');
+    assert.equal(idx.find(source).titles.koCheckedAt,now);
+    assert.equal(idx.find(source).titles.manual,false);
+  }
+  idx.flush();
+  const data=JSON.parse(map.get(WORK_INDEX_KEY));
+  assert.equal(data.works.length,1);
+  assert.equal(data.works[0].sources.length,5);
+  assert.equal(data.works[0].titles.ko,'원본에서 확인한 공식 한국어 제목');
+  assert.equal(data.works[0].sources[3].title,'공급원 한국어 제목',
+    'canonical Korean must not replace the site title needed for its API');
+
+  const restarted=createWorkIndex(storage,{clock:()=>now});
+  assert.equal(restarted.find(sources[4]).titles.ko,'원본에서 확인한 공식 한국어 제목');
+  assert.equal(map.get('contentSource'),'reanime');
+  assert.equal(map.get('userTheme'),'dark');
+});
+
+test('user-edited Korean title is authoritative and reset allows original resolver again', () => {
+  const {createWorkIndex,WORK_INDEX_KEY}=require('../src/integrated-search.js');
+  const raw=new Map();
+  let now=1900000000000;
+  const storage={getItem:k=>raw.get(k)||null,setItem:(k,v)=>raw.set(k,String(v))};
+  const db=createWorkIndex(storage,{clock:()=>now});
+  const a={provider:'reanime',id:'a',mal_id:'reanime:a',title:'Initial Korean? English',
+    anilistId:112233,year:2025,type:'TV'};
+  const b={provider:'miruro',id:'b',mal_id:'miruro:b',title:'Initial Korean? English',
+    anilistId:112233,year:2025,type:'TV'};
+  db.observe([a,b]);
+  db.rememberTitles(a,{ko:'원본 한국어 제목'}, {source:'official'});
+  now+=3000;
+  assert.equal(db.rememberTitles(b,{ko:'내가 지정한 대표 제목'}, {source:'manual'}),true);
+  assert.equal(db.find(a).titles.manual,true);
+  assert.equal(db.find(b).titles.koCheckedAt,now);
+  assert.equal(db.rememberTitles(a,{ko:'다시 조회한 한국어 제목'}, {source:'official'}),false);
+  db.remember({sourceItems:[{...a,displayTitle:'공급원 표시 제목'}]},
+    {checked:true,outcome:'verified'});
+  assert.equal(db.find(a).titles.ko,'내가 지정한 대표 제목');
+  assert.equal(db.rememberTitles(a,{ko:'English only'}, {source:'manual'}),false,
+    'manual edit cannot accidentally remove the only Korean title');
+  db.flush();
+  const read=createWorkIndex(storage,{clock:()=>now});
+  assert.equal(read.find(b).titles.ko,'내가 지정한 대표 제목');
+  assert.equal(read.find(b).titles.koSource,'manual');
+  assert.equal(read.find(b).titles.manual,true);
+  assert.equal(read.resetManualKoreanTitle(b),true);
+  assert.equal(read.find(a).titles.manual,false);
+  assert.equal(read.find(a).titles.koSource,'provider'===read.find(a).titles.koSource?'provider':'');
+  assert.equal(read.rememberTitles(a,{ko:'다시 조회한 한국어 제목'}, {source:'official'}),true);
+  assert.equal(read.find(b).titles.ko,'다시 조회한 한국어 제목');
+  read.flush();
+  assert.equal(JSON.parse(raw.get(WORK_INDEX_KEY)).works[0].titles.manual,false);
+});
+
+test('legacy v1 work caches gain a conservative Korean representative without losing provider IDs', () => {
+  const {createWorkIndex,WORK_INDEX_KEY}=require('../src/integrated-search.js');
+  const anchor={provider:'ohli24',id:'old',mal_id:'ohli24:old',title:'기존의 한국어 제목',
+    title_english:'Older English Name',anilistId:448899,year:2024,type:'TV'};
+  const other={provider:'linkani',id:'other',mal_id:'linkani:other',title:'Older English Name',
+    anilistId:448899,year:2024,type:'TV'};
+  const old={version:1,works:[{id:'ohli24:old',sources:[anchor,other],
+    names:['기존의 한국어 제목','Older English Name'],checkedAt:100,
+    updatedAt:100,attemptedAt:100,outcome:'verified'}],searches:[]};
+  const raw=new Map([[WORK_INDEX_KEY,JSON.stringify(old)]]);
+  const storage={getItem:k=>raw.get(k)||null,setItem:(k,v)=>raw.set(k,String(v))};
+  const index=createWorkIndex(storage,{clock:()=>200});
+  assert.equal(index.stats().works,1);
+  assert.equal(index.find(anchor).titles.ko,'기존의 한국어 제목');
+  assert.equal(index.find(other).titles.en,'Older English Name');
+  assert.equal(index.find(anchor).titles.koSource,'provider');
+  assert.equal(index.find(anchor).sources.length,2);
+  assert.equal(index.find(anchor).checkedAt,100);
+});
