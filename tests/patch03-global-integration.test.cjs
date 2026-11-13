@@ -415,8 +415,10 @@ test('background source indexing pauses for detail playback and ignores non-inte
   assert.equal(app.calls.search.length,0,'detail modal takes priority over background prefetch');
   assert.equal(app.window.__dinoPatch03Bridge.getPrefetchStatus().queued,1);
   app.nodes.get('#detailDialog').open=false;
-  assert.equal(app.scheduled.length,1);
-  app.scheduled.shift()();
+  // Episode polling has its own timer; this test only drives the existing
+  // supplier-discovery retry after the detail dialog is closed.
+  assert.equal(app.scheduled.filter(fn=>fn.__testDelay===15000).length,1);
+  app.scheduled.find(fn=>fn.__testDelay===15000)();
   for(let i=0;i<12;i++)await settle();
   assert.ok(app.calls.search.length>0);
   const individual=harness({integrated:false});
