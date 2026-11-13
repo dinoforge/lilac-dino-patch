@@ -290,3 +290,15 @@
   .detail-source-picker .dino-source-option,
   .search-provider-chip{transition:none}
 }
+
+
+/* Only actual provider-detail episode increases receive the subtle new-episode
+   accent; no catalog-only guess is presented as a confirmed new episode. */
+.detail-source-picker .dino-source-option[data-new-episodes]:not([data-new-episodes="0"]){
+  border-color:color-mix(in srgb,var(--lilac) 58%,var(--line));
+  background:color-mix(in srgb,var(--lilac) 12%,var(--panel));
+}
+.detail-source-picker .dino-source-option[data-new-episodes]:not([data-new-episodes="0"])::before{
+  background:var(--lilac);
+  opacity:1;
+}
