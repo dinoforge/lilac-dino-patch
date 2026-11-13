@@ -550,9 +550,9 @@
       data.searches = data.searches.slice(-65);
       try {
         let encoded = JSON.stringify(data);
-        // Keep the profile cache below Electron localStorage's usual quota;
+        // Keep UTF-16 profile storage well below Electron's usual quota;
         // LRU eviction is bounded and never touches original LilacAnime data.
-        while (encoded.length > 3700000 && data.works.length > 1) {
+        while (encoded.length > 1900000 && data.works.length > 1) {
           data.works.pop();
           encoded = JSON.stringify(data);
         }
