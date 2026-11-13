@@ -517,6 +517,19 @@
       koCheckedAt: Number(saved?.koCheckedAt) || 0,
       manual: saved?.manual === true && !!korean(saved?.ko)
     });
+    const episodeFields = raw => {
+      if (!raw || typeof raw !== 'object') return null;
+      const safe = value => Number.isSafeInteger(Number(value)) && Number(value) >= 0
+        ? Math.min(10000000000000, Number(value)) : 0;
+      const state = ['ready','empty','error'].includes(raw.state) ? raw.state : '';
+      if (!state) return null;
+      return {
+        state, count: Math.min(10000, safe(raw.count)),
+        latest: Math.min(9999, safe(raw.latest)),
+        checkedAt: safe(raw.checkedAt), attemptedAt: safe(raw.attemptedAt),
+        newEpisodes: Math.min(9999, safe(raw.newEpisodes))
+      };
+    };
     const providerTitles = item => ({
       ko: korean(item?.displayTitle) || korean(item?.title),
       en: !korean(item?.title_english) && clean(item?.title_english)
@@ -535,6 +548,10 @@
       if (Array.isArray(a.synonyms)) o.synonyms = namesOf(a.synonyms);
       if (a.images && typeof a.images === 'object') {
         try { if (JSON.stringify(a.images).length < 1200) o.images = a.images; } catch {}
+      }
+      if (a.dinoEpisode) {
+        const episode = episodeFields(a.dinoEpisode);
+        if (episode) o.dinoEpisode = episode;
       }
       o.provider = a.provider;
       o.mal_id = sourceKey(a);
@@ -741,6 +758,49 @@
       return true;
     };
 
+    // Supplier-specific episode snapshots never affect canonical Korean titles,
+    // provider matching freshness, or another supplier's episode count.
+    const episodeState = item => {
+      const row = rowFor(item);
+      const source = row?.sources.find(entry => entry.provider === item?.provider
+        && sourceKey(entry) === sourceKey(item));
+      const value = episodeFields(source?.dinoEpisode);
+      return value ? { ...value } : null;
+    };
+    const rememberEpisode = (item, facts = null) => {
+      if (!compact(item)) return false;
+      let row = rowFor(item);
+      if (!row) {
+        remember({sourceItems:[item]});
+        row = rowFor(item);
+      }
+      const source = row?.sources.find(entry => entry.provider === item.provider
+        && sourceKey(entry) === sourceKey(item));
+      if (!source) return false;
+      const old = episodeFields(source.dinoEpisode);
+      const successful = facts && Number.isSafeInteger(facts.count) && facts.count >= 0
+        && Number.isSafeInteger(facts.latest) && facts.latest >= 0;
+      const time = clock();
+      if (!successful && old?.attemptedAt && time < old.attemptedAt) return false;
+      if (successful && old?.checkedAt && time < old.checkedAt) return false;
+      const snapshot = successful ? {
+        state: facts.count ? 'ready' : 'empty',
+        count: Math.min(10000, facts.count),
+        latest: Math.min(9999, facts.latest),
+        checkedAt: time, attemptedAt: time,
+        newEpisodes: old?.latest > 0 && facts.latest > old.latest
+          ? Math.min(9999, facts.latest - old.latest) : 0
+      } : {
+        state: 'error', count: old?.count || 0, latest: old?.latest || 0,
+        checkedAt: old?.checkedAt || 0, attemptedAt: time,
+        newEpisodes: old?.newEpisodes || 0
+      };
+      source.dinoEpisode = snapshot;
+      row.updatedAt = time;
+      touch(); notify(row);
+      return true;
+    };
+
     // Opportunistically reuse entries already delivered to the original
     // renderer (season, airing, library, search or a catalog card). This
     // creates no IPC/network request and never marks an observed card as a
@@ -849,8 +909,16 @@
         const reference = { ...sources[0], synonyms: row.names };
         const known = new Map(row.sources.map(s => [scopedKey(s), s]));
         for (const source of sources) {
-          if (identityMatch(reference, source) && !known.has(scopedKey(source)))
-            known.set(scopedKey(source), source);
+          if (!identityMatch(reference, source)) continue;
+          const existing = known.get(scopedKey(source));
+          if (!existing) known.set(scopedKey(source), source);
+          else {
+            const incoming = episodeFields(source.dinoEpisode);
+            const previous = episodeFields(existing.dinoEpisode);
+            if (incoming && (!previous || incoming.attemptedAt > previous.attemptedAt
+              || incoming.attemptedAt === previous.attemptedAt && incoming.checkedAt > previous.checkedAt))
+              existing.dinoEpisode = incoming;
+          }
         }
         row.sources = [...known.values()].slice(0,8);
         const storedCheck = Number(raw.checkedAt) || 0;
@@ -869,6 +937,7 @@
       return {added,merged};
     };
     return { find, remember, rememberTitles, resetManualKoreanTitle, observe,
+      episodeState, rememberEpisode,
       rememberSearch, readSearch, invalidate, flush, exportRows, importRows,
       setPersistenceHook,
       stats: () => ({
