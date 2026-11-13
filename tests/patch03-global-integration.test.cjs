@@ -764,3 +764,92 @@ test('failed local index persistence cannot advance daily checkpoint and skip un
   assert.equal(storage.has('lilacDinoPatch.workIndex.originalCatalogSeed.v1'),false);
   assert.equal(storage.has(api.WORK_INDEX_KEY),false);
 });
+
+
+test('original resolver writes one work-level Korean title shared by both suppliers',async()=>{
+  const storage=new Map([['contentSource','reanime']]);
+  const first=harness({persistedStorage:storage});
+  let resolves=0;
+  first.window.lilac.resolveTitles=async()=>{resolves++;
+    return [{ko:'두 공급원이 공유하는 한국어 대표 제목',en:'English Work'}];
+  };
+  await first.window.openDetail(first.home.mal_id);
+  assert.equal(resolves,1,'first detail uses the official title resolver once');
+  const reanime=first.window.__dinoPatch03Bridge.getWorkTitles(first.home.mal_id);
+  const miruro=first.window.__dinoPatch03Bridge.getWorkTitles(first.other.mal_id);
+  assert.equal(reanime.ko,'두 공급원이 공유하는 한국어 대표 제목');
+  assert.equal(miruro.ko,reanime.ko);
+  assert.equal(reanime.koSource,'official');
+  assert.equal(reanime.manual,false);
+  assert.ok(reanime.koCheckedAt>0);
+  first.window.__dinoPatch03Bridge.flushWorkIndex();
+
+  const second=harness({persistedStorage:storage});
+  let repeated=0;
+  second.window.lilac.resolveTitles=async()=>{repeated++;
+    return [{ko:'나중에 바뀐 원본 제목',en:'English Work'}];
+  };
+  await second.window.openDetail(second.home.mal_id);
+  assert.equal(repeated,0,'canonical official result is reused after restart');
+  assert.equal(second.window.__dinoPatch03Bridge.getWorkTitles(second.home.mal_id).ko,
+    '두 공급원이 공유하는 한국어 대표 제목');
+  assert.equal(second.window.__dinoPatch03Bridge.getWorkTitles(second.other.mal_id).ko,
+    '두 공급원이 공유하는 한국어 대표 제목');
+});
+
+test('detail editor overrides work-level Korean title, protects it from automatic changes, and can reset it',async()=>{
+  const app=harness();
+  app.window.lilac.resolveTitles=async()=>[{ko:'자동으로 찾은 한국어 제목',en:'English Work'}];
+  await app.window.openDetail(app.home.mal_id);
+  const detail=app.nodes.get('#detailContent');
+  let picker=detail.querySelector('.detail-source-picker');
+  assert.ok(picker);
+  assert.match(picker.querySelector('.dino-work-title-edit').textContent,/한국어 제목 수정/);
+  const edit=picker.querySelector('.dino-work-title-edit');
+  edit.send('click');
+  let input=detail.querySelector('.dino-work-title-input');
+  assert.equal(input.value,'자동으로 찾은 한국어 제목');
+  input.value='사용자가 직접 수정한 제목';
+  detail.querySelector('.dino-work-title-save').send('click');
+  const titles=app.window.__dinoPatch03Bridge.getWorkTitles(app.home.mal_id);
+  assert.equal(titles.ko,'사용자가 직접 수정한 제목');
+  assert.equal(titles.koSource,'manual');
+  assert.equal(titles.manual,true);
+  assert.equal(app.window.__dinoPatch03Bridge.getWorkTitles(app.other.mal_id).ko,
+    '사용자가 직접 수정한 제목','both providers read same manual work-level title');
+
+  app.window.__dinoPatch03Bridge.flushWorkIndex();
+  const stored=JSON.parse(app.storage.get(api.WORK_INDEX_KEY));
+  assert.equal(stored.works[0].titles.ko,'사용자가 직접 수정한 제목');
+  assert.equal(stored.works[0].sources[0].mal_id,app.home.mal_id,
+    'provider ID remains untouched by the title editor');
+  picker=detail.querySelector('.detail-source-picker');
+  picker.querySelector('.dino-work-title-edit').send('click');
+  detail.querySelector('.dino-work-title-reset').send('click');
+  assert.equal(app.window.__dinoPatch03Bridge.getWorkTitles(app.home.mal_id).manual,false);
+  assert.equal(app.window.__dinoPatch03Bridge.getWorkTitles(app.home.mal_id).koSource,'provider');
+});
+
+test('manual Korean title survives original resolver updates after restart',async()=>{
+  const storage=new Map([['contentSource','reanime']]);
+  const first=harness({persistedStorage:storage});
+  first.window.lilac.resolveTitles=async()=>[{ko:'처음 확인된 제목',en:'English Work'}];
+  await first.window.openDetail(first.home.mal_id);
+  let detail=first.nodes.get('#detailContent');
+  detail.querySelector('.dino-work-title-edit').send('click');
+  detail.querySelector('.dino-work-title-input').value='내가 정한 표준 작품명';
+  detail.querySelector('.dino-work-title-save').send('click');
+  first.window.__dinoPatch03Bridge.flushWorkIndex();
+
+  const second=harness({persistedStorage:storage});
+  let officialCalls=0;
+  second.window.lilac.resolveTitles=async()=>{officialCalls++;
+    return [{ko:'다른 자동 제목',en:'English Work'}];
+  };
+  await second.window.openDetail(second.home.mal_id);
+  assert.equal(officialCalls,0,'manual title avoids automatic title resolution');
+  assert.equal(second.window.__dinoPatch03Bridge.getWorkTitles(second.home.mal_id).ko,
+    '내가 정한 표준 작품명');
+  assert.equal(second.window.__dinoPatch03Bridge.getWorkTitles(second.other.mal_id).ko,
+    '내가 정한 표준 작품명');
+});
