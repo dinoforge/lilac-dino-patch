@@ -507,6 +507,22 @@
     const scopedKey = a => a.provider + ':' + sourceKey(a);
     const clean = a => typeof a === 'string' ? a.trim().slice(0, 240) : '';
     const namesOf = xs => [...new Set(xs.map(clean).filter(x => x.length > 1))].slice(0, 24);
+    const korean = value => /[가-힣]/.test(String(value || '')) ? clean(value) : '';
+    // Canonical titles belong to the WORK, never to one of its providers.
+    // Source rows retain their original title fields for provider-specific APIs.
+    const titleFields = saved => ({
+      ko: korean(saved?.ko), en: clean(saved?.en), ja: clean(saved?.ja),
+      koSource: ['official', 'provider', 'manual'].includes(saved?.koSource)
+        && korean(saved?.ko) ? saved.koSource : '',
+      koCheckedAt: Number(saved?.koCheckedAt) || 0,
+      manual: saved?.manual === true && !!korean(saved?.ko)
+    });
+    const providerTitles = item => ({
+      ko: korean(item?.displayTitle) || korean(item?.title),
+      en: !korean(item?.title_english) && clean(item?.title_english)
+        || (!korean(item?.title) && clean(item?.title)) || '',
+      ja: clean(item?.title_japanese) || clean(item?.title_native) || ''
+    });
     const compact = a => {
       if (!a || !PROVIDERS.includes(a.provider) || !sourceKey(a)) return null;
       const o = {};
@@ -533,6 +549,7 @@
           data.works = saved.works.slice(0, maxWorks).filter(w => w && Array.isArray(w.sources))
             .map(w => ({ id: String(w.id || '').slice(0, 160), sources: w.sources.map(compact).filter(Boolean).slice(0, 8),
               names: namesOf(Array.isArray(w.names) ? w.names : []),
+              titles: titleFields(w.titles),
               checkedAt: Number(w.checkedAt) || 0, attemptedAt: Number(w.attemptedAt) || 0,
               outcome: ['verified', 'missing', 'error'].includes(w.outcome) ? w.outcome : '',
               updatedAt: Number(w.updatedAt) || 0 }))
@@ -590,6 +607,7 @@
       const verifiedOrMissing = w.outcome === 'verified' || w.outcome === 'missing';
       const at = verifiedOrMissing ? w.checkedAt : (w.attemptedAt || w.checkedAt);
       return { sources: w.sources.filter(s => identityMatch(ref, s)), names: w.names.slice(),
+        titles: { ...w.titles },
         checkedAt: w.checkedAt, attemptedAt: w.attemptedAt || 0,
         outcome: w.outcome || 'legacy',
         fresh: at > 0 && clock() - at < ttl };
@@ -599,12 +617,27 @@
       if (!items.length) return;
       let row = rowFor(items[0]);
       if (!row) {
-        row = { id: sourceKey(items[0]), sources: [], names: [], checkedAt: 0,
-          attemptedAt: 0, outcome: '', updatedAt: 0 };
+        row = { id: sourceKey(items[0]), sources: [], names: [],
+          titles: titleFields(), checkedAt: 0, attemptedAt: 0,
+          outcome: '', updatedAt: 0 };
         data.works.push(row);
       }
       row.names = namesOf([...row.names, ...names,
         ...items.flatMap(s => [s.title, s.title_english, s.title_japanese, s.displayTitle, ...(s.synonyms || [])])]);
+      // Passive provider cards may seed missing common titles, but they
+      // cannot override a title verified by Lilac's original resolver or
+      // explicitly edited by the user.
+      for (const item of items) {
+        const candidate = providerTitles(item);
+        if (!row.titles.ko && candidate.ko) {
+          row.titles.ko = candidate.ko;
+          row.titles.koSource = 'provider';
+          row.titles.koCheckedAt = clock();
+        }
+        if (!row.titles.en && candidate.en) row.titles.en = candidate.en;
+        if (!row.titles.ja && candidate.ja) row.titles.ja = candidate.ja;
+      }
+      if (row.titles.ko) row.names = namesOf([row.titles.ko, ...row.names]);
       const ref = { ...items[0], synonyms: [...(items[0].synonyms || []), ...row.names] };
       const merged = new Map(row.sources.filter(s => identityMatch(ref, s)).map(s => [scopedKey(s), s]));
       for (const s of items) if (identityMatch(ref, s))
@@ -621,6 +654,66 @@
         data.works.length = maxWorks;
       }
       touch();
+    };
+
+    const rememberTitles = (anchor, titles, { source = 'official' } = {}) => {
+      if (!['official', 'provider', 'manual'].includes(source)) return false;
+      let row = rowFor(anchor);
+      // An original title result may arrive before its card is in the DB.
+      if (!row && compact(anchor)) {
+        remember({ sourceItems: [anchor] });
+        row = rowFor(anchor);
+      }
+      if (!row) return false;
+      const candidate = titleFields(titles);
+      const ko = candidate.ko;
+      let changed = false;
+      if (source === 'manual') {
+        // Empty titles are not a deletion command; don't lose the only
+        // Korean title accidentally through an empty edit form.
+        if (!ko) return false;
+        if (row.titles.ko !== ko || !row.titles.manual) {
+          row.titles.ko = ko;
+          row.titles.koSource = 'manual';
+          row.titles.manual = true;
+          row.titles.koCheckedAt = clock();
+          changed = true;
+        }
+      } else if (ko && !row.titles.manual
+        && (source === 'official' || !row.titles.ko)) {
+        if (row.titles.ko !== ko || row.titles.koSource !== source) {
+          row.titles.ko = ko;
+          row.titles.koSource = source;
+          row.titles.koCheckedAt = clock();
+          changed = true;
+        }
+      }
+      for (const lang of ['en', 'ja']) {
+        if (candidate[lang] && (source === 'official' || !row.titles[lang])
+          && candidate[lang] !== row.titles[lang]) {
+          row.titles[lang] = candidate[lang];
+          changed = true;
+        }
+      }
+      const combined = namesOf([row.titles.ko, row.titles.en, row.titles.ja, ...row.names]);
+      if (combined.length !== row.names.length || combined.some((name, at) => name !== row.names[at])) {
+        row.names = combined; changed = true;
+      }
+      if (changed) { row.updatedAt = clock(); touch(); }
+      return changed;
+    };
+    const resetManualKoreanTitle = anchor => {
+      const row = rowFor(anchor);
+      if (!row?.titles.manual) return false;
+      // Reset to the most reliable observed Korean provider title; a later
+      // original resolver pass may supersede this fallback.
+      const fallback = row.sources.map(providerTitles).find(title => title.ko)?.ko || '';
+      row.titles = { ...row.titles, ko: fallback,
+        koSource: fallback ? 'provider' : '',
+        koCheckedAt: fallback ? clock() : 0, manual: false };
+      if (fallback) row.names = namesOf([fallback, ...row.names]);
+      row.updatedAt = clock(); touch();
+      return true;
     };
 
     // Opportunistically reuse entries already delivered to the original
@@ -692,7 +785,8 @@
         scopedKey(item) === id || sourceKey(item) === id)));
       touch();
     };
-    return { find, remember, observe, rememberSearch, readSearch, invalidate, flush,
+    return { find, remember, rememberTitles, resetManualKoreanTitle, observe,
+      rememberSearch, readSearch, invalidate, flush,
       stats: () => ({
         works: data.works.length, searches: data.searches.length,
         providers: Object.fromEntries(PROVIDERS.map(provider => [
