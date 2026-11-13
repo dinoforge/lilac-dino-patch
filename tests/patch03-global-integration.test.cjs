@@ -934,3 +934,153 @@ test('broken supplier detail is shown as an error, not an episode count',async()
   assert.equal(healthy.dataset.availability,'ready');
   assert.match(healthy.textContent,/1화/);
 });
+
+
+test('only ongoing works schedule episode updates; completed and ordinary catalog cards do not',async()=>{
+  const app=harness();
+  app.nodes.get('#detailDialog').open=false;
+  const finished={...app.home,id:'done',mal_id:'reanime:done',anilistId:112231,
+    title:'완결 작품',status:'FINISHED'};
+  app.window.renderCards('#airingRail',[finished]);
+  assert.equal(app.window.__dinoPatch03Bridge.getEpisodeRefreshStatus().queued,0);
+  app.window.renderCards('#topRail',[{...app.home,status:''}]);
+  assert.equal(app.window.__dinoPatch03Bridge.getEpisodeRefreshStatus().queued,0);
+  app.window.renderCards('#topRail',[{...app.home,status:'ongoing'}]);
+  assert.equal(app.window.__dinoPatch03Bridge.getEpisodeRefreshStatus().queued,1);
+  assert.equal(app.scheduled.filter(fn=>fn.__testDelay===20000).length,1);
+  assert.equal(app.calls.detail.length,0,'no user navigation from automatic episode updates');
+});
+
+test('airing rail background detail check saves a real episode count with zero catalog searches',async()=>{
+  const storage=new Map([['contentSource','reanime']]);
+  const app=harness({persistedStorage:storage});
+  app.nodes.get('#detailDialog').open=false;
+  let detailCalls=0;
+  app.window.lilac.providerDetail=async()=>{
+    detailCalls++;
+    return {episodes:Array.from({length:10},(_,i)=>({number:i+1,playable:true}))};
+  };
+  app.window.renderCards('#airingRail',[{...app.home,status:'airing'}]);
+  const queued=app.window.__dinoPatch03Bridge.getEpisodeRefreshStatus();
+  assert.equal(queued.queued,1);
+  assert.equal(detailCalls,0,'rendering cards alone sends no detail request');
+  const job=app.scheduled.find(fn=>fn.__testDelay===20000);
+  assert.ok(job);
+  job();
+  await settle();await settle();
+  const meta=app.window.__dinoPatch03Bridge.getEpisodeState(app.home.mal_id);
+  assert.equal(meta.latest,10);
+  assert.equal(meta.count,10);
+  assert.equal(meta.state,'ready');
+  assert.ok(meta.checkedAt>0);
+  assert.equal(detailCalls,1);
+  assert.equal(app.window.__dinoPatch03Bridge.getEpisodeRefreshStatus().daily,1);
+  assert.equal(app.calls.search.length,0,'no live catalog search is needed for episode verification');
+  app.window.__dinoPatch03Bridge.flushWorkIndex();
+  const persisted=JSON.parse(storage.get(api.WORK_INDEX_KEY));
+  assert.equal(persisted.works[0].sources[0].dinoEpisode.latest,10);
+  assert.equal(persisted.works[0].titles.ko,'일본어 한글 제목',
+    'the shared Korean title must be unchanged by episode polling');
+
+  const next=harness({persistedStorage:storage});
+  next.nodes.get('#detailDialog').open=false;
+  next.window.renderCards('#airingRail',[{...next.home,status:'airing'}]);
+  assert.equal(next.window.__dinoPatch03Bridge.getEpisodeRefreshStatus().queued,0,
+    'recently confirmed episodes must not be queried again after restart');
+});
+
+test('a later ongoing check detects new episodes and shows them in the supplier picker',async()=>{
+  const storage=new Map([['contentSource','reanime']]);
+  const first=harness({persistedStorage:storage});
+  first.nodes.get('#detailDialog').open=false;
+  first.window.lilac.providerDetail=async()=>({episodes:Array.from({length:10},(_,i)=>({number:i+1}))});
+  first.window.renderCards('#airingRail',[{...first.home,status:'airing'}]);
+  first.scheduled.find(fn=>fn.__testDelay===20000)();
+  await settle();await settle();
+  first.window.__dinoPatch03Bridge.flushWorkIndex();
+  // Simulate the legitimate 12-hour expiration without changing the clock.
+  const indexData=JSON.parse(storage.get(api.WORK_INDEX_KEY));
+  const old=indexData.works[0].sources[0].dinoEpisode;
+  old.checkedAt-=13*60*60*1000;
+  old.attemptedAt-=13*60*60*1000;
+  storage.set(api.WORK_INDEX_KEY,JSON.stringify(indexData));
+
+  const second=harness({persistedStorage:storage});
+  second.nodes.get('#detailDialog').open=false;
+  second.window.lilac.providerDetail=async()=>({episodes:Array.from({length:12},(_,i)=>({number:i+1}))});
+  second.window.renderCards('#airingRail',[{...second.home,status:'airing'}]);
+  assert.equal(second.window.__dinoPatch03Bridge.getEpisodeRefreshStatus().queued,1);
+  second.scheduled.find(fn=>fn.__testDelay===20000)();
+  await settle();await settle();
+  const meta=second.window.__dinoPatch03Bridge.getEpisodeState(second.home.mal_id);
+  assert.equal(meta.latest,12);
+  assert.equal(meta.newEpisodes,2);
+  assert.equal(second.window.__dinoPatch03Bridge.getEpisodeRefreshStatus().newEpisodes,1);
+  second.nodes.get('#detailDialog').open=true;
+  await second.window.openDetail(second.home.mal_id);
+  await settle();await settle();
+  const tab=buttons(second).find(b=>b.dataset.providerSource===second.home.mal_id);
+  assert.ok(tab,'original supplier must remain available in detail picker');
+  assert.equal(tab.dataset.newEpisodes,'2');
+  assert.match(tab.textContent,/새 회차 \+2/);
+  assert.equal(second.window.__dinoPatch03Bridge.getWorkTitles(second.home.mal_id).ko,
+    '일본어 한글 제목');
+});
+
+test('provider outage keeps last confirmed episode count and rate-limits automatic retry',async()=>{
+  const storage=new Map([['contentSource','reanime']]);
+  const app=harness({persistedStorage:storage});
+  app.nodes.get('#detailDialog').open=false;
+  app.window.lilac.providerDetail=async()=>({episodes:Array.from({length:8},(_,i)=>({number:i+1}))});
+  app.window.renderCards('#airingRail',[{...app.home,status:'airing'}]);
+  app.scheduled.find(fn=>fn.__testDelay===20000)();
+  await settle();await settle();
+  app.window.__dinoPatch03Bridge.flushWorkIndex();
+  const rows=JSON.parse(storage.get(api.WORK_INDEX_KEY));
+  rows.works[0].sources[0].dinoEpisode.checkedAt-=13*60*60*1000;
+  rows.works[0].sources[0].dinoEpisode.attemptedAt-=13*60*60*1000;
+  storage.set(api.WORK_INDEX_KEY,JSON.stringify(rows));
+  const broken=harness({persistedStorage:storage});
+  broken.nodes.get('#detailDialog').open=false;
+  broken.window.lilac.providerDetail=async()=>{throw Error('upstream timeout')};
+  broken.window.renderCards('#airingRail',[{...broken.home,status:'airing'}]);
+  broken.scheduled.find(fn=>fn.__testDelay===20000)();
+  await settle();await settle();
+  const after=broken.window.__dinoPatch03Bridge.getEpisodeState(broken.home.mal_id);
+  assert.equal(after.latest,8);
+  assert.equal(after.state,'error');
+  assert.equal(after.newEpisodes,0);
+  broken.window.__dinoPatch03Bridge.flushWorkIndex();
+  const restarted=harness({persistedStorage:storage});
+  restarted.nodes.get('#detailDialog').open=false;
+  restarted.window.renderCards('#airingRail',[{...restarted.home,status:'airing'}]);
+  assert.equal(restarted.window.__dinoPatch03Bridge.getEpisodeRefreshStatus().queued,0,
+    'failed provider has a six-hour cooldown, not a false zero-episode result');
+});
+
+test('background episode polling is bounded to eight supplier requests in one session',async()=>{
+  const app=harness();
+  app.nodes.get('#detailDialog').open=false;
+  let calls=0;
+  app.window.lilac.providerDetail=async()=>{calls++;return {episodes:[{number:1}]}};
+  const cards=Array.from({length:24},(_,i)=>({...app.home,
+    provider:'reanime',id:'session-'+i,mal_id:'reanime:session-'+i,
+    anilistId:990000+i,title:'Air Work '+i,status:'airing'}));
+  app.window.renderCards('#airingRail',cards);
+  const first=app.scheduled.find(fn=>fn.__testDelay===20000);
+  assert.ok(first);
+  first();
+  await settle();await settle();
+  for(let n=1;n<8;n++){
+    const timer=app.scheduled.filter(fn=>fn.__testDelay===14000)[n-1];
+    assert.ok(timer,'one delayed provider query is scheduled at a time');
+    timer();
+    await settle();await settle();
+  }
+  const info=app.window.__dinoPatch03Bridge.getEpisodeRefreshStatus();
+  assert.equal(calls,8);
+  assert.equal(info.attempted,8);
+  assert.equal(info.daily,8);
+  assert.equal(info.sessionLimit,8);
+  assert.equal(app.scheduled.filter(fn=>fn.__testDelay===14000).length,7);
+});
