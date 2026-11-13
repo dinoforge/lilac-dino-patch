@@ -784,9 +784,9 @@ mod versionless_tests {
         let previous=std::env::var_os("APPDATA");
         std::env::set_var("APPDATA",&profile);
         let result=(||->Result<()>{
-            let canonical_root=installed_root(&root)?;
             let asar_path=root.join("resources").join("app.asar");
             fixture(&asar_path,"0.5.64",false)?;
+            let canonical_root=installed_root(&root)?;
             let ready=inspect(&root);
             assert_eq!(ready.status,"UNPATCHED","{}",ready.reason);
             let first=apply(&root,true)?;

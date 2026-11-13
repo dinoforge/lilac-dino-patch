@@ -138,3 +138,10 @@ test('Windows fixture looks up old backups via the same canonical root as the ma
   assert.ok(safeTest>=0&&expensiveCompile>safeTest,
     'run the cheap Windows patch regression before the expensive GUI build');
 });
+
+test('fixture builds the ASAR before asking installed_root to validate it',()=>{
+  const fixture=transaction.split('fn official_updates_keep_historical_backups_and_uninstall_current_version()')[1];
+  const create=fixture.indexOf('fixture(&asar_path,"0.5.64",false)?;');
+  const check=fixture.indexOf('let canonical_root=installed_root(&root)?;');
+  assert.ok(create>=0&&check>create,'test must create resources/app.asar before inspecting it');
+});
