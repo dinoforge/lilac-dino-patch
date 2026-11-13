@@ -385,8 +385,11 @@
 
     // Fair round-robin ordering: start one request for each provider before
     // dispatching additional language variants for the first provider.
-    const work = searchTerms.flatMap(term => selectedProviders.map(provider =>
-      tasks.find(task => task.provider === provider && task.term === term)).filter(Boolean));
+    const byTerm = new Map(searchTerms.map(term => [term, []]));
+    for (const task of tasks) {
+      if ('term' in task) byTerm.get(task.term).push(task);
+    }
+    const work = searchTerms.flatMap(term => byTerm.get(term));
     let next = 0;
     await Promise.all([
       ...tasks.filter(task => task.localAttempt).map(task => task.localAttempt),
@@ -1164,21 +1167,23 @@
   // or infer a release date from a year alone. Untrusted/partial dates are
   // excluded to avoid inaccurate "new anime" notifications.
   function preciseReleaseTime(item) {
-    const raw = item?.startDate || item?.started_on || item?.aired;
-    let y, m, d;
-    if (raw && typeof raw === 'object') {
-      y = Number(raw.year); m = Number(raw.month); d = Number(raw.day);
-    } else {
-      const match = String(raw || '').match(/(^|[^0-9])((?:19|20)\d{2})-(\d{2})-(\d{2})(?=$|[^0-9])/);
-      if (!match) return null;
-      y = Number(match[2]); m = Number(match[3]); d = Number(match[4]);
+    for (const raw of [item?.startDate, item?.started_on, item?.aired]) {
+      let y, m, d;
+      if (raw && typeof raw === 'object') {
+        y = Number(raw.year); m = Number(raw.month); d = Number(raw.day);
+      } else {
+        const match = String(raw || '').match(/(^|[^0-9])((?:19|20)\d{2})-(\d{2})-(\d{2})(?=$|[^0-9])/);
+        if (!match) continue;
+        y = Number(match[2]); m = Number(match[3]); d = Number(match[4]);
+      }
+      if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)
+        || y < 1990 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) continue;
+      const time = Date.UTC(y, m - 1, d);
+      const check = new Date(time);
+      if (check.getUTCFullYear() === y && check.getUTCMonth() === m - 1
+        && check.getUTCDate() === d) return time;
     }
-    if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)
-      || y < 1990 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return null;
-    const time = Date.UTC(y, m - 1, d);
-    const check = new Date(time);
-    return check.getUTCFullYear() === y && check.getUTCMonth() === m - 1
-      && check.getUTCDate() === d ? time : null;
+    return null;
   }
 
   function createSeasonDetector(storage, { clock = Date.now } = {}) {
@@ -1188,8 +1193,10 @@
       const saved = JSON.parse(storage?.getItem(key) || 'null');
       if (saved?.version === 1 && Array.isArray(saved.seen) && Array.isArray(saved.recent)) {
         state = { version: 1,
-          seen: saved.seen.filter(v => typeof v === 'string').slice(-300),
-          recent: saved.recent.filter(v => v && typeof v === 'object').slice(-80) };
+          seen: saved.seen.filter(v => typeof v === 'string' && v.length <= 170).slice(-300),
+          recent: saved.recent.filter(v => v && PROVIDERS.includes(v.provider)
+            && typeof v.sourceId === 'string' && v.sourceId.length <= 150
+            && Number.isFinite(v.startedAt)).slice(-80) };
       }
     } catch { /* A broken auxiliary tracker must not affect the official cache. */ }
     function observe(items) {
@@ -1217,8 +1224,13 @@
       }
       return fresh;
     }
-    return { observe, summary: () => ({ count: state.recent.length,
-      recent: state.recent.slice(-8).map(row => ({ ...row })) }) };
+    return { observe, summary: () => {
+      const now = Number(clock());
+      const current = Number.isFinite(now) ? state.recent.filter(row =>
+        row.startedAt <= now && now - row.startedAt <= 90 * 86400000) : [];
+      return { count: current.length,
+        recent: current.slice(-8).map(row => ({ ...row })) };
+    } };
   }
 
   const api = {
