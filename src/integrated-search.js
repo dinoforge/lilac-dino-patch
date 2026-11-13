@@ -383,7 +383,10 @@
       }
     }
 
-    const work = tasks.filter(task => 'term' in task);
+    // Fair round-robin ordering: start one request for each provider before
+    // dispatching additional language variants for the first provider.
+    const work = searchTerms.flatMap(term => selectedProviders.map(provider =>
+      tasks.find(task => task.provider === provider && task.term === term)).filter(Boolean));
     let next = 0;
     await Promise.all([
       ...tasks.filter(task => task.localAttempt).map(task => task.localAttempt),
@@ -1137,6 +1140,87 @@
       }) };
   }
 
+
+  // Diagnostics are based on status counts only. They never include searched
+  // titles, local paths, stream addresses, or remote error bodies.
+  function diagnoseProviderStatuses(statuses = []) {
+    const rows = Array.isArray(statuses) ? statuses.filter(row => PROVIDERS.includes(row?.provider)) : [];
+    const failed = rows.filter(row => row.state === 'failed' || row.state === 'partial').length;
+    const limited = rows.filter(row => row.pageLimitReached).length;
+    const empty = rows.filter(row => row.state === 'ready' && row.resultCount === 0).length;
+    if (failed) return { category: 'provider-error', severity: 'warning',
+      message: '일부 공급원이 응답하지 않았습니다. 네트워크 연결을 확인하고 해당 공급원에서만 재검색하세요.',
+      count: failed };
+    if (limited) return { category: 'page-limit', severity: 'info',
+      message: '일부 공급원에 추가 페이지가 있습니다. 공급원별 상세 검색으로 결과를 확인하세요.',
+      count: limited };
+    if (rows.length && empty === rows.length) return { category: 'no-results', severity: 'info',
+      message: '모든 공급원에서 결과를 찾지 못했습니다. 원어 제목 또는 다른 표기를 시도하세요.',
+      count: empty };
+    return { category: 'ok', severity: 'none', message: '', count: 0 };
+  }
+
+  // Observe official seasonal cards only; never crawl providers, fetch links,
+  // or infer a release date from a year alone. Untrusted/partial dates are
+  // excluded to avoid inaccurate "new anime" notifications.
+  function preciseReleaseTime(item) {
+    const raw = item?.startDate || item?.started_on || item?.aired;
+    let y, m, d;
+    if (raw && typeof raw === 'object') {
+      y = Number(raw.year); m = Number(raw.month); d = Number(raw.day);
+    } else {
+      const match = String(raw || '').match(/(^|[^0-9])((?:19|20)\d{2})-(\d{2})-(\d{2})(?=$|[^0-9])/);
+      if (!match) return null;
+      y = Number(match[2]); m = Number(match[3]); d = Number(match[4]);
+    }
+    if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)
+      || y < 1990 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return null;
+    const time = Date.UTC(y, m - 1, d);
+    const check = new Date(time);
+    return check.getUTCFullYear() === y && check.getUTCMonth() === m - 1
+      && check.getUTCDate() === d ? time : null;
+  }
+
+  function createSeasonDetector(storage, { clock = Date.now } = {}) {
+    const key = 'lilacDinoPatch.newSeasonObserved.v1';
+    let state = { version: 1, seen: [], recent: [] };
+    try {
+      const saved = JSON.parse(storage?.getItem(key) || 'null');
+      if (saved?.version === 1 && Array.isArray(saved.seen) && Array.isArray(saved.recent)) {
+        state = { version: 1,
+          seen: saved.seen.filter(v => typeof v === 'string').slice(-300),
+          recent: saved.recent.filter(v => v && typeof v === 'object').slice(-80) };
+      }
+    } catch { /* A broken auxiliary tracker must not affect the official cache. */ }
+    function observe(items) {
+      const now = Number(clock());
+      if (!Number.isFinite(now)) return [];
+      const known = new Set(state.seen);
+      const fresh = [];
+      for (const item of Array.isArray(items) ? items.slice(0, 80) : []) {
+        if (!PROVIDERS.includes(item?.provider)) continue;
+        const source = String(item.mal_id ?? item.id ?? '').trim();
+        const date = preciseReleaseTime(item);
+        if (!source || source.length > 150 || date == null || date > now || now - date > 90 * 86400000) continue;
+        const identity = item.provider + ':' + source;
+        if (known.has(identity)) continue;
+        known.add(identity);
+        state.seen.push(identity);
+        const record = { provider: item.provider, sourceId: source, startedAt: date };
+        fresh.push(record);
+        state.recent.push(record);
+      }
+      if (fresh.length) {
+        state.seen = state.seen.slice(-300);
+        state.recent = state.recent.slice(-80);
+        try { storage?.setItem(key, JSON.stringify(state)); } catch { /* optional local-only metadata */ }
+      }
+      return fresh;
+    }
+    return { observe, summary: () => ({ count: state.recent.length,
+      recent: state.recent.slice(-8).map(row => ({ ...row })) }) };
+  }
+
   const api = {
     PROVIDERS,
     playableEpisodeNumber,
@@ -1155,6 +1239,9 @@
     chooseSource,
     searchProviders,
     mergeSearchResults,
+    diagnoseProviderStatuses,
+    createSeasonDetector,
+    preciseReleaseTime,
     aliases,
     year,
     part,
