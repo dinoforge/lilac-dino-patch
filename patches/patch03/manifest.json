@@ -47,7 +47,7 @@
     {
       "source": "src/integrated-search.js",
       "destination": "src/integrated-search.js",
-      "sha256": "C1C905BA6124EE2B9D53C516DC16637D68DF2FD171AA4B805629F4BDBC8EFD9D"
+      "sha256": "BF017E2C224D2314AD9774B1DDFEDB75C741747EC9E8CF523F5426F3BE793B8C"
     },
     {
       "source": "src/integrated-search.css",
