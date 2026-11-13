@@ -410,7 +410,9 @@ test('background source indexing pauses for detail playback and ignores non-inte
   const app=harness();
   app.window.renderCards('#airingRail',[app.home]);
   assert.equal(app.window.__dinoPatch03Bridge.getPrefetchStatus().queued,1);
-  app.scheduled.shift()();
+  // A separate 20-second episode refresh now exists, so select the
+  // existing 2.3-second supplier-mapping timer explicitly.
+  app.scheduled.find(fn=>fn.__testDelay===2300)();
   await settle();
   assert.equal(app.calls.search.length,0,'detail modal takes priority over background prefetch');
   assert.equal(app.window.__dinoPatch03Bridge.getPrefetchStatus().queued,1);
