@@ -1,3 +1,8 @@
+// Windows GUI builds must not allocate a console window (the black CMD
+// window users see behind the patch manager). Native CLI-only builds keep
+// the console subsystem for JSON output and automation.
+#![cfg_attr(all(windows, feature = "gui"), windows_subsystem = "windows")]
+
 //! DinoPatch native Rust manager. The official LilacAnime application remains
 //! an external installation; only its verified app.asar is patched.
 
