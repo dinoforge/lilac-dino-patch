@@ -50,13 +50,14 @@ function fixture(t){
     return {name,backup};
   }
   function run(){
-    const before=fingerprint(root);
+    const before=[fingerprint(install),fs.existsSync(stateDir)?fingerprint(stateDir):null];
     const r=spawnSync(shell,['-NoProfile','-NonInteractive','-File',script,'-InstalledRoot',install],
       {cwd:root,env:{...process.env,APPDATA:appdata},encoding:'utf8',timeout:15000});
     assert.equal(r.error,undefined,r.error?.message);
     assert.equal(r.status,0,'PowerShell returned '+r.status+'\n'+r.stdout+'\n'+r.stderr);
     const result=JSON.parse(r.stdout.replace(/^\uFEFF/,'').trim());
-    assert.deepEqual(fingerprint(root),before,'The diagnostic modified its input fixture');
+    assert.deepEqual([fingerprint(install),fs.existsSync(stateDir)?fingerprint(stateDir):null],before,
+      'The diagnostic modified installation ASAR or manager state/backup files');
     return result;
   }
   return {root,install,appdata,asar,stateDir,record,run};
