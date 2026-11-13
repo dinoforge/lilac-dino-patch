@@ -315,6 +315,107 @@
     };
   }
 
+
+  // The official Re:Anime catalog is already persisted by LilacAnime.
+  // Its "popular" page is served by sortedFromIndex() inside the main
+  // process, not by a provider HTTP search. Import at most one local page
+  // per day, never launch a new catalog download from DinoPatch.
+  // Other suppliers do NOT have this guarantee for sorted pages.
+  const CATALOG_SEED_KEY = 'lilacDinoPatch.workIndex.originalCatalogSeed.v1';
+  const CATALOG_SEED_DAY_MS = 24 * 60 * 60 * 1000;
+  const CATALOG_SEED_PAGE_SIZE = 36;
+  const CATALOG_SEED_MAX_WORKS = 240;
+  let catalogSeedBusy = false;
+  let catalogSeedTimer = null;
+  let catalogSeedImported = 0;
+  let catalogSeedChecks = 0;
+  let catalogSeedStatus = 'idle';
+  function catalogSeedCheckpoint() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CATALOG_SEED_KEY) || 'null');
+      return saved && Number.isFinite(saved.time) && Number.isInteger(saved.offset)
+        && saved.offset >= 0 ? saved : { time: 0, offset: 0 };
+    } catch { return { time: 0, offset: 0 }; }
+  }
+  async function seedFromOriginalCatalog(indexState) {
+    if (!integratedMode() || catalogSeedBusy
+      || typeof window.lilac?.providerCatalog !== 'function') return;
+    const source = indexState?.sources?.find(entry => entry.provider === 'reanime'
+      && Number(entry.total) > 0);
+    // No original index: do not invoke activateCatalog() or start a scrape.
+    if (!source) { catalogSeedStatus = 'no-local-index'; return; }
+    const checkpoint = catalogSeedCheckpoint();
+    if (Date.now() - checkpoint.time < CATALOG_SEED_DAY_MS) {
+      catalogSeedStatus = 'already-imported-today';
+      return;
+    }
+    if (workIndex.stats().works >= CATALOG_SEED_MAX_WORKS) {
+      catalogSeedStatus = 'db-capacity-reserved';
+      return;
+    }
+    catalogSeedBusy = true;
+    catalogSeedChecks++;
+    catalogSeedStatus = 'reading-local-index';
+    try {
+      const offset = checkpoint.offset < Number(source.total) ? checkpoint.offset : 0;
+      // Official v0.5.64: "popular" + empty query + reanime is strictly
+      // an indexed local catalog page (36 entries), not providerFetch().
+      const page = await window.lilac.providerCatalog('reanime', '', offset, 'popular');
+      if (page?.pending || !Array.isArray(page?.data) || !page.data.length) {
+        catalogSeedStatus = 'index-not-ready';
+        return;
+      }
+      let count = 0;
+      for (const item of page.data.slice(0, CATALOG_SEED_PAGE_SIZE)) {
+        if (workIndex.stats().works >= CATALOG_SEED_MAX_WORKS) break;
+        if (!isDinoProvider(item) || item.provider !== 'reanime'
+          || !String(item.title || item.title_english || '').trim()) continue;
+        // Preserve verified mappings; a bare catalog entry is not a
+        // successful five-provider scan and must have NO "fresh" TTL.
+        const already = workIndex.find(item)?.sources?.some(source =>
+          source.provider === item.provider && sourceKey(source) === sourceKey(item));
+        if (already) continue;
+        workIndex.remember({ sourceItems: [item] });
+        count++;
+      }
+      catalogSeedImported += count;
+      workIndex.flush();
+      const total = Math.max(1, Number(source.total) || page.total || 1);
+      const scanned = Math.min(CATALOG_SEED_PAGE_SIZE, page.data.length);
+      const nextOffset = offset + scanned >= total ? 0 : offset + scanned;
+      try {
+        localStorage.setItem(CATALOG_SEED_KEY, JSON.stringify({
+          time: Date.now(), offset: nextOffset
+        }));
+      } catch { /* keep the work index usable even if profile is full */ }
+      catalogSeedStatus = 'imported';
+    } catch {
+      // A missing/changed official IPC contract is not evidence that the
+      // source is down, and must never be treated as a provider failure.
+      catalogSeedStatus = 'read-failed';
+    } finally { catalogSeedBusy = false; }
+  }
+  function scheduleOriginalCatalogSeed(state = null) {
+    if (!integratedMode() || catalogSeedBusy || catalogSeedTimer !== null
+      || typeof window.lilac?.catalogIndexState !== 'function') return;
+    if (Date.now() - catalogSeedCheckpoint().time < CATALOG_SEED_DAY_MS) return;
+    if (workIndex.stats().works >= CATALOG_SEED_MAX_WORKS) return;
+    // For incoming notifications only: check that the already present index
+    // is Re:Anime, rather than calling the IPC again on every event.
+    if (state && !state.sources?.some(source => source.provider === 'reanime'
+      && Number(source.total) > 0)) return;
+    catalogSeedTimer = setTimeout(() => {
+      catalogSeedTimer = null;
+      (state ? Promise.resolve(state) : window.lilac.catalogIndexState())
+        .then(seedFromOriginalCatalog).catch(() => { catalogSeedStatus = 'read-failed'; });
+    }, 5000);
+  }
+  if (typeof window.lilac?.catalogIndexState === 'function') {
+    scheduleOriginalCatalogSeed();
+    if (typeof window.lilac.onCatalogIndexState === 'function')
+      window.lilac.onCatalogIndexState(state => scheduleOriginalCatalogSeed(state));
+  }
+
   function syncSourceSelection() {
     sourceSelect.value = integratedMode() ? 'integrated' : selectedProvider();
     officialSyncChoices?.();
@@ -875,6 +976,12 @@
     getMode: () => integratedMode() ? 'integrated' : 'provider',
     getSelectedProvider: selectedProvider,
     getWorkIndexStats: () => workIndex.stats(),
+    getOriginalCatalogSeedStatus: () => ({
+      status: catalogSeedStatus,
+      importedThisSession: catalogSeedImported, localPageReads: catalogSeedChecks,
+      nextOffset: catalogSeedCheckpoint().offset,
+      source: 'reanime', dailyLimit: CATALOG_SEED_PAGE_SIZE
+    }),
     getPrefetchStatus: () => ({
       queued: prefetchQueue.length, running: prefetchBusy,
       startedThisSession: prefetchStarted, failed: prefetchFailed,
