@@ -211,3 +211,55 @@ test('search UI loads the grouping model before app code and routes source chang
   assert.match(appSource, /openDetail\(button\.dataset\.detailSource,\{groupKey:group\?\.groupKey\|\|'',sourceId:button\.dataset\.detailSource\}\)/);
   assert.match(appSource, /function showHomeList\(list,label\)\{invalidateIntegratedSearch\(\);switchView\('search'\);hideIntegratedSearchFilters\(\);\$\('#filterBar'\)\.classList\.toggle\('hidden',state\.source!=='linkkf'\)/);
 });
+
+
+test('Dino work index behaves like the original local Korean title cache without mutating source settings', () => {
+  const {createWorkIndex,WORK_INDEX_KEY}=require('../src/integrated-search.js');
+  const values=new Map([['contentSource','reanime'],['lilacDinoPatch.searchMode','integrated']]);
+  const storage={getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,String(value))};
+  let now=1900000000000;
+  const first=createWorkIndex(storage,{clock:()=>now});
+  const anchor=item('reanime','first',{title:'한국 제목',anilistId:12345,year:2026,type:'TV'});
+  const secondary=item('miruro','second',{title:'English Title',anilistId:12345,year:2026,type:'TV'});
+  first.remember({sourceItems:[anchor,secondary]},{checked:true,names:['원본에서 가져온 한글 제목']});
+  first.rememberSearch('한국 제목',{items:[anchor,secondary],statuses:[
+    {provider:'reanime',state:'ready',resultCount:1},
+    {provider:'miruro',state:'ready',resultCount:1}
+  ]});
+  assert.equal(first.find(anchor).sources.length,2);
+  first.flush();
+  assert.equal(values.get('contentSource'),'reanime');
+  assert.equal(values.get('lilacDinoPatch.searchMode'),'integrated');
+  assert.ok(values.get(WORK_INDEX_KEY));
+  const second=createWorkIndex(storage,{clock:()=>now});
+  assert.equal(second.find(anchor).fresh,true);
+  assert.equal(second.find(anchor).sources.length,2);
+  assert.equal(second.find(anchor).names.includes('원본에서 가져온 한글 제목'),true);
+  assert.equal(second.readSearch('한국 제목').items.length,2);
+  now+=7*60*60*1000;
+  assert.equal(second.readSearch('한국 제목'),null,'successful query cache expires');
+  assert.equal(second.find(anchor).fresh,true,'verified source mapping lives longer than query results');
+  now+=2*24*60*60*1000;
+  assert.equal(second.find(anchor).fresh,false,'stale entries remain visible but require remote validation');
+  second.invalidate(anchor);
+  second.flush();
+  assert.equal(second.find(anchor).fresh,false);
+});
+
+test('corrupted work cache is isolated from official settings and conflicting seasons never merge', () => {
+  const {createWorkIndex,WORK_INDEX_KEY}=require('../src/integrated-search.js');
+  const values=new Map([['contentSource','miruro'],[WORK_INDEX_KEY],['userTheme','dark']]);
+  values.set(WORK_INDEX_KEY,'{invalid JSON');
+  const storage={getItem:key=>values.get(key)||null,setItem:(key,v)=>values.set(key,String(v))};
+  const index=createWorkIndex(storage);
+  assert.equal(index.stats().works,0);
+  const first=item('reanime','s1',{anilistId:100,year:2023,title:'Same Title'});
+  const other=item('miruro','s2',{anilistId:200,year:2026,title:'Same Title'});
+  index.remember({sourceItems:[first]},{checked:true});
+  index.remember({sourceItems:[other]},{checked:true});
+  assert.equal(index.stats().works,2);
+  assert.equal(index.find(first).sources.length,1);
+  index.flush();
+  assert.equal(values.get('contentSource'),'miruro');
+  assert.equal(values.get('userTheme'),'dark');
+});
