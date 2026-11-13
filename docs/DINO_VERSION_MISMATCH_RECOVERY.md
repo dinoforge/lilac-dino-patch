@@ -29,6 +29,29 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dino-read-only-dia
 `STATE_NOT_UNIQUE`면 경로가 상태 기록의 설치 위치와 다르거나
 기록이 여러 개일 수 있습니다. 임의의 다른 기록을 연결하지 않습니다.
 
+
+### 공식 앱 업데이트 후 버전별 기록 판독
+
+최신 Rust 관리자는 레거시 `state.json` / `original-app.asar`뿐 아니라,
+공식 앱 버전별 `state-<버전 SHA-256 앞 24자리>.json` /
+`original-<버전 SHA-256 앞 24자리>.asar`를 함께 보존할 수 있습니다.
+이 문서와 함께 제공되는 **후속 수정 스크립트**는 두 형식을 모두 읽습니다.
+
+`selectionReason: UNIQUE_CURRENT_ASAR_HASH`는 현재 ASAR SHA-256과
+유일하게 일치하는 기록을 찾았다는 뜻입니다.
+`ONLY_RECORDED_STATE_CURRENT_ASAR_DIFFERS`는 기록이 하나이지만
+현재 ASAR와 일치하지 않는다는 뜻이므로 복원을 승인하지 않습니다.
+유효한 기록이 여러 개인데 유일한 해시 일치 기록이 없다면
+`STATE_NOT_UNIQUE`로 멈춥니다. `matchingPendingRecords`가 1 이상이면
+미완료 작업이 있을 수 있으므로 복구 기록을 먼저 보존하세요.
+`INVALID_STATE_RECORD`는 파일명, 버전 또는 백업 파일명이 예상과
+달라 해당 기록을 신뢰할 수 없다는 뜻입니다.
+
+이 스크립트는 공식 앱 버전을 내부 ASAR에서 구조 검사하지 않습니다.
+실행 전 원본을 백업하고 실제 패치·원복은 Rust 관리자에서 별도로 검증해야
+합니다. 이 개선은 **기존 CI와 PREVIEW EXE를 다시 실행하거나 교체하지 않는**
+후속 읽기 전용 진단 수정입니다.
+
 ## 판독
 
 - `RECORDED_PATCHED_ASAR`: 현재 설치 파일은 기록된 패치본과 바이트 단위로 같습니다. 구버전 패치 관리자의 검증된 해제 절차를 찾아야 하며, 새 관리자로 강제 덮어쓰지 않습니다.
