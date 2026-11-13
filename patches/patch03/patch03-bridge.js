@@ -786,46 +786,73 @@
     if (!dialog?.open || !content?.querySelector('.detail-actions')) return;
     const oldPicker = content.querySelector('.detail-source-picker');
     const previousScroll = oldPicker?.querySelector('.dino-source-track')?.scrollLeft || 0;
+    // Episode counts arrive asynchronously. Preserve an unsaved title draft
+    // and keyboard caret when the five-source rail is re-rendered.
+    const oldInput = oldPicker?.querySelector('.dino-work-title-input');
+    const editingDraft = oldInput ? String(oldInput.value || '') : null;
+    const editHadFocus = oldInput && document.activeElement === oldInput;
+    const caret = editHadFocus && Number.isInteger(oldInput.selectionStart)
+      ? oldInput.selectionStart : null;
     oldPicker?.remove();
     const section = document.createElement('section');
     section.className = 'detail-source-picker';
     section.setAttribute('aria-label', '통합 공급원 선택');
+    const header = document.createElement('div');
+    header.className = 'dino-source-header';
+    const headingCopy = document.createElement('div');
+    headingCopy.className = 'dino-source-heading';
     const title = document.createElement('b');
+    title.className = 'dino-source-heading-label';
+    title.textContent = '재생 공급원';
     const representative = group.sourceItems.map(canonicalTitleFor).find(value => value?.ko);
-    title.textContent = representative?.ko ? '재생 공급원 · ' + representative.ko : '재생 공급원';
+    const headingName = document.createElement('div');
+    headingName.className = 'dino-source-heading-name';
+    headingName.textContent = representative?.ko
+      || String(group.displayTitle || group.title || group.sourceItems[0].title || '');
+    headingCopy.append(title, headingName);
+    const headingActions = document.createElement('div');
+    headingActions.className = 'dino-source-heading-actions';
+    const linkedCount = document.createElement('span');
+    linkedCount.className = 'dino-source-linked-count';
+    linkedCount.textContent = group.sourceItems.length + '/' + providers.length + '개 연결';
     const editTitle = document.createElement('button');
     editTitle.type = 'button';
     editTitle.className = 'dino-work-title-edit';
     editTitle.textContent = '한국어 제목 수정';
     editTitle.setAttribute('aria-label', '이 작품의 공통 한국어 제목 수정');
-    editTitle.addEventListener('click', () => {
+    function toggleTitleEditor(initialDraft = null) {
+      const old = section.querySelector('.dino-work-title-form');
+      if (old) { old.remove(); return; }
       const reference = group.sourceItems.find(item => sourceKey(item) === String(activeId))
         || group.sourceItems[0];
-      const old = content.querySelector('.dino-work-title-form');
-      if (old) { old.remove(); return; }
       const form = document.createElement('div');
       form.className = 'dino-work-title-form';
       const input = document.createElement('input');
       input.type = 'text';
       input.className = 'dino-work-title-input';
-      input.value = canonicalTitleFor(reference)?.ko || '';
+      input.value = initialDraft === null
+        ? canonicalTitleFor(reference)?.ko || '' : initialDraft;
       input.setAttribute('aria-label', '이 작품의 대표 한국어 제목');
       input.setAttribute('maxlength', '240');
       const save = document.createElement('button');
       save.type = 'button';
       save.className = 'dino-work-title-save';
       save.textContent = '저장';
-      save.addEventListener('click', () => {
+      const saveTitle = () => {
         const value = String(input.value || '').trim();
         if (!/[가-힣]/.test(value)) {
           window.toast?.('한국어가 포함된 제목을 입력해 주세요.');
           return;
         }
-        if (!workIndex.rememberTitles(reference, { ko: value }, { source: 'manual' })) {
-          if (canonicalTitleFor(reference)?.ko !== value) return;
-        }
+        if (!workIndex.rememberTitles(reference, { ko: value }, { source: 'manual' })
+          && canonicalTitleFor(reference)?.ko !== value) return;
         workIndex.flush();
         renderSourcePicker(group, activeId, searching);
+      };
+      save.addEventListener('click', saveTitle);
+      input.addEventListener('keydown', event => {
+        if (event.key === 'Enter') { event.preventDefault?.(); saveTitle(); }
+        else if (event.key === 'Escape') { event.preventDefault?.(); form.remove(); }
       });
       const reset = document.createElement('button');
       reset.type = 'button';
@@ -837,8 +864,15 @@
         renderSourcePicker(group, activeId, searching);
       });
       form.append(input, save, reset);
-      editTitle.before(form);
+      choices.before(form);
+      return input;
+    }
+    editTitle.addEventListener('click', () => {
+      const input = toggleTitleEditor();
+      input?.focus?.();
     });
+    headingActions.append(linkedCount, editTitle);
+    header.append(headingCopy, headingActions);
     const choices = document.createElement('div');
     choices.className = 'dino-source-track';
     choices.setAttribute('role', 'group');
@@ -865,6 +899,12 @@
         : '';
       const resolution = quality ? '재생 ' + quality : info?.reportedQuality
         ? '표기 ' + info.reportedQuality : '화질 미확인';
+      const availability = info?.unavailable ? 'unavailable'
+        : info?.error ? 'error' : info?.noEpisodes ? 'empty'
+        : Number.isInteger(info?.episodes) ? 'ready' : 'checking';
+      button.dataset.availability = availability;
+      button.dataset.quality = quality ? 'measured' : info?.reportedQuality ? 'reported' : 'unknown';
+      button.dataset.latest = latest && latestAvailable && latest === latestAvailable ? 'true' : 'false';
       const displayName = labels[item.provider] || item.provider;
       // One compact two-line tab; the track itself stays on a single
       // horizontal row even when five providers are available.
@@ -874,7 +914,18 @@
       button.addEventListener('click', () => window.openDetail(id, { sourceSelection: true }));
       choices.append(button);
     }
-    section.append(title, editTitle, choices);
+    section.append(header, choices);
+    if (editingDraft !== null) {
+      const input = toggleTitleEditor(editingDraft);
+      if (input && editHadFocus) {
+        input.focus?.();
+        if (caret !== null) input.setSelectionRange?.(caret, caret);
+      }
+    }
+    const helper = document.createElement('small');
+    helper.className = 'dino-source-hint';
+    helper.textContent = '회차는 공급원 목록 기준 · 화질은 확인된 정보만 표시';
+    section.append(helper);
     if (group.sourceItems.length === 1) {
       const note = document.createElement('small');
       note.className = 'source-search-note';
