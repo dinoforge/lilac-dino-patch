@@ -1451,3 +1451,35 @@ test('degraded SQLite diagnostic UI gives non-destructive manual recovery guidan
   assert.match(notice.textContent,/자동 원본 복원은 하지 않습니다/);
   assert.equal(panel.querySelector('.dino-diagnostics-backup').disabled,true);
 });
+
+
+test('selected accent persists inside integrated picker only',async()=>{
+  const app=harness();
+  await app.window.openDetail(app.home.mal_id);
+  const picker=app.nodes.get('#detailContent').querySelector('.detail-source-picker');
+  const button=picker.querySelector('.dino-accent-switch');
+  assert.ok(button);
+  assert.equal(picker.dataset.dinoAccent,'default');
+  button.send('click');
+  assert.equal(picker.dataset.dinoAccent,'mint');
+  assert.equal(app.storage.get('lilacDinoPatch.integratedAccent.v1'),'mint');
+  const individual=harness({integrated:false,persistedStorage:app.storage});
+  await individual.window.openDetail(individual.home.mal_id);
+  assert.equal(individual.nodes.get('#detailContent').querySelector('.dino-accent-switch'),null);
+});
+
+test('season observation is local-only and available in diagnostics',async()=>{
+  const app=harness();
+  app.window.renderCards('#seasonRail',[{
+    ...app.home,startDate:{year:2026,month:11,day:1}
+  }]);
+  await app.window.openDetail(app.home.mal_id);
+  const picker=app.nodes.get('#detailContent').querySelector('.detail-source-picker');
+  const dashboard=picker.querySelectorAll('button').find(x=>x.textContent==='공급원·DB 상태');
+  assert.ok(dashboard);
+  dashboard.send('click');
+  await settle();await settle();
+  const note=picker.querySelector('.dino-season-observation');
+  assert.ok(note);
+  assert.match(note.textContent,/새로 관측한 방영 시작 작품/);
+});
