@@ -66,7 +66,8 @@ const tests = [
   'tests/dino-db-hardening.test.cjs',
   'tests/dino-episode-refresh.test.cjs',
   'tests/dino-native-manager-ui.test.cjs',
-  'tests/dino-beta8-hardening.test.cjs'
+  'tests/dino-beta8-hardening.test.cjs',
+  'tests/dino-readonly-diagnose-contract.test.cjs'
 ];
 function run(command,args,cwd=root){
   console.log('RUN: '+command+' '+args.join(' '));
