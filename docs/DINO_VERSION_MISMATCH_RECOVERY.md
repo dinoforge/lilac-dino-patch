@@ -72,3 +72,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dino-read-only-dia
 **기존에 다운로드한 PREVIEW EXE는 재빌드하기 전에는 변경되지 않습니다.**
 이 문서의 검사 도구는 별도로 사용 가능하며 Windows 네이티브
 실행/설치본 복구를 수행하거나 자동 승인하지 않습니다.
+
+## 후속 진단 테스트 (Windows, 실제 설치본 불필요)
+
+읽기 전용 진단 스크립트는 가상 설치 폴더 및 가상 APPDATA에서 실행하는
+합성 설치본 테스트로 점검할 수 있습니다. 실제 LilacAnime 설치본은 사용하지 않습니다.
+
+```powershell
+node --test tests/dino-readonly-diagnose-contract.test.cjs
+node --test tests/dino-readonly-diagnose-fixtures.test.cjs
+```
+
+첫 번째 명령은 3개의 소스 계약 테스트, 두 번째 명령은 10개의
+PowerShell 실제 호출 시나리오를 검사합니다. PowerShell이 없는 환경에서는
+두 번째 테스트가 SKIP 처리되며, 이를 성공으로 간주하지 않습니다.
+
+합성 설치본 테스트는 구형/버전별 원본 백업, 해시 일치, 상태 충돌,
+미완료 pending, 잘못된 상태 정보 및 검사 전후 입력 파일 무변경을 확인합니다.
+합성 테스트 성공만으로 실제 v0.5.65 설치본의 GUI와 공급원별 재생까지
+검증되었다고 볼 수는 없습니다.
