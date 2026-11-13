@@ -372,12 +372,12 @@ impl DinoUi {
     // read a long transaction log: was the original found, is it safe to
     // modify, and has the patch already been applied?
     fn overview_card(&mut self, ui: &mut Ui) {
-        let status = self.status.status.as_str();
-        let applied = matches!(status, "APPLIED" | "ALREADY_APPLIED");
-        let compatible = matches!(status,
+        let status = self.status.status.clone();
+        let applied = matches!(status.as_str(), "APPLIED" | "ALREADY_APPLIED");
+        let compatible = matches!(status.as_str(),
             "APPLIED" | "ALREADY_APPLIED" | "UNPATCHED" | "ALREADY_UNPATCHED");
         let has_root = !self.root.trim().is_empty();
-        let blocked = matches!(status, "CONFLICT" | "UNSUPPORTED" | "PARTIAL_OR_UNKNOWN");
+        let blocked = matches!(status.as_str(), "CONFLICT" | "UNSUPPORTED" | "PARTIAL_OR_UNKNOWN");
         let (headline, details, tone) = if self.busy {
             ("안전한 패치 작업을 진행하고 있습니다",
              "호환성과 백업 상태를 확인하고 있어요. 완료될 때까지 다른 작업은 시작하지 않습니다.",
