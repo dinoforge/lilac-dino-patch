@@ -878,3 +878,59 @@ test('integrated picker highlights the active supplier and shows common title an
   assert.match(css,/@media\(prefers-reduced-motion:reduce\)/);
 });
 
+
+test('async source episode-count updates preserve title-edit input and Enter saves it', async()=>{
+  const app=harness();
+  const pending=[];
+  app.window.lilac.providerDetail=item=>new Promise(resolve=>pending.push({item,resolve}));
+  await app.window.openDetail(app.home.mal_id);
+  const detail=app.nodes.get('#detailContent');
+  assert.equal(pending.length,2);
+  detail.querySelector('.dino-work-title-edit').send('click');
+  const initial=detail.querySelector('.dino-work-title-input');
+  assert.ok(initial);
+  initial.value='회차 확인 중 수정한 한국어 제목';
+  pending[0].resolve({data:{},episodes:Array.from({length:12},(_,i)=>({number:i+1}))});
+  await settle();await settle();
+  assert.equal(detail.querySelector('.dino-work-title-input').value,'회차 확인 중 수정한 한국어 제목');
+  pending[1].resolve({data:{},episodes:Array.from({length:10},(_,i)=>({number:i+1}))});
+  await settle();await settle();
+  const input=detail.querySelector('.dino-work-title-input');
+  assert.equal(input.value,'회차 확인 중 수정한 한국어 제목');
+  let prevented=false;
+  input.listeners.get('keydown')({key:'Enter',preventDefault:()=>{prevented=true;}});
+  assert.equal(prevented,true);
+  assert.equal(app.window.__dinoPatch03Bridge.getWorkTitles(app.home.mal_id).ko,'회차 확인 중 수정한 한국어 제목');
+  assert.equal(detail.querySelector('.dino-work-title-form'),null);
+  assert.equal(detail.querySelector('.dino-source-heading-name').textContent,'회차 확인 중 수정한 한국어 제목');
+});
+
+test('Escape closes Korean title editor without saving an unfinished change',async()=>{
+  const app=harness();
+  await app.window.openDetail(app.home.mal_id);
+  const detail=app.nodes.get('#detailContent');
+  const prior=app.window.__dinoPatch03Bridge.getWorkTitles(app.home.mal_id)?.ko;
+  detail.querySelector('.dino-work-title-edit').send('click');
+  const input=detail.querySelector('.dino-work-title-input');
+  input.value='취소할 제목';
+  input.listeners.get('keydown')({key:'Escape',preventDefault:()=>{}});
+  assert.equal(detail.querySelector('.dino-work-title-form'),null);
+  assert.equal(app.window.__dinoPatch03Bridge.getWorkTitles(app.home.mal_id)?.ko,prior);
+});
+
+test('broken supplier detail is shown as an error, not an episode count',async()=>{
+  const app=harness();
+  app.window.lilac.providerDetail=async item=>{
+    if(item.provider==='miruro')throw new Error('provider unavailable');
+    return {data:item,episodes:[{number:1}]};
+  };
+  await app.window.openDetail(app.home.mal_id);
+  await settle();await settle();
+  const tabs=buttons(app);
+  const unavailable=tabs.find(b=>b.dataset.providerSource===app.other.mal_id);
+  const healthy=tabs.find(b=>b.dataset.providerSource===app.home.mal_id);
+  assert.equal(unavailable.dataset.availability,'error');
+  assert.match(unavailable.textContent,/회차 확인 실패/);
+  assert.equal(healthy.dataset.availability,'ready');
+  assert.match(healthy.textContent,/1화/);
+});
