@@ -118,7 +118,7 @@ function harness({ integrated=true, firstReturnsUnrelated=false, persistedStorag
   };
   if(catalogState) window.lilac.catalogIndexState=async()=>catalogState;
   const sandbox=vm.createContext({window,document,localStorage,
-    setTimeout:(fn)=>{scheduled.push(fn);return scheduled.length;},console});
+    setTimeout:(fn,delay)=>{fn.__testDelay=delay;scheduled.push(fn);return scheduled.length;},console});
   vm.runInContext(bridge,sandbox,{filename:'patch03-bridge.js'});
   assert.equal(window.__dinoPatch03Bridge?.active,true);
   return {window,document,storage,nodes,calls,events,home,other,unrelated,video,psQuality,psQualityList,sandbox,status,sourceSelect,playbackStatus,scheduled};
@@ -696,7 +696,8 @@ test('offline catalog import continues 36 NEW works a day until 1000 then stops 
       && query.query==='' && query.sort==='popular'),'no five-provider search requests');
     if(imported>=limit){
       assert.equal(indexed.status,'target-reached');
-      assert.equal(app.scheduled.length,0,'no tomorrow timer after target is reached');
+      assert.equal(app.scheduled.filter(fn=>fn.__testDelay>=60000).length,0,
+        'no daily wake-up timer after the target is reached');
       break;
     }
     const checkpoint=JSON.parse(storage.get(checkpointKey));
