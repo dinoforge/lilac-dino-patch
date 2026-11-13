@@ -46,7 +46,7 @@ class Elements {
   querySelector(selector){return this.querySelectorAll(selector)[0]||null;}
 }
 
-function harness({ integrated=true, firstReturnsUnrelated=false }={}) {
+function harness({ integrated=true, firstReturnsUnrelated=false, persistedStorage=null }={}) {
   const nodes=new Map();
   const element=(id,name='div')=>{const node=new Elements(name);nodes.set('#'+id,node);return node;};
   const sourceSelect=element('contentSource','select');
@@ -68,7 +68,7 @@ function harness({ integrated=true, firstReturnsUnrelated=false }={}) {
     createElement:name=>new Elements(name),
     addEventListener:(name,fn)=>{const previous=events.get(name);events.set(name,previous?()=>{previous();fn()}:fn);}
   };
-  const storage=new Map([['contentSource','reanime']]);
+  const storage=persistedStorage||new Map([['contentSource','reanime']]);
   if(integrated)storage.set('lilacDinoPatch.searchMode','integrated');
   const localStorage={
     getItem:key=>storage.get(key)??null,
@@ -330,4 +330,46 @@ test('terminal playback error offers a verified same-episode alternative and pre
   assert.equal(switched.context.episode.number,7);
   assert.equal(switched.context.resumeSeconds,123);
   assert.equal(switched.context.anime.mal_id,app.other.mal_id);
+});
+
+
+test('a verified source mapping survives restart and does not search five sites again',async()=>{
+  const persistedStorage=new Map([['contentSource','reanime']]);
+  const first=harness({persistedStorage});
+  await first.window.openDetail(first.home.mal_id);
+  await settle();await settle();
+  assert.equal(buttons(first).length,2);
+  first.window.__dinoPatch03Bridge.flushWorkIndex();
+  assert.ok(persistedStorage.has(api.WORK_INDEX_KEY));
+  const second=harness({persistedStorage});
+  await second.window.openDetail(second.home.mal_id);
+  await settle();await settle();
+  assert.equal(buttons(second).length,2);
+  assert.equal(second.calls.search.length,0,'fresh local work index must avoid remote providerCatalog requests');
+  assert.equal(second.window.__dinoPatch03Bridge.getWorkIndexStats().works,1);
+});
+
+test('original Korean-title resolver aliases are reused for missing suppliers',async()=>{
+  const app=harness();
+  app.home.title_english='';
+  app.window.lilac.titleVariants=async()=>[];
+  let titleCalls=0;
+  app.window.lilac.resolveTitles=async()=>{titleCalls++;return [{ko:'원본 한국어 제목',en:'English Work'}];};
+  await app.window.openDetail(app.home.mal_id);
+  assert.equal(titleCalls,1);
+  assert.ok(app.calls.search.some(x=>x.provider==='miruro'&&x.query==='English Work'));
+  assert.equal(buttons(app).length,2);
+  assert.ok(app.window.__dinoPatch03Bridge.getWorkIndexStats().works>=1);
+});
+
+test('integrated exact-query results are read from local DB without repeat catalog calls',async()=>{
+  const persistedStorage=new Map([['contentSource','reanime']]);
+  const first=harness({persistedStorage});
+  await first.window.doSearch('일본어 한글 제목');
+  first.window.__dinoPatch03Bridge.flushWorkIndex();
+  const second=harness({persistedStorage});
+  await second.window.doSearch('일본어 한글 제목');
+  assert.equal(second.calls.search.length,0);
+  assert.ok(second.calls.render.length>0);
+  assert.match(second.status.textContent,/로컬 DB 결과/);
 });
