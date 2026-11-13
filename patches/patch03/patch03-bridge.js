@@ -847,6 +847,7 @@
         if (!workIndex.rememberTitles(reference, { ko: value }, { source: 'manual' })
           && canonicalTitleFor(reference)?.ko !== value) return;
         workIndex.flush();
+        form.remove();
         renderSourcePicker(group, activeId, searching);
       };
       save.addEventListener('click', saveTitle);
@@ -861,6 +862,7 @@
       reset.addEventListener('click', () => {
         workIndex.resetManualKoreanTitle(reference);
         workIndex.flush();
+        form.remove();
         renderSourcePicker(group, activeId, searching);
       });
       form.append(input, save, reset);
