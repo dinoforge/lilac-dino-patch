@@ -746,7 +746,10 @@
         const current = group.sourceItems.find(item => sourceKey(item) === String(activeId)) || group.sourceItems[0];
         if (!isDinoProvider(current)) return;
         const seq = detailSequence;
-        detailDiscoveryCache.delete(current.provider + ':' + sourceKey(current));
+        // Manual retry must clear both foreground and bounded-background
+        // promises; otherwise the cached result could hide the new scan.
+        detailDiscoveryCache.delete(current.provider + ':' + sourceKey(current) + ':foreground');
+        detailDiscoveryCache.delete(current.provider + ':' + sourceKey(current) + ':background');
         catalogRequestCache.clear();
         workIndex.invalidate(current);
         retry.disabled = true;
