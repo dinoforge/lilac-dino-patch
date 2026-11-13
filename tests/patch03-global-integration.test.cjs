@@ -62,7 +62,7 @@ function harness({ integrated=true, firstReturnsUnrelated=false, persistedStorag
   const video=element('video','video');
   const psQuality=element('psQuality');psQuality.classList.add('hidden');
   const psQualityList=element('psQualityList');
-  const events=new Map();
+  const events=new Map(), scheduled=[];
   const document={
     querySelector:selector=>nodes.get(selector)||null,
     createElement:name=>new Elements(name),
@@ -113,10 +113,11 @@ function harness({ integrated=true, firstReturnsUnrelated=false, persistedStorag
       providerResolve:async episode=>episode
     }
   };
-  const sandbox=vm.createContext({window,document,localStorage,setTimeout:()=>1,console});
+  const sandbox=vm.createContext({window,document,localStorage,
+    setTimeout:(fn)=>{scheduled.push(fn);return scheduled.length;},console});
   vm.runInContext(bridge,sandbox,{filename:'patch03-bridge.js'});
   assert.equal(window.__dinoPatch03Bridge?.active,true);
-  return {window,document,storage,nodes,calls,events,home,other,unrelated,video,psQuality,psQualityList,sandbox,status,sourceSelect,playbackStatus};
+  return {window,document,storage,nodes,calls,events,home,other,unrelated,video,psQuality,psQualityList,sandbox,status,sourceSelect,playbackStatus,scheduled};
 }
 const buttons=app=>app.nodes.get('#detailContent').querySelector('.detail-source-picker')?.querySelectorAll('[data-provider-source]')||[];
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
@@ -372,4 +373,67 @@ test('integrated exact-query results are read from local DB without repeat catal
   assert.equal(second.calls.search.length,0);
   assert.ok(second.calls.render.length>0);
   assert.match(second.status.textContent,/로컬 DB 결과/);
+});
+
+
+test('original home rails enqueue background verified source mappings without opening any detail', async () => {
+  const persistedStorage=new Map([['contentSource','reanime']]);
+  const app=harness({persistedStorage});
+  app.nodes.get('#detailDialog').open=false;
+  app.window.renderCards('#seasonRail',[app.home,app.home]);
+  assert.equal(app.calls.search.length,0,'rendering does not synchronously call providers');
+  assert.equal(app.window.__dinoPatch03Bridge.getPrefetchStatus().queued,1,'repeat cards are deduplicated');
+  assert.equal(app.scheduled.length,1,'only one delayed background pass is scheduled');
+  app.scheduled.shift()();
+  for(let i=0;i<12;i++)await settle();
+  assert.ok(app.calls.search.some(request=>request.provider==='miruro'&&request.query==='English Work'));
+  assert.equal(app.window.__dinoPatch03Bridge.getPrefetchStatus().startedThisSession,1);
+  app.window.__dinoPatch03Bridge.flushWorkIndex();
+  assert.ok(persistedStorage.has(api.WORK_INDEX_KEY),'verified source mapping persisted');
+  const second=harness({persistedStorage});
+  await second.window.openDetail(second.home.mal_id);
+  assert.equal(second.calls.search.length,0,'opening an already indexed anime must not search the five sites');
+  assert.equal(buttons(second).length,2);
+});
+
+test('background source indexing pauses for detail playback and ignores non-integrated mode',async()=>{
+  const app=harness();
+  app.window.renderCards('#airingRail',[app.home]);
+  assert.equal(app.window.__dinoPatch03Bridge.getPrefetchStatus().queued,1);
+  app.scheduled.shift()();
+  await settle();
+  assert.equal(app.calls.search.length,0,'detail modal takes priority over background prefetch');
+  assert.equal(app.window.__dinoPatch03Bridge.getPrefetchStatus().queued,1);
+  app.nodes.get('#detailDialog').open=false;
+  assert.equal(app.scheduled.length,1);
+  app.scheduled.shift()();
+  for(let i=0;i<12;i++)await settle();
+  assert.ok(app.calls.search.length>0);
+  const individual=harness({integrated:false});
+  individual.window.renderCards('#topRail',[individual.home]);
+  assert.equal(individual.window.__dinoPatch03Bridge.getPrefetchStatus().queued,0);
+  assert.equal(individual.scheduled.length,0);
+});
+
+test('background prefetch obeys session cap and deduplicates repeated visible lists',async()=>{
+  const app=harness();
+  app.nodes.get('#detailDialog').open=false;
+  const works=Array.from({length:15},(_,i)=>({
+    ...app.home,id:'home-'+i,mal_id:'reanime:home-'+i,
+    anilistId:90000+i,malId:80000+i,
+    title:'Unrelated New Work '+i,title_english:'Unique Work '+i
+  }));
+  app.window.renderCards('#seasonRail',works);
+  app.window.renderCards('#seasonRail',works);
+  assert.equal(app.window.__dinoPatch03Bridge.getPrefetchStatus().queued,15);
+  assert.equal(app.scheduled.length,1);
+  for(let pass=0;pass<16 && app.scheduled.length;pass++) {
+    app.scheduled.shift()();
+    for(let i=0;i<10;i++)await settle();
+  }
+  const progress=app.window.__dinoPatch03Bridge.getPrefetchStatus();
+  assert.equal(progress.startedThisSession,8);
+  assert.equal(progress.usedToday,8);
+  assert.equal(progress.running,false);
+  assert.equal(app.scheduled.length,0,'session cap prevents further background requests');
 });
