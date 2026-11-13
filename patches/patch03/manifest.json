@@ -62,7 +62,7 @@
     {
       "source": "src/dino-sqlite-sync.js",
       "destination": "src/dino-sqlite-sync.js",
-      "sha256": "964EFA43E12D3F1C25E73AA22AF3E88BAA4411FF04121BE0079068C4D3408A0C"
+      "sha256": "90C631092A971DC43A33F10D2436654E459A75186AED524C449A9EC8797AEDC1"
     },
     {
       "source": "patches/patch03/dino-work-db.cjs",

@@ -9,6 +9,9 @@
     const key=row=>String(row?.sources?.[0]?.provider||'')+':'+String(row?.sources?.[0]?.mal_id||'');
     const safeInvoke=async(method,payload)=>invoke(method,payload);
     let skippedConflicts=0;
+    // Old v1 cards may contain a now-invalid cross-season match or two links
+    // for the same supplier. Reject that row, not the entire SQLite backend.
+    const staleConflict=value=>/conflicting existing work identities|manually separated provider sources|provider source identity conflicts|invalid row/.test(String(value||''));
     const report=()=>({active,phase,reason,pending:pending.size,skippedConflicts});
     async function send(rows){
       for(let i=0;i<rows.length;i+=36){
@@ -17,12 +20,12 @@
         if(result?.ok&&result.saved===part.length)continue;
         // A legacy cache can still contain a group the user manually split.
         // Keep SQLite available and preserve the user-chosen ownership.
-        if(!/conflicting existing work identities|manually separated provider sources/.test(String(result?.reason||'')))
+        if(!staleConflict(result?.reason))
           throw Error(String(result?.reason||'SQLite batch confirmation missing'));
         for(const row of part){
           const single=await safeInvoke('upsert',{works:[row]});
           if(single?.ok&&single.saved===1)continue;
-          if(!/conflicting existing work identities|manually separated provider sources/.test(String(single?.reason||'')))
+          if(!staleConflict(single?.reason))
             throw Error(String(single?.reason||'SQLite write failed'));
           skippedConflicts++;
         }

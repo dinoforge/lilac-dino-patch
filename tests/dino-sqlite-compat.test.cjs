@@ -212,6 +212,26 @@ test('automatic linking rejects cross-season IDs and duplicate supplier rows ato
   }finally{env.close();}
 });
 
+test('legacy invalid season groups are skipped without disabling the SQLite writer',async()=>{
+  const data=new Map();
+  const storage={getItem:key=>data.get(key)||null,setItem:(key,value)=>data.set(key,String(value))};
+  const index=api.createWorkIndex(storage);
+  index.remember({sourceItems:work('11111').sources});
+  const calls=[];
+  const rpc=async(method,payload)=>{
+    calls.push(method);
+    if(method==='status')return {available:true};
+    if(method==='upsert')return {ok:false,reason:'incoming provider source identity conflicts with the stored work'};
+    if(method==='recent')return [];
+    throw Error('unexpected');
+  };
+  const adapter=sync.connect(index,rpc,{delay:()=>null});
+  assert.equal(await adapter.start(),true);
+  assert.equal(adapter.report().active,true);
+  assert.equal(adapter.report().skippedConflicts,1);
+  assert.equal(calls.filter(m=>m==='upsert').length,2);
+});
+
 test('SQLite retains last confirmed latest episode across stale passive cards, restarts and five suppliers',()=>{
   const env=fixture();
   try{
