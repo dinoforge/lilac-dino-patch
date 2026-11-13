@@ -107,18 +107,33 @@
     return groups.find(group => group.sourceItems.some(item => item.provider === anchor.provider
       && sourceKey(item) === sourceKey(anchor))) || api.groupResults([anchor], selectedProvider())[0];
   }
-  async function discoverSources(anchor, knownGroup) {
-    const key = anchor.provider + ':' + sourceKey(anchor);
+  async function discoverSources(anchor, knownGroup, { background = false } = {}) {
+    const identityKey = anchor.provider + ':' + sourceKey(anchor);
+    const key = identityKey + (background ? ':background' : ':foreground');
     const cached = detailDiscoveryCache.get(key);
     if (cached && Date.now() - cached.at < DISCOVERY_TTL_MS) return cached.promise;
     const promise = (async () => {
       const stored = workIndex.find(anchor);
       const seeds = [...(Array.isArray(knownGroup?.sourceItems) ? knownGroup.sourceItems : []),
         ...(stored?.sources || [])];
-      if (stored?.fresh) {
+      // Foreground requests may bypass a background attempt that failed or
+      // only checked a limited number of aliases/pages.
+      if (stored?.fresh && (background || stored.outcome !== 'error')) {
         const reference = { ...anchor,
           synonyms: [...(Array.isArray(anchor.synonyms) ? anchor.synonyms : []), ...stored.names] };
         return verifiedGroupFor(reference, seeds);
+      }
+      const knownGroupNow = verifiedGroupFor(anchor, seeds);
+      // Expired positive/missing mappings get a full recheck. Otherwise use
+      // the provider IDs already observed in Lilac's own cards and only ask
+      // for suppliers not yet represented in this work.
+      const expiredVerified = stored && !stored.fresh
+        && ['verified', 'missing', 'error'].includes(stored.outcome);
+      const toCheck = expiredVerified ? providers.slice()
+        : providers.filter(provider => !knownGroupNow.sourceItems.some(item => item.provider === provider));
+      if (!toCheck.length) {
+        workIndex.remember(knownGroupNow, { checked: true, attempted: true, outcome: 'verified' });
+        return knownGroupNow;
       }
       const nativeTitles = [anchor.displayTitle, anchor.title, anchor.title_english,
         anchor.title_japanese, anchor.title_native, anchor.title_romaji, anchor.romaji,
@@ -146,7 +161,8 @@
         } catch { /* Original aliases remain usable. */ }
       }
       const terms = api.titleVariantTerms({
-        query, displayTitles: [...nativeTitles, ...resolvedTitles, ...(stored?.names || [])], variants, limit: 5
+        query, displayTitles: [...nativeTitles, ...resolvedTitles, ...(stored?.names || [])],
+        variants, limit: background ? 2 : 5
       });
       // Official title variants are candidate aliases, not sufficient alone
       // to join anime. The existing identity matcher still demands matching
@@ -160,15 +176,16 @@
       };
       const options = {
         search: cachedCatalog,
-        localSearch: localKoreanCatalog, concurrency: 5, maxPages: 2
+        localSearch: localKoreanCatalog,
+        concurrency: background ? 3 : 5, maxPages: background ? 1 : 2
       };
-      const first = await api.searchProviders({ ...options, providers, query });
+      const first = await api.searchProviders({ ...options, providers: toCheck, query });
       let diagnostics = first;
       let group = verifiedGroupFor(reference, [...seeds, ...first.items]);
       // A successful nonempty catalog response can contain unrelated anime.
       // Only an identity match proves that the requested work was found.
       const matched = new Set(group.sourceItems.map(item => item.provider));
-      const missing = providers.filter(provider => !matched.has(provider));
+      const missing = toCheck.filter(provider => !matched.has(provider));
       if (missing.length && terms.length) {
         const extra = await api.searchProviders({
           ...options, providers: missing, query: '', terms,
@@ -179,17 +196,21 @@
       }
       // Mark a mapping fresh only when every attempted supplier answered.
       // Failed or skipped lookups never turn into permanent "not found".
-      const complete = (diagnostics.statuses || []).length === providers.length
+      const complete = (diagnostics.statuses || []).length === toCheck.length
         && diagnostics.statuses.every(status => status.state === 'ready' && !status.pageLimitReached);
       // All five verified sources can be reused for 30 days. A successful
       // scan that did not find some sources is rechecked after 7 days.
       // Partial/failed scans are retried after 3 days; known links survive.
       const allMatched = providers.every(provider =>
         group.sourceItems.some(item => item.provider === provider));
-      const outcome = !complete ? 'error' : allMatched ? 'verified' : 'missing';
+      // Limited background matching is deliberately not a verified "missing"
+      // result. It cools down for 3 days; an explicit foreground visit can
+      // still search thoroughly without being blocked by the cache.
+      const outcome = !complete || (background && !allMatched) ? 'error'
+        : allMatched ? 'verified' : 'missing';
       workIndex.remember(group, { checked: complete, attempted: true,
         outcome, names: verifiedAliases });
-      detailSearchDiagnostics.set(key, diagnostics.statuses || []);
+      detailSearchDiagnostics.set(identityKey, diagnostics.statuses || []);
       if (detailSearchDiagnostics.size > 120) detailSearchDiagnostics.delete(detailSearchDiagnostics.keys().next().value);
       return group;
     })();
@@ -209,6 +230,10 @@
   if (typeof officialShowHomeList === 'function') {
     window.showHomeList = function (...args) {
       searchSequence++;
+      // Original lists may include more entries than the first visible rail.
+      // Import only the bounded first slice, without querying any supplier.
+      if (integratedMode() && Array.isArray(args[0]))
+        workIndex.observe(args[0], { limit: 24 });
       return officialShowHomeList.apply(this, args);
     };
   }
@@ -283,9 +308,9 @@
     prefetchStarted++;
     recordPrefetchAttempt();
     try {
-      await discoverSources(next, null);
+      await discoverSources(next, null, { background: true });
     } catch {
-      // Do not turn an outage into a 48-hour "not found" result.
+      // Do not turn an outage into a long-lived "not found" result.
       // Remember only that this item was attempted for the cooldown.
       workIndex.remember({ sourceItems: [next] }, { attempted: true, outcome: 'error' });
       prefetchFailed++;
@@ -307,9 +332,25 @@
     }
     schedulePrefetch();
   }
+  // Every original source uses renderCards for its main rails. Copy already
+  // downloaded cards (including Korean-title aliases) into the shared local
+  // index. No new providerCatalog, title resolver or remote request is made.
+  const OBSERVED_CARD_TARGETS = new Set(['#seasonRail', '#airingRail', '#topRail',
+    '#allGrid', '#catalogGrid', '#libraryGrid', '#searchGrid',
+    '#pvRail', '#movieRail', '#adultRail']);
+  function observeOriginalCards(target, items) {
+    if (!integratedMode() || !OBSERVED_CARD_TARGETS.has(target) || !Array.isArray(items)) return;
+    const flattened = [];
+    for (const item of items.slice(0, 36)) {
+      if (Array.isArray(item?.sourceItems)) flattened.push(...item.sourceItems);
+      else flattened.push(item);
+    }
+    workIndex.observe(flattened, { limit: 24 });
+  }
   if (typeof officialRenderCards === 'function') {
     window.renderCards = function (target, items, ...args) {
       const rendered = officialRenderCards.call(this, target, items, ...args);
+      observeOriginalCards(target, items);
       queueVisibleWorks(target, items);
       return rendered;
     };
