@@ -371,6 +371,124 @@
   // Every original source uses renderCards for its main rails. Copy already
   // downloaded cards (including Korean-title aliases) into the shared local
   // index. No new providerCatalog, title resolver or remote request is made.
+  // Only ongoing titles are checked automatically. A provider's own detail
+  // endpoint supplies actual playable episodes; catalog estimates never
+  // overwrite the verified per-supplier episode snapshot.
+  const EPISODE_REFRESH_BUDGET_KEY = 'lilacDinoPatch.episodeRefreshBudget.v1';
+  const EPISODE_REFRESH_SESSION_LIMIT = 8;
+  const EPISODE_REFRESH_DAILY_LIMIT = 18;
+  const EPISODE_REFRESH_TTL_MS = 12 * 60 * 60 * 1000;
+  const EPISODE_FAILURE_TTL_MS = 6 * 60 * 60 * 1000;
+  const EPISODE_DETAIL_TTL_MS = 6 * 60 * 60 * 1000;
+  const EPISODE_REFRESH_DELAY_MS = 20000;
+  const episodeQueue = [];
+  const episodeQueued = new Set();
+  let episodeTimer = null, episodeBusy = false;
+  let episodeAttempted = 0, episodeSucceeded = 0, episodeFoundNew = 0, episodeFailed = 0;
+  function airingStatus(item, fromAiringRail = false) {
+    const status = String(item?.status || '').toLowerCase().trim().replace(/[_-]/g, ' ');
+    if (/(finished|completed|complete|ended|cancelled|canceled|not yet|upcoming|미방영|완결|종영|방영\s*종료)/.test(status))
+      return false;
+    return /(^|[\s,])(airing|ongoing|releasing|broadcasting|on air)([\s,]|$)|방영\s*중|연재\s*중/.test(status)
+      || fromAiringRail && !status;
+  }
+  function episodeBudgetCount() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(EPISODE_REFRESH_BUDGET_KEY) || 'null');
+      return saved?.day === budgetDay() && Number.isInteger(saved?.count)
+        ? Math.max(0, Math.min(saved.count, EPISODE_REFRESH_DAILY_LIMIT)) : 0;
+    } catch { return 0; }
+  }
+  function recordEpisodeAttempt() {
+    try {
+      localStorage.setItem(EPISODE_REFRESH_BUDGET_KEY,JSON.stringify({
+        day:budgetDay(),count:episodeBudgetCount()+1
+      }));
+    } catch { /* the per-session limit still guards against repeated requests */ }
+  }
+  function episodeCheckDue(item) {
+    const saved = workIndex.episodeState(item);
+    if (!saved) return true;
+    const at = saved.state === 'error' ? saved.attemptedAt : saved.checkedAt;
+    const ttl = saved.state === 'error' ? EPISODE_FAILURE_TTL_MS : EPISODE_REFRESH_TTL_MS;
+    return !at || Date.now() - at >= ttl;
+  }
+  function scheduleEpisodeRefresh(delay = EPISODE_REFRESH_DELAY_MS) {
+    if (!integratedMode() || episodeTimer !== null || episodeBusy || !episodeQueue.length
+      || episodeAttempted >= EPISODE_REFRESH_SESSION_LIMIT
+      || episodeBudgetCount() >= EPISODE_REFRESH_DAILY_LIMIT) return;
+    episodeTimer = setTimeout(() => {
+      episodeTimer = null;
+      runNextEpisodeRefresh().catch(() => { episodeFailed++; });
+    }, delay);
+  }
+  function episodeMetrics(response) {
+    if (!Array.isArray(response?.episodes) || response?.unavailable) return null;
+    let count = 0, latest = 0;
+    for (const episode of response.episodes.slice(0,5000)) {
+      if (!episode || episode.playable === false) continue;
+      count++;
+      const number = playableEpisodeNumber(episode);
+      if (number && number > latest) latest = number;
+    }
+    return {count,latest};
+  }
+  async function runNextEpisodeRefresh() {
+    if (episodeBusy || !integratedMode() || !episodeQueue.length
+      || episodeAttempted >= EPISODE_REFRESH_SESSION_LIMIT
+      || episodeBudgetCount() >= EPISODE_REFRESH_DAILY_LIMIT) return;
+    if (document.hidden === true || document.querySelector('#detailDialog')?.open
+      || document.querySelector('#playerView')?.classList?.contains('active')) {
+      scheduleEpisodeRefresh(15000);
+      return;
+    }
+    const next = episodeQueue.shift();
+    if (!next || !episodeCheckDue(next)) { scheduleEpisodeRefresh(1800); return; }
+    episodeBusy = true;
+    episodeAttempted++;
+    recordEpisodeAttempt();
+    try {
+      const before = workIndex.episodeState(next);
+      const response = await window.lilac.providerDetail(next);
+      const metrics = episodeMetrics(response);
+      if (!metrics) {
+        workIndex.rememberEpisode(next,null);
+        episodeFailed++;
+      } else {
+        workIndex.rememberEpisode(next,metrics);
+        episodeSucceeded++;
+        if (before?.latest > 0 && metrics.latest > before.latest) episodeFoundNew++;
+      }
+    } catch {
+      workIndex.rememberEpisode(next,null);
+      episodeFailed++;
+    } finally {
+      episodeBusy = false;
+      scheduleEpisodeRefresh(14000);
+    }
+  }
+  function queueAiringEpisodes(target,items) {
+    if (!integratedMode() || !Array.isArray(items)
+      || episodeAttempted >= EPISODE_REFRESH_SESSION_LIMIT
+      || episodeBudgetCount() >= EPISODE_REFRESH_DAILY_LIMIT) return;
+    const fromAiringRail = target === '#airingRail';
+    for (const item of items.slice(0,24)) {
+      if (!isDinoProvider(item) || !airingStatus(item,fromAiringRail)) continue;
+      const known = workIndex.find(item)?.sources || [item];
+      for (const source of known) {
+        if (!isDinoProvider(source) || !airingStatus(source,fromAiringRail)
+          || !episodeCheckDue(source)) continue;
+        const key = source.provider + ':' + sourceKey(source);
+        if (episodeQueued.has(key)) continue;
+        episodeQueued.add(key);
+        episodeQueue.push(source);
+        if (episodeQueue.length >= 40) break;
+      }
+      if (episodeQueue.length >= 40) break;
+    }
+    scheduleEpisodeRefresh();
+  }
+
   const OBSERVED_CARD_TARGETS = new Set(['#seasonRail', '#airingRail', '#topRail',
     '#allGrid', '#catalogGrid', '#libraryGrid', '#searchGrid',
     '#pvRail', '#movieRail', '#adultRail']);
@@ -393,6 +511,7 @@
       else flattened.push(item);
     }
     workIndex.observe(flattened, { limit: 24 });
+    queueAiringEpisodes(target,flattened);
   }
   if (typeof officialRenderCards === 'function') {
     window.renderCards = function (target, items, ...args) {
@@ -906,10 +1025,17 @@
     choices.className = 'dino-source-track';
     choices.setAttribute('role', 'group');
     choices.setAttribute('aria-label', '재생 공급원 선택');
-    const latestAvailable = Math.max(0, ...group.sourceItems.map(item => detailFacts.get(sourceKey(item))?.latest || 0));
+    const latestAvailable = Math.max(0, ...group.sourceItems.map(item =>
+      (detailFacts.get(sourceKey(item))?.latest || workIndex.episodeState(item)?.latest || 0)));
     for (const item of group.sourceItems) {
       const id = sourceKey(item);
-      const info = detailFacts.get(id);
+      const info = detailFacts.get(id) || (() => {
+        const saved = workIndex.episodeState(item);
+        return saved?.checkedAt ? {
+          episodes:saved.count,latest:saved.latest,checkedAt:saved.checkedAt,
+          newEpisodes:saved.newEpisodes,noEpisodes:saved.state==='empty'
+        } : null;
+      })();
       const quality = verifiedVideoQuality.get(id);
       const button = document.createElement('button');
       button.type = 'button';
@@ -926,6 +1052,7 @@
       const comparison = latest && latestAvailable
         ? latest < latestAvailable ? ' · ' + (latestAvailable - latest) + '화 차이' : ' · 최신화'
         : '';
+      const update = info?.newEpisodes > 0 ? ' · 새 회차 +' + info.newEpisodes : '';
       const resolution = quality ? '재생 ' + quality : info?.reportedQuality
         ? '표기 ' + info.reportedQuality : '화질 미확인';
       const availability = info?.unavailable ? 'unavailable'
@@ -934,11 +1061,12 @@
       button.dataset.availability = availability;
       button.dataset.quality = quality ? 'measured' : info?.reportedQuality ? 'reported' : 'unknown';
       button.dataset.latest = latest && latestAvailable && latest === latestAvailable ? 'true' : 'false';
+      button.dataset.newEpisodes = String(info?.newEpisodes || 0);
       const displayName = labels[item.provider] || item.provider;
       // One compact two-line tab; the track itself stays on a single
       // horizontal row even when five providers are available.
-      button.textContent = displayName + '\n' + count + comparison + ' · ' + resolution;
-      button.title = displayName + ' · ' + count + comparison + ' · ' + resolution;
+      button.textContent = displayName + '\n' + count + comparison + update + ' · ' + resolution;
+      button.title = displayName + ' · ' + count + comparison + update + ' · ' + resolution;
       button.setAttribute('aria-label', button.title + (id === String(activeId) ? ' · 선택됨' : ''));
       button.addEventListener('click', () => window.openDetail(id, { sourceSelection: true }));
       choices.append(button);
@@ -953,7 +1081,7 @@
     }
     const helper = document.createElement('small');
     helper.className = 'dino-source-hint';
-    helper.textContent = '회차는 공급원 목록 기준 · 화질은 확인된 정보만 표시';
+    helper.textContent = '회차는 공급원 목록 기준 · 방영 중인 작품만 제한적으로 자동 확인 · 화질은 확인된 정보만 표시';
     section.append(helper);
     if (group.sourceItems.length === 1) {
       const note = document.createElement('small');
@@ -1019,23 +1147,40 @@
     await Promise.all(Array.from({ length: Math.min(2, items.length) }, async () => {
       while (index < items.length) {
         const item = items[index++], id = sourceKey(item);
-        if (detailFacts.has(id)) continue;
+        const existing = detailFacts.get(id);
+        if (existing && (!existing.checkedAt || Date.now() - existing.checkedAt < EPISODE_DETAIL_TTL_MS))
+          continue;
+        detailFacts.delete(id);
+        const saved = workIndex.episodeState(item);
+        if (saved?.checkedAt && Date.now() - saved.checkedAt < EPISODE_DETAIL_TTL_MS
+          && saved.state !== 'error') {
+          detailFacts.set(id, { episodes:saved.count, latest:saved.latest,
+            checkedAt:saved.checkedAt, newEpisodes:saved.newEpisodes,
+            noEpisodes:saved.state==='empty' });
+          continue;
+        }
         try {
           const response = await window.lilac.providerDetail(item);
-          if (Array.isArray(response?.episodes)) {
-            const playable = response.episodes.filter(ep => ep?.playable !== false);
+          const metrics = episodeMetrics(response);
+          if (metrics) {
+            workIndex.rememberEpisode(item,metrics);
+            const updated = workIndex.episodeState(item);
             detailFacts.set(id, {
-              episodes: playable.length,
-              latest: Math.max(0, ...playable.map(playableEpisodeNumber).filter(Boolean)),
+              episodes: metrics.count, latest: metrics.latest,
+              checkedAt:Date.now(),newEpisodes:updated?.newEpisodes || 0,
               reportedQuality: providerReportedQuality(response),
-              noEpisodes: response.episodes.length === 0,
-              unavailable: Boolean(response?.unavailable)
+              noEpisodes: response.episodes.length === 0
             });
           } else if (response?.unavailable) {
+            workIndex.rememberEpisode(item,null);
             detailFacts.set(id, { unavailable: true });
+          } else {
+            workIndex.rememberEpisode(item,null);
+            detailFacts.set(id, { error: true });
           }
         } catch {
           // An error is not proof that this provider has no episodes.
+          workIndex.rememberEpisode(item,null);
           detailFacts.set(id, { error: true });
         }
         if (sequence === detailSequence) renderSourcePicker(group, activeId);
@@ -1257,6 +1402,14 @@
     getMode: () => integratedMode() ? 'integrated' : 'provider',
     getSelectedProvider: selectedProvider,
     getWorkIndexStats: () => workIndex.stats(),
+    getEpisodeRefreshStatus: () => ({ queued:episodeQueue.length,
+      attempted:episodeAttempted,updated:episodeSucceeded,newEpisodes:episodeFoundNew,
+      failed:episodeFailed,daily:episodeBudgetCount(),
+      sessionLimit:EPISODE_REFRESH_SESSION_LIMIT,dailyLimit:EPISODE_REFRESH_DAILY_LIMIT }),
+    getEpisodeState: id => {
+      const item = typeof window.animeById === 'function' ? window.animeById(id) : null;
+      return workIndex.episodeState(item);
+    },
     getSqliteStatus: () => sqlite.report(),
     getSqliteStats: () => sqlite.stats(),
     getWorkTitles: id => {
