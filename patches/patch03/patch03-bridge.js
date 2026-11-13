@@ -181,7 +181,14 @@
       // Failed or skipped lookups never turn into permanent "not found".
       const complete = (diagnostics.statuses || []).length === providers.length
         && diagnostics.statuses.every(status => status.state === 'ready' && !status.pageLimitReached);
-      workIndex.remember(group, { checked: complete, attempted: true, names: verifiedAliases });
+      // All five verified sources can be reused for 30 days. A successful
+      // scan that did not find some sources is rechecked after 7 days.
+      // Partial/failed scans are retried after 3 days; known links survive.
+      const allMatched = providers.every(provider =>
+        group.sourceItems.some(item => item.provider === provider));
+      const outcome = !complete ? 'error' : allMatched ? 'verified' : 'missing';
+      workIndex.remember(group, { checked: complete, attempted: true,
+        outcome, names: verifiedAliases });
       detailSearchDiagnostics.set(key, diagnostics.statuses || []);
       if (detailSearchDiagnostics.size > 120) detailSearchDiagnostics.delete(detailSearchDiagnostics.keys().next().value);
       return group;
@@ -219,7 +226,7 @@
   const PREFETCH_BUDGET_KEY = 'lilacDinoPatch.workIndex.prefetchBudget.v1';
   const PREFETCH_SESSION_LIMIT = 8;
   const PREFETCH_DAILY_LIMIT = 18;
-  const PREFETCH_RETRY_MS = 12 * 60 * 60 * 1000;
+  const PREFETCH_RETRY_MS = 3 * 24 * 60 * 60 * 1000;
   const PREFETCH_LIST_TARGETS = new Set(['#seasonRail', '#airingRail', '#topRail',
     '#allGrid', '#catalogGrid']);
   // Search has already queried every supplier and must not re-enqueue
@@ -280,7 +287,7 @@
     } catch {
       // Do not turn an outage into a 48-hour "not found" result.
       // Remember only that this item was attempted for the cooldown.
-      workIndex.remember({ sourceItems: [next] }, { attempted: true });
+      workIndex.remember({ sourceItems: [next] }, { attempted: true, outcome: 'error' });
       prefetchFailed++;
     } finally {
       prefetchBusy = false;
