@@ -47,6 +47,8 @@ jobs:
           node --test tests/dino-sqlite-compat.test.cjs
       - name: Verify native Rust manager UI and console-free Windows build contract
         run: node --test tests/dino-native-manager-ui.test.cjs
+      - name: Check legacy Python patch-manager syntax
+        run: python3 -m py_compile tools/dino-patch-manager/manager_core.py
       - name: Verify patch manifest module SHA-256
         shell: bash
         run: |
