@@ -265,8 +265,18 @@ pub fn inspect(root:&Path)->Status {
         }
         let actual=sha(&archive_path(&root))?;
         if let Some(state)=read_state(&root)? {
-            if state["version"]!=version || state["patchVersion"]!=PATCH_VERSION{
-                return Ok(Status::new("PARTIAL_OR_UNKNOWN",&version,"이전 패치 버전 또는 설치본 버전 기록이 현재와 다릅니다."));
+            if state["version"]!=version || state["patchVersion"]!=PATCH_VERSION {
+                // Distinguish an official-app update from a DinoPatch manager
+                // upgrade. NEVER silently overwrite or discard the previous
+                // state, backup, or installed archive for either situation.
+                let recorded_app=state["version"].as_str().unwrap_or("없음")
+                    .chars().take(32).collect::<String>();
+                let recorded_patch=state["patchVersion"].as_str().unwrap_or("없음")
+                    .chars().take(32).collect::<String>();
+                let reason=format!(
+                    "버전 기록 불일치: LilacAnime 기록 v{recorded_app}, 현재 v{version}; DinoPatch 기록 v{recorded_patch}, 현재 v{PATCH_VERSION}. 자동 적용을 차단했습니다. 기존 state.json과 original-app.asar를 보존하고 해시를 확인하세요."
+                );
+                return Ok(Status::new("PARTIAL_OR_UNKNOWN",&version,reason));
             }
             let original=state["originalSha256"].as_str().unwrap_or("");
             let patched=state["patchedSha256"].as_str().unwrap_or("");

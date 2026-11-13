@@ -7,6 +7,7 @@ const path=require('node:path');
 const root=path.join(__dirname,'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 const transaction=read('tools/dino-patch-manager/native-rust/src/transaction.rs');
+const readOnlyAudit=read('scripts/dino-read-only-diagnose.ps1');
 const gui=read('tools/dino-patch-manager/native-rust/src/gui.rs');
 const bridge=read('patches/patch03/patch03-bridge.js');
 const db=read('patches/patch03/dino-work-db.cjs');
@@ -73,4 +74,22 @@ test('Manual CI release checks Rust CLI before allocating a Windows machine',()=
   const second=workflow.indexOf('gui-windows:');
   assert.ok(first>=0&&second>first);
   assert.match(workflow,/^    needs: preflight$/m);
+});
+
+test('mismatched app/patch records are explained separately but still block every auto write',()=>{
+  const inspect=transaction.split('pub fn inspect(')[1].split('fn ensure_state_dir(')[0];
+  assert.match(inspect,/state\["version"\]!=version \|\| state\["patchVersion"\]!=PATCH_VERSION/);
+  assert.match(inspect,/버전 기록 불일치: LilacAnime 기록/);
+  assert.match(inspect,/DinoPatch 기록 v\{recorded_patch\}, 현재 v\{PATCH_VERSION\}/);
+  assert.match(inspect,/PARTIAL_OR_UNKNOWN/);
+  const apply=transaction.split('pub fn apply(')[1].split('pub fn uninstall(')[0];
+  assert.match(apply,/if current.status!="UNPATCHED" \{return Ok\(current\);\}/);
+});
+test('version-mismatch diagnostic script is read-only and checks the exact previous backup hash',()=>{
+  assert.match(readOnlyAudit,/Get-FileHash/);
+  assert.match(readOnlyAudit,/original-app\.asar/);
+  assert.match(readOnlyAudit,/pending\.json/);
+  assert.match(readOnlyAudit,/recordedPatchVersion/);
+  assert.match(readOnlyAudit,/DIFFERENT_FROM_BOTH_RECORDED_HASHES/);
+  assert.doesNotMatch(readOnlyAudit,/(?:^|\n)\s*(?:Remove-Item|Set-Content|Copy-Item|Move-Item|Rename-Item)\b/im);
 });
