@@ -136,3 +136,36 @@ test('existing v1 work cache migrates without deletion and older SQLite works hy
     assert.equal(env.store.lookup({provider:'reanime',mal_id:'reanime:51'}).titles.ko,'새로 수정한 제목');
   }finally{env.close();}
 });
+
+
+test('an existing supplier identity cannot be overwritten by a different season or external ID',()=>{
+  const env=fixture();
+  try{
+    const first=work('401','동일 이름의 첫 시즌');
+    assert.equal(env.store.upsert([first]).ok,true);
+    const wrong=work('401','다른 시즌으로 잘못 연결된 제목');
+    wrong.sources[0]={...wrong.sources[0],anilistId:999999,year:2027};
+    const outcome=env.store.upsert([wrong]);
+    assert.equal(outcome.ok,false);
+    assert.match(outcome.reason,/identity conflicts/i);
+    const stored=env.store.lookup({provider:'reanime',mal_id:'reanime:401'});
+    assert.equal(stored.titles.ko,'동일 이름의 첫 시즌');
+    assert.equal(stored.sources.length,5);
+    assert.equal(env.store.stats().works,1);
+  }finally{env.close();}
+});
+
+test('official Korean title is not downgraded to an older provider-only title',()=>{
+  const env=fixture();
+  try{
+    const original=work('202','원본이 확인한 한국어 제목',false);
+    assert.equal(env.store.upsert([original]).ok,true);
+    const provider=work('202','공급원이 임시로 쓴 제목',false);
+    provider.titles.koSource='provider';
+    provider.updatedAt+=10000;
+    assert.equal(env.store.upsert([provider]).ok,true);
+    const row=env.store.lookup({provider:'linkani',mal_id:'linkani:202'});
+    assert.equal(row.titles.ko,'원본이 확인한 한국어 제목');
+    assert.equal(row.titles.koSource,'official');
+  }finally{env.close();}
+});
