@@ -572,7 +572,17 @@
         }
       }
     } catch { /* broken or unavailable cache never changes original user data */ }
-    let dirty = false, timer = null;
+    let dirty = false, timer = null, persistenceHook = null;
+    const cloned = value => JSON.parse(JSON.stringify(value));
+    const notify = row => {
+      if (row && typeof persistenceHook === 'function') {
+        try { persistenceHook(cloned(row)); } catch { /* optional SQLite is never required */ }
+      }
+    };
+    const setPersistenceHook = hook => { persistenceHook = typeof hook === 'function' ? hook : null; };
+    // Complete v1 snapshots are always kept in localStorage for fallback.
+    // SQLite is an additive durable store for rows older than this hot cache.
+    const exportRows = () => data.works.map(cloned);
     const flush = () => {
       if (!dirty) return true;
       data.works.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -667,6 +677,7 @@
         data.works.length = maxWorks;
       }
       touch();
+      notify(row);
     };
 
     const rememberTitles = (anchor, titles, { source = 'official' } = {}) => {
@@ -712,7 +723,7 @@
       if (combined.length !== row.names.length || combined.some((name, at) => name !== row.names[at])) {
         row.names = combined; changed = true;
       }
-      if (changed) { row.updatedAt = clock(); touch(); }
+      if (changed) { row.updatedAt = clock(); touch(); notify(row); }
       return changed;
     };
     const resetManualKoreanTitle = anchor => {
@@ -725,7 +736,7 @@
         koSource: fallback ? 'provider' : '',
         koCheckedAt: fallback ? clock() : 0, manual: false };
       if (fallback) row.names = namesOf([fallback, ...row.names]);
-      row.updatedAt = clock(); touch();
+      row.updatedAt = clock(); touch(); notify(row);
       return true;
     };
 
@@ -797,9 +808,68 @@
       data.searches = data.searches.filter(s => !s.sourceIds.some(id => row.sources.some(item =>
         scopedKey(item) === id || sourceKey(item) === id)));
       touch();
+      notify(row);
+    };
+    // Recover older work rows from SQLite on a cache miss. Canonical titles
+    // are merged conservatively; manual edits are never downgraded.
+    const importRows = rows => {
+      let added = 0, merged = 0;
+      for (const raw of Array.isArray(rows) ? rows.slice(0, 300) : []) {
+        if (!raw || !Array.isArray(raw.sources) || !raw.sources.length) continue;
+        const sources = raw.sources.map(compact).filter(Boolean);
+        if (!sources.length) continue;
+        let row = rowFor(sources[0]);
+        if (!row) {
+          row = {
+            id: String(raw.id || sourceKey(sources[0])).slice(0,160),
+            sources: [], names: [], titles: titleFields(),
+            checkedAt: 0, attemptedAt: 0, outcome: '', updatedAt: 0
+          };
+          data.works.push(row);
+          added++;
+        } else merged++;
+        const incomingTitle = titleFields(raw.titles);
+        const localTitle = row.titles;
+        const incomingManualNewer = incomingTitle.manual &&
+          (!localTitle.manual || incomingTitle.koCheckedAt > localTitle.koCheckedAt);
+        if (incomingManualNewer ||
+          (!localTitle.manual && !incomingTitle.manual &&
+            (incomingTitle.koSource === 'official' && localTitle.koSource !== 'official'
+              || !localTitle.ko && !!incomingTitle.ko))) {
+          row.titles.ko = incomingTitle.ko;
+          row.titles.koSource = incomingTitle.koSource;
+          row.titles.koCheckedAt = incomingTitle.koCheckedAt;
+          row.titles.manual = incomingTitle.manual;
+        }
+        if (!row.titles.en) row.titles.en = incomingTitle.en;
+        if (!row.titles.ja) row.titles.ja = incomingTitle.ja;
+        row.names = namesOf([row.titles.ko, row.titles.en, row.titles.ja,
+          ...row.names, ...(Array.isArray(raw.names) ? raw.names : [])]);
+        const reference = { ...sources[0], synonyms: row.names };
+        const known = new Map(row.sources.map(s => [scopedKey(s), s]));
+        for (const source of sources) {
+          if (identityMatch(reference, source) && !known.has(scopedKey(source)))
+            known.set(scopedKey(source), source);
+        }
+        row.sources = [...known.values()].slice(0,8);
+        const storedCheck = Number(raw.checkedAt) || 0;
+        if (storedCheck > row.checkedAt) {
+          row.checkedAt = storedCheck;
+          row.outcome = ['verified','missing','error'].includes(raw.outcome) ? raw.outcome : '';
+        }
+        row.attemptedAt = Math.max(row.attemptedAt, Number(raw.attemptedAt)||0);
+        row.updatedAt = Math.max(row.updatedAt, Number(raw.updatedAt)||0);
+      }
+      if (added || merged) {
+        data.works.sort((a,b)=>b.updatedAt-a.updatedAt);
+        data.works.length = Math.min(data.works.length,maxWorks);
+        touch();
+      }
+      return {added,merged};
     };
     return { find, remember, rememberTitles, resetManualKoreanTitle, observe,
-      rememberSearch, readSearch, invalidate, flush,
+      rememberSearch, readSearch, invalidate, flush, exportRows, importRows,
+      setPersistenceHook,
       stats: () => ({
         works: data.works.length, searches: data.searches.length,
         providers: Object.fromEntries(PROVIDERS.map(provider => [
