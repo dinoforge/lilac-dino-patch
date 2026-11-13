@@ -488,6 +488,31 @@
   }
 
 
+  // Provider detail endpoints may list both dubs/subs, specials and repeats.
+  // Compare only distinct playable episode numbers for the latest count.
+  function playableEpisodeNumber(episode) {
+    if(!episode || episode.special || episode.playable === false)return null;
+    const numeric=Number(episode.number);
+    if(Number.isInteger(numeric) && numeric>0 && numeric<10000)return numeric;
+    const label=String(episode.name || episode.title || '').trim();
+    const match=label.match(/^(?:제\s*|第\s*)?(?:ep(?:isode)?\.?\s*#?\s*)?(\d{1,4})(?=\s*(?:화|회|話|$|[-:]))/i);
+    return match ? Number(match[1]) : null;
+  }
+  function episodeMetrics(response) {
+    if(!Array.isArray(response?.episodes) || response.unavailable)return null;
+    const numbered=new Set();
+    let unnumbered=0,latest=0;
+    for(const episode of response.episodes.slice(0,5000)){
+      if(!episode || episode.special || episode.playable === false)continue;
+      const number=playableEpisodeNumber(episode);
+      if(number){
+        numbered.add(number);
+        if(number>latest)latest=number;
+      }else unnumbered++;
+    }
+    return {count:numbered.size+unnumbered,latest};
+  }
+
   // Like the original Korean title index: timestamped, batched local writes,
   // bounded profile storage and conservative verified provider identities.
   const WORK_INDEX_KEY = 'lilacDinoPatch.workIndex.v1';
@@ -953,12 +978,24 @@
     };
     // Database repairs return full affected works. Replace, don't heuristically
     // merge: the owner chosen by the user is authoritative.
-    const replaceRows = (rows, affected = []) => {
+    const replaceRows = (rows, affected = [], { persist = true } = {}) => {
       if (!Array.isArray(rows) || !rows.length) return false;
       const incoming=rows.filter(row=>row&&Array.isArray(row.sources)&&row.sources.length);
       const keys=new Set([...affected,...incoming.flatMap(row=>row.sources)].filter(Boolean)
         .map(source=>source.provider+':'+sourceKey(source)));
-      data.works=data.works.filter(row=>!row.sources.some(source=>keys.has(scopedKey(source))));
+      // A legacy row can include two now-separated works. Keep any suppliers
+      // absent from the authoritative SQLite response as independent entries.
+      data.works=data.works.flatMap(row=>{
+        const remaining=row.sources.filter(source=>!keys.has(scopedKey(source)));
+        if(remaining.length===row.sources.length)return [row];
+        if(!remaining.length)return [];
+        const guessed=remaining.map(providerTitles).find(title=>title.ko);
+        const titles=titleFields({ko:guessed?.ko,en:remaining.map(providerTitles).find(t=>t.en)?.en,
+          ja:remaining.map(providerTitles).find(t=>t.ja)?.ja,koSource:guessed?'provider':''});
+        return [{...row,id:sourceKey(remaining[0]),sources:remaining,
+          titles,names:namesOf(remaining.flatMap(s=>[s.title,s.title_english,s.displayTitle])),
+          checkedAt:0,attemptedAt:0,outcome:'',updatedAt:clock()}];
+      });
       for (const raw of incoming) {
         const sources=raw.sources.map(compact).filter(Boolean);
         if (!sources.length)continue;
@@ -971,7 +1008,12 @@
           updatedAt:Number(raw.updatedAt)||clock()
         });
       }
-      data.searches=[];touch();return flush();
+      data.works.sort((a,b)=>b.updatedAt-a.updatedAt);
+      data.works.length=Math.min(data.works.length,maxWorks);
+      data.searches=[];touch();
+      // Startup hydration must not immediately rewrite the original v1
+      // snapshot. The ordinary delayed flush keeps the cache consistent.
+      return persist?flush():true;
     };
     return { find, remember, rememberTitles, resetManualKoreanTitle, observe,
       separateWorks, replaceRows,
@@ -989,6 +1031,8 @@
 
   const api = {
     PROVIDERS,
+    playableEpisodeNumber,
+    episodeMetrics,
     WORK_INDEX_KEY,
     createWorkIndex,
     OFFICIAL_SOURCES,

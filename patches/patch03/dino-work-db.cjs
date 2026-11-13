@@ -37,12 +37,15 @@ function pairFields(a,b){
 function normalize(raw){
   if(!object(raw)||!Array.isArray(raw.sources)||!raw.sources.length||raw.sources.length>8
     || JSON.stringify(raw).length>40000)return null;
-  const sources=[],seen=new Set();
+  const sources=[],seen=new Set(),seenProviders=new Set();
   for(const src of raw.sources){
     if(!object(src)||!PROVIDERS.has(src.provider)||JSON.stringify(src).length>16000)continue;
     const id=sourceKey(src),key=src.provider+':'+id;
     if(!id||seen.has(key))continue;
-    seen.add(key);sources.push({...src,mal_id:id});
+    // One canonical work should not contain multiple episodes/season entries
+    // from the same supplier: ask for a manual selection instead.
+    if(seenProviders.has(src.provider))return null;
+    seen.add(key);seenProviders.add(src.provider);sources.push({...src,mal_id:id});
   }
   if(!sources.length)return null;
   const title=object(raw.titles)?raw.titles:{};
@@ -106,7 +109,7 @@ function createStore({app,DatabaseSync}={}){
     const sourceFind=db.prepare('SELECT work_id,item_json FROM work_sources WHERE provider=? AND source_id=?');
     const workFind=db.prepare('SELECT * FROM works WHERE work_id=?');
     const blockFind=db.prepare('SELECT 1 AS blocked FROM manual_pair_blocks WHERE left_provider=? AND left_id=? AND right_provider=? AND right_id=?');
-    const members=db.prepare('SELECT provider,source_id FROM work_sources WHERE work_id=?');
+    const members=db.prepare('SELECT provider,source_id,item_json FROM work_sources WHERE work_id=?');
     const putWork=db.prepare('INSERT INTO works(work_id,names_json,title_ko,title_en,title_ja,ko_source,ko_checked_at,manual,checked_at,attempted_at,outcome,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(work_id) DO UPDATE SET names_json=excluded.names_json,title_ko=excluded.title_ko,title_en=excluded.title_en,title_ja=excluded.title_ja,ko_source=excluded.ko_source,ko_checked_at=excluded.ko_checked_at,manual=excluded.manual,checked_at=excluded.checked_at,attempted_at=excluded.attempted_at,outcome=excluded.outcome,updated_at=excluded.updated_at');
     const putSource=db.prepare('INSERT INTO work_sources(provider,source_id,work_id,item_json) VALUES(?,?,?,?) ON CONFLICT(provider,source_id) DO UPDATE SET item_json=excluded.item_json WHERE work_sources.work_id=excluded.work_id');
     try{
@@ -124,10 +127,21 @@ function createStore({app,DatabaseSync}={}){
         }
         if(knownIds.size>1)throw Error('conflicting existing work identities');
         const id=[...knownIds][0]||work.sources[0].provider+':'+sourceKey(work.sources[0]);
-        // A user-separated link cannot return through a stale discovery group.
-        for(const src of work.sources)for(const old of members.all(id)){
-          const pair=pairFields(src,{provider:old.provider,mal_id:old.source_id});
-          if(pair&&blockFind.get(...pair))throw Error('manually separated provider sources cannot be auto-linked');
+        const existing=members.all(id);
+        // Exact ID ownership alone cannot prove a newly discovered supplier
+        // belongs to this season. Validate it against all stored work members.
+        for(let i=0;i<work.sources.length;i++){
+          const src=work.sources[i];
+          for(let j=0;j<i;j++)if(identityConflict(src,work.sources[j]))
+            throw Error('incoming provider source identity conflicts with its work');
+          for(const old of existing){
+            const earlier=parse(old.item_json);
+            if(identityConflict(earlier,src))
+              throw Error('incoming provider source identity conflicts with the stored work');
+            const pair=pairFields(src,{provider:old.provider,mal_id:old.source_id});
+            if(pair&&blockFind.get(...pair))
+              throw Error('manually separated provider sources cannot be auto-linked');
+          }
         }
         const previous=workFind.get(id),titles={...work.titles};
         if(previous){
@@ -171,7 +185,9 @@ function createStore({app,DatabaseSync}={}){
           const older=Number(incomingEpisode?.attemptedAt)||0;
           const newer=Number(storedEpisode?.attemptedAt)||0;
           const selected=storedEpisode && newer>=older ? storedEpisode : incomingEpisode;
-          const item=selected?{...src,dinoEpisode:selected}:src;
+          // Passive cards omit episode/status fields; never erase richer details.
+          const item={...(earlier||{}),...src};
+          if(selected)item.dinoEpisode=selected;
           putSource.run(src.provider,sourceKey(src),id,JSON.stringify(item));
         }
       }

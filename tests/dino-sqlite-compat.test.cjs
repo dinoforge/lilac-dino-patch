@@ -171,6 +171,47 @@ test('official Korean title is not downgraded to an older provider-only title',(
 });
 
 
+test('more than the v1 hot-cache limit survives SQLite restart across five suppliers',()=>{
+  const env=fixture();
+  let reopened=null;
+  try{
+    const count=1901;
+    for(let i=0;i<count;i+=48){
+      const batch=Array.from({length:Math.min(48,count-i)},(_,j)=>
+        work(String(5000+i+j),'한국어 작품 '+(i+j)));
+      assert.equal(env.store.upsert(batch).ok,true);
+    }
+    assert.equal(env.store.stats().works,count);
+    env.store.close();
+    reopened=createStore({app:{getPath:()=>env.root}});
+    assert.equal(reopened.stats().works,count);
+    assert.ok(reopened.stats().sources.every(s=>s.count===count));
+    assert.equal(reopened.lookup({provider:'linkani',mal_id:'linkani:6900'}).sources.length,5);
+    assert.equal(reopened.lookup({provider:'miruro',mal_id:'miruro:5000'}).titles.ko,'한국어 작품 0');
+  }finally{reopened?.close();env.close();}
+});
+
+test('automatic linking rejects cross-season IDs and duplicate supplier rows atomically',()=>{
+  const env=fixture();
+  try{
+    const initial=work('1211','첫 시즌');
+    initial.sources=[initial.sources[0]];
+    assert.equal(env.store.upsert([initial]).ok,true);
+    const newSource={provider:'miruro',mal_id:'miruro:other-season',id:'wrong',
+      title:'잘못된 두 번째 시즌',anilistId:555555,year:2027,type:'TV'};
+    const inconsistent={...initial,sources:[...initial.sources,newSource]};
+    const rejected=env.store.upsert([inconsistent]);
+    assert.equal(rejected.ok,false);
+    assert.match(rejected.reason,/identity conflicts/);
+    assert.equal(env.store.stats().works,1);
+    assert.equal(env.store.lookup(newSource),null);
+    const duplicate={...initial,sources:[initial.sources[0],
+      {...initial.sources[0],mal_id:'reanime:another-season'}]};
+    assert.equal(env.store.upsert([duplicate]).ok,false);
+    assert.equal(env.store.lookup(initial.sources[0]).sources.length,1);
+  }finally{env.close();}
+});
+
 test('SQLite retains last confirmed latest episode across stale passive cards, restarts and five suppliers',()=>{
   const env=fixture();
   try{

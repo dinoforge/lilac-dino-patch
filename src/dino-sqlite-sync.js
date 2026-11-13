@@ -75,7 +75,10 @@
           // Recent SQLite rows hydrate the synchronous cache. Older works
           // are fetched by exact supplier ID on demand, never all at startup.
           const recent=await safeInvoke('recent',{limit:180});
-          if(Array.isArray(recent)&&recent.length)index.importRows(recent);
+          // The database is authoritative after explicit detach/attach.
+          // An old merged memory group must never swallow separate works.
+          if(Array.isArray(recent)&&recent.length)
+            index.replaceRows(recent,[],{persist:false});
           phase='ready';
           if(pending.size)schedule();
           return true;
@@ -91,7 +94,10 @@
       await start();
       if(!active||!anchor?.provider)return index.find(anchor);
       const cached=index.find(anchor);
-      if(cached?.fresh)return cached;
+      const id=String(anchor.mal_id??(anchor.id!=null?anchor.provider+':'+anchor.id:''));
+      // Fuzzy title matching is not proof of exact supplier ownership.
+      if(cached?.fresh&&cached.sources.some(item=>item.provider===anchor.provider
+        && String(item.mal_id)===id))return cached;
       try{
         const work=await safeInvoke('lookup',{provider:anchor.provider,mal_id:anchor.mal_id,id:anchor.id});
         if(work?.sources?.length)index.importRows([work]);

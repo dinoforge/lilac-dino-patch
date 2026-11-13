@@ -299,7 +299,13 @@
   let prefetchBusy = false;
   let prefetchStarted = 0;
   let prefetchFailed = 0;
-  const budgetDay = () => Math.floor(Date.now() / 86400000);
+  // Apply both background budgets at the computer's local midnight.
+  // Previous numeric UTC-day records naturally expire after this upgrade.
+  const budgetDay = () => {
+    const day=new Date();
+    return [day.getFullYear(),String(day.getMonth()+1).padStart(2,'0'),
+      String(day.getDate()).padStart(2,'0')].join('-');
+  };
   function dailyPrefetchCount() {
     try {
       const budget = JSON.parse(localStorage.getItem(PREFETCH_BUDGET_KEY) || 'null');
@@ -423,17 +429,7 @@
       runNextEpisodeRefresh().catch(() => { episodeFailed++; });
     }, delay);
   }
-  function episodeMetrics(response) {
-    if (!Array.isArray(response?.episodes) || response?.unavailable) return null;
-    let count = 0, latest = 0;
-    for (const episode of response.episodes.slice(0,5000)) {
-      if (!episode || episode.playable === false) continue;
-      count++;
-      const number = playableEpisodeNumber(episode);
-      if (number && number > latest) latest = number;
-    }
-    return {count,latest};
-  }
+  const episodeMetrics = api.episodeMetrics;
   async function runNextEpisodeRefresh() {
     if (episodeBusy || !integratedMode() || !episodeQueue.length
       || episodeAttempted >= EPISODE_REFRESH_SESSION_LIMIT
@@ -914,13 +910,7 @@
     }
   };
 
-  const playableEpisodeNumber = episode => {
-    if (!episode || episode.special || episode.playable === false) return null;
-    const numeric = Number(episode.number);
-    if (Number.isInteger(numeric) && numeric > 0 && numeric < 10000) return numeric;
-    const match = String(episode.name || '').match(/^(?:제?\s*)?(\d{1,4})(?:화|\s*$)/);
-    return match ? Number(match[1]) : null;
-  };
+  const playableEpisodeNumber = api.playableEpisodeNumber;
   function providerReportedQuality(response) {
     // Some providers publish a quality label with their detail/episode data.
     // This is advertised metadata, not a decoded or verified video resolution.
@@ -1263,7 +1253,7 @@
               episodes: metrics.count, latest: metrics.latest,
               checkedAt:Date.now(),newEpisodes:updated?.newEpisodes || 0,
               reportedQuality: providerReportedQuality(response),
-              noEpisodes: response.episodes.length === 0
+              noEpisodes: metrics.count === 0
             });
           } else if (response?.unavailable) {
             workIndex.rememberEpisode(item,null);

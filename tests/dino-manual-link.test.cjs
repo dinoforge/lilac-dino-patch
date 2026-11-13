@@ -71,6 +71,38 @@ test('manual move blocks conflicting seasons, duplicate suppliers and unknown ID
   }finally{env.close();}
 });
 
+test('SQLite split stays split when an old merged v1 snapshot is hydrated at next launch',async()=>{
+  const env=fixture();
+  try{
+    const original=row('73');
+    assert.equal(env.store.upsert([original]).ok,true);
+    const anchor=original.sources[0],moving=original.sources[1];
+    assert.equal(env.store.repair('detach',{anchor,source:moving}).ok,true);
+    const bag=new Map();
+    const storage={getItem:key=>bag.get(key)||null,setItem:(key,value)=>bag.set(key,String(value))};
+    const cache=createWorkIndex(storage);
+    cache.remember({sourceItems:original.sources});
+    cache.flush();
+    const before=bag.get('lilacDinoPatch.workIndex.v1');
+    assert.equal(cache.find(anchor).sources.length,5);
+    const invoke=async(method,payload)=>method==='status'?env.store.status()
+      :method==='upsert'?env.store.upsert(payload.works)
+      :method==='lookup'?env.store.lookup(payload)
+      :method==='recent'?env.store.recent(payload)
+      :method==='stats'?env.store.stats()
+      :env.store.repair(method,payload);
+    const adapter=connect(cache,invoke,{delay:()=>null});
+    assert.equal(await adapter.start(),true);
+    assert.equal(bag.get('lilacDinoPatch.workIndex.v1'),before,
+      'startup migration must not delete or immediately rewrite original v1 cache');
+    assert.equal(cache.find(anchor).sources.length,4);
+    assert.equal(cache.find(moving).sources.length,1);
+    cache.remember({sourceItems:original.sources});
+    assert.equal(cache.find(anchor).sources.length,4);
+    assert.equal(cache.find(moving).sources.length,1);
+  }finally{env.close();}
+});
+
 test('renderer memory gets an authoritative split instead of fuzzy rejoining same-title rows',async()=>{
   const env=fixture();
   try{
