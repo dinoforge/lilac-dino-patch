@@ -12,6 +12,7 @@
   const officialSyncChoices = window.syncSettingChoices;
   const officialSwitchView = window.switchView;
   const officialShowHomeList = window.showHomeList;
+  const officialRenderCards = window.renderCards;
 
   function disablePatch(reason) {
     sourceSelect?.querySelector('option[value="integrated"]')?.remove();
@@ -180,7 +181,7 @@
       // Failed or skipped lookups never turn into permanent "not found".
       const complete = (diagnostics.statuses || []).length === providers.length
         && diagnostics.statuses.every(status => status.state === 'ready');
-      workIndex.remember(group, { checked: complete, names: verifiedAliases });
+      workIndex.remember(group, { checked: complete, attempted: true, names: verifiedAliases });
       detailSearchDiagnostics.set(key, diagnostics.statuses || []);
       if (detailSearchDiagnostics.size > 120) detailSearchDiagnostics.delete(detailSearchDiagnostics.keys().next().value);
       return group;
@@ -210,6 +211,101 @@
     const stored = api.readSourceSettings(localStorage).provider;
     return singleSources.includes(stored) ? stored : initialSourceSettings.provider;
   }
+
+  // As with LilacAnime's Korean title index, discover mappings in the
+  // background as home/season/catalog cards become available. Do not bulk-
+  // scrape all five sites on every launch: persist a daily work budget, run
+  // one work at a time and reuse the same verified index as detail/search.
+  const PREFETCH_BUDGET_KEY = 'lilacDinoPatch.workIndex.prefetchBudget.v1';
+  const PREFETCH_SESSION_LIMIT = 8;
+  const PREFETCH_DAILY_LIMIT = 18;
+  const PREFETCH_RETRY_MS = 12 * 60 * 60 * 1000;
+  const PREFETCH_LIST_TARGETS = new Set(['#seasonRail', '#airingRail', '#topRail',
+    '#allGrid', '#catalogGrid', '#searchGrid']);
+  const prefetchQueue = [];
+  const prefetchSeen = new Set();
+  let prefetchTimer = null;
+  let prefetchBusy = false;
+  let prefetchStarted = 0;
+  let prefetchFailed = 0;
+  const budgetDay = () => Math.floor(Date.now() / 86400000);
+  function dailyPrefetchCount() {
+    try {
+      const budget = JSON.parse(localStorage.getItem(PREFETCH_BUDGET_KEY) || 'null');
+      return budget?.day === budgetDay() && Number.isInteger(budget?.count)
+        ? Math.max(0, Math.min(PREFETCH_DAILY_LIMIT, budget.count)) : 0;
+    } catch { return 0; }
+  }
+  function recordPrefetchAttempt() {
+    const count = dailyPrefetchCount() + 1;
+    try {
+      localStorage.setItem(PREFETCH_BUDGET_KEY, JSON.stringify({ day: budgetDay(), count }));
+    } catch { /* session budget still protects against repeated requests */ }
+  }
+  function prefetchedRecently(item) {
+    const cached = workIndex.find(item);
+    return cached?.fresh || (cached?.attemptedAt > 0
+      && Date.now() - cached.attemptedAt < PREFETCH_RETRY_MS);
+  }
+  function schedulePrefetch(delay = 2300) {
+    if (prefetchTimer !== null || prefetchBusy || !prefetchQueue.length || !integratedMode()
+      || prefetchStarted >= PREFETCH_SESSION_LIMIT || dailyPrefetchCount() >= PREFETCH_DAILY_LIMIT) return;
+    if (typeof setTimeout !== 'function') return;
+    prefetchTimer = setTimeout(() => {
+      prefetchTimer = null;
+      runNextPrefetch().catch(() => { prefetchFailed++; });
+    }, delay);
+  }
+  async function runNextPrefetch() {
+    if (prefetchBusy || !integratedMode() || !prefetchQueue.length
+      || prefetchStarted >= PREFETCH_SESSION_LIMIT || dailyPrefetchCount() >= PREFETCH_DAILY_LIMIT) return;
+    // Foreground playback and detail always take priority over indexing.
+    if (document.hidden === true || document.querySelector('#detailDialog')?.open
+      || document.querySelector('#playerView')?.classList?.contains('active')) {
+      schedulePrefetch(15000);
+      return;
+    }
+    const next = prefetchQueue.shift();
+    if (!next || prefetchedRecently(next)) {
+      schedulePrefetch(900);
+      return;
+    }
+    prefetchBusy = true;
+    prefetchStarted++;
+    recordPrefetchAttempt();
+    try {
+      await discoverSources(next, null);
+    } catch {
+      // Do not turn an outage into a 48-hour "not found" result.
+      // Remember only that this item was attempted for the cooldown.
+      workIndex.remember({ sourceItems: [next] }, { attempted: true });
+      prefetchFailed++;
+    } finally {
+      prefetchBusy = false;
+      schedulePrefetch(3600);
+    }
+  }
+  function queueVisibleWorks(target, items) {
+    if (!PREFETCH_LIST_TARGETS.has(target) || !integratedMode() || !Array.isArray(items)
+      || prefetchStarted >= PREFETCH_SESSION_LIMIT || dailyPrefetchCount() >= PREFETCH_DAILY_LIMIT) return;
+    for (const item of items.slice(0, 32)) {
+      if (!isDinoProvider(item) || !String(item.title || item.title_english || item.displayTitle || '').trim()) continue;
+      const key = item.provider + ':' + sourceKey(item);
+      if (prefetchSeen.has(key) || prefetchedRecently(item)) continue;
+      prefetchSeen.add(key);
+      prefetchQueue.push(item);
+      if (prefetchQueue.length >= 60) break;
+    }
+    schedulePrefetch();
+  }
+  if (typeof officialRenderCards === 'function') {
+    window.renderCards = function (target, items, ...args) {
+      const rendered = officialRenderCards.call(this, target, items, ...args);
+      queueVisibleWorks(target, items);
+      return rendered;
+    };
+  }
+
   function syncSourceSelection() {
     sourceSelect.value = integratedMode() ? 'integrated' : selectedProvider();
     officialSyncChoices?.();
@@ -770,6 +866,11 @@
     getMode: () => integratedMode() ? 'integrated' : 'provider',
     getSelectedProvider: selectedProvider,
     getWorkIndexStats: () => workIndex.stats(),
+    getPrefetchStatus: () => ({
+      queued: prefetchQueue.length, running: prefetchBusy,
+      startedThisSession: prefetchStarted, failed: prefetchFailed,
+      usedToday: dailyPrefetchCount(), dailyLimit: PREFETCH_DAILY_LIMIT
+    }),
     flushWorkIndex: () => workIndex.flush(),
     getSearchDiagnostics: () => resultStatuses.map(item => ({
       provider: item.provider, state: item.state, results: item.resultCount,
