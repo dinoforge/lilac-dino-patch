@@ -1088,3 +1088,22 @@ test('background episode polling is bounded to eight supplier requests in one se
   assert.equal(info.sessionLimit,8);
   assert.equal(app.scheduled.filter(fn=>fn.__testDelay===14000).length,7);
 });
+
+
+test('an airing title that becomes completed before its scheduled poll is not queried',async()=>{
+  const app=harness();
+  app.nodes.get('#detailDialog').open=false;
+  let calls=0;
+  app.window.lilac.providerDetail=async()=>{calls++;return {episodes:[{number:1}]}};
+  app.window.renderCards('#airingRail',[{...app.home,status:'airing'}]);
+  const scheduled=app.scheduled.find(fn=>fn.__testDelay===20000);
+  assert.ok(scheduled);
+  app.window.renderCards('#airingRail',[{...app.home,status:'FINISHED'}]);
+  scheduled();
+  await settle();await settle();
+  assert.equal(calls,0,'a title completed before the timer fires must not generate supplier IPC');
+  assert.equal(app.window.__dinoPatch03Bridge.getEpisodeRefreshStatus().attempted,0);
+  app.window.renderCards('#airingRail',[{...app.home,status:'airing'}]);
+  assert.equal(app.window.__dinoPatch03Bridge.getEpisodeRefreshStatus().queued,1,
+    'new airing announcements can be scheduled after a skipped old request');
+});
