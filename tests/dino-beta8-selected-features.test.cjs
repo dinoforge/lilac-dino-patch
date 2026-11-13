@@ -77,3 +77,54 @@ test('selected feature UI remains scoped to integrated detail picker',()=>{
   assert.match(bridge,/dino-accent-switch/);
   assert.match(bridge,/diagnoseProviderStatuses/);
 });
+
+
+test('partial primary airing date falls back to a precise secondary date',()=>{
+  assert.equal(api.preciseReleaseTime({
+    startDate:{year:2026},
+    started_on:'2026-11-03'
+  }),Date.UTC(2026,10,3));
+  assert.equal(api.preciseReleaseTime({
+    startDate:'2026-02-30',
+    aired:'2026-11-02'
+  }),Date.UTC(2026,10,2));
+});
+test('season summary expires old observations without deleting manually owned data',()=>{
+  const map=new Map();
+  const storage={getItem:key=>map.get(key)||null,setItem:(key,value)=>map.set(key,value)};
+  let current=Date.UTC(2026,10,14);
+  const detector=api.createSeasonDetector(storage,{clock:()=>current});
+  const row={provider:'miruro',id:'season-77',started_on:'2026-11-01'};
+  assert.equal(detector.observe([row]).length,1);
+  assert.equal(detector.summary().count,1);
+  current=Date.UTC(2027,2,5);
+  assert.equal(detector.summary().count,0);
+  assert.equal(detector.summary().recent.length,0);
+  assert.ok(map.has('lilacDinoPatch.newSeasonObserved.v1'));
+});
+test('corrupt persisted observation rows do not inflate the current count',()=>{
+  const key='lilacDinoPatch.newSeasonObserved.v1';
+  const now=Date.UTC(2026,10,14);
+  const saved={version:1,seen:[],recent:[
+    {provider:'reanime',sourceId:'ok',startedAt:Date.UTC(2026,10,1)},
+    {provider:'unsupported',sourceId:'no',startedAt:now},
+    {provider:'miruro',sourceId:'no-date',startedAt:'2026-11-01'},
+    {provider:'ohli24',sourceId:'very-old',startedAt:Date.UTC(2024,0,1)}
+  ]};
+  const storage={getItem:input=>input===key?JSON.stringify(saved):null,setItem:()=>{}};
+  const detector=api.createSeasonDetector(storage,{clock:()=>now});
+  assert.equal(detector.summary().count,1);
+  assert.equal(detector.summary().recent[0].sourceId,'ok');
+});
+test('search term fan-out stays bounded to providers and unique terms',async()=>{
+  const calls=[];
+  const result=await api.searchProviders({
+    providers:['reanime','miruro','reanime'],
+    terms:['ABC','abc','ABC','日本語'],
+    concurrency:2,maxPages:1,
+    search:async(provider,term)=>{calls.push(provider+':'+term);return [];}
+  });
+  assert.equal(calls.length,4);
+  assert.equal(new Set(calls).size,4);
+  assert.equal(result.statuses.length,2);
+});
