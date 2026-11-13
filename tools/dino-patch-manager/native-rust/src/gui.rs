@@ -368,6 +368,113 @@ impl DinoUi {
         }
     }
 
+    // The first screen answers three questions without requiring a user to
+    // read a long transaction log: was the original found, is it safe to
+    // modify, and has the patch already been applied?
+    fn overview_card(&mut self, ui: &mut Ui) {
+        let status = self.status.status.as_str();
+        let applied = matches!(status, "APPLIED" | "ALREADY_APPLIED");
+        let compatible = matches!(status,
+            "APPLIED" | "ALREADY_APPLIED" | "UNPATCHED" | "ALREADY_UNPATCHED");
+        let has_root = !self.root.trim().is_empty();
+        let blocked = matches!(status, "CONFLICT" | "UNSUPPORTED" | "PARTIAL_OR_UNKNOWN");
+        let (headline, details, tone) = if self.busy {
+            ("안전한 패치 작업을 진행하고 있습니다",
+             "호환성과 백업 상태를 확인하고 있어요. 완료될 때까지 다른 작업은 시작하지 않습니다.",
+             StatusTone::Neutral)
+        } else if applied {
+            ("패치가 적용되어 있습니다",
+             "설치된 LilacAnime에 DinoPatch가 적용된 상태입니다. 필요할 때 다시 검사할 수 있습니다.",
+             StatusTone::Good)
+        } else if compatible {
+            ("원본 확인 완료 · 패치 적용 가능",
+             "공식 원본의 호환성이 확인됐습니다. 적용 전 백업과 원본 지문을 다시 검사합니다.",
+             StatusTone::Warning)
+        } else if blocked {
+            ("안전을 위해 작업이 중단됐습니다",
+             "원본 파일은 변경하지 않았습니다. 오류 사유와 상세 진단 기록을 확인하세요.",
+             StatusTone::Bad)
+        } else if !has_root || status == "NO_SOURCE" {
+            ("먼저 LilacAnime 설치 폴더를 선택하세요",
+             "설치된 공식 LilacAnime만 지원하며 원본 프로그램은 DinoPatch에 포함되지 않습니다.",
+             StatusTone::Neutral)
+        } else {
+            ("패치 적용 전 원본 확인이 필요합니다",
+             "원본 구조와 호환성을 확인한 후 패치 적용 여부를 판단합니다.",
+             StatusTone::Neutral)
+        };
+        let (badge_fill, badge_ink) = status_style(tone);
+        Frame::new()
+            .fill(rgb(SURFACE_DARK))
+            .stroke(Stroke::new(1.0, rgb(if blocked { 0x725054 } else { 0x41695F })))
+            .corner_radius(CornerRadius::same(16))
+            .inner_margin(Margin::symmetric(20, 19))
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("현재 패치 상태")
+                        .size(12.0).strong().color(rgb(ACCENT)));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let (title, status_tone) = badge_for(&self.status);
+                        pill(ui, title, status_tone);
+                    });
+                });
+                ui.add_space(7.0);
+                ui.label(RichText::new(headline).size(20.0).strong().color(rgb(TEXT)));
+                ui.add_space(3.0);
+                ui.label(RichText::new(details).size(12.0).color(rgb(MUTED)));
+                ui.add_space(14.0);
+                ui.horizontal_wrapped(|ui| {
+                    pill(ui, "1. 원본 선택", if has_root {
+                        StatusTone::Good
+                    } else { StatusTone::Neutral });
+                    pill(ui, "2. 호환성 확인", if compatible {
+                        StatusTone::Good
+                    } else if blocked { StatusTone::Bad } else { StatusTone::Neutral });
+                    pill(ui, "3. 패치 적용", if applied {
+                        StatusTone::Good
+                    } else { StatusTone::Neutral });
+                });
+                ui.add_space(12.0);
+                ui.horizontal_wrapped(|ui| {
+                    if self.busy {
+                        ui.spinner();
+                        label(ui, "처리 중 · 잠시 다른 패치 작업은 비활성화됩니다.");
+                    } else if !has_root || status == "NO_SOURCE" {
+                        if action(ui, "원본 폴더 선택", ButtonTone::Primary, true) {
+                            self.choose_folder();
+                        }
+                    } else if compatible && !applied {
+                        if action(ui, "안전하게 패치 적용", ButtonTone::Primary, true) {
+                            self.ask("디노 패치 수동 적용");
+                        }
+                    } else if applied {
+                        if action(ui, "현재 상태 다시 검사", ButtonTone::Secondary, true) {
+                            self.enqueue("원본 다시 확인");
+                        }
+                    } else if blocked {
+                        if action(ui, "진단 기록 열기", ButtonTone::Secondary, true) {
+                            self.show_log = true;
+                        }
+                    } else if action(ui, "원본 호환성 확인", ButtonTone::Primary, true) {
+                        self.enqueue("원본 다시 확인");
+                    }
+                    ui.add_space(7.0);
+                    Frame::new()
+                        .fill(rgb(badge_fill))
+                        .corner_radius(CornerRadius::same(7))
+                        .inner_margin(Margin::symmetric(9, 7))
+                        .show(ui, |ui| {
+                            ui.label(RichText::new(if self.auto_enabled {
+                                "자동 감시 사용 중"
+                            } else {
+                                "자동 감시 일시 중지"
+                            }).size(10.5).color(rgb(badge_ink)));
+                        });
+                });
+            });
+    }
+
     fn source_card(&mut self, ui: &mut Ui) {
         card(ui, |ui| {
             ui.horizontal(|ui| {
@@ -699,13 +806,18 @@ impl eframe::App for DinoUi {
                             ui.set_max_width(860.0);
                             ui.set_min_width(ui.available_width().min(860.0));
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new("LilacAnime DinoPatch")
-                                    .size(27.0).strong().color(rgb(TEXT)));
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new("DinoPatch Manager")
+                                        .size(28.0).strong().color(rgb(TEXT)));
+                                    label(ui, "LilacAnime · 원본 보존형 패치 관리자");
+                                });
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    pill(ui, "관리자 v0.2.1 · Rust", StatusTone::Neutral);
+                                    pill(ui, "Rust 네이티브 · v0.2.1", StatusTone::Neutral);
                                 });
                             });
-                            ui.add_space(13.0);
+                            ui.add_space(15.0);
+                            self.overview_card(ui);
+                            ui.add_space(12.0);
                             self.source_card(ui);
                             ui.add_space(12.0);
                             self.patch_list_card(ui);
@@ -768,8 +880,8 @@ fn setup_style(ctx: &egui::Context) {
 pub fn start() -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([920.0, 800.0])
-            .with_min_inner_size([800.0, 760.0]),
+            .with_inner_size([940.0, 840.0])
+            .with_min_inner_size([730.0, 640.0]),
         ..Default::default()
     };
     eframe::run_native(
