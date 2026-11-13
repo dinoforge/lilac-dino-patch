@@ -10,6 +10,20 @@ const number=x=>Number.isFinite(Number(x))?Math.max(0,Math.trunc(Number(x))):0;
 const korean=x=>/[가-힣]/.test(x||'')?clean(x):'';
 const object=x=>!!x&&typeof x==='object'&&!Array.isArray(x);
 const sourceKey=x=>String(x?.mal_id??(x?.provider&&x?.id!=null?x.provider+':'+x.id:'')).slice(0,300);
+const external=x=>String(x??'').trim().replace(/^0+/, '')||'';
+const identityConflict=(a,b)=>{
+  if(!object(a)||!object(b))return false;
+  const ids=[['anilistId','anilist_id'],['malId','malId']];
+  for(const [first,second] of ids){
+    const left=external(a[first]??a[second]),right=external(b[first]??b[second]);
+    if(left&&right&&left!==right)return true;
+  }
+  const leftYear=number(a.year),rightYear=number(b.year);
+  if(leftYear&&rightYear&&leftYear!==rightYear)return true;
+  if(clean(a.type)&&clean(b.type)&&clean(a.type).toUpperCase()!==clean(b.type).toUpperCase())
+    return true;
+  return false;
+};
 const parse=x=>{try{return JSON.parse(x)}catch{return null}};
 function normalize(raw){
   if(!object(raw)||!Array.isArray(raw.sources)||!raw.sources.length||raw.sources.length>8
@@ -79,19 +93,25 @@ function createStore({app,DatabaseSync}={}){
     if(!Array.isArray(rows)||rows.length>BATCH_LIMIT)return {ok:false,reason:'invalid batch'};
     const normalized=rows.map(normalize);
     if(normalized.some(x=>!x))return {ok:false,reason:'invalid row'};
-    const sourceFind=db.prepare('SELECT work_id FROM work_sources WHERE provider=? AND source_id=?');
+    const sourceFind=db.prepare('SELECT work_id,item_json FROM work_sources WHERE provider=? AND source_id=?');
     const workFind=db.prepare('SELECT * FROM works WHERE work_id=?');
     const putWork=db.prepare('INSERT INTO works(work_id,names_json,title_ko,title_en,title_ja,ko_source,ko_checked_at,manual,checked_at,attempted_at,outcome,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(work_id) DO UPDATE SET names_json=excluded.names_json,title_ko=excluded.title_ko,title_en=excluded.title_en,title_ja=excluded.title_ja,ko_source=excluded.ko_source,ko_checked_at=excluded.ko_checked_at,manual=excluded.manual,checked_at=excluded.checked_at,attempted_at=excluded.attempted_at,outcome=excluded.outcome,updated_at=excluded.updated_at');
     const putSource=db.prepare('INSERT INTO work_sources(provider,source_id,work_id,item_json) VALUES(?,?,?,?) ON CONFLICT(provider,source_id) DO UPDATE SET item_json=excluded.item_json WHERE work_sources.work_id=excluded.work_id');
     try{
       db.exec('BEGIN IMMEDIATE');
       for(const work of normalized){
-        let id='';
+        // Never silently reassign a source URL/ID to a different season,
+        // movie, or AniList identity. Nor merge two already distinct works.
+        const knownIds=new Set();
         for(const src of work.sources){
           const known=sourceFind.get(src.provider,sourceKey(src));
-          if(known){id=known.work_id;break;}
+          if(!known)continue;
+          if(identityConflict(parse(known.item_json),src))
+            throw Error('provider source identity conflicts with the stored work');
+          knownIds.add(known.work_id);
         }
-        if(!id)id=work.sources[0].provider+':'+sourceKey(work.sources[0]);
+        if(knownIds.size>1)throw Error('conflicting existing work identities');
+        const id=[...knownIds][0]||work.sources[0].provider+':'+sourceKey(work.sources[0]);
         const previous=workFind.get(id),titles={...work.titles};
         if(previous){
           const previousTime=Number(previous.ko_checked_at)||0;
@@ -102,6 +122,13 @@ function createStore({app,DatabaseSync}={}){
             titles.koCheckedAt=previousTime;titles.manual=true;
           }else if(!titles.ko&&previous.title_ko&&!work.explicitManualReset){
             titles.ko=previous.title_ko;titles.koSource=previous.ko_source;
+            titles.koCheckedAt=previousTime;
+          }
+          // A verified Korean title outranks an unverified provider label.
+          if(previous.ko_source==='official'&&!titles.manual
+            &&(titles.koSource!=='official'
+              ||previousTime>titles.koCheckedAt)){
+            titles.ko=previous.title_ko;titles.koSource='official';
             titles.koCheckedAt=previousTime;
           }
           if(!titles.en)titles.en=previous.title_en;
