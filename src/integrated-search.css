@@ -497,3 +497,30 @@
   white-space:normal;
   overflow-wrap:anywhere
 }
+
+
+/* Optional integrated-mode-only accent colors; never change upstream panels
+   or the app's global light/dark preference. */
+.detail-source-picker.dino-integrated-picker[data-dino-accent="mint"]{
+  --lilac:#40b89e;
+  --lilac2:#7ad6c1
+}
+.detail-source-picker.dino-integrated-picker[data-dino-accent="blue"]{
+  --lilac:#7b9be7;
+  --lilac2:#a3baf4
+}
+.detail-source-picker.dino-integrated-picker .dino-accent-switch{
+  margin-left:0;
+  min-height:32px
+}
+.detail-source-picker.dino-integrated-picker .dino-accent-switch:focus-visible{
+  outline:2px solid var(--lilac);
+  outline-offset:2px
+}
+.detail-source-picker.dino-integrated-picker .dino-season-observation{
+  width:100%;
+  font-size:11px;
+  color:var(--muted);
+  line-height:1.5;
+  overflow-wrap:anywhere
+}
