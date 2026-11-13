@@ -423,7 +423,7 @@ impl DinoUi {
              StatusTone::Warning)
         } else if blocked {
             ("안전을 위해 작업이 중단됐습니다",
-             "원본 파일은 변경하지 않았습니다. 오류 사유와 상세 진단 기록을 확인하세요.",
+             "현재 원본·백업 상태가 확인되지 않았습니다. 추가 변경을 중단하고 진단 기록을 확인하세요.",
              StatusTone::Bad)
         } else if !has_root || status == "NO_SOURCE" {
             ("먼저 LilacAnime 설치 폴더를 선택하세요",
@@ -572,11 +572,12 @@ impl DinoUi {
             ui.add_space(7.0);
             if self.show_path_editor {
                 label(ui, "검사할 새 경로 · 입력 중에는 기존 설치 경로가 유지됩니다.");
+                let input_width = ui.available_width();
                 ui.add_enabled(
                     !self.busy,
                     egui::TextEdit::singleline(&mut self.path_draft)
                         .hint_text(r"D:\LilacAnime")
-                        .desired_width(ui.available_width()),
+                        .desired_width(input_width),
                 );
                 ui.add_space(6.0);
                 ui.horizontal_wrapped(|ui| {
@@ -915,8 +916,9 @@ impl eframe::App for DinoUi {
                             } else {
                                 "고급 관리 열기 · 원복 / 백업 / 작업 로그 / 업데이트"
                             };
+                            let toggle_width = ui.available_width();
                             if ui.add_sized(
-                                [ui.available_width(), 38.0],
+                                [toggle_width, 38.0],
                                 Button::new(advanced_title)
                                     .fill(rgb(SURFACE))
                                     .stroke(Stroke::new(1.0, rgb(BORDER)))
