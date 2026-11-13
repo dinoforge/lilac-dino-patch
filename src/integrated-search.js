@@ -825,7 +825,9 @@
           // arrive after the first card has already been rendered.
           const itemNames = namesOf([item.title, item.title_english,
             item.title_japanese, item.displayTitle, ...(item.synonyms || [])]);
-          if (!itemNames.some(name => !row.names.includes(name))) continue;
+          const statusChanged = typeof item.status === 'string'
+            && item.status.trim() && item.status !== old.status;
+          if (!itemNames.some(name => !row.names.includes(name)) && !statusChanged) continue;
           updated++;
         } else added++;
         remember({ sourceItems: [item] });
