@@ -1120,3 +1120,64 @@ test('episode scheduler can pause and resume without touching provider settings'
   assert.equal(app.storage.get('contentSource'),sourceBefore);
   assert.equal(bridge.getEpisodeRefreshStatus().dailyLimit,18);
 });
+
+test('yearless Animenosub list candidate is matched only after detail verifies its release year',async()=>{
+  const app=harness();
+  const candidate={
+    provider:'animenosub',id:'same-work',mal_id:'animenosub:same-work',
+    title:'English Work',title_english:'',year:'',type:'Anime'
+  };
+  const detailCalls=[];
+  app.window.lilac.providerCatalog=async(provider,query)=>
+    provider==='animenosub'&&query==='English Work'?{data:[candidate]}:{data:[]};
+  app.window.lilac.providerDetail=async item=>{
+    detailCalls.push(item.provider);
+    return {data:item.provider==='animenosub'?{...item,year:2026}:item,episodes:[]};
+  };
+  await app.window.openDetail(app.home.mal_id);
+  assert.ok(buttons(app).some(button=>button.dataset.providerSource==='animenosub:same-work'),
+    'same-year candidate should link after loading official provider detail');
+  assert.ok(detailCalls.includes('animenosub'),'yearless provider metadata should be loaded from its detail page');
+});
+
+test('yearless candidate whose detailed release year conflicts stays separate',async()=>{
+  const app=harness();
+  const candidate={
+    provider:'animenosub',id:'different-season',mal_id:'animenosub:different-season',
+    title:'English Work',title_english:'',year:'',type:'Anime'
+  };
+  app.window.lilac.providerCatalog=async(provider,query)=>
+    provider==='animenosub'&&query==='English Work'?{data:[candidate]}:{data:[]};
+  app.window.lilac.providerDetail=async item=>({
+    data:item.provider==='animenosub'?{...item,year:2025}:item,episodes:[]
+  });
+  await app.window.openDetail(app.home.mal_id);
+  assert.equal(buttons(app).length,1,
+    'identical title is not evidence enough when detailed year differs');
+  const picker=app.nodes.get('#detailContent').querySelector('.detail-source-picker');
+  assert.ok(!picker.children.some(node=>String(node.textContent).includes('작품 확인 필요')),
+    'a proven different release year is a rejection, not an unverified match');
+});
+
+test('a matching-title candidate without a verifiable year is shown as unverified',async()=>{
+  const app=harness();
+  const candidate={
+    provider:'animenosub',id:'unknown-year',mal_id:'animenosub:unknown-year',
+    title:'English Work',title_english:'',year:'',type:'Anime'
+  };
+  app.window.lilac.providerCatalog=async(provider,query)=>
+    provider==='animenosub'&&query==='English Work'?{data:[candidate]}:{data:[]};
+  app.window.lilac.providerDetail=async item=>({data:item,episodes:[]});
+  await app.window.openDetail(app.home.mal_id);
+  assert.equal(buttons(app).length,1);
+  const picker=app.nodes.get('#detailContent').querySelector('.detail-source-picker');
+  assert.ok(picker.children.some(node=>String(node.textContent).includes('작품 확인 필요')),
+    'an unresolved exact-title candidate must not be reported as a confirmed miss');
+});
+
+test('manual supplier refresh overrides a previously fresh scan without deleting SQLite history',async()=>{
+  const source=fs.readFileSync(path.join(__dirname,'../patches/patch03/patch03-bridge.js'),'utf8');
+  assert.match(source,/if \(!force && stored\?\.fresh/);
+  assert.match(source,/discoverSources\(current, group, \{ force: true \}\)/);
+  assert.doesNotMatch(source,/localStorage\.clear\(|DROP TABLE|DELETE FROM dino_work/);
+});

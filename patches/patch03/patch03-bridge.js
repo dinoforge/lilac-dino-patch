@@ -72,6 +72,8 @@
   const DISCOVERY_TTL_MS = 5 * 60 * 1000;
   const catalogRequestCache = new Map();
   const detailSearchDiagnostics = new Map();
+  const detailUnverifiedCandidates = new Map();
+  const detailedIdentityCache = new Map();
   const SEARCH_CACHE_TTL_MS = 90 * 1000;
   function cachedCatalog(provider, query, offset = undefined) {
     const key = JSON.stringify([provider, String(query || ''), offset ?? null]);
@@ -133,7 +135,56 @@
     return commonTitleGroup(groups.find(group => group.sourceItems.some(item => item.provider === anchor.provider
       && sourceKey(item) === sourceKey(anchor))) || api.groupResults([anchor], selectedProvider())[0]);
   }
-  async function discoverSources(anchor, knownGroup, { background = false } = {}) {
+  // Some upstream catalogs (especially Animenosub) return year: ''.
+  // Their detail endpoint can supply the actual release year. Only fetch a
+  // bounded number of exact-title candidates, then let the STRICT year/season
+  // and external-ID matcher decide; never merge on title alone.
+  const strongTitleCandidate = (reference, candidate) => {
+    if (!isDinoProvider(candidate) || candidate.provider === reference.provider
+      || !api.metadataCompatible(reference, candidate, { aliasMatch: true })) return false;
+    const left = new Set(api.aliases(reference).filter(key => key.length >= 5));
+    return api.aliases(candidate).some(key => key.length >= 5 && left.has(key));
+  };
+  function detailedIdentity(item) {
+    const key = item.provider + ':' + sourceKey(item);
+    const cached = detailedIdentityCache.get(key);
+    if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.promise;
+    const promise = Promise.resolve().then(() => window.lilac.providerDetail(item))
+      .then(result => {
+        const data = result?.data;
+        // Only accept metadata for the SAME underlying provider item.
+        if (!data || data.provider !== item.provider || sourceKey(data) !== sourceKey(item)) return item;
+        const enriched = { ...item };
+        for (const field of ['year', 'season', 'part', 'aired', 'type', 'format',
+          'title_english', 'title_japanese', 'anilistId', 'malId']) {
+          if ((enriched[field] == null || enriched[field] === '') && data[field] != null && data[field] !== '')
+            enriched[field] = data[field];
+        }
+        if ((!Array.isArray(item.synonyms) || !item.synonyms.length) && Array.isArray(data.synonyms))
+          enriched.synonyms = data.synonyms;
+        return enriched;
+      }).catch(() => item);
+    detailedIdentityCache.set(key, { at: Date.now(), promise });
+    if (detailedIdentityCache.size > 120) detailedIdentityCache.delete(detailedIdentityCache.keys().next().value);
+    return promise;
+  }
+  async function enrichMissingIdentityYears(reference, items, { background = false } = {}) {
+    if (typeof window.lilac?.providerDetail !== 'function') return { reference, items };
+    const matches = items.filter(item => strongTitleCandidate(reference, item));
+    if (!matches.length) return { reference, items };
+    let enrichedReference = reference;
+    if (!api.year(reference) && matches.length) enrichedReference = await detailedIdentity(reference);
+    const eligible = matches.filter(item => !api.year(item)
+      && strongTitleCandidate(enrichedReference, item))
+      .slice(0, background ? 1 : 4);
+    if (!eligible.length) return { reference: enrichedReference, items };
+    const updated = await Promise.all(eligible.map(detailedIdentity));
+    const enriched = new Map(updated.map(item => [item.provider + ':' + sourceKey(item), item]));
+    return { reference: enrichedReference,
+      items: items.map(item => enriched.get(item.provider + ':' + sourceKey(item)) || item) };
+  }
+
+  async function discoverSources(anchor, knownGroup, { background = false, force = false } = {}) {
     const identityKey = anchor.provider + ':' + sourceKey(anchor);
     const key = identityKey + (background ? ':background' : ':foreground');
     const cached = detailDiscoveryCache.get(key);
@@ -144,7 +195,7 @@
         ...(stored?.sources || [])];
       // Foreground requests may bypass a background attempt that failed or
       // only checked a limited number of aliases/pages.
-      if (stored?.fresh && (background || stored.outcome !== 'error')) {
+      if (!force && stored?.fresh && (background || stored.outcome !== 'error')) {
         const reference = { ...anchor,
           synonyms: [...(Array.isArray(anchor.synonyms) ? anchor.synonyms : []), ...stored.names] };
         return verifiedGroupFor(reference, seeds);
@@ -219,7 +270,8 @@
       };
       const first = await api.searchProviders({ ...options, providers: toCheck, query });
       let diagnostics = first;
-      let group = verifiedGroupFor(reference, [...seeds, ...first.items]);
+      let identity = await enrichMissingIdentityYears(reference, [...seeds, ...first.items], { background });
+      let group = verifiedGroupFor(identity.reference, identity.items);
       // A successful nonempty catalog response can contain unrelated anime.
       // Only an identity match proves that the requested work was found.
       const matched = new Set(group.sourceItems.map(item => item.provider));
@@ -229,7 +281,9 @@
           ...options, providers: missing, query: '', terms,
           localSearch: async () => null
         });
-        group = verifiedGroupFor(reference, [...seeds, ...first.items, ...extra.items]);
+        identity = await enrichMissingIdentityYears(identity.reference,
+          [...identity.items, ...extra.items], { background });
+        group = verifiedGroupFor(identity.reference, identity.items);
         diagnostics = api.mergeSearchResults(first, extra);
       }
       // Mark a mapping fresh only when every attempted supplier answered.
@@ -249,7 +303,16 @@
       workIndex.remember(group, { checked: complete, attempted: true,
         outcome, names: verifiedAliases });
       detailSearchDiagnostics.set(identityKey, diagnostics.statuses || []);
+      // Report exact-title candidates that still lack safe identity evidence
+      // separately from providers that returned no search results at all.
+      const unverified = [...new Set(identity.items.filter(item =>
+        strongTitleCandidate(identity.reference, item)
+        && !api.identityMatch(identity.reference, item)
+      ).map(item => item.provider))];
+      detailUnverifiedCandidates.set(identityKey, unverified);
       if (detailSearchDiagnostics.size > 120) detailSearchDiagnostics.delete(detailSearchDiagnostics.keys().next().value);
+      if (detailUnverifiedCandidates.size > 120)
+        detailUnverifiedCandidates.delete(detailUnverifiedCandidates.keys().next().value);
       return group;
     })();
     detailDiscoveryCache.set(key, { at: Date.now(), promise });
@@ -1287,20 +1350,24 @@
     if (group.sourceItems.length === 1) {
       const note = document.createElement('small');
       note.className = 'source-search-note';
-      note.textContent = searching ? '다른 공급원에서 같은 작품을 확인하는 중...' : '다른 공급원에서 같은 작품을 확인하지 못했습니다. 다른 시즌은 자동으로 합치지 않습니다.';
+      note.textContent = searching ? '다른 공급원에서 같은 작품을 확인하는 중...'
+        : '다른 공급원 연결은 아직 확인되지 않았습니다. 검색 성공과 작품 일치 확인은 다릅니다.';
       section.append(note);
     }
     if (!searching && group.sourceItems.length < providers.length) {
       const reference = group.sourceItems.find(item => sourceKey(item) === String(activeId)) || group.sourceItems[0];
-      const scan = detailSearchDiagnostics.get(reference.provider + ':' + sourceKey(reference)) || [];
+      const scanKey = reference.provider + ':' + sourceKey(reference);
+      const scan = detailSearchDiagnostics.get(scanKey) || [];
+      const potential = detailUnverifiedCandidates.get(scanKey) || [];
       const missing = scan.filter(item => item.state === 'ready' && item.resultCount === 0);
       const failed = scan.filter(item => item.state === 'failed' || item.state === 'partial');
-      if (missing.length || failed.length) {
+      if (missing.length || failed.length || potential.length) {
         const diagnostic = document.createElement('small');
         diagnostic.className = 'source-search-note';
         diagnostic.textContent = [
-          missing.length ? '미발견: ' + missing.map(item => labels[item.provider] || item.provider).join(', ') : '',
-          failed.length ? '응답 오류: ' + failed.map(item => labels[item.provider] || item.provider).join(', ') : ''
+          missing.length ? '검색 결과 없음: ' + missing.map(item => labels[item.provider] || item.provider).join(', ') : '',
+          failed.length ? '응답 오류: ' + failed.map(item => labels[item.provider] || item.provider).join(', ') : '',
+          potential.length ? '작품 확인 필요: ' + potential.map(provider => labels[provider] || provider).join(', ') : ''
         ].filter(Boolean).join(' · ');
         section.append(diagnostic);
       }
@@ -1321,7 +1388,7 @@
         retry.disabled = true;
         retry.textContent = '다른 공급원 다시 확인 중...';
         try {
-          const discovered = await discoverSources(current, group);
+          const discovered = await discoverSources(current, group, { force: true });
           if (seq !== detailSequence || !integratedMode()) return;
           keepDetailGroup(discovered);
           renderSourcePicker(discovered, activeId);
