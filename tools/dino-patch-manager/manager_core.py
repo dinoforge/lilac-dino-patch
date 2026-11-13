@@ -48,6 +48,8 @@ EXPECTED_MODULES = {
     "src/patch03-bridge.js",
 }
 EXPECTED_CONNECTION_FILES = {"src/app.js", "src/index.html"}
+OPTIONAL_CONNECTION_FILES = {"electron/main.cjs", "electron/preload.cjs"}
+OPTIONAL_MODULES = {"src/dino-sqlite-sync.js", "electron/dino-work-db.cjs"}
 EXPECTED_PROVIDERS = ["reanime", "miruro", "animenosub", "ohli24", "linkani"]
 
 
@@ -392,10 +394,29 @@ def validate_manifest(manifest: Any) -> None:
     connection_files = manifest.get("officialConnectionFiles")
     allowed = manifest.get("officialRuntimeModifiedAllowlist")
     connections = manifest.get("connections")
-    if not isinstance(connection_files, list) or not isinstance(allowed, list) or set(connection_files) != set(allowed):
+    optional = manifest.get("optionalConnections", [])
+    if not isinstance(optional, list) or (optional and len(optional) != 2):
+        raise ManagerError("추가 SQLite IPC 연결 목록이 올바르지 않습니다.")
+    expected_modified = EXPECTED_CONNECTION_FILES | (OPTIONAL_CONNECTION_FILES if optional else set())
+    if not isinstance(connection_files, list) or set(connection_files) != EXPECTED_CONNECTION_FILES:
+        raise ManagerError("기존 공식 연결 파일 범위를 변경할 수 없습니다.")
+    if not isinstance(allowed, list) or set(allowed) != expected_modified:
         raise ManagerError("공식 연결 파일 허용 목록이 일치하지 않습니다.")
-    if set(connection_files) != EXPECTED_CONNECTION_FILES:
-        raise ManagerError("검토된 두 공식 연결 파일 범위와 manifest가 다릅니다.")
+    if optional:
+        extra_paths = set()
+        for item in optional:
+            if not isinstance(item, dict):
+                raise ManagerError("추가 연결 항목 형식이 잘못됐습니다.")
+            relative = _safe_relative(item.get("file"))
+            if relative not in OPTIONAL_CONNECTION_FILES or relative in extra_paths:
+                raise ManagerError(f"허용되지 않은 추가 연결 대상: {relative}")
+            if not all(isinstance(item.get(key), str) and item[key] for key in ("description", "before", "after")):
+                raise ManagerError(f"추가 연결 지점이 불완전합니다: {relative}")
+            if item["before"] == item["after"]:
+                raise ManagerError(f"추가 연결 변경 전후가 동일합니다: {relative}")
+            extra_paths.add(relative)
+        if extra_paths != OPTIONAL_CONNECTION_FILES:
+            raise ManagerError("SQLite 메인·preload 연결 두 개가 모두 필요합니다.")
     if not isinstance(connections, list) or len(connections) != 5:
         raise ManagerError("공식 연결 코드 변경 목록이 없습니다.")
     touched = set()
@@ -416,14 +437,15 @@ def validate_manifest(manifest: Any) -> None:
         raise ManagerError("manifest가 두 공식 연결 파일을 모두 다루지 않습니다.")
 
     modules = manifest.get("runtimeModules")
-    if not isinstance(modules, list) or len(modules) != len(EXPECTED_MODULES) or {item.get("destination") for item in modules if isinstance(item, dict)} != EXPECTED_MODULES:
-        raise ManagerError("필수 디노 패치 모듈 3개가 manifest와 일치하지 않습니다.")
+    module_set = EXPECTED_MODULES | (OPTIONAL_MODULES if optional else set())
+    if not isinstance(modules, list) or len(modules) != len(module_set) or {item.get("destination") for item in modules if isinstance(item, dict)} != module_set:
+        raise ManagerError("필수 디노 패치 모듈이 manifest와 일치하지 않습니다.")
     for item in modules:
         _safe_relative(item.get("source"))
         _safe_relative(item.get("destination"))
         if not re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256", "")), re.I):
             raise ManagerError(f"패치 파일 SHA-256 형식이 잘못됐습니다: {item.get('source')}")
-        if item["destination"] in EXPECTED_CONNECTION_FILES:
+        if item["destination"] in expected_modified:
             raise ManagerError("패치 모듈이 공식 연결 파일을 덮어쓰도록 설정되어 있습니다.")
 
     apis = manifest.get("officialApis")
@@ -494,7 +516,7 @@ def _verify_original_root(root: Path, manifest: dict[str, Any]) -> dict[str, str
     actual_tree = tree_sha256(files)
     if actual_tree != manifest["officialTreeSha256"]:
         raise ManagerError(f"공식 원본 파일 트리 SHA-256 불일치: {actual_tree}")
-    for connection in manifest["connections"]:
+    for connection in [*manifest["connections"], *manifest.get("optionalConnections", [])]:
         path = _module_path(root, connection["file"])
         data = path.read_bytes()
         before = connection["before"].encode("utf-8")
@@ -1279,7 +1301,7 @@ def _replace_exactly(data: bytes, before: str, after: str, label: str) -> bytes:
 
 
 def _apply_connections(source_root: Path, manifest: dict[str, Any]) -> None:
-    for connection in manifest["connections"]:
+    for connection in [*manifest["connections"], *manifest.get("optionalConnections", [])]:
         target = _module_path(source_root, connection["file"])
         content = target.read_bytes()
         updated = _replace_exactly(content, connection["before"], connection["after"], connection["description"])
@@ -1581,7 +1603,7 @@ def check_compatibility(
 
 def _preview(source_root: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     changes = []
-    for connection in manifest["connections"]:
+    for connection in [*manifest["connections"], *manifest.get("optionalConnections", [])]:
         path = _module_path(source_root, connection["file"])
         original = path.read_bytes().decode("utf-8")
         updated = _replace_exactly(path.read_bytes(), connection["before"], connection["after"], connection["description"]).decode("utf-8")
@@ -1956,7 +1978,7 @@ def _target_state(root: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     destinations = {item["destination"] for item in manifest["runtimeModules"]}
     installed = sorted(path for path in destinations if (root / Path(*path.split("/"))).exists())
     applied_anchors = []
-    for item in manifest["connections"]:
+    for item in [*manifest["connections"], *manifest.get("optionalConnections", [])]:
         target = _module_path(root, item["file"])
         if item["after"].encode("utf-8") in target.read_bytes():
             applied_anchors.append(item["file"])
@@ -2627,7 +2649,7 @@ def _updated_source_candidate(
             }
             after_hashes = previous_state.get("afterFileHashes", {})
             before_hashes = previous_backup.get("beforeFileHashes", {})
-            for relative in sorted(EXPECTED_CONNECTION_FILES):
+            for relative in sorted(manifest.get("officialRuntimeModifiedAllowlist", EXPECTED_CONNECTION_FILES)):
                 candidate_file = _module_path(candidate, relative)
                 if not candidate_file.is_file() or _sha256_file(candidate_file).upper() != str(after_hashes.get(relative, "")).upper():
                     continue
@@ -2690,7 +2712,7 @@ def _project_reconciled_source(
             for entry in previous_backup.get("files", [])
             if isinstance(entry, dict)
         }
-        for relative in sorted(EXPECTED_CONNECTION_FILES):
+        for relative in sorted(manifest.get("officialRuntimeModifiedAllowlist", EXPECTED_CONNECTION_FILES)):
             current_hash = projected.get(relative)
             target_hash = source_hashes.get(relative)
             if target_hash is None or current_hash is None:
