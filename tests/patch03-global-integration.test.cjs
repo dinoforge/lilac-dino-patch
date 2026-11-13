@@ -397,7 +397,12 @@ test('original home rails enqueue background verified source mappings without op
   assert.ok(persistedStorage.has(api.WORK_INDEX_KEY),'verified source mapping persisted');
   const second=harness({persistedStorage});
   await second.window.openDetail(second.home.mal_id);
-  assert.equal(second.calls.search.length,0,'opening an already indexed anime must not search the five sites');
+  // Background mode deliberately caches an incomplete discovery as an
+  // error (3-day cooldown), not a seven-day verified absence. An explicit
+  // foreground detail visit can fill the missing sources after a restart.
+  assert.ok(second.calls.search.length>0,'foreground detail can complete a limited background pass');
+  assert.ok(!second.calls.search.some(request=>request.provider==='reanime'),
+    'the already indexed anchor provider is never re-queried');
   assert.equal(buttons(second).length,2);
 });
 
@@ -619,6 +624,7 @@ test('background matching excludes known suppliers and keeps explicit detail ret
   const before=JSON.parse(app.storage.get(api.WORK_INDEX_KEY)).works
     .find(row=>row.sources.some(source=>source.mal_id===app.home.mal_id));
   assert.equal(before.outcome,'error','limited background scan must not cache missing as definitive');
+  app.nodes.get('#detailDialog').open=true;
   await app.window.openDetail(app.home.mal_id);
   app.window.__dinoPatch03Bridge.flushWorkIndex();
   const after=JSON.parse(app.storage.get(api.WORK_INDEX_KEY)).works
