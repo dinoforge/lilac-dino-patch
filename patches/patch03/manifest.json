@@ -47,7 +47,7 @@
     {
       "source": "src/integrated-search.js",
       "destination": "src/integrated-search.js",
-      "sha256": "AFE2CD9CD9E7E4D65E4510FCC1EC51F14B3DD88F5DE99AB6CD518B0C866B679C"
+      "sha256": "0F764E438FC462B609EF5D85DA33E6C8990884318BA19E9219F7317856B47DAB"
     },
     {
       "source": "src/integrated-search.css",
@@ -57,7 +57,7 @@
     {
       "source": "patches/patch03/patch03-bridge.js",
       "destination": "src/patch03-bridge.js",
-      "sha256": "ABBF8C7CCAAB3F626F07CD73EB5BEC053A1558D54312FFF9D5D4F0EB4CBDA54D"
+      "sha256": "1BB3B0EE2BC6BF285E899544E26D00D55E455F51D5F3C0D143A3BC48C2AD73BF"
     }
   ],
   "officialRuntimeModifiedAllowlist": [
