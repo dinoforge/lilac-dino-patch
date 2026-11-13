@@ -487,8 +487,131 @@
     return terms;
   }
 
+
+  // Like the original Korean title index: timestamped, batched local writes,
+  // bounded profile storage and conservative verified provider identities.
+  const WORK_INDEX_KEY = 'lilacDinoPatch.workIndex.v1';
+  function createWorkIndex(storage, { clock = () => Date.now(), maxWorks = 350 } = {}) {
+    const DAY = 86400000, sourceTtl = DAY * 2, searchTtl = 21600000, retryTtl = 600000;
+    const sourceKey = a => String(a?.mal_id ?? (a?.provider && a.id != null ? a.provider + ':' + a.id : ''));
+    const clean = a => typeof a === 'string' ? a.trim().slice(0, 240) : '';
+    const namesOf = xs => [...new Set(xs.map(clean).filter(x => x.length > 1))].slice(0, 24);
+    const compact = a => {
+      if (!a || !PROVIDERS.includes(a.provider) || !sourceKey(a)) return null;
+      const o = {};
+      for (const k of ['provider', 'id', 'mal_id', 'title', 'title_english', 'title_japanese',
+        'title_native', 'title_romaji', 'romaji', 'displayTitle', 'url',
+        'year', 'type', 'anilistId', 'malId', 'status']) {
+        const v = a[k];
+        if (typeof v === 'string' && v.length < 700 || typeof v === 'number' && Number.isFinite(v)) o[k] = v;
+      }
+      if (Array.isArray(a.synonyms)) o.synonyms = namesOf(a.synonyms);
+      if (a.images && typeof a.images === 'object') {
+        try { if (JSON.stringify(a.images).length < 1200) o.images = a.images; } catch {}
+      }
+      o.provider = a.provider;
+      o.mal_id = sourceKey(a);
+      return o;
+    };
+    let data = { version: 1, works: [], searches: [] };
+    try {
+      const raw = storage?.getItem(WORK_INDEX_KEY);
+      if (raw && raw.length < 2500000) {
+        const saved = JSON.parse(raw);
+        if (saved?.version === 1 && Array.isArray(saved.works) && Array.isArray(saved.searches)) {
+          data.works = saved.works.slice(0, maxWorks).filter(w => w && Array.isArray(w.sources))
+            .map(w => ({ id: String(w.id || '').slice(0, 160), sources: w.sources.map(compact).filter(Boolean).slice(0, 8),
+              names: namesOf(Array.isArray(w.names) ? w.names : []),
+              checkedAt: Number(w.checkedAt) || 0, updatedAt: Number(w.updatedAt) || 0 }))
+            .filter(w => w.sources.length);
+          data.searches = saved.searches.slice(-65).filter(s => s && typeof s.query === 'string'
+            && Array.isArray(s.sourceIds) && Array.isArray(s.statuses));
+        }
+      }
+    } catch { /* broken or unavailable cache never changes original user data */ }
+    let dirty = false, timer = null;
+    const flush = () => {
+      if (!dirty) return;
+      dirty = false;
+      data.works.sort((a, b) => b.updatedAt - a.updatedAt);
+      data.works.length = Math.min(data.works.length, maxWorks);
+      data.searches = data.searches.slice(-65);
+      try { storage?.setItem(WORK_INDEX_KEY, JSON.stringify(data)); } catch {}
+    };
+    const touch = () => {
+      dirty = true;
+      if (timer == null && typeof setTimeout === 'function')
+        timer = setTimeout(() => { timer = null; flush(); }, 800);
+    };
+    const rowFor = anchor => {
+      if (!anchor || !PROVIDERS.includes(anchor.provider)) return null;
+      const key = sourceKey(anchor);
+      return data.works.find(w => w.sources.some(s => s.provider === anchor.provider
+        && sourceKey(s) === key && identityMatch(s, anchor))) ||
+        data.works.find(w => w.sources.some(s => identityMatch(s, anchor))) || null;
+    };
+    const find = anchor => {
+      const w = rowFor(anchor);
+      if (!w) return null;
+      const ref = { ...anchor, synonyms: [...(Array.isArray(anchor.synonyms) ? anchor.synonyms : []), ...w.names] };
+      return { sources: w.sources.filter(s => identityMatch(ref, s)), names: w.names.slice(),
+        checkedAt: w.checkedAt, fresh: w.checkedAt > 0 && clock() - w.checkedAt < sourceTtl };
+    };
+    const remember = (group, { checked = false, names = [] } = {}) => {
+      const items = (group?.sourceItems || []).map(compact).filter(Boolean);
+      if (!items.length) return;
+      let row = rowFor(items[0]);
+      if (!row) {
+        row = { id: sourceKey(items[0]), sources: [], names: [], checkedAt: 0, updatedAt: 0 };
+        data.works.push(row);
+      }
+      row.names = namesOf([...row.names, ...names,
+        ...items.flatMap(s => [s.title, s.title_english, s.title_japanese, s.displayTitle, ...(s.synonyms || [])])]);
+      const ref = { ...items[0], synonyms: [...(items[0].synonyms || []), ...row.names] };
+      const merged = new Map(row.sources.filter(s => identityMatch(ref, s)).map(s => [sourceKey(s), s]));
+      for (const s of items) if (identityMatch(ref, s))
+        merged.set(sourceKey(s), { ...merged.get(sourceKey(s)), ...s });
+      row.sources = [...merged.values()];
+      row.updatedAt = clock();
+      if (checked) row.checkedAt = clock();
+      if (data.works.length > maxWorks) {
+        data.works.sort((a, b) => b.updatedAt - a.updatedAt);
+        data.works.length = maxWorks;
+      }
+      touch();
+    };
+    const rememberSearch = (query, result) => {
+      const key = titleKey(query);
+      if (!key || !Array.isArray(result?.items) || !Array.isArray(result?.statuses)) return;
+      data.searches = data.searches.filter(s => s.query !== key);
+      data.searches.push({ query: key, time: clock(), sourceIds: [...new Set(result.items.map(sourceKey).filter(Boolean))].slice(0, 450),
+        statuses: result.statuses.map(s => ({ provider: s.provider, state: s.state,
+          attempts: s.attempts || 0, successes: s.successes || 0, failures: s.failures || 0,
+          pages: s.pages || 0, pageLimitReached: !!s.pageLimitReached, resultCount: s.resultCount || 0 })) });
+      touch();
+    };
+    const readSearch = query => {
+      const row = data.searches.find(s => s.query === titleKey(query));
+      if (!row || clock() - row.time > (row.statuses.every(s => s.state === 'ready') ? searchTtl : retryTtl)) return null;
+      const lookup = new Map(data.works.flatMap(w => w.sources.map(s => [sourceKey(s), s])));
+      const items = row.sourceIds.map(id => lookup.get(id));
+      return items.some(s => !s) ? null : { items, statuses: row.statuses, fromCache: true };
+    };
+    const invalidate = anchor => {
+      const row = rowFor(anchor);
+      if (!row) return;
+      row.checkedAt = 0;
+      data.searches = data.searches.filter(s => !s.sourceIds.some(id => row.sources.some(item => sourceKey(item) === id)));
+      touch();
+    };
+    return { find, remember, rememberSearch, readSearch, invalidate, flush,
+      stats: () => ({ works: data.works.length, searches: data.searches.length }) };
+  }
+
   const api = {
     PROVIDERS,
+    WORK_INDEX_KEY,
+    createWorkIndex,
     OFFICIAL_SOURCES,
     SOURCE_MODE_KEY,
     SOURCE_MIGRATION_KEY,
