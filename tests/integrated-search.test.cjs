@@ -373,3 +373,39 @@ test('identical raw source IDs across providers are namespaced in search snapsho
   assert.equal(createWorkIndex(legacyStore).readSearch('Shared ID'),null,
     'ambiguous legacy snapshots must be rechecked rather than guessed');
 });
+
+
+test('work index can retain 1200 distinct local works across restart without changing official settings', () => {
+  const {createWorkIndex,WORK_INDEX_KEY}=require('../src/integrated-search.js');
+  const backing=new Map([['contentSource','reanime'],['lilacDinoPatch.searchMode','integrated']]);
+  const storage={getItem:key=>backing.get(key)||null,setItem:(key,value)=>backing.set(key,String(value))};
+  const index=createWorkIndex(storage);
+  for(let i=0;i<1200;i++)index.observe([{
+    provider:'reanime',id:'growing-'+i,mal_id:'reanime:growing-'+i,
+    title:'Growth Work '+i,year:2025,anilistId:210000+i,type:'TV'
+  }],{limit:1});
+  assert.equal(index.stats().works,1200);
+  assert.equal(index.flush(),true);
+  const restored=createWorkIndex(storage);
+  assert.equal(restored.stats().providers.reanime,1200);
+  assert.ok(backing.get(WORK_INDEX_KEY).length<1900000);
+  assert.equal(backing.get('contentSource'),'reanime');
+  assert.equal(backing.get('lilacDinoPatch.searchMode'),'integrated');
+});
+
+test('work index reports disk quota errors and retains retryable in-memory changes', () => {
+  const {createWorkIndex,WORK_INDEX_KEY}=require('../src/integrated-search.js');
+  const backing=new Map();
+  let blocked=true;
+  const storage={getItem:key=>backing.get(key)||null,setItem:(key,value)=>{
+    if(key===WORK_INDEX_KEY&&blocked)throw Error('Quota exceeded');
+    backing.set(key,String(value));
+  }};
+  const index=createWorkIndex(storage);
+  index.observe([{provider:'reanime',id:'keep',mal_id:'reanime:keep',title:'Keep Work'}]);
+  assert.equal(index.flush(),false);
+  assert.equal(backing.has(WORK_INDEX_KEY),false);
+  blocked=false;
+  assert.equal(index.flush(),true);
+  assert.equal(createWorkIndex(storage).stats().works,1);
+});
