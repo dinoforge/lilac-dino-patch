@@ -673,7 +673,7 @@ impl DinoUi {
                     // The manager repository can be private. Never claim an
                     // automatic version comparison without authenticated release
                     // metadata; opening its page does not patch or download.
-                    if action(ui, "DinoPatch 업데이트 확인", ButtonTone::Secondary, true) {
+                    if action(ui, "DinoPatch 릴리스 보기", ButtonTone::Secondary, true) {
                         ctx.open_url(egui::OpenUrl::new_tab(
                             "https://github.com/dinoforge/lilac-dino-patch/releases"
                         ));
