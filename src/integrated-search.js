@@ -554,6 +554,19 @@
               outcome: ['verified', 'missing', 'error'].includes(w.outcome) ? w.outcome : '',
               updatedAt: Number(w.updatedAt) || 0 }))
             .filter(w => w.sources.length);
+          // Old v1 work caches stored titles only in provider rows + names.
+          // Backfill a conservative Korean representative in memory; no
+          // original display-title profile file is modified during migration.
+          for (const row of data.works) {
+            if (!row.titles.ko) {
+              const provider = row.sources.map(providerTitles).find(t => t.ko);
+              if (provider) row.titles = { ...row.titles, ko: provider.ko,
+                koSource: 'provider', koCheckedAt: 0 };
+            }
+            if (!row.titles.en) row.titles.en = row.sources.map(providerTitles).find(t => t.en)?.en || '';
+            if (!row.titles.ja) row.titles.ja = row.sources.map(providerTitles).find(t => t.ja)?.ja || '';
+            row.names = namesOf([row.titles.ko, row.titles.en, row.titles.ja, ...row.names]);
+          }
           data.searches = saved.searches.slice(-65).filter(s => s && typeof s.query === 'string'
             && Array.isArray(s.sourceIds) && Array.isArray(s.statuses));
         }
