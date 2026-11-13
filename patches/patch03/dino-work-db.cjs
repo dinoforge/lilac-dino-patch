@@ -25,6 +25,15 @@ const identityConflict=(a,b)=>{
   return false;
 };
 const parse=x=>{try{return JSON.parse(x)}catch{return null}};
+// Canonical ordering makes manual separation independent of which work opened it.
+function pairFields(a,b){
+  const aa={provider:a?.provider,id:sourceKey(a)},bb={provider:b?.provider,id:sourceKey(b)};
+  if(!PROVIDERS.has(aa.provider)||!PROVIDERS.has(bb.provider)||!aa.id||!bb.id
+    ||aa.provider===bb.provider&&aa.id===bb.id)return null;
+  const left=(aa.provider+'\0'+aa.id)<(bb.provider+'\0'+bb.id)?aa:bb;
+  const right=left===aa?bb:aa;
+  return [left.provider,left.id,right.provider,right.id];
+}
 function normalize(raw){
   if(!object(raw)||!Array.isArray(raw.sources)||!raw.sources.length||raw.sources.length>8
     || JSON.stringify(raw).length>40000)return null;
@@ -62,13 +71,14 @@ function createStore({app,DatabaseSync}={}){
       db.exec('PRAGMA journal_mode=WAL');
       db.exec('PRAGMA synchronous=NORMAL');
       const version=Number(db.prepare('PRAGMA user_version').get().user_version)||0;
-      if(version>1)throw Error('newer SQLite schema: read-only fallback');
+      if(version>2)throw Error('newer SQLite schema: read-only fallback');
       db.exec('CREATE TABLE IF NOT EXISTS works(work_id TEXT PRIMARY KEY,names_json TEXT NOT NULL,title_ko TEXT NOT NULL,title_en TEXT NOT NULL,title_ja TEXT NOT NULL,ko_source TEXT NOT NULL,ko_checked_at INTEGER NOT NULL,manual INTEGER NOT NULL,checked_at INTEGER NOT NULL,attempted_at INTEGER NOT NULL,outcome TEXT NOT NULL,updated_at INTEGER NOT NULL)');
       db.exec('CREATE TABLE IF NOT EXISTS work_sources(provider TEXT NOT NULL,source_id TEXT NOT NULL,work_id TEXT NOT NULL REFERENCES works(work_id),item_json TEXT NOT NULL,PRIMARY KEY(provider,source_id))');
       db.exec('CREATE INDEX IF NOT EXISTS idx_dino_source_work ON work_sources(work_id)');
       db.exec('CREATE INDEX IF NOT EXISTS idx_dino_work_updated ON works(updated_at DESC)');
       db.exec('CREATE INDEX IF NOT EXISTS idx_dino_work_ko ON works(title_ko)');
-      if(!version)db.exec('PRAGMA user_version=1');
+      db.exec('CREATE TABLE IF NOT EXISTS manual_pair_blocks(left_provider TEXT NOT NULL,left_id TEXT NOT NULL,right_provider TEXT NOT NULL,right_id TEXT NOT NULL,PRIMARY KEY(left_provider,left_id,right_provider,right_id))');
+      if(version<2)db.exec('PRAGMA user_version=2');
       ready=true;return true;
     }catch(error){
       problem=String(error?.message||error).slice(0,250);
@@ -76,7 +86,7 @@ function createStore({app,DatabaseSync}={}){
       db=null;return false;
     }
   }
-  function status(){return {available:init(),schema:ready?1:0,reason:ready?'':problem,engine:'node:sqlite'};}
+  function status(){return {available:init(),schema:ready?2:0,reason:ready?'':problem,engine:'node:sqlite'};}
   function readRow(id){
     const row=db.prepare('SELECT * FROM works WHERE work_id=?').get(id);
     if(!row)return null;
@@ -95,6 +105,8 @@ function createStore({app,DatabaseSync}={}){
     if(normalized.some(x=>!x))return {ok:false,reason:'invalid row'};
     const sourceFind=db.prepare('SELECT work_id,item_json FROM work_sources WHERE provider=? AND source_id=?');
     const workFind=db.prepare('SELECT * FROM works WHERE work_id=?');
+    const blockFind=db.prepare('SELECT 1 AS blocked FROM manual_pair_blocks WHERE left_provider=? AND left_id=? AND right_provider=? AND right_id=?');
+    const members=db.prepare('SELECT provider,source_id FROM work_sources WHERE work_id=?');
     const putWork=db.prepare('INSERT INTO works(work_id,names_json,title_ko,title_en,title_ja,ko_source,ko_checked_at,manual,checked_at,attempted_at,outcome,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(work_id) DO UPDATE SET names_json=excluded.names_json,title_ko=excluded.title_ko,title_en=excluded.title_en,title_ja=excluded.title_ja,ko_source=excluded.ko_source,ko_checked_at=excluded.ko_checked_at,manual=excluded.manual,checked_at=excluded.checked_at,attempted_at=excluded.attempted_at,outcome=excluded.outcome,updated_at=excluded.updated_at');
     const putSource=db.prepare('INSERT INTO work_sources(provider,source_id,work_id,item_json) VALUES(?,?,?,?) ON CONFLICT(provider,source_id) DO UPDATE SET item_json=excluded.item_json WHERE work_sources.work_id=excluded.work_id');
     try{
@@ -112,6 +124,11 @@ function createStore({app,DatabaseSync}={}){
         }
         if(knownIds.size>1)throw Error('conflicting existing work identities');
         const id=[...knownIds][0]||work.sources[0].provider+':'+sourceKey(work.sources[0]);
+        // A user-separated link cannot return through a stale discovery group.
+        for(const src of work.sources)for(const old of members.all(id)){
+          const pair=pairFields(src,{provider:old.provider,mal_id:old.source_id});
+          if(pair&&blockFind.get(...pair))throw Error('manually separated provider sources cannot be auto-linked');
+        }
         const previous=workFind.get(id),titles={...work.titles};
         if(previous){
           const previousTime=Number(previous.ko_checked_at)||0;
@@ -185,8 +202,86 @@ function createStore({app,DatabaseSync}={}){
       sources:db.prepare('SELECT provider,COUNT(*) AS n FROM work_sources GROUP BY provider').all()
         .map(x=>({provider:x.provider,count:Number(x.n)}))};
   }
+  // Explicit user repair is transactional: never use the ordinary automatic
+  // upsert to move a source between works.
+  function repair(method,request){
+    if(!init())return {ok:false,reason:problem};
+    const anchor=request?.anchor,source=request?.source;
+    if(!object(anchor)||!object(source)||!PROVIDERS.has(anchor.provider)
+      ||!PROVIDERS.has(source.provider)||!sourceKey(anchor)||!sourceKey(source))
+      return {ok:false,reason:'invalid source identity'};
+    const find=db.prepare('SELECT work_id,item_json FROM work_sources WHERE provider=? AND source_id=?');
+    const origin=find.get(anchor.provider,sourceKey(anchor));
+    const moving=find.get(source.provider,sourceKey(source));
+    if(!origin||!moving)return {ok:false,reason:'공급원을 먼저 검색하여 작품 DB에 저장해 주세요.'};
+    const targetId=origin.work_id,sourceId=moving.work_id;
+    if(anchor.provider===source.provider&&sourceKey(anchor)===sourceKey(source))
+      return {ok:false,reason:'대표 공급원 자체는 이동할 수 없습니다.'};
+    const primary=readRow(targetId),item=parse(moving.item_json);
+    if(!primary||!item)return {ok:false,reason:'stored source is invalid'};
+    if(method==='detach'&&targetId!==sourceId)
+      return {ok:false,reason:'이 공급원은 이미 다른 작품으로 분리돼 있습니다.'};
+    if(method==='detach'&&primary.sources.length<2)
+      return {ok:false,reason:'마지막 공급원은 분리할 수 없습니다.'};
+    if(method==='attach'&&targetId===sourceId)
+      return {ok:true,unchanged:true,works:[primary],affected:[anchor,source]};
+    if(method==='attach'&&primary.sources.some(existing=>existing.provider===source.provider))
+      return {ok:false,reason:'이 작품에는 같은 공급원이 이미 연결돼 있습니다.'};
+    if(method==='attach'&&primary.sources.some(existing=>identityConflict(existing,item)))
+      return {ok:false,reason:'연도·형식·AniList ID가 달라 잘못된 시즌/극장판 연결을 차단했습니다.'};
+    if(!['attach','detach'].includes(method))return {ok:false,reason:'unsupported repair'};
+    const block=db.prepare('INSERT OR IGNORE INTO manual_pair_blocks(left_provider,left_id,right_provider,right_id) VALUES(?,?,?,?)');
+    const unblock=db.prepare('DELETE FROM manual_pair_blocks WHERE left_provider=? AND left_id=? AND right_provider=? AND right_id=?');
+    const mark=db.prepare("UPDATE works SET checked_at=0,attempted_at=0,outcome='',updated_at=? WHERE work_id=?");
+    const now=Date.now();
+    let destination=targetId;
+    try{
+      db.exec('BEGIN IMMEDIATE');
+      if(method==='detach'){
+        const base='manual:'+source.provider+':'+sourceKey(source);
+        destination=base;
+        let salt=0;
+        const exists=db.prepare('SELECT 1 FROM works WHERE work_id=?');
+        while(exists.get(destination))destination=base+':'+(++salt);
+        if(salt>1000)throw Error('cannot allocate detached work identity');
+        const ko=korean(item.displayTitle)||korean(item.title),en=clean(item.title_english)
+          ||(!ko?clean(item.title):''),ja=clean(item.title_japanese||item.title_native);
+        const names=[...new Set([ko,en,ja,clean(item.title),clean(item.displayTitle)].filter(Boolean))].slice(0,24);
+        db.prepare('INSERT INTO works(work_id,names_json,title_ko,title_en,title_ja,ko_source,ko_checked_at,manual,checked_at,attempted_at,outcome,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
+          .run(destination,JSON.stringify(names),ko,en,ja,ko?'provider':'',0,0,0,0,'',now);
+        for(const previous of primary.sources){
+          const pair=pairFields(previous,source);
+          if(pair)block.run(...pair);
+        }
+      }else{
+        const oldWork=readRow(sourceId);
+        for(const previous of oldWork.sources){
+          const pair=pairFields(previous,source);
+          if(pair)block.run(...pair);
+        }
+        for(const next of primary.sources){
+          const pair=pairFields(next,source);
+          if(pair)unblock.run(...pair);
+        }
+      }
+      db.prepare('UPDATE work_sources SET work_id=? WHERE provider=? AND source_id=?')
+        .run(destination,source.provider,sourceKey(source));
+      mark.run(now,targetId);
+      if(method==='attach'){
+        if(db.prepare('SELECT 1 FROM work_sources WHERE work_id=? LIMIT 1').get(sourceId))
+          mark.run(now,sourceId);
+        else db.prepare('DELETE FROM works WHERE work_id=?').run(sourceId);
+      }
+      db.exec('COMMIT');
+      const works=[readRow(targetId),readRow(method==='detach'?destination:sourceId)].filter(Boolean);
+      return {ok:true,works,affected:[anchor,source]};
+    }catch(error){
+      try{db.exec('ROLLBACK')}catch{}
+      return {ok:false,reason:String(error?.message||error).slice(0,250)};
+    }
+  }
   function close(){if(db){db.close();db=null;ready=false;}}
-  return {status,upsert,lookup,recent,stats,close};
+  return {status,upsert,lookup,recent,stats,repair,close};
 }
 function register({app,ipcMain,DatabaseSync}={}){
   const store=createStore({app,DatabaseSync});
@@ -197,6 +292,7 @@ function register({app,ipcMain,DatabaseSync}={}){
       case 'lookup':return store.lookup(payload);
       case 'recent':return store.recent(payload);
       case 'stats':return store.stats();
+      case 'attach':case 'detach':return store.repair(method,payload);
       default:return {ok:false,reason:'unknown method'};
     }
   });

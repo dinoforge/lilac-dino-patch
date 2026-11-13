@@ -632,8 +632,10 @@
     const rowFor = anchor => {
       if (!anchor || !PROVIDERS.includes(anchor.provider)) return null;
       const key = sourceKey(anchor);
+      // Stored provider ID takes precedence over fuzzy title matching.
+      // Essential after a user separates two look-alike seasons.
       return data.works.find(w => w.sources.some(s => s.provider === anchor.provider
-        && sourceKey(s) === key && identityMatch(s, anchor))) ||
+        && sourceKey(s) === key)) ||
         data.works.find(w => w.sources.some(s => identityMatch(s, anchor))) || null;
     };
     const find = anchor => {
@@ -681,7 +683,9 @@
       if (row.titles.ko) row.names = namesOf([row.titles.ko, ...row.names]);
       const ref = { ...items[0], synonyms: [...(items[0].synonyms || []), ...row.names] };
       const merged = new Map(row.sources.filter(s => identityMatch(ref, s)).map(s => [scopedKey(s), s]));
-      for (const s of items) if (identityMatch(ref, s))
+      for (const s of items) if (identityMatch(ref, s)
+        && !data.works.some(other => other !== row && other.sources.some(existing =>
+          scopedKey(existing) === scopedKey(s))))
         merged.set(scopedKey(s), { ...merged.get(scopedKey(s)), ...s });
       row.sources = [...merged.values()];
       row.updatedAt = clock();
@@ -881,10 +885,12 @@
         if (!raw || !Array.isArray(raw.sources) || !raw.sources.length) continue;
         const sources = raw.sources.map(compact).filter(Boolean);
         if (!sources.length) continue;
-        let row = rowFor(sources[0]);
+        // SQLite's exact ownership wins over heuristic alias matching.
+        let row = data.works.find(w => w.sources.some(s =>
+          sources.some(next => scopedKey(s) === scopedKey(next)))) || null;
         if (!row) {
           row = {
-            id: String(raw.id || sourceKey(sources[0])).slice(0,160),
+            id: String(raw.id || sourceKey(sources[0])).slice(0,360),
             sources: [], names: [], titles: titleFields(),
             checkedAt: 0, attemptedAt: 0, outcome: '', updatedAt: 0
           };
@@ -938,7 +944,37 @@
       }
       return {added,merged};
     };
+    // A stored source in another work is never silently merged into this one.
+    const separateWorks = (anchor, candidate) => {
+      const owned = item => data.works.find(w => w.sources.some(s =>
+        s.provider === item?.provider && sourceKey(s) === sourceKey(item)));
+      const a=owned(anchor),b=owned(candidate);
+      return !!a && !!b && a!==b;
+    };
+    // Database repairs return full affected works. Replace, don't heuristically
+    // merge: the owner chosen by the user is authoritative.
+    const replaceRows = (rows, affected = []) => {
+      if (!Array.isArray(rows) || !rows.length) return false;
+      const incoming=rows.filter(row=>row&&Array.isArray(row.sources)&&row.sources.length);
+      const keys=new Set([...affected,...incoming.flatMap(row=>row.sources)].filter(Boolean)
+        .map(source=>source.provider+':'+sourceKey(source)));
+      data.works=data.works.filter(row=>!row.sources.some(source=>keys.has(scopedKey(source))));
+      for (const raw of incoming) {
+        const sources=raw.sources.map(compact).filter(Boolean);
+        if (!sources.length)continue;
+        data.works.push({
+          id:String(raw.id||sourceKey(sources[0])).slice(0,360),
+          sources,names:namesOf(Array.isArray(raw.names)?raw.names:[]),
+          titles:titleFields(raw.titles),checkedAt:Number(raw.checkedAt)||0,
+          attemptedAt:Number(raw.attemptedAt)||0,
+          outcome:['verified','missing','error'].includes(raw.outcome)?raw.outcome:'',
+          updatedAt:Number(raw.updatedAt)||clock()
+        });
+      }
+      data.searches=[];touch();return flush();
+    };
     return { find, remember, rememberTitles, resetManualKoreanTitle, observe,
+      separateWorks, replaceRows,
       episodeState, rememberEpisode,
       rememberSearch, readSearch, invalidate, flush, exportRows, importRows,
       setPersistenceHook,

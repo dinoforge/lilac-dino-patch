@@ -8,13 +8,24 @@
     const pending=new Map();
     const key=row=>String(row?.sources?.[0]?.provider||'')+':'+String(row?.sources?.[0]?.mal_id||'');
     const safeInvoke=async(method,payload)=>invoke(method,payload);
-    const report=()=>({active,phase,reason,pending:pending.size});
+    let skippedConflicts=0;
+    const report=()=>({active,phase,reason,pending:pending.size,skippedConflicts});
     async function send(rows){
       for(let i=0;i<rows.length;i+=36){
         const part=rows.slice(i,i+36);
         const result=await safeInvoke('upsert',{works:part});
-        if(!result?.ok||result.saved!==part.length)
+        if(result?.ok&&result.saved===part.length)continue;
+        // A legacy cache can still contain a group the user manually split.
+        // Keep SQLite available and preserve the user-chosen ownership.
+        if(!/conflicting existing work identities|manually separated provider sources/.test(String(result?.reason||'')))
           throw Error(String(result?.reason||'SQLite batch confirmation missing'));
+        for(const row of part){
+          const single=await safeInvoke('upsert',{works:[row]});
+          if(single?.ok&&single.saved===1)continue;
+          if(!/conflicting existing work identities|manually separated provider sources/.test(String(single?.reason||'')))
+            throw Error(String(single?.reason||'SQLite write failed'));
+          skippedConflicts++;
+        }
       }
     }
     function schedule(){
@@ -92,7 +103,20 @@
       return active?await safeInvoke('stats').catch(()=>({available:false})):
         {available:false,reason};
     }
-    return {start,ensure,flush,stats,report,isReady:()=>active};
+    async function repair(method,anchor,source){
+      await start();
+      if(!active)return {ok:false,reason:'SQLite 작품 DB를 사용할 수 없습니다.'};
+      // Flush all pending observations before re-parenting source identities.
+      if(!await flush())return {ok:false,reason:'저장되지 않은 작품 정보가 있어 연결 수정을 중단했습니다.'};
+      if(!['attach','detach'].includes(method))return {ok:false,reason:'invalid repair action'};
+      try{
+        const result=await safeInvoke(method,{anchor,source});
+        if(!result?.ok)return result||{ok:false,reason:'SQLite repair failed'};
+        const cacheUpdated=index.replaceRows(result.works,result.affected);
+        return {...result,cacheUpdated};
+      }catch(error){return {ok:false,reason:String(error?.message||error).slice(0,200)};}
+    }
+    return {start,ensure,flush,stats,repair,report,isReady:()=>active};
   }
   const api={connect};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;

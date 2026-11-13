@@ -46,6 +46,7 @@ jobs:
           node --test tests/integrated-search.test.cjs
           node --test tests/patch03-settings-preservation.test.cjs
           node --test tests/dino-sqlite-compat.test.cjs
+          node --test tests/dino-manual-link.test.cjs
       - name: Verify native Rust manager UI and console-free Windows build contract
         run: node --test tests/dino-native-manager-ui.test.cjs
       - name: Check both legacy and SQLite-extended Python patch manifests

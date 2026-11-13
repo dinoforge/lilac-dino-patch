@@ -121,7 +121,8 @@
   function verifiedGroupFor(anchor, candidates) {
     const accepted = [anchor], seen = new Set([anchor.provider + ':' + sourceKey(anchor)]);
     for (const item of candidates) {
-      if (!isDinoProvider(item) || !api.identityMatch(anchor, item)) continue;
+      if (!isDinoProvider(item) || !api.identityMatch(anchor, item)
+        || workIndex.separateWorks(anchor, item)) continue;
       const key = item.provider + ':' + sourceKey(item);
       if (seen.has(key)) continue;
       seen.add(key);
@@ -615,7 +616,7 @@
       while (pages < CATALOG_SEED_MAX_LOCAL_PAGES
         && count < CATALOG_SEED_PAGE_SIZE
         && (sqlite.isReady() || reanimeCount < CATALOG_SEED_TARGET)
-        && workIndex.stats().works < CATALOG_SEED_MAX_WORKS) {
+        && (sqlite.isReady() || workIndex.stats().works < CATALOG_SEED_MAX_WORKS)) {
         catalogSeedChecks++;
         const page = await window.lilac.providerCatalog('reanime', '', offset, 'popular');
         if (page?.pending || !Array.isArray(page?.data) || !page.data.length) {
@@ -683,7 +684,7 @@
         : catalogSeedAtCapacity()
           ? 'db-capacity-reserved' : 'imported';
       continueLater = !reachedEnd && !catalogSeedReachedTarget()
-        && workIndex.stats().works < CATALOG_SEED_MAX_WORKS;
+        && (sqlite.isReady() || workIndex.stats().works < CATALOG_SEED_MAX_WORKS);
     } catch {
       catalogSeedStatus = 'read-failed';
     } finally {
@@ -1028,7 +1029,91 @@
       const input = toggleTitleEditor();
       input?.focus?.();
     });
-    headingActions.append(linkedCount, editTitle);
+    const editLinks = document.createElement('button');
+    editLinks.type = 'button';
+    editLinks.className = 'dino-work-title-edit dino-link-repair-toggle';
+    editLinks.textContent = '공급원 연결 수정';
+    editLinks.hidden = !sqlite.isReady();
+    editLinks.addEventListener('click', () => {
+      const existing = section.querySelector('.dino-link-repair');
+      if (existing) { existing.remove(); return; }
+      const reference=group.sourceItems.find(item=>sourceKey(item)===String(activeId))
+        ||group.sourceItems[0];
+      const panel=document.createElement('div');
+      panel.className='dino-link-repair';
+      const explanation=document.createElement('p');
+      explanation.textContent='잘못 묶인 공급원은 분리하고, 이미 작품 DB에 저장된 공급원 ID는 직접 연결할 수 있습니다. 다른 시즌·극장판 등 충돌하는 ID는 연결을 차단합니다.';
+      panel.append(explanation);
+      async function submitRepair(method,item){
+        const verb=method==='detach'?'분리':'연결';
+        if(typeof window.confirm==='function'&&!window.confirm(
+          (labels[item.provider]||item.provider)+' ('+sourceKey(item)+') 공급원을 '+verb+'할까요?'))return;
+        editLinks.disabled=true;
+        try{
+          const result=await sqlite.repair(method,reference,item);
+          if(!result?.ok){
+            window.toast?.('연결 수정 실패: '+String(result?.reason||'알 수 없는 오류'));
+            return;
+          }
+          window.toast?.('공급원 '+verb+' 정보를 저장했습니다. 목록을 다시 불러옵니다.');
+          window.location.reload();
+        }finally{editLinks.disabled=false;}
+      }
+      if(group.sourceItems.length>1){
+        const label=document.createElement('b');
+        label.textContent='현재 연결된 공급원';
+        panel.append(label);
+        for(const item of group.sourceItems){
+          const line=document.createElement('div');
+          line.className='dino-link-repair-row';
+          const name=document.createElement('span');
+          name.textContent=(labels[item.provider]||item.provider)+' · ID '+sourceKey(item);
+          line.append(name);
+          if(sourceKey(item)!==sourceKey(reference)||item.provider!==reference.provider){
+            const detach=document.createElement('button');
+            detach.type='button';
+            detach.textContent='이 작품에서 분리';
+            detach.addEventListener('click',()=>submitRepair('detach',item).catch(error=>
+              window.toast?.('연결 수정 실패: '+String(error?.message||error))));
+            line.append(detach);
+          }
+          panel.append(line);
+        }
+      }
+      const label=document.createElement('b');
+      label.textContent='다른 작품에 저장된 공급원 연결';
+      const row=document.createElement('div');
+      row.className='dino-link-repair-row';
+      const select=document.createElement('select');
+      select.setAttribute('aria-label','연결할 공급원');
+      for(const provider of providers){
+        const option=document.createElement('option');
+        option.value=provider;
+        option.textContent=labels[provider]||provider;
+        select.append(option);
+      }
+      const input=document.createElement('input');
+      input.type='text';
+      input.maxLength=300;
+      input.placeholder='검색 결과 공급원 ID (mal_id)';
+      input.setAttribute('aria-label','연결할 공급원 ID');
+      const attach=document.createElement('button');
+      attach.type='button';
+      attach.textContent='선택한 작품에 연결';
+      attach.addEventListener('click',()=>{
+        const id=String(input.value||'').trim();
+        if(!id){window.toast?.('공급원 ID를 입력해 주세요.');return;}
+        submitRepair('attach',{provider:select.value,mal_id:id}).catch(error=>
+          window.toast?.('연결 수정 실패: '+String(error?.message||error)));
+      });
+      row.append(select,input,attach);
+      panel.append(label,row);
+      const note=document.createElement('small');
+      note.textContent='대상 작품을 먼저 공급원 검색으로 DB에 등록해야 합니다. 재생 공급원 탭이 아닌 검색 결과의 원본 ID를 사용하세요.';
+      panel.append(note);
+      choices.before(panel);
+    });
+    headingActions.append(linkedCount, editTitle, editLinks);
     header.append(headingCopy, headingActions);
     const choices = document.createElement('div');
     choices.className = 'dino-source-track';

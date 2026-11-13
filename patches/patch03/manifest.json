@@ -47,27 +47,27 @@
     {
       "source": "src/integrated-search.js",
       "destination": "src/integrated-search.js",
-      "sha256": "BF017E2C224D2314AD9774B1DDFEDB75C741747EC9E8CF523F5426F3BE793B8C"
+      "sha256": "DD09E96EC7A3534A4ACC73D65789D57F8A5C7C6F8EC6E31756649E510C88DF96"
     },
     {
       "source": "src/integrated-search.css",
       "destination": "src/integrated-search.css",
-      "sha256": "38E0C045110FF29E46622D5450F471525BAAC56C7EDB9C7FEF7D6819A1FBEF5C"
+      "sha256": "8C938E2865ABA633DC0F25C00273098D72DC1A4DEAC02F5D25CC9781B737906E"
     },
     {
       "source": "patches/patch03/patch03-bridge.js",
       "destination": "src/patch03-bridge.js",
-      "sha256": "27513D41DF5378236CE0C091C2CA9D92CFD158BED542F2BB28EDAECA15B5EBBE"
+      "sha256": "ED3866379FACA46A16E90EC7E7CC34E6B12AF8A758AFD0EF3B537ED51DB3BB7E"
     },
     {
       "source": "src/dino-sqlite-sync.js",
       "destination": "src/dino-sqlite-sync.js",
-      "sha256": "0A84CB4E5C9BB0DC156A7F529E9CF185CD7EE15397AEAA809619651FBF959DC5"
+      "sha256": "61EF897CF2228AFA66F2F0AEF5C6F315C04D5FA2A9DBAB0686EFEE1324D338FA"
     },
     {
       "source": "patches/patch03/dino-work-db.cjs",
       "destination": "electron/dino-work-db.cjs",
-      "sha256": "526A13E7D4BF859B0358B67725885986BB9B6BE93CC6DA267AE05B46BA2CB6C3"
+      "sha256": "62D832613FDA3633280123BB7CE57DD30302EDD9323AFC69D71E7D3835F3EA12"
     }
   ],
   "officialRuntimeModifiedAllowlist": [
