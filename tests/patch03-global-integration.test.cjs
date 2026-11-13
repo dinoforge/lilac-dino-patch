@@ -437,3 +437,12 @@ test('background prefetch obeys session cap and deduplicates repeated visible li
   assert.equal(progress.running,false);
   assert.equal(app.scheduled.length,0,'session cap prevents further background requests');
 });
+
+
+test('already searched cards never trigger duplicate background scans',async()=>{
+  const app=harness();
+  app.nodes.get('#detailDialog').open=false;
+  app.window.renderCards('#searchGrid',[app.home]);
+  assert.equal(app.window.__dinoPatch03Bridge.getPrefetchStatus().queued,0);
+  assert.equal(app.scheduled.length,0);
+});
