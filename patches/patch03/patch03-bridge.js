@@ -180,7 +180,7 @@
       // Mark a mapping fresh only when every attempted supplier answered.
       // Failed or skipped lookups never turn into permanent "not found".
       const complete = (diagnostics.statuses || []).length === providers.length
-        && diagnostics.statuses.every(status => status.state === 'ready');
+        && diagnostics.statuses.every(status => status.state === 'ready' && !status.pageLimitReached);
       workIndex.remember(group, { checked: complete, attempted: true, names: verifiedAliases });
       detailSearchDiagnostics.set(key, diagnostics.statuses || []);
       if (detailSearchDiagnostics.size > 120) detailSearchDiagnostics.delete(detailSearchDiagnostics.keys().next().value);
@@ -221,7 +221,9 @@
   const PREFETCH_DAILY_LIMIT = 18;
   const PREFETCH_RETRY_MS = 12 * 60 * 60 * 1000;
   const PREFETCH_LIST_TARGETS = new Set(['#seasonRail', '#airingRail', '#topRail',
-    '#allGrid', '#catalogGrid', '#searchGrid']);
+    '#allGrid', '#catalogGrid']);
+  // Search has already queried every supplier and must not re-enqueue
+  // its results for a costly duplicate background scan.
   const prefetchQueue = [];
   const prefetchSeen = new Set();
   let prefetchTimer = null;
