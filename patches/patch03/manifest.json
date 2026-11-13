@@ -67,7 +67,7 @@
     {
       "source": "patches/patch03/dino-work-db.cjs",
       "destination": "electron/dino-work-db.cjs",
-      "sha256": "BD365E38E5D513C1E3A84BFC8134EDB2596003DF9230B9FA4042EE0A35542155"
+      "sha256": "A78D2259EB5A4C01C2F3A6D659BE43DD9FDCD6F97D6F83128876774F9FED4C3C"
     }
   ],
   "officialRuntimeModifiedAllowlist": [
