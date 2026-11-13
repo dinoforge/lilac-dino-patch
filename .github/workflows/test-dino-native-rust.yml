@@ -1,15 +1,7 @@
 name: Native Rust DinoPatch patch and restore
 
+# Expensive Windows checks run only when a release is explicitly requested.
 on:
-  push:
-    branches: [feature/dino-native-rust-manager]
-    paths:
-      - tools/dino-patch-manager/native-rust/**
-      - src/integrated-search.js
-      - src/integrated-search.css
-      - tests/patch03-global-integration.test.cjs
-      - patches/patch03/**
-      - .github/workflows/test-dino-native-rust.yml
   workflow_dispatch:
 
 permissions:
