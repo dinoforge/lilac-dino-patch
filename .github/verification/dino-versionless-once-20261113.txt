@@ -1,0 +1,3 @@
+Version-independent LilacAnime ASAR patch verification (one-shot).
+Rust synthetic fixture validates unregistered versions and Windows backup rollover.
+Source feature branch: feature/dino-versionless-structural-patch
