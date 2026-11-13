@@ -71,6 +71,10 @@
     return promise;
   }
   const sourceKey = item => String(item?.mal_id ?? item?.id ?? '');
+  // One canonical title per work, regardless of the provider being viewed.
+  function canonicalTitleFor(item) {
+    return item && isDinoProvider(item) ? workIndex.find(item)?.titles || null : null;
+  }
   const isDinoProvider = item => !!item && providers.includes(item.provider) && !!sourceKey(item);
   const localKoreanCatalog = async (provider, query) => {
     if (!/[가-힣]/.test(String(query)) || !['reanime', 'animenosub'].includes(provider)
@@ -146,12 +150,23 @@
       // Reuse the original app's disk-backed Korean/English display-title
       // resolver (TMDB, Anissia, AniList, Wikidata), rather than translating
       // or fetching the same name independently in Dino.
-      let resolvedTitles = [];
-      if (typeof window.lilac.resolveTitles === 'function') {
+      let resolvedTitles = [stored?.titles?.ko, stored?.titles?.en, stored?.titles?.ja]
+        .filter(value => typeof value === 'string' && value.trim());
+      // LilacAnime owns the actual Korean-title resolution and its disk
+      // cache. Once the result is saved at WORK level, reuse it for every
+      // provider instead of re-invoking the resolver for each source.
+      const hasOfficialTitle = stored?.titles?.koSource === 'official'
+        || stored?.titles?.manual === true;
+      if (!hasOfficialTitle && typeof window.lilac.resolveTitles === 'function') {
         try {
           const resolved = await window.lilac.resolveTitles([anchor]);
-          resolvedTitles = Array.isArray(resolved) ? resolved.flatMap(item => [item?.ko, item?.en])
-            .filter(value => typeof value === 'string' && value.trim()) : [];
+          if (Array.isArray(resolved)) {
+            const primary = resolved.find(item => item?.ko || item?.en) || {};
+            workIndex.rememberTitles(anchor, { ko: primary.ko, en: primary.en },
+              { source: 'official' });
+            resolvedTitles = [...new Set([...resolvedTitles, primary.ko, primary.en])]
+              .filter(value => typeof value === 'string' && value.trim());
+          }
         } catch { /* original title cache remains optional */ }
       }
       let variants = [];
@@ -168,7 +183,8 @@
       // Official title variants are candidate aliases, not sufficient alone
       // to join anime. The existing identity matcher still demands matching
       // release years, compatible season/format and non-conflicting IDs.
-      const verifiedAliases = [...new Set([...nativeTitles, ...resolvedTitles, ...(stored?.names || []), ...variants])]
+      const verifiedAliases = [...new Set([...nativeTitles, ...resolvedTitles,
+        ...(workIndex.find(anchor)?.names || stored?.names || []), ...variants])]
         .filter(value => typeof value === 'string' && value.trim().length > 1)
         .slice(0, 16);
       const reference = {
@@ -768,7 +784,54 @@
     section.className = 'detail-source-picker';
     section.setAttribute('aria-label', '통합 공급원 선택');
     const title = document.createElement('b');
-    title.textContent = '재생 공급원';
+    const representative = group.sourceItems.map(canonicalTitleFor).find(value => value?.ko);
+    title.textContent = representative?.ko ? '재생 공급원 · ' + representative.ko : '재생 공급원';
+    const editTitle = document.createElement('button');
+    editTitle.type = 'button';
+    editTitle.className = 'dino-work-title-edit';
+    editTitle.textContent = '한국어 제목 수정';
+    editTitle.setAttribute('aria-label', '이 작품의 공통 한국어 제목 수정');
+    editTitle.addEventListener('click', () => {
+      const reference = group.sourceItems.find(item => sourceKey(item) === String(activeId))
+        || group.sourceItems[0];
+      const old = content.querySelector('.dino-work-title-form');
+      if (old) { old.remove(); return; }
+      const form = document.createElement('div');
+      form.className = 'dino-work-title-form';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'dino-work-title-input';
+      input.value = canonicalTitleFor(reference)?.ko || '';
+      input.setAttribute('aria-label', '이 작품의 대표 한국어 제목');
+      input.setAttribute('maxlength', '240');
+      const save = document.createElement('button');
+      save.type = 'button';
+      save.className = 'dino-work-title-save';
+      save.textContent = '저장';
+      save.addEventListener('click', () => {
+        const value = String(input.value || '').trim();
+        if (!/[가-힣]/.test(value)) {
+          window.toast?.('한국어가 포함된 제목을 입력해 주세요.');
+          return;
+        }
+        if (!workIndex.rememberTitles(reference, { ko: value }, { source: 'manual' })) {
+          if (canonicalTitleFor(reference)?.ko !== value) return;
+        }
+        workIndex.flush();
+        renderSourcePicker(group, activeId, searching);
+      });
+      const reset = document.createElement('button');
+      reset.type = 'button';
+      reset.className = 'dino-work-title-reset';
+      reset.textContent = '자동 제목 사용';
+      reset.addEventListener('click', () => {
+        workIndex.resetManualKoreanTitle(reference);
+        workIndex.flush();
+        renderSourcePicker(group, activeId, searching);
+      });
+      form.append(input, save, reset);
+      editTitle.before(form);
+    });
     const choices = document.createElement('div');
     choices.className = 'dino-source-track';
     choices.setAttribute('role', 'group');
@@ -804,7 +867,7 @@
       button.addEventListener('click', () => window.openDetail(id, { sourceSelection: true }));
       choices.append(button);
     }
-    section.append(title, choices);
+    section.append(title, editTitle, choices);
     if (group.sourceItems.length === 1) {
       const note = document.createElement('small');
       note.className = 'source-search-note';
@@ -1107,6 +1170,10 @@
     getMode: () => integratedMode() ? 'integrated' : 'provider',
     getSelectedProvider: selectedProvider,
     getWorkIndexStats: () => workIndex.stats(),
+    getWorkTitles: id => {
+      const anime = typeof window.animeById === 'function' ? window.animeById(id) : null;
+      return canonicalTitleFor(anime);
+    },
     getOriginalCatalogSeedStatus: () => ({
       status: catalogSeedStatus,
       importedThisSession: catalogSeedImported, localPageReads: catalogSeedChecks,
