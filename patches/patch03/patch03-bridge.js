@@ -893,8 +893,11 @@
     const missingText = notFound.length
       ? ` · 미발견: ${notFound.map(item => labels[item.provider] || item.provider).join(', ')}` : '';
     const limitedText = limited.length ? ' · 일부 공급원은 다음 페이지가 더 있을 수 있음' : '';
-    const combinedSources = resultGroups.reduce((sum,group) =>
-      sum + Math.max(0,(group.sourceItems?.length || 1) - 1),0);
+    const combinedSources = resultGroups.reduce((sum,group) => {
+      const distinctProviders = new Set((group.sourceItems || [])
+        .map(item => item?.provider).filter(provider => providers.includes(provider)));
+      return sum + Math.max(0, distinctProviders.size - 1);
+    }, 0);
     const joinedText = combinedSources ? ` · 동일 작품 공급원 ${combinedSources}개 자동 묶음` : '';
     const advice = api.diagnoseProviderStatuses?.(resultStatuses);
     const adviceText = advice?.message ? ` · 안내: ${advice.message}` : '';
@@ -1465,7 +1468,7 @@
       const recent = seasonDetector.summary();
       const newSeason = document.createElement('p');
       newSeason.className = 'dino-season-observation';
-      newSeason.textContent = '최근 90일 공식 목록에서 새로 관측한 방영 시작 작품: '
+      newSeason.textContent = '최근 90일 공식 목록에서 새로 관측한 공급원 항목: '
         + recent.count + '개 · 목록에 시작일이 있는 작품만 기록하며, 공급원 재생 가능 여부와는 별개입니다.';
       panel.append(info,recovery,newSeason,refresh,pause,backup,exportLog);
       choices.before(panel);
