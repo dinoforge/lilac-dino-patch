@@ -485,6 +485,12 @@
         catalogSeedStatus = 'write-failed';
         return;
       }
+      if ((workIndex.stats().providers.reanime || 0) < reanimeCount) {
+        // Size-based LRU eviction can discard newly imported rows. Don't
+        // advance the offset past content that wasn't retained on disk.
+        catalogSeedStatus = 'db-capacity-reserved';
+        return;
+      }
       catalogSeedImported += count;
       try {
         localStorage.setItem(CATALOG_SEED_KEY, JSON.stringify({
