@@ -36,6 +36,7 @@
     return;
   }
 
+  const workIndex = api.createWorkIndex(localStorage);
   const groupBySourceId = new Map();
   let resultGroups = [];
   let resultStatuses = [];
@@ -77,6 +78,7 @@
   };
   function keepDetailGroup(group) {
     if (!Array.isArray(group?.sourceItems)) return;
+    workIndex.remember(group);
     for (const item of group.sourceItems) {
       if (isDinoProvider(item)) {
         detailGroupsBySourceId.set(sourceKey(item), group);
@@ -109,7 +111,14 @@
     const cached = detailDiscoveryCache.get(key);
     if (cached && Date.now() - cached.at < DISCOVERY_TTL_MS) return cached.promise;
     const promise = (async () => {
-      const seeds = Array.isArray(knownGroup?.sourceItems) ? knownGroup.sourceItems : [];
+      const stored = workIndex.find(anchor);
+      const seeds = [...(Array.isArray(knownGroup?.sourceItems) ? knownGroup.sourceItems : []),
+        ...(stored?.sources || [])];
+      if (stored?.fresh) {
+        const reference = { ...anchor,
+          synonyms: [...(Array.isArray(anchor.synonyms) ? anchor.synonyms : []), ...stored.names] };
+        return verifiedGroupFor(reference, seeds);
+      }
       const nativeTitles = [anchor.displayTitle, anchor.title, anchor.title_english,
         anchor.title_japanese, anchor.title_native, anchor.title_romaji, anchor.romaji,
         ...(Array.isArray(anchor.synonyms) ? anchor.synonyms : [])]
@@ -117,6 +126,17 @@
       const query = String((typeof window.titleOf === 'function' && window.titleOf(anchor))
         || anchor.title || nativeTitles[0] || '').trim();
       if (!query) return verifiedGroupFor(anchor, seeds);
+      // Reuse the original app's disk-backed Korean/English display-title
+      // resolver (TMDB, Anissia, AniList, Wikidata), rather than translating
+      // or fetching the same name independently in Dino.
+      let resolvedTitles = [];
+      if (typeof window.lilac.resolveTitles === 'function') {
+        try {
+          const resolved = await window.lilac.resolveTitles([anchor]);
+          resolvedTitles = Array.isArray(resolved) ? resolved.flatMap(item => [item?.ko, item?.en])
+            .filter(value => typeof value === 'string' && value.trim()) : [];
+        } catch { /* original title cache remains optional */ }
+      }
       let variants = [];
       if (typeof window.lilac.titleVariants === 'function') {
         try {
@@ -125,12 +145,12 @@
         } catch { /* Original aliases remain usable. */ }
       }
       const terms = api.titleVariantTerms({
-        query, displayTitles: nativeTitles, variants, limit: 5
+        query, displayTitles: [...nativeTitles, ...resolvedTitles, ...(stored?.names || [])], variants, limit: 5
       });
       // Official title variants are candidate aliases, not sufficient alone
       // to join anime. The existing identity matcher still demands matching
       // release years, compatible season/format and non-conflicting IDs.
-      const verifiedAliases = [...new Set([...nativeTitles, ...variants])]
+      const verifiedAliases = [...new Set([...nativeTitles, ...resolvedTitles, ...(stored?.names || []), ...variants])]
         .filter(value => typeof value === 'string' && value.trim().length > 1)
         .slice(0, 16);
       const reference = {
@@ -156,6 +176,11 @@
         group = verifiedGroupFor(reference, [...seeds, ...first.items, ...extra.items]);
         diagnostics = api.mergeSearchResults(first, extra);
       }
+      // Mark a mapping fresh only when every attempted supplier answered.
+      // Failed or skipped lookups never turn into permanent "not found".
+      const complete = (diagnostics.statuses || []).length === providers.length
+        && diagnostics.statuses.every(status => status.state === 'ready');
+      workIndex.remember(group, { checked: complete, names: verifiedAliases });
       detailSearchDiagnostics.set(key, diagnostics.statuses || []);
       if (detailSearchDiagnostics.size > 120) detailSearchDiagnostics.delete(detailSearchDiagnostics.keys().next().value);
       return group;
@@ -289,6 +314,7 @@
     resultGroups = api.groupResults(localized, selectedProvider());
     groupBySourceId.clear();
     for (const group of resultGroups) {
+      keepDetailGroup(group);
       for (const item of group.sourceItems || []) groupBySourceId.set(String(item.mal_id), group);
     }
     renderFilters();
@@ -319,6 +345,19 @@
     const container = ensureFilterRoot();
     container?.replaceChildren();
     container?.classList.add('hidden');
+
+    // A repeated exact search reads the verified local snapshot, like the
+    // original Korean title index. Errors expire quickly, healthy results
+    // expire after six hours; explicit supplier refresh bypasses this path.
+    const saved = workIndex.readSearch(query);
+    if (saved) {
+      if (sequence === searchSequence) {
+        applyResults(saved);
+        const status = document.querySelector('#searchStatus');
+        if (status) status.textContent += ' · 로컬 DB 결과';
+      }
+      return;
+    }
 
     const options = {
       providers,
@@ -351,7 +390,10 @@
           result = api.mergeSearchResults(result, extra);
         }
       }
-      if (sequence === searchSequence) applyResults(result);
+      if (sequence === searchSequence) {
+        applyResults(result);
+        workIndex.rememberSearch(query, result);
+      }
     } catch (error) {
       if (sequence === searchSequence) {
         document.querySelector('#searchStatus').textContent = `통합 검색을 완료하지 못했습니다: ${String(error?.message || error)}`;
@@ -459,6 +501,7 @@
         const seq = detailSequence;
         detailDiscoveryCache.delete(current.provider + ':' + sourceKey(current));
         catalogRequestCache.clear();
+        workIndex.invalidate(current);
         retry.disabled = true;
         retry.textContent = '다른 공급원 다시 확인 중...';
         try {
@@ -517,9 +560,16 @@
   window.openDetail = async function (id, options = {}) {
     const isIntegrated = integratedMode();
     const inIntegratedSearch = isIntegrated && document.querySelector('#searchView')?.classList.contains('active');
-    const group = isIntegrated ? (detailGroupsBySourceId.get(String(id))
+    const initialGroup = isIntegrated ? (detailGroupsBySourceId.get(String(id))
       || (inIntegratedSearch ? groupBySourceId.get(String(id)) : null)) : null;
-    const anchor = initialKnownSource(id, group);
+    const anchor = initialKnownSource(id, initialGroup);
+    const stored = isIntegrated && isDinoProvider(anchor) ? workIndex.find(anchor) : null;
+    const reference = stored ? { ...anchor, synonyms: [
+      ...(Array.isArray(anchor.synonyms) ? anchor.synonyms : []), ...stored.names
+    ] } : anchor;
+    const group = stored?.sources?.length
+      ? verifiedGroupFor(reference, [...(initialGroup?.sourceItems || []), ...stored.sources])
+      : initialGroup;
     const sequence = ++detailSequence;
     const selected = group ? api.chooseSource(group, {
       provider: inIntegratedSearch ? currentFilter : 'all',
@@ -719,6 +769,8 @@
     apiContracts: ['providerCatalog', 'providerDetail', 'providerResolve'],
     getMode: () => integratedMode() ? 'integrated' : 'provider',
     getSelectedProvider: selectedProvider,
+    getWorkIndexStats: () => workIndex.stats(),
+    flushWorkIndex: () => workIndex.flush(),
     getSearchDiagnostics: () => resultStatuses.map(item => ({
       provider: item.provider, state: item.state, results: item.resultCount,
       pages: item.pages || 0, pageLimitReached: !!item.pageLimitReached
