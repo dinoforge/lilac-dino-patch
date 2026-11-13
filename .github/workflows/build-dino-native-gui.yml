@@ -24,6 +24,25 @@ jobs:
           cargo build --release --features gui
           if ($LASTEXITCODE -ne 0) { throw 'Rust desktop manager could not compile' }
           if (-not (Test-Path -LiteralPath 'target/release/dino-native-manager.exe' -PathType Leaf)) { throw 'Native Rust executable missing' }
+      - name: Verify PE executable has Windows GUI subsystem (no CMD console)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Join-Path (Get-Location).Path 'target/release/dino-native-manager.exe'
+          $bytes=[System.IO.File]::ReadAllBytes($exe)
+          if ($bytes.Length -lt 256 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+            throw 'Native Rust executable does not contain a valid DOS/PE header'
+          }
+          $peOffset=[BitConverter]::ToInt32($bytes,0x3c)
+          if ($peOffset -lt 64 -or $peOffset + 96 -ge $bytes.Length) {
+            throw 'Native Rust PE optional header is invalid'
+          }
+          $subsystem=[BitConverter]::ToUInt16($bytes,$peOffset + 24 + 68)
+          # IMAGE_SUBSYSTEM_WINDOWS_GUI = 2, CONSOLE = 3.
+          if ($subsystem -ne 2) {
+            throw "Rust manager would open a console window: PE subsystem=$subsystem (expected Windows GUI = 2)"
+          }
+          Write-Host 'PASS: Windows GUI subsystem; native manager does not create a CMD console at startup'
       - name: Smoke-test real Rust Windows GUI startup
         shell: pwsh
         run: |
