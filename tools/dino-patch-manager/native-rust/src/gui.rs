@@ -290,6 +290,7 @@ impl DinoUi {
             self.busy = false;
             self.response = None;
             self.show_log = true;
+            self.show_advanced = true;
         }
     }
 
@@ -318,6 +319,7 @@ impl DinoUi {
                             "PARTIAL_OR_UNKNOWN", &self.status.version, message
                         );
                         self.show_log = true;
+                        self.show_advanced = true;
                     }
                 },
                 Err(message) => {
@@ -326,6 +328,7 @@ impl DinoUi {
                         "PARTIAL_OR_UNKNOWN", &self.status.version, message
                     );
                     self.show_log = true;
+                    self.show_advanced = true;
                 }
             }
         }
@@ -486,6 +489,7 @@ impl DinoUi {
                     } else if blocked {
                         if action(ui, "진단 기록 열기", ButtonTone::Secondary, true) {
                             self.show_log = true;
+                            self.show_advanced = true;
                         }
                     } else if action(ui, "원본 호환성 확인", ButtonTone::Primary, true) {
                         self.enqueue("원본 다시 확인");
@@ -531,7 +535,7 @@ impl DinoUi {
                 label(ui, "원본 폴더");
                 ui.add(egui::Label::new(
                     RichText::new(&path_text).size(12.0).strong().color(rgb(TEXT))
-                ).truncate()).on_hover_text(&path_text);
+                ).truncate()).on_hover_text(path_text.as_str());
                 ui.add_space(9.0);
                 if action(ui, "원본 폴더 변경", ButtonTone::Secondary, !self.busy) {
                     self.choose_folder();
@@ -556,7 +560,7 @@ impl DinoUi {
                             label(ui, "원본 폴더");
                             ui.add(egui::Label::new(
                                 RichText::new(&path_text).size(12.0).strong().color(rgb(TEXT))
-                            ).truncate()).on_hover_text(&path_text);
+                            ).truncate()).on_hover_text(path_text.as_str());
                         },
                     );
                     if action(ui, "원본 폴더 변경", ButtonTone::Secondary, !self.busy) {
@@ -725,6 +729,7 @@ impl DinoUi {
                         }
                         if action(ui, "작업 기록", ButtonTone::Secondary, !self.busy) {
                             self.show_log = true;
+                            self.show_advanced = true;
                         }
                     });
                 });
@@ -735,7 +740,7 @@ impl DinoUi {
                         .size(14.0).strong().color(rgb(TEXT)));
                     label(ui, "원본 앱과 DinoPatch 릴리스 페이지를 각각 엽니다. 자동 설치나 무단 변경은 하지 않습니다.");
                 });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.horizontal_wrapped(|ui| {
                     if action(ui, "원본 앱 릴리스", ButtonTone::Secondary, true) {
                         ctx.open_url(egui::OpenUrl::new_tab(
                             "https://github.com/whispelyn-byte/LilacAnime-desktop/releases"
@@ -979,7 +984,7 @@ pub fn start() -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([940.0, 840.0])
-            .with_min_inner_size([730.0, 640.0]),
+            .with_min_inner_size([640.0, 560.0]),
         ..Default::default()
     };
     eframe::run_native(
