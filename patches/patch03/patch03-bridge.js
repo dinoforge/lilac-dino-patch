@@ -39,6 +39,17 @@
   }
 
   const workIndex = api.createWorkIndex(localStorage);
+  const seasonDetector = api.createSeasonDetector?.(localStorage)
+    || { observe: () => [], summary: () => ({ count: 0, recent: [] }) };
+  const ACCENT_KEY = 'lilacDinoPatch.integratedAccent.v1';
+  const ACCENTS = ['default', 'mint', 'blue'];
+  function readAccent() {
+    try {
+      const saved = localStorage.getItem(ACCENT_KEY);
+      return ACCENTS.includes(saved) ? saved : 'default';
+    } catch { return 'default'; }
+  }
+  let selectedAccent = readAccent();
   // IPC is additive. If an older supported LilacAnime build lacks the
   // SQLite preload method, keep the v1 work cache and original titles.
   const sqlite = window.DinoSqliteSync?.connect(
@@ -623,6 +634,8 @@
       else flattened.push(item);
     }
     workIndex.observe(flattened, { limit: 24 });
+    if (target === '#seasonRail' || target === '#airingRail')
+      seasonDetector.observe(flattened);
     queueAiringEpisodes(target,flattened);
   }
   if (typeof officialRenderCards === 'function') {
@@ -880,7 +893,12 @@
     const missingText = notFound.length
       ? ` · 미발견: ${notFound.map(item => labels[item.provider] || item.provider).join(', ')}` : '';
     const limitedText = limited.length ? ' · 일부 공급원은 다음 페이지가 더 있을 수 있음' : '';
-    document.querySelector('#searchStatus').textContent = `“${currentQuery}” 검색 결과 ${summary}${failureText}${missingText}${limitedText}`;
+    const combinedSources = resultGroups.reduce((sum,group) =>
+      sum + Math.max(0,(group.sourceItems?.length || 1) - 1),0);
+    const joinedText = combinedSources ? ` · 동일 작품 공급원 ${combinedSources}개 자동 묶음` : '';
+    const advice = api.diagnoseProviderStatuses?.(resultStatuses);
+    const adviceText = advice?.message ? ` · 안내: ${advice.message}` : '';
+    document.querySelector('#searchStatus').textContent = `“${currentQuery}” 검색 결과 ${summary}${failureText}${missingText}${limitedText}${joinedText}${adviceText}`;
   }
 
   function renderFilters() {
@@ -1119,6 +1137,7 @@
     oldPicker?.remove();
     const section = document.createElement('section');
     section.className = 'detail-source-picker dino-integrated-picker';
+    section.dataset.dinoAccent = selectedAccent;
     section.setAttribute('aria-label', '통합 공급원 선택');
     const header = document.createElement('div');
     header.className = 'dino-source-header';
@@ -1135,6 +1154,18 @@
     headingCopy.append(title, headingName);
     const headingActions = document.createElement('div');
     headingActions.className = 'dino-source-heading-actions';
+    const accentButton = document.createElement('button');
+    accentButton.type = 'button';
+    accentButton.className = 'dino-work-title-edit dino-accent-switch';
+    accentButton.setAttribute('aria-label', '통합 화면 포인트 색상 변경');
+    const accentLabel = { default: '기본', mint: '민트', blue: '블루' };
+    accentButton.textContent = '포인트 색상: ' + accentLabel[selectedAccent];
+    accentButton.addEventListener('click', () => {
+      selectedAccent = ACCENTS[(ACCENTS.indexOf(selectedAccent) + 1) % ACCENTS.length];
+      section.dataset.dinoAccent = selectedAccent;
+      accentButton.textContent = '포인트 색상: ' + accentLabel[selectedAccent];
+      try { localStorage.setItem(ACCENT_KEY, selectedAccent); } catch { /* optional preference */ }
+    });
     const linkedCount = document.createElement('span');
     linkedCount.className = 'dino-source-linked-count';
     linkedCount.textContent = group.sourceItems.length + '/' + providers.length + '개 연결';
@@ -1431,10 +1462,15 @@
         window.toast?.(ok?'민감한 작품 이름을 제외한 진단 보고서를 저장했습니다.'
           :'진단 보고서를 저장하지 못했습니다.');
       });
-      panel.append(info,recovery,refresh,pause,backup,exportLog);
+      const recent = seasonDetector.summary();
+      const newSeason = document.createElement('p');
+      newSeason.className = 'dino-season-observation';
+      newSeason.textContent = '최근 90일 공식 목록에서 새로 관측한 방영 시작 작품: '
+        + recent.count + '개 · 목록에 시작일이 있는 작품만 기록하며, 공급원 재생 가능 여부와는 별개입니다.';
+      panel.append(info,recovery,newSeason,refresh,pause,backup,exportLog);
       choices.before(panel);
     });
-    headingActions.append(linkedCount, editTitle, editLinks, showDashboard);
+    headingActions.append(linkedCount, editTitle, editLinks, showDashboard, accentButton);
     header.append(headingCopy, headingActions);
     const choices = document.createElement('div');
     choices.className = 'dino-source-track';
