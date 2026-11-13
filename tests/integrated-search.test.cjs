@@ -318,3 +318,58 @@ test('old local-index entries without scan outcome stay readable and revalidate 
   assert.equal(idx.find(anchor).sources.length,1);
   assert.equal(idx.find(anchor).fresh,false);
 });
+
+
+test('five-source observed catalog cards share one work without being counted as verified', () => {
+  const {createWorkIndex,PROVIDERS,WORK_INDEX_KEY}=require('../src/integrated-search.js');
+  const backing=new Map();
+  const storage={getItem:key=>backing.get(key)||null,setItem:(key,value)=>backing.set(key,String(value))};
+  let now=1900000000000;
+  const index=createWorkIndex(storage,{clock:()=>now});
+  const base={title:'Common title',title_english:'Common title',year:2026,type:'TV',anilistId:120091};
+  const five=PROVIDERS.map((provider,i)=>({...base,provider,id:'s'+i,mal_id:provider+':s'+i}));
+  assert.equal(index.observe(five).added,5);
+  assert.equal(index.stats().works,1);
+  assert.ok(PROVIDERS.every(provider=>index.stats().providers[provider]===1));
+  assert.equal(index.find(five[0]).fresh,false);
+  assert.equal(index.observe(five).added,0);
+  index.remember({sourceItems:five},{checked:true,attempted:true,outcome:'verified'});
+  const verified=index.find(five[0]);
+  assert.equal(verified.fresh,true);
+  const more={...five[0],displayTitle:'동일 작품'};
+  assert.equal(index.observe([more]).updated,1,'new known Korean title is retained');
+  assert.equal(index.find(more).outcome,'verified','observing original cards never resets successful verification');
+  index.flush();
+  const restored=createWorkIndex(storage,{clock:()=>now});
+  assert.equal(restored.find(more).sources.length,5);
+  assert.ok(backing.has(WORK_INDEX_KEY));
+  const conflicting={...five[1],id:'new-season',mal_id:'miruro:new-season',anilistId:120092,year:2025};
+  assert.equal(restored.observe([conflicting]).added,1);
+  assert.equal(restored.stats().works,2,'conflicting years and media IDs remain separate works');
+});
+
+test('identical raw source IDs across providers are namespaced in search snapshots', () => {
+  const {createWorkIndex,WORK_INDEX_KEY}=require('../src/integrated-search.js');
+  const backing=new Map();
+  const storage={getItem:key=>backing.get(key)||null,setItem:(key,value)=>backing.set(key,String(value))};
+  const one={provider:'reanime',id:'a',mal_id:'same-id',anilistId:900101,title:'Shared ID',year:2026,type:'TV'};
+  const two={provider:'miruro',id:'b',mal_id:'same-id',anilistId:900101,title:'Shared ID',year:2026,type:'TV'};
+  const index=createWorkIndex(storage);
+  index.observe([one,two]);
+  assert.equal(index.find(one).sources.length,2,'overlapping raw IDs must not overwrite different suppliers');
+  index.rememberSearch('Shared ID',{items:[one,two],statuses:[
+    {provider:'reanime',state:'ready'},{provider:'miruro',state:'ready'}
+  ]});
+  assert.equal(index.readSearch('Shared ID').items.length,2);
+  assert.deepEqual(index.readSearch('Shared ID').items.map(x=>x.provider),['reanime','miruro']);
+  index.flush();
+  const stored=JSON.parse(backing.get(WORK_INDEX_KEY));
+  assert.equal(stored.searches[0].sourceIds.length,2);
+  const restarted=createWorkIndex(storage);
+  assert.deepEqual(restarted.readSearch('Shared ID').items.map(x=>x.provider),['reanime','miruro']);
+
+  const old={version:1,works:stored.works,searches:[{...stored.searches[0],sourceIds:['same-id']}]};
+  const legacyStore={getItem:key=>key===WORK_INDEX_KEY?JSON.stringify(old):null,setItem:()=>{}};
+  assert.equal(createWorkIndex(legacyStore).readSearch('Shared ID'),null,
+    'ambiguous legacy snapshots must be rechecked rather than guessed');
+});
