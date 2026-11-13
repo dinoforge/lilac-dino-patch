@@ -43,7 +43,9 @@ fn execute(args: &[String]) -> Result<Value> {
     if command=="info" {
         return Ok(json!({"managerVersion":"0.2.0","patchVersion":"1.0.0",
             "engine":"RUST_NATIVE","originalIsBundled":false,
-            "testedOfficialVersions":["0.5.54","0.5.55","0.5.63","0.5.64"]}));
+            "compatibility":"structural-anchor-validation",
+            "registeredVersionsRequired":false,
+            "testedOfficialVersions":["0.5.54","0.5.55","0.5.63","0.5.64","0.5.65"]}));
     }
     if command=="discover" {
         let roots:Vec<PathBuf>= [

@@ -27,6 +27,6 @@ Manual patch: dino-native-manager.exe apply "D:\LilacAnime"
 Uninstall: dino-native-manager.exe uninstall "D:\LilacAnime"
 Pending review: dino-native-manager.exe review "D:\LilacAnime"
 
-Only reviewed official 0.5.54, 0.5.55, 0.5.63 and 0.5.64 source fingerprints permit writes. A damaged or missing ASAR, mismatch, pending work, or invalid backup blocks modifications. Manual patch does not bypass safety checks. An existing APPDATA backup and runtime folder must not be removed. The official LilacAnime executable and original ASAR are never included in DinoPatch's distribution.
+Official app release numbers are **not an allowlist**. Any new LilacAnime version whose ASAR identity, required modules, seven exact single-occurrence connection anchors and runtime payload manifest checks pass can be patched. An incompatible or already-patched ASAR still blocks writes. After the official updater replaces an older version, the previous generation's state and backup are retained unchanged; a new version receives an independent SHA-256-verified backup. A previous user-initiated uninstall still requires manual application. An existing APPDATA backup and runtime folder must not be removed. The original LilacAnime executable and ASAR are never bundled.
 
 This is an experimental branch, NOT an official Beta 8 release. Old source-checkout patching, native LevelDB theme handling, advanced update metadata and some legacy history functions still need parity work. Do not replace a working Beta 7 until all native Windows safety and GUI tests pass.

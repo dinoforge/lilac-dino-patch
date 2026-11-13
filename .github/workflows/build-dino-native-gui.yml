@@ -46,6 +46,11 @@ jobs:
           cargo build --release --features gui
           if ($LASTEXITCODE -ne 0) { throw 'Rust desktop manager could not compile' }
           if (-not (Test-Path -LiteralPath 'target/release/dino-native-manager.exe' -PathType Leaf)) { throw 'Native Rust executable missing' }
+      - name: Verify versionless patch, backup rollover and safe uninstall on Windows
+        shell: pwsh
+        run: |
+          cargo test --no-default-features official_updates_keep_historical_backups_and_uninstall_current_version
+          if ($LASTEXITCODE -ne 0) { throw 'Windows safe patch upgrade/uninstall regression failed' }
       - name: Verify PE executable has Windows GUI subsystem (no CMD console)
         shell: pwsh
         run: |

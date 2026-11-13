@@ -76,14 +76,29 @@ test('Manual CI release checks Rust CLI before allocating a Windows machine',()=
   assert.match(workflow,/^    needs: preflight$/m);
 });
 
-test('mismatched app/patch records are explained separately but still block every auto write',()=>{
+test('an updated official app is assessed by exact anchors, not by a version allowlist',()=>{
   const inspect=transaction.split('pub fn inspect(')[1].split('fn ensure_state_dir(')[0];
-  assert.match(inspect,/state\["version"\]!=version \|\| state\["patchVersion"\]!=PATCH_VERSION/);
-  assert.match(inspect,/버전 기록 불일치: LilacAnime 기록/);
-  assert.match(inspect,/DinoPatch 기록 v\{recorded_patch\}, 현재 v\{PATCH_VERSION\}/);
-  assert.match(inspect,/PARTIAL_OR_UNKNOWN/);
   const apply=transaction.split('pub fn apply(')[1].split('pub fn uninstall(')[0];
+  assert.doesNotMatch(transaction,/fn official_hashes\(/);
+  assert.match(transaction,/fn select_manifest\(archive:&Archive\)/);
+  assert.match(transaction,/fn profile_compatible\(archive:&Archive/);
+  assert.match(inspect,/replacements\(&archive,&version\)\.is_ok\(\)/);
+  assert.match(inspect,/state\["patchVersion"\]==PATCH_VERSION/);
+  assert.match(inspect,/sha\(&previous_backup\)\?==expected/);
   assert.match(apply,/if current.status!="UNPATCHED" \{return Ok\(current\);\}/);
+  assert.match(apply,/let updated=previous\.as_ref\(\)\.is_some_and/);
+  assert.match(apply,/backup_filename\(&version\)/);
+  assert.match(apply,/write_state\(&root,&state\)\?/);
+  assert.match(transaction,/fn official_updates_keep_historical_backups_and_uninstall_current_version/);
+});
+test('existing original and state records remain version-specific across official upgrades',()=>{
+  assert.match(transaction,/fn read_state\(root:&Path\)/);
+  assert.match(transaction,/fn backup_for_state\(root:&Path,state:&Value\)/);
+  assert.match(transaction,/let preferred=directory\.join\(state_filename\(&version\)\)/);
+  assert.match(transaction,/let backup=backup_for_state\(&root,&pending\)\?/);
+  assert.match(transaction,/write_state\(&root,&new\)\?/);
+  assert.match(transaction,/sha\(&archived_backup\)\?,original_hash/);
+  assert.match(transaction,/assert_eq!\(latest\["version"\],"0\.5\.66"\)/);
 });
 test('version-mismatch diagnostic script is read-only and checks the exact previous backup hash',()=>{
   assert.match(readOnlyAudit,/Get-FileHash/);
@@ -92,4 +107,10 @@ test('version-mismatch diagnostic script is read-only and checks the exact previ
   assert.match(readOnlyAudit,/recordedPatchVersion/);
   assert.match(readOnlyAudit,/DIFFERENT_FROM_BOTH_RECORDED_HASHES/);
   assert.doesNotMatch(readOnlyAudit,/(?:^|\n)\s*(?:Remove-Item|Set-Content|Copy-Item|Move-Item|Rename-Item)\b/im);
+});
+
+test('Rust CLI exposes versionless structural compatibility rather than claiming a registered-only patch',()=>{
+  const main=read('tools/dino-patch-manager/native-rust/src/main.rs');
+  assert.match(main,/"registeredVersionsRequired":false/);
+  assert.match(main,/"compatibility":"structural-anchor-validation"/);
 });
