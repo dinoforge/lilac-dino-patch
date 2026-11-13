@@ -634,3 +634,23 @@ test('provider mode does not modify the hybrid observed-work cache',async()=>{
   assert.equal(app.window.__dinoPatch03Bridge.getWorkIndexStats().works,0);
   assert.equal(app.calls.search.length,0);
 });
+
+
+test('original rememberAnime callback passively indexes sorted catalog cards across all providers',async()=>{
+  const app=harness();
+  const cards=api.PROVIDERS.map((provider,i)=>({
+    ...app.home,provider,id:'sorted-'+i,mal_id:provider+':sorted-'+i,
+    title:'The Same Sorted Work',anilistId:470001,year:2026,type:'TV'
+  }));
+  for(const anime of cards)
+    assert.equal(app.window.rememberAnime(anime),undefined,
+      'the original rememberAnime return behavior is preserved');
+  assert.equal(app.calls.search.length,0,'no provider lookup from original card path');
+  const stats=app.window.__dinoPatch03Bridge.getWorkIndexStats();
+  assert.equal(stats.works,1);
+  assert.ok(api.PROVIDERS.every(provider=>stats.providers[provider]===1));
+  app.window.__dinoPatch03Bridge.flushWorkIndex();
+  const saved=JSON.parse(app.storage.get(api.WORK_INDEX_KEY));
+  assert.equal(saved.works[0].sources.length,5);
+  assert.equal(saved.works[0].checkedAt,0);
+});
