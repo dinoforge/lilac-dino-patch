@@ -522,7 +522,8 @@
           data.works = saved.works.slice(0, maxWorks).filter(w => w && Array.isArray(w.sources))
             .map(w => ({ id: String(w.id || '').slice(0, 160), sources: w.sources.map(compact).filter(Boolean).slice(0, 8),
               names: namesOf(Array.isArray(w.names) ? w.names : []),
-              checkedAt: Number(w.checkedAt) || 0, updatedAt: Number(w.updatedAt) || 0 }))
+              checkedAt: Number(w.checkedAt) || 0, attemptedAt: Number(w.attemptedAt) || 0,
+              updatedAt: Number(w.updatedAt) || 0 }))
             .filter(w => w.sources.length);
           data.searches = saved.searches.slice(-65).filter(s => s && typeof s.query === 'string'
             && Array.isArray(s.sourceIds) && Array.isArray(s.statuses));
@@ -555,14 +556,15 @@
       if (!w) return null;
       const ref = { ...anchor, synonyms: [...(Array.isArray(anchor.synonyms) ? anchor.synonyms : []), ...w.names] };
       return { sources: w.sources.filter(s => identityMatch(ref, s)), names: w.names.slice(),
-        checkedAt: w.checkedAt, fresh: w.checkedAt > 0 && clock() - w.checkedAt < sourceTtl };
+        checkedAt: w.checkedAt, attemptedAt: w.attemptedAt || 0,
+        fresh: w.checkedAt > 0 && clock() - w.checkedAt < sourceTtl };
     };
-    const remember = (group, { checked = false, names = [] } = {}) => {
+    const remember = (group, { checked = false, attempted = false, names = [] } = {}) => {
       const items = (group?.sourceItems || []).map(compact).filter(Boolean);
       if (!items.length) return;
       let row = rowFor(items[0]);
       if (!row) {
-        row = { id: sourceKey(items[0]), sources: [], names: [], checkedAt: 0, updatedAt: 0 };
+        row = { id: sourceKey(items[0]), sources: [], names: [], checkedAt: 0, attemptedAt: 0, updatedAt: 0 };
         data.works.push(row);
       }
       row.names = namesOf([...row.names, ...names,
@@ -574,6 +576,7 @@
       row.sources = [...merged.values()];
       row.updatedAt = clock();
       if (checked) row.checkedAt = clock();
+      if (attempted || checked) row.attemptedAt = clock();
       if (data.works.length > maxWorks) {
         data.works.sort((a, b) => b.updatedAt - a.updatedAt);
         data.works.length = maxWorks;
@@ -601,6 +604,7 @@
       const row = rowFor(anchor);
       if (!row) return;
       row.checkedAt = 0;
+      row.attemptedAt = 0;
       data.searches = data.searches.filter(s => !s.sourceIds.some(id => row.sources.some(item => sourceKey(item) === id)));
       touch();
     };
