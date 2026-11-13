@@ -577,7 +577,7 @@ test('visible original cards from all five providers populate one conservative l
 
 test('an observed five-source work opens from cached IDs without redundant searches',async()=>{
   const app=harness();
-  const cards=api.PROVIDERS.map((provider,i)=>({
+  const cards=api.PROVIDERS.map((provider,i)=>provider==='reanime'?app.home:({
     ...app.home,provider,id:'cached-'+i,mal_id:provider+':cached-'+i,
     title:'Common work',year:2026,anilistId:app.home.anilistId
   }));
