@@ -330,21 +330,6 @@
 }
 .detail-source-picker .dino-diagnostics-panel button{border-radius:8px}
 
-/* Integrated-mode-only supplier diagnostics. Do not style the official
-   individual-provider player or overwrite its supplier controls. */
-.detail-source-picker .dino-provider-connection-diagnostics{
-  display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));
-  gap:5px;margin:7px 0 9px;min-width:0
-}
-.detail-source-picker .dino-provider-diagnostic{
-  display:block;margin:0;padding:7px 9px;line-height:1.4;
-  border:1px solid var(--line);border-radius:7px;
-  color:var(--muted);font-size:11px;overflow-wrap:anywhere
-}
-.detail-source-picker .dino-provider-diagnostic[data-reason="linked"]{
-  color:var(--text)
-}
-
 /* Beta 8: integrated-only compact supplier status cards and precise retry.
    The official individual-provider detail page never mounts this picker. */
 .detail-source-picker .dino-provider-connection-diagnostics{
@@ -395,4 +380,103 @@
 }
 @media(prefers-reduced-motion:reduce){
   .detail-source-picker .dino-provider-retry{transition:none}
+}
+
+/* Final layout pass: isolate the integrated detail UI from official panels.
+   Let full titles wrap instead of squeezing controls into unreadable columns. */
+.detail-source-picker.dino-integrated-picker{
+  box-sizing:border-box;
+  width:100%;
+  max-width:100%;
+  min-width:0
+}
+.detail-source-picker .dino-source-header{
+  align-items:flex-start;
+  gap:10px 14px
+}
+.detail-source-picker .dino-source-heading{
+  flex:1 1 230px;
+  min-width:0;
+  max-width:100%
+}
+.detail-source-picker .dino-source-heading-name{
+  display:block;
+  min-width:0;
+  max-width:100%;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  word-break:normal;
+  line-height:1.5
+}
+.detail-source-picker .dino-source-heading-actions{
+  display:flex;
+  flex:1 1 230px;
+  min-width:0;
+  max-width:100%;
+  gap:6px;
+  justify-content:flex-end
+}
+.detail-source-picker .dino-source-heading-actions > button{
+  white-space:normal;
+  overflow-wrap:anywhere;
+  text-align:center;
+  min-height:32px
+}
+.detail-source-picker .dino-source-track{max-width:100%;min-width:0}
+.detail-source-picker .dino-source-option{
+  box-sizing:border-box;
+  max-width:min(220px,82vw);
+  height:auto;
+  min-height:78px;
+  white-space:pre-line;
+  overflow-wrap:anywhere;
+  word-break:normal
+}
+.detail-source-picker .dino-source-hint,
+.detail-source-picker .source-search-note,
+.detail-source-picker .dino-provider-diagnostic-meta{
+  overflow-wrap:anywhere;
+  white-space:normal
+}
+.detail-source-picker .dino-provider-connection-diagnostics{
+  width:100%;max-width:100%;min-width:0;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,205px),1fr));
+  gap:8px
+}
+.detail-source-picker .dino-provider-diagnostic{box-sizing:border-box;min-width:0}
+.detail-source-picker .dino-provider-diagnostic-meta{max-width:100%}
+.detail-source-picker .dino-provider-retry{
+  min-height:34px;
+  line-height:1.35;
+  overflow-wrap:anywhere
+}
+.detail-source-picker .dino-diagnostics-panel{min-width:0;max-width:100%}
+.detail-source-picker .dino-diagnostics-panel button{
+  min-height:34px;
+  white-space:normal;
+  overflow-wrap:anywhere
+}
+@media(max-width:700px){
+  .detail-source-picker .dino-source-heading-actions{
+    flex:1 1 100%;
+    justify-content:flex-start
+  }
+  .detail-source-picker .dino-source-header{gap:9px}
+  .detail-source-picker .dino-source-option{flex-basis:205px;width:205px}
+}
+@media(max-width:580px){
+  .detail-source-picker .dino-provider-connection-diagnostics{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:7px
+  }
+  .detail-source-picker .dino-source-heading-actions > button{
+    flex:0 1 auto;
+    max-width:100%
+  }
+  .detail-source-picker .dino-provider-retry{width:100%}
+}
+@media(max-width:380px){
+  .detail-source-picker .dino-provider-connection-diagnostics{grid-template-columns:1fr;}
+  .detail-source-picker .dino-source-heading-actions{gap:6px}
+  .detail-source-picker .dino-source-option{flex-basis:180px;width:180px}
 }

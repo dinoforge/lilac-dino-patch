@@ -52,12 +52,12 @@
     {
       "source": "src/integrated-search.css",
       "destination": "src/integrated-search.css",
-      "sha256": "6BB8D1D64E04B2DD5A03626EA6B33CA37D9F2EFD99E4C072B46747618486A126"
+      "sha256": "3B264D3A81899EBF21E83BE229113E5018E7CD69A9736C500B98EF0832C802A8"
     },
     {
       "source": "patches/patch03/patch03-bridge.js",
       "destination": "src/patch03-bridge.js",
-      "sha256": "91ED8377EA1A27C3E2A85B7E4F6FE9B07CAFDEDF1B66DD985E0AAFDE3633590E"
+      "sha256": "8FDD941E9CC9014D7354F7C372D593075A2CC65136E63EEBFD2C4A87682AB3B9"
     },
     {
       "source": "src/dino-sqlite-sync.js",

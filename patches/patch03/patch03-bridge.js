@@ -1118,7 +1118,7 @@
       ? oldInput.selectionStart : null;
     oldPicker?.remove();
     const section = document.createElement('section');
-    section.className = 'detail-source-picker';
+    section.className = 'detail-source-picker dino-integrated-picker';
     section.setAttribute('aria-label', '통합 공급원 선택');
     const header = document.createElement('div');
     header.className = 'dino-source-header';

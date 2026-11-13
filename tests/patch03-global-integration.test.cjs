@@ -222,7 +222,8 @@ test('integrated picker keeps providers on one horizontally scrollable row and p
   const style=fs.readFileSync(path.join(__dirname,'../src/integrated-search.css'),'utf8');
   assert.match(style,/\.detail-source-picker \.dino-source-track\s*\{[^}]*display:flex;[^}]*flex-wrap:nowrap;[^}]*overflow-x:auto;/s);
   assert.match(style,/\.dino-source-option\s*\{[^}]*flex:0 0 218px;/s);
-  assert.doesNotMatch(style,/grid-template-columns:repeat\(auto-fit/);
+  assert.doesNotMatch(style,/\.detail-source-picker \.dino-source-track\s*\{[^}]*grid-template-columns:/s,
+    'the source tabs must remain a horizontal rail even if diagnostics use a responsive grid');
   const app=harness();
   await app.window.openDetail(app.home.mal_id);
   await settle();await settle();
@@ -320,6 +321,8 @@ test('terminal playback error offers a verified same-episode alternative and pre
     anime:app.home,episode:{provider:'reanime',number:7,id:'ep-7'},
     subtitleTitle:'English Work',resolving:false
   };
+  // Successful fallback needs an actual stream URL before the player can switch.
+  app.window.lilac.providerResolve=async()=>({url:'https://video.example/episode-7.m3u8'});
   let switched=null;
   app.sandbox.resolveIntoPlayer=async(_resolver,title,context,subtitleTitle,number)=>{
     switched={title,context,subtitleTitle,number};
@@ -1393,4 +1396,40 @@ test('diagnostic export, SQLite snapshot and per-supplier styling remain integra
   await individual.window.openDetail(individual.home.mal_id);
   assert.equal(individual.window.__dinoPatch03Bridge.getDiagnosticReport(individual.home.mal_id),null);
   assert.equal(individual.nodes.get('#detailContent').querySelectorAll('.dino-provider-retry').length,0);
+});
+
+test('integrated UI allows long work titles and responsive supplier cards without clipping',()=>{
+  const style=fs.readFileSync(path.join(__dirname,'../src/integrated-search.css'),'utf8');
+  assert.match(style,/\.detail-source-picker \.dino-source-heading-name\s*\{[^}]*white-space:normal;[^}]*overflow-wrap:anywhere;/s);
+  assert.match(style,/\.detail-source-picker \.dino-source-option\s*\{[^}]*overflow-wrap:anywhere;/s);
+  assert.match(style,/@media\(max-width:580px\)\s*\{[^]*?\.dino-provider-connection-diagnostics\s*\{\s*grid-template-columns:repeat\(2,minmax\(0,1fr\)\);/s);
+  assert.match(style,/@media\(max-width:380px\)\s*\{[^]*?\.detail-source-picker \.dino-provider-connection-diagnostics\s*\{\s*grid-template-columns:1fr;/s);
+  assert.match(style,/\.detail-source-picker \.dino-source-track\s*\{[^}]*display:flex;[^}]*flex-wrap:nowrap;/s);
+  assert.equal((style.match(/\/\* Beta 8: integrated-only compact supplier status cards/g)||[]).length,1);
+});
+
+test('supplier retry controls have an individual accessible label and working disabled state',async()=>{
+  const app=harness();
+  await app.window.openDetail(app.home.mal_id);
+  const cards=app.nodes.get('#detailContent').querySelectorAll('.dino-provider-diagnostic');
+  assert.equal(cards.length,5);
+  for(const card of cards){
+    const retry=card.querySelector('.dino-provider-retry');
+    if(card.dataset.reason==='linked'){assert.equal(retry,null);continue;}
+    assert.ok(retry);
+    assert.match(retry.getAttribute('aria-label'),/다시 검색/);
+    assert.equal(retry.type,'button');
+  }
+});
+
+test('new compact layout is scoped to the integrated picker rather than official supplier details',async()=>{
+  const integrated=harness();
+  await integrated.window.openDetail(integrated.home.mal_id);
+  const picker=integrated.nodes.get('#detailContent').querySelector('.detail-source-picker');
+  assert.ok(picker.className.split(' ').includes('dino-integrated-picker'));
+  const individual=harness({integrated:false});
+  await individual.window.openDetail(individual.home.mal_id);
+  assert.equal(individual.nodes.get('#detailContent').querySelector('.dino-integrated-picker'),null);
+  const style=fs.readFileSync(path.join(__dirname,'../src/integrated-search.css'),'utf8');
+  assert.match(style,/\.detail-source-picker\.dino-integrated-picker\s*\{[^}]*box-sizing:border-box;/s);
 });
