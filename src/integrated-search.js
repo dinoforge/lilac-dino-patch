@@ -574,9 +574,10 @@
     } catch { /* broken or unavailable cache never changes original user data */ }
     let dirty = false, timer = null, persistenceHook = null;
     const cloned = value => JSON.parse(JSON.stringify(value));
-    const notify = row => {
+    const notify = (row, { manualReset = false } = {}) => {
       if (row && typeof persistenceHook === 'function') {
-        try { persistenceHook(cloned(row)); } catch { /* optional SQLite is never required */ }
+        try { persistenceHook({ ...cloned(row), dinoResetManual: manualReset }); }
+        catch { /* optional SQLite is never required */ }
       }
     };
     const setPersistenceHook = hook => { persistenceHook = typeof hook === 'function' ? hook : null; };
@@ -736,7 +737,7 @@
         koSource: fallback ? 'provider' : '',
         koCheckedAt: fallback ? clock() : 0, manual: false };
       if (fallback) row.names = namesOf([fallback, ...row.names]);
-      row.updatedAt = clock(); touch(); notify(row);
+      row.updatedAt = clock(); touch(); notify(row, { manualReset: true });
       return true;
     };
 
