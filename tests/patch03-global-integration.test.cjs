@@ -480,7 +480,7 @@ test('source index records missing versus provider outage for separate expiry po
 });
 
 
-test('original local Re:Anime index seeds 36 titles without a five-provider network search', async()=>{
+test('original on-disk catalog imports 36 per idle batch and another 36 immediately, not tomorrow',async()=>{
   const works=Array.from({length:72},(_,i)=>({
     provider:'reanime',id:'local-'+i,mal_id:'reanime:local-'+i,
     title:'Local Indexed Anime '+i,anilistId:100000+i,year:2026,type:'TV'
@@ -488,42 +488,40 @@ test('original local Re:Anime index seeds 36 titles without a five-provider netw
   const state={sources:[{provider:'reanime',total:works.length,status:'ready'}]};
   const storage=new Map([['contentSource','reanime']]);
   const first=harness({persistedStorage:storage,catalogState:state,catalogItems:works});
-  assert.equal(first.calls.search.length,0,'index import starts after the UI is ready');
-  assert.equal(first.scheduled.length,1,'one deferred local read');
-  first.scheduled.shift()();
+  first.nodes.get('#detailDialog').open=false;
+  assert.equal(first.calls.search.length,0,'import starts after UI initialization');
+  assert.equal(first.scheduled.filter(fn=>fn.__testDelay===5000).length,1);
+  first.scheduled.find(fn=>fn.__testDelay===5000)();
   await settle();await settle();await settle();
-  const originalCalls=first.calls.search;
-  assert.equal(originalCalls.length,1,'one original indexed page only');
-  assert.equal(originalCalls[0].provider,'reanime');
-  assert.equal(originalCalls[0].query,'');
-  assert.equal(originalCalls[0].sort,'popular');
-  assert.ok(!originalCalls.some(request=>request.provider==='miruro'),'no remote supplier searches');
-  assert.equal(first.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().importedThisSession,36);
-  assert.equal(first.window.__dinoPatch03Bridge.getWorkIndexStats().works,36);
+  assert.equal(first.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().indexed,36);
+  assert.equal(first.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().batchSize,36);
+  assert.equal(first.calls.search.length,1);
+  assert.ok(first.calls.search.every(x=>x.provider==='reanime'&&x.query===''&&x.sort==='popular'));
+  const next=first.scheduled.find(fn=>fn.__testDelay===1400);
+  assert.ok(next,'a second local batch should run without waiting a day');
+  next();
+  await settle();await settle();await settle();
+  assert.equal(first.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().indexed,72);
+  assert.equal(first.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().status,'catalog-end-reached');
+  assert.ok(!first.scheduled.some(fn=>fn.__testDelay===86401000),'no daily quota or daily timer');
   first.window.__dinoPatch03Bridge.flushWorkIndex();
-  const data=JSON.parse(storage.get(api.WORK_INDEX_KEY));
-  assert.equal(data.works.length,36);
-  assert.ok(data.works.every(row=>row.checkedAt===0 && !row.outcome),'catalog-only titles must not be marked verified');
-  assert.equal(first.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().nextOffset,36);
-
+  const saved=JSON.parse(storage.get(api.WORK_INDEX_KEY));
+  assert.equal(saved.works.length,72);
+  assert.ok(saved.works.every(row=>row.checkedAt===0&&!row.outcome));
+  assert.equal(first.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().nextOffset,0);
   const repeat=harness({persistedStorage:storage,catalogState:state,catalogItems:works});
-  assert.equal(repeat.scheduled.length,1,'the next local read is scheduled for tomorrow, not startup');
+  repeat.nodes.get('#detailDialog').open=false;
   assert.equal(repeat.calls.search.length,0);
-  assert.equal(repeat.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().indexed,36);
-  const checkpointKey='lilacDinoPatch.workIndex.originalCatalogSeed.v1';
-  const checkpoint=JSON.parse(storage.get(checkpointKey));
-  storage.set(checkpointKey,JSON.stringify({...checkpoint,time:Date.now()-25*60*60*1000}));
-  const next=harness({persistedStorage:storage,catalogState:state,catalogItems:works});
-  assert.equal(next.scheduled.length,1);
-  next.scheduled.shift()();
-  await settle();await settle();await settle();
-  assert.equal(next.calls.search[0].offset,36,'next day imports next page, not first page');
-  assert.equal(next.window.__dinoPatch03Bridge.getWorkIndexStats().works,72);
-  assert.equal(next.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().nextOffset,0);
+  const recheck=repeat.scheduled.find(fn=>fn.__testDelay===5000);
+  assert.ok(recheck,'a cheap original index state check may be scheduled');
+  recheck();
+  await settle();await settle();
+  assert.equal(repeat.calls.search.length,0,'completed catalog does not re-read local pages');
 });
 
 test('missing original index and non-integrated mode cause no new catalog or supplier requests', async()=>{
   const empty=harness({catalogState:{sources:[]},catalogItems:[]});
+  empty.nodes.get('#detailDialog').open=false;
   assert.equal(empty.scheduled.length,1);
   empty.scheduled.shift()();
   await settle();await settle();
@@ -548,6 +546,7 @@ test('already verified connections are not overwritten by the original catalog s
     catalogState:{sources:[{provider:'reanime',total:1,status:'ready'}]},
     catalogItems:[first.home]
   });
+  read.nodes.get('#detailDialog').open=false;
   assert.equal(read.scheduled.length,1);
   read.scheduled.shift()();
   await settle();await settle();
@@ -665,69 +664,82 @@ test('original rememberAnime callback passively indexes sorted catalog cards acr
 });
 
 
-test('offline catalog import continues 36 NEW works a day until 1000 then stops permanently',async()=>{
-  const limit=1000,day=24*60*60*1000;
+test('idle import reaches 1000 local titles without any calendar-day transitions',async()=>{
+  const target=1000;
   const catalogItems=Array.from({length:1100},(_,i)=>({
-    provider:'reanime',id:'daily-'+i,mal_id:'reanime:daily-'+i,
-    title:'Daily Catalog Work '+i,anilistId:300000+i,year:2026,type:'TV'
+    provider:'reanime',id:'stream-'+i,mal_id:'reanime:stream-'+i,
+    title:'Stream Work '+i,anilistId:300000+i,year:2026,type:'TV'
   }));
   const catalogState={sources:[{provider:'reanime',total:catalogItems.length,status:'ready'}]};
   const storage=new Map([['contentSource','reanime']]);
-  let imported=0;
-  const checkpointKey='lilacDinoPatch.workIndex.originalCatalogSeed.v1';
-  for(let dayIndex=0;dayIndex<29;dayIndex++){
-    const app=harness({persistedStorage:storage,catalogState,catalogItems});
-    const pending=app.scheduled.shift();
-    if(dayIndex<28)assert.ok(pending,'new day must schedule a local read');
-    if(!pending){
-      assert.equal(imported,limit);
-      break;
-    }
-    pending();
+  const app=harness({persistedStorage:storage,catalogState,catalogItems});
+  app.nodes.get('#detailDialog').open=false;
+  let indexed=0,turns=0,callback=app.scheduled.find(fn=>fn.__testDelay===5000);
+  while(callback&&turns<30){
+    callback();
     await settle();await settle();await settle();
-    app.window.__dinoPatch03Bridge.flushWorkIndex();
-    const indexed=app.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus();
-    const added=indexed.indexed-imported;
-    assert.ok(added>=0 && added<=36,'at most 36 distinct indexed sources per day');
-    if(dayIndex<27)assert.equal(added,36,'a full local catalog should supply 36 new works');
-    imported=indexed.indexed;
-    assert.equal(indexed.target,limit);
-    assert.ok(app.calls.search.every(query=>query.provider==='reanime'
-      && query.query==='' && query.sort==='popular'),'no five-provider search requests');
-    if(imported>=limit){
-      assert.equal(indexed.status,'target-reached');
-      assert.equal(app.scheduled.filter(fn=>fn.__testDelay>=60000).length,0,
-        'no daily wake-up timer after the target is reached');
-      break;
-    }
-    const checkpoint=JSON.parse(storage.get(checkpointKey));
-    storage.set(checkpointKey,JSON.stringify({...checkpoint,time:Date.now()-25*60*60*1000}));
+    const state=app.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus();
+    const added=state.indexed-indexed;
+    assert.ok(added>0&&added<=36,'each idle batch imports at most 36 distinct works');
+    indexed=state.indexed;
+    turns++;
+    callback=app.scheduled.filter(fn=>fn.__testDelay===1400).at(-1);
+    if(state.status==='target-reached')break;
   }
-  assert.equal(imported,limit,'28 daily batches must reach 1,000 and stop');
-  const final=harness({persistedStorage:storage,catalogState,catalogItems});
-  assert.equal(final.scheduled.length,0,'restarting after target never re-seeds');
-  assert.equal(final.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().indexed,limit);
-  assert.equal(final.window.__dinoPatch03Bridge.getWorkIndexStats().works,limit);
-  assert.equal(final.calls.search.length,0);
+  assert.equal(indexed,target);
+  assert.equal(turns,28);
+  const end=app.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus();
+  assert.equal(end.status,'target-reached');
+  assert.equal(end.localPageReads,28);
+  assert.ok(app.calls.search.every(x=>x.provider==='reanime'&&x.query===''&&x.sort==='popular'));
+  assert.equal(app.calls.search.length,28);
+  app.window.__dinoPatch03Bridge.flushWorkIndex();
+  const restart=harness({persistedStorage:storage,catalogState,catalogItems});
+  assert.equal(restart.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().indexed,target);
+  assert.equal(restart.scheduled.length,0,'target reached: no new automatic work');
+  assert.equal(restart.calls.search.length,0);
 });
 
-test('duplicates already observed from native cards do not consume daily 36 new-work quota',async()=>{
+test('already seen cards are free, with no daily limit or repeated supplier searches',async()=>{
   const catalogItems=Array.from({length:160},(_,i)=>({
     provider:'reanime',id:'duplicate-'+i,mal_id:'reanime:duplicate-'+i,
     title:'Duplicate Work '+i,anilistId:500000+i,year:2026,type:'TV'
   }));
   const state={sources:[{provider:'reanime',total:catalogItems.length,status:'ready'}]};
   const app=harness({catalogState:state,catalogItems});
+  app.nodes.get('#detailDialog').open=false;
   app.window.renderCards('#topRail',catalogItems.slice(0,20));
   assert.equal(app.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().indexed,20);
-  app.scheduled.shift()();
+  app.scheduled.find(fn=>fn.__testDelay===5000)();
   await settle();await settle();await settle();
   const seed=app.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus();
-  assert.equal(seed.importedThisSession,36,'duplicates do not spend daily new-work budget');
+  assert.equal(seed.importedThisSession,36);
   assert.equal(seed.indexed,56);
-  assert.equal(seed.localPageReads,2,'the importer skips duplicate cards using only local pages');
-  assert.equal(seed.nextOffset,56,'the next daily cursor skips exactly the scanned entries');
-  assert.ok(app.calls.search.every(query=>query.provider==='reanime'&&query.sort==='popular'));
+  assert.equal(seed.localPageReads,2);
+  assert.equal(seed.nextOffset,56);
+  assert.ok(app.scheduled.some(fn=>fn.__testDelay===1400),'next batch does not wait a day');
+  assert.ok(app.calls.search.every(x=>x.provider==='reanime'&&x.sort==='popular'));
+});
+
+test('active detail playback postpones offline indexing but never burns a daily quota',async()=>{
+  const works=Array.from({length:72},(_,i)=>({
+    provider:'reanime',id:'paused-'+i,mal_id:'reanime:paused-'+i,
+    title:'Paused Work '+i,year:2025,anilistId:700000+i
+  }));
+  const app=harness({
+    catalogState:{sources:[{provider:'reanime',total:works.length,status:'ready'}]},
+    catalogItems:works
+  });
+  // The harness starts with the detail dialog open.
+  app.scheduled.find(fn=>fn.__testDelay===5000)();
+  await settle();await settle();
+  assert.equal(app.calls.search.length,0);
+  assert.equal(app.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().status,'paused-for-playback');
+  app.nodes.get('#detailDialog').open=false;
+  app.scheduled.find(fn=>fn.__testDelay===15000)();
+  await settle();await settle();await settle();
+  assert.equal(app.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().indexed,36);
+  assert.equal(app.calls.search.length,1);
 });
 
 test('failed local index persistence cannot advance daily checkpoint and skip unsaved works',async()=>{
@@ -745,7 +757,8 @@ test('failed local index persistence cannot advance daily checkpoint and skip un
   const app=harness({persistedStorage:storage,
     catalogState:{sources:[{provider:'reanime',total:catalogItems.length,status:'ready'}]},
     catalogItems});
-  app.scheduled.shift()();
+  app.nodes.get('#detailDialog').open=false;
+  app.scheduled.find(fn=>fn.__testDelay===5000)();
   await settle();await settle();await settle();
   assert.equal(app.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().status,'write-failed');
   assert.equal(storage.has('lilacDinoPatch.workIndex.originalCatalogSeed.v1'),false);
