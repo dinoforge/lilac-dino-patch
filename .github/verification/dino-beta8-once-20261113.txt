@@ -1,0 +1,3 @@
+One-shot Beta 8 PREVIEW verification trigger.
+Base branch: feature/dino-beta8-preflight-ready
+No official ASAR or user data is included or modified.
