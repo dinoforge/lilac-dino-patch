@@ -57,7 +57,7 @@
     {
       "source": "patches/patch03/patch03-bridge.js",
       "destination": "src/patch03-bridge.js",
-      "sha256": "51327FC22FEFFB421F60D9774634755FDD3825C946AB1EDED8624A095A4CFA4F"
+      "sha256": "27513D41DF5378236CE0C091C2CA9D92CFD158BED542F2BB28EDAECA15B5EBBE"
     },
     {
       "source": "src/dino-sqlite-sync.js",
