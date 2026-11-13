@@ -510,3 +510,67 @@ test('legacy v1 work caches gain a conservative Korean representative without lo
   assert.equal(index.find(anchor).sources.length,2);
   assert.equal(index.find(anchor).checkedAt,100);
 });
+
+
+test('per-source episode refresh persists independently of work title and provider verification',()=>{
+  const {createWorkIndex,WORK_INDEX_KEY}=require('../src/integrated-search.js');
+  const map=new Map(), storage={getItem:k=>map.get(k)||null,setItem:(k,v)=>map.set(k,String(v))};
+  let now=1900000000000;
+  const idx=createWorkIndex(storage,{clock:()=>now});
+  const a={provider:'reanime',mal_id:'reanime:airing',id:'airing',
+    title:'방영 작품',anilistId:89001,year:2026,status:'airing'};
+  const b={...a,provider:'miruro',id:'miruro-airing',mal_id:'miruro:airing',
+    title:'Airing Series'};
+  idx.observe([a,b]);
+  idx.remember({sourceItems:[a,b]},{checked:true,outcome:'verified'});
+  idx.rememberTitles(a,{ko:'내가 직접 정한 한국어 작품명'},{source:'manual'});
+  const verifiedAt=idx.find(a).checkedAt;
+  assert.equal(idx.rememberEpisode(a,{count:10,latest:10}),true);
+  assert.equal(idx.episodeState(b),null);
+  now+=10000;
+  assert.equal(idx.rememberEpisode(b,{count:9,latest:9}),true);
+  assert.equal(idx.rememberEpisode(a,{count:11,latest:11}),true);
+  assert.equal(idx.episodeState(a).newEpisodes,1);
+  assert.equal(idx.episodeState(b).latest,9);
+  assert.equal(idx.find(b).checkedAt,verifiedAt,
+    'episode refresh must never alter five-provider matching verification');
+  assert.equal(idx.find(a).titles.ko,'내가 직접 정한 한국어 작품명');
+  assert.equal(idx.find(a).titles.manual,true);
+  const previous=idx.episodeState(a);
+  now+=1000;
+  assert.equal(idx.rememberEpisode(a,null),true);
+  assert.equal(idx.episodeState(a).state,'error');
+  assert.equal(idx.episodeState(a).latest,11,'provider outage never means zero available episodes');
+  assert.equal(idx.episodeState(a).checkedAt,previous.checkedAt);
+  idx.flush();
+  assert.equal(JSON.parse(map.get(WORK_INDEX_KEY)).works[0].sources.length,2);
+  const reloaded=createWorkIndex(storage,{clock:()=>now});
+  assert.equal(reloaded.episodeState(a).latest,11);
+  assert.equal(reloaded.episodeState(b).latest,9);
+  assert.equal(reloaded.find(a).titles.ko,'내가 직접 정한 한국어 작품명');
+  reloaded.observe([a]);
+  assert.equal(reloaded.episodeState(a).latest,11,
+    'passive catalog card must not erase a saved episode snapshot');
+});
+
+test('SQLite hydration preserves the newer per-supplier episode snapshot',()=>{
+  const {createWorkIndex}=require('../src/integrated-search.js');
+  const cache={getItem:()=>null,setItem:()=>{}};
+  let now=1900000000000;
+  const idx=createWorkIndex(cache,{clock:()=>now});
+  const a={provider:'ohli24',id:'show',mal_id:'ohli24:show',title:'한국 작품',year:2026,
+    anilistId:77777};
+  idx.observe([a]);
+  idx.rememberEpisode(a,{count:15,latest:15});
+  const older=idx.exportRows()[0];
+  now+=100000;
+  idx.rememberEpisode(a,{count:16,latest:16});
+  idx.importRows([older]);
+  assert.equal(idx.episodeState(a).latest,16);
+  const newer=structuredClone(idx.exportRows()[0]);
+  newer.sources[0].dinoEpisode={...newer.sources[0].dinoEpisode,
+    latest:17,count:17,attemptedAt:now+10,checkedAt:now+10,newEpisodes:1};
+  idx.importRows([newer]);
+  assert.equal(idx.episodeState(a).latest,17,
+    'newer SQLite episode state should hydrate the local cache');
+});
