@@ -29,6 +29,7 @@ function normalize(raw){
     titles:{ko,en:clean(title.en),ja:clean(title.ja),
       koSource:manual?'manual':ko&&['official','provider'].includes(title.koSource)?title.koSource:'',
       koCheckedAt:number(title.koCheckedAt),manual},
+    explicitManualReset:raw.dinoResetManual===true,
     checkedAt:number(raw.checkedAt),attemptedAt:number(raw.attemptedAt),
     outcome:['verified','missing','error'].includes(raw.outcome)?raw.outcome:'',
     updatedAt:number(raw.updatedAt)};
@@ -95,7 +96,7 @@ function createStore({app,DatabaseSync}={}){
         if(previous){
           const previousTime=Number(previous.ko_checked_at)||0;
           // Never roll back user-edited Korean titles through old cached data.
-          if((previous.manual&&!titles.manual)
+          if((previous.manual&&!titles.manual&&!work.explicitManualReset)
             ||(previous.manual&&titles.manual&&previousTime>titles.koCheckedAt)){
             titles.ko=previous.title_ko;titles.koSource='manual';
             titles.koCheckedAt=previousTime;titles.manual=true;
