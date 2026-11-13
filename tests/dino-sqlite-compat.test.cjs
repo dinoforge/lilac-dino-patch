@@ -99,6 +99,8 @@ test('SQLite absence leaves original v1 synchronous index operational and untouc
     index.flush();
     assert.equal(index.find(first.sources[1]).titles.ko,'사용자 제목');
     assert.equal(adapter.report().active,false);
+    assert.equal(adapter.report().pending,0,
+      'missing SQLite IPC cannot retain an unbounded queue in renderer RAM');
     assert.ok(bag.has(api.WORK_INDEX_KEY));
     assert.equal(fs.existsSync(path.join(env.root,FILE)),false);
   }finally{env.close();}
@@ -168,4 +170,23 @@ test('official Korean title is not downgraded to an older provider-only title',(
     assert.equal(row.titles.ko,'원본이 확인한 한국어 제목');
     assert.equal(row.titles.koSource,'official');
   }finally{env.close();}
+});
+
+
+test('SQLite startup failure drops pending writes and keeps the original cache usable',async()=>{
+  const storage=new Map(),local={getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,String(v))};
+  const idx=api.createWorkIndex(local);
+  const adapter=sync.connect(idx,async method=>{
+    if(method==='status')return {available:false,reason:'built-in SQLite unavailable'};
+    throw Error('unexpected IPC call');
+  });
+  assert.equal(await adapter.start(),false);
+  for(let i=0;i<125;i++)idx.observe([{
+    provider:'reanime',id:'fallback'+i,mal_id:'reanime:fallback'+i,
+    title:'오프라인 캐시 '+i,year:2026,anilistId:900000+i
+  }],{limit:1});
+  assert.equal(adapter.report().active,false);
+  assert.equal(adapter.report().pending,0,'fallback must not buffer endless work rows');
+  assert.equal(idx.flush(),true);
+  assert.equal(api.createWorkIndex(local).stats().works,125);
 });
