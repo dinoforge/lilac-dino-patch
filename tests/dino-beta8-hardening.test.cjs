@@ -6,6 +6,7 @@ const path=require('node:path');
 
 const root=path.join(__dirname,'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
+const checkoutAttributes=read('.gitattributes');
 const transaction=read('tools/dino-patch-manager/native-rust/src/transaction.rs');
 const readOnlyAudit=read('scripts/dino-read-only-diagnose.ps1');
 const gui=read('tools/dino-patch-manager/native-rust/src/gui.rs');
@@ -113,4 +114,17 @@ test('Rust CLI exposes versionless structural compatibility rather than claiming
   const main=read('tools/dino-patch-manager/native-rust/src/main.rs');
   assert.match(main,/"registeredVersionsRequired":false/);
   assert.match(main,/"compatibility":"structural-anchor-validation"/);
+});
+
+test('all embedded JavaScript and CSS files retain exact bytes on Windows checkout',()=>{
+  const pinned=['/src/integrated-search.js','/src/integrated-search.css',
+    '/src/dino-sqlite-sync.js','/patches/patch03/**'];
+  for(const item of pinned) {
+    assert.ok(checkoutAttributes.split('\n').some(line=>line.startsWith(item+' -text')),
+      item+' must not be CRLF-transformed during Git checkout');
+  }
+  const byteCheck=workflow.indexOf('Verify embedded module hashes on Windows before compiling');
+  const compile=workflow.indexOf('Compile the entire native Rust desktop manager');
+  assert.ok(byteCheck>=0&&compile>byteCheck,
+    'byte-level runtime verification must precede expensive Windows compile');
 });

@@ -3,6 +3,7 @@
 # Preserve A35 source payload bytes across Windows checkouts for provenance hashes.
 /src/integrated-search.js -text
 /src/integrated-search.css -text whitespace=cr-at-eol
+/src/dino-sqlite-sync.js -text
 /patches/patch03/** -text
 /scripts/validate-patch03-clean-source.cjs -text
 /tests/dino-manager-ui.test.cjs -text

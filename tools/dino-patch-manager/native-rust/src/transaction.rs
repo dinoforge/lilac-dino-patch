@@ -786,8 +786,10 @@ mod versionless_tests {
         let result=(||->Result<()>{
             let asar_path=root.join("resources").join("app.asar");
             fixture(&asar_path,"0.5.64",false)?;
+            let ready=inspect(&root);
+            assert_eq!(ready.status,"UNPATCHED","{}",ready.reason);
             let first=apply(&root,true)?;
-            assert_eq!(first.status,"APPLIED");
+            assert_eq!(first.status,"APPLIED","{}",first.reason);
             assert_eq!(uninstall(&root)?.status,"UNPATCHED");
             let data=state_root(&root)?;
             let archived_backup=data.join("original-app.asar");
@@ -800,7 +802,8 @@ mod versionless_tests {
             let review=inspect(&root);
             assert_eq!(review.status,"UNPATCHED", "{}",review.reason);
             assert!(review.manually_uninstalled);
-            assert_eq!(apply(&root,true)?.status,"APPLIED");
+            let result=apply(&root,true)?;
+            assert_eq!(result.status,"APPLIED","{}",result.reason);
             let active=read_state(&root)?.unwrap();
             assert_eq!(active["version"],"0.5.65");
             assert_eq!(active["backupFile"],backup_filename("0.5.65"));
@@ -818,7 +821,8 @@ mod versionless_tests {
             fixture(&asar_path,"0.5.66",false)?;
             let future=inspect(&root);
             assert_eq!(future.status,"UNPATCHED", "{}",future.reason);
-            assert_eq!(apply(&root,true)?.status,"APPLIED");
+            let result=apply(&root,true)?;
+            assert_eq!(result.status,"APPLIED","{}",result.reason);
             let latest=read_state(&root)?.unwrap();
             assert_eq!(latest["version"],"0.5.66");
             assert_eq!(uninstall(&root)?.status,"UNPATCHED");

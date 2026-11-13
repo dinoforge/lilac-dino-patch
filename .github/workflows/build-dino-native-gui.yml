@@ -39,6 +39,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify embedded module hashes on Windows before compiling
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          node scripts/dino-release-preflight.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows source hashes or Node regressions failed' }
       - name: Compile the entire native Rust desktop manager
         shell: pwsh
         run: |
