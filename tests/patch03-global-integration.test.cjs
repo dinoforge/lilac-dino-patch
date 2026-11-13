@@ -615,10 +615,16 @@ test('background matching excludes known suppliers and keeps explicit detail ret
   assert.ok(app.calls.search.length>0);
   assert.ok(!app.calls.search.some(req=>req.provider==='reanime'),
     'already known source should not be searched in background');
-  const before=app.calls.search.length;
+  app.window.__dinoPatch03Bridge.flushWorkIndex();
+  const before=JSON.parse(app.storage.get(api.WORK_INDEX_KEY)).works
+    .find(row=>row.sources.some(source=>source.mal_id===app.home.mal_id));
+  assert.equal(before.outcome,'error','limited background scan must not cache missing as definitive');
   await app.window.openDetail(app.home.mal_id);
-  assert.ok(app.calls.search.length>before,
-    'foreground lookup may retry an incomplete background pass rather than waiting three days');
+  app.window.__dinoPatch03Bridge.flushWorkIndex();
+  const after=JSON.parse(app.storage.get(api.WORK_INDEX_KEY)).works
+    .find(row=>row.sources.some(source=>source.mal_id===app.home.mal_id));
+  assert.equal(after.outcome,'missing',
+    'foreground evaluates the background result fully, reusing recent requests where possible');
   assert.ok(buttons(app).length>=2);
 });
 
