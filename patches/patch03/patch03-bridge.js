@@ -47,7 +47,12 @@
   ) || { start:async()=>false,ensure:async anchor=>workIndex.find(anchor),
     flush:async()=>false,isReady:()=>false,
     report:()=>({active:false,phase:'legacy'}),stats:async()=>({available:false}) };
-  sqlite.start().catch(()=>{});
+  sqlite.start().then(ready => {
+    // The legacy 1000-work guard may have suppressed the first schedule
+    // before the async SQLite handshake completed. Resume only after the
+    // unbounded durable store confirms it is ready.
+    if (ready) scheduleOriginalCatalogSeed();
+  }).catch(()=>{});
   const groupBySourceId = new Map();
   let resultGroups = [];
   let resultStatuses = [];
