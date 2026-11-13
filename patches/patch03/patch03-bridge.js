@@ -45,7 +45,7 @@
     workIndex, window.lilac?.dinoWorkIndex,
     { delay: (fn,ms) => setTimeout(fn,ms) }
   ) || { start:async()=>false,ensure:async anchor=>workIndex.find(anchor),
-    flush:async()=>false,isReady:()=>false,
+    flush:async()=>false,backup:async()=>({ok:false,reason:'SQLite 사용 불가'}),isReady:()=>false,
     report:()=>({active:false,phase:'legacy'}),stats:async()=>({available:false}),
     diagnostic:async method=>['search','titleHistory','linkHistory'].includes(method)?[]:{ok:false,available:false} };
   // The integrated work index is additive. Do not even initialize its
@@ -74,6 +74,7 @@
   const catalogRequestCache = new Map();
   const detailSearchDiagnostics = new Map();
   const detailUnverifiedCandidates = new Map();
+  const detailRejectionReasons = new Map();
   const detailedIdentityCache = new Map();
   const SEARCH_CACHE_TTL_MS = 90 * 1000;
   function cachedCatalog(provider, query, offset = undefined) {
@@ -185,7 +186,7 @@
       items: items.map(item => enriched.get(item.provider + ':' + sourceKey(item)) || item) };
   }
 
-  async function discoverSources(anchor, knownGroup, { background = false, force = false } = {}) {
+  async function discoverSources(anchor, knownGroup, { background = false, force = false, onlyProviders = null } = {}) {
     const identityKey = anchor.provider + ':' + sourceKey(anchor);
     const key = identityKey + (background ? ':background' : ':foreground');
     const cached = detailDiscoveryCache.get(key);
@@ -207,7 +208,10 @@
       // for suppliers not yet represented in this work.
       const expiredVerified = stored && !stored.fresh
         && ['verified', 'missing', 'error'].includes(stored.outcome);
-      const toCheck = expiredVerified ? providers.slice()
+      const toCheck = Array.isArray(onlyProviders)
+        ? [...new Set(onlyProviders)].filter(provider => providers.includes(provider)
+          && !knownGroupNow.sourceItems.some(item => item.provider === provider))
+        : expiredVerified ? providers.slice()
         : providers.filter(provider => !knownGroupNow.sourceItems.some(item => item.provider === provider));
       if (!toCheck.length) {
         workIndex.remember(knownGroupNow, { checked: true, attempted: true, outcome: 'verified' });
@@ -267,7 +271,8 @@
       const options = {
         search: cachedCatalog,
         localSearch: localKoreanCatalog,
-        concurrency: background ? 3 : 5, maxPages: background ? 1 : 2
+        concurrency: background ? 3 : 5, maxPages: background ? 1 : 2,
+        timeoutMs: background ? 9000 : 12000
       };
       const first = await api.searchProviders({ ...options, providers: toCheck, query });
       let diagnostics = first;
@@ -289,7 +294,8 @@
       }
       // Mark a mapping fresh only when every attempted supplier answered.
       // Failed or skipped lookups never turn into permanent "not found".
-      const complete = (diagnostics.statuses || []).length === toCheck.length
+      const complete = !Array.isArray(onlyProviders)
+        && (diagnostics.statuses || []).length === toCheck.length
         && diagnostics.statuses.every(status => status.state === 'ready' && !status.pageLimitReached);
       // All five verified sources can be reused for 30 days. A successful
       // scan that did not find some sources is rechecked after 7 days.
@@ -301,24 +307,42 @@
       // still search thoroughly without being blocked by the cache.
       const outcome = !complete || (background && !allMatched) ? 'error'
         : allMatched ? 'verified' : 'missing';
-      workIndex.remember(group, { checked: complete, attempted: true,
-        outcome, names: verifiedAliases });
-      // A user can open the same work through any verified supplier. Share
-      // this scan snapshot between the linked source identities, not just the
-      // original anchor, without persisting transient network failures.
+      workIndex.remember(group, { checked: complete,
+        attempted: !Array.isArray(onlyProviders),
+        outcome: Array.isArray(onlyProviders) ? '' : outcome, names: verifiedAliases });
+      // Diagnostic matches are observations, never instructions to link works.
       const unverified = [...new Set(identity.items.filter(item =>
         strongTitleCandidate(identity.reference, item)
         && !api.identityMatch(identity.reference, item)
       ).map(item => item.provider))];
+      const rejectionDetails = new Map();
+      const reasonPriority = ['id-conflict', 'season-different', 'year-different',
+        'format-different', 'year-unconfirmed', 'identity-unconfirmed'];
+      for (const item of identity.items) {
+        if (!isDinoProvider(item) || item.provider === anchor.provider
+          || group.sourceItems.some(linked => linked.provider === item.provider)) continue;
+        const reason = api.identityDifference(identity.reference, item);
+        if (reason === 'title-different' || reason === 'matched') continue;
+        const previous = rejectionDetails.get(item.provider);
+        if (!previous || reasonPriority.indexOf(reason) < reasonPriority.indexOf(previous))
+          rejectionDetails.set(item.provider, reason);
+      }
       for (const item of [anchor, ...group.sourceItems]) {
         const scanKey = item.provider + ':' + sourceKey(item);
-        detailSearchDiagnostics.set(scanKey, diagnostics.statuses || []);
-        detailUnverifiedCandidates.set(scanKey, unverified);
+        const previous = Array.isArray(onlyProviders) ? (detailSearchDiagnostics.get(scanKey) || []) : [];
+        const remaining = previous.filter(row => !toCheck.includes(row.provider));
+        detailSearchDiagnostics.set(scanKey, [...remaining, ...(diagnostics.statuses || [])]);
+        const candidates = Array.isArray(onlyProviders)
+          ? (detailUnverifiedCandidates.get(scanKey) || []).filter(p => !toCheck.includes(p)) : [];
+        detailUnverifiedCandidates.set(scanKey, [...new Set([...candidates, ...unverified])]);
+        const prior = Array.isArray(onlyProviders)
+          ? new Map(detailRejectionReasons.get(scanKey) || []) : new Map();
+        for (const provider of toCheck) prior.delete(provider);
+        for (const [provider, reason] of rejectionDetails) prior.set(provider, reason);
+        detailRejectionReasons.set(scanKey, prior);
       }
-      while (detailSearchDiagnostics.size > 120)
-        detailSearchDiagnostics.delete(detailSearchDiagnostics.keys().next().value);
-      while (detailUnverifiedCandidates.size > 120)
-        detailUnverifiedCandidates.delete(detailUnverifiedCandidates.keys().next().value);
+      for (const cache of [detailSearchDiagnostics, detailUnverifiedCandidates, detailRejectionReasons])
+        while (cache.size > 120) cache.delete(cache.keys().next().value);
       return group;
     })();
     detailDiscoveryCache.set(key, { at: Date.now(), promise });
@@ -954,6 +978,7 @@
       providers,
       concurrency: 6,
       maxPages: 2,
+      timeoutMs: 12000,
       search: cachedCatalog,
       localSearch: localKoreanCatalog
     };
@@ -1013,6 +1038,70 @@
     });
     return heights.length ? Math.max(...heights) + 'p' : '';
   }
+  // Privacy-safe diagnostics: never include local file paths, work titles,
+  // stream URLs, query strings, external IDs or user preferences in export.
+  function diagnosticReport(group, anchor, dbCheck = null) {
+    if (!integratedMode()) return null;
+    const key = anchor?.provider + ':' + sourceKey(anchor);
+    const scan = detailSearchDiagnostics.get(key) || [];
+    const verified = api.providerConnectionDiagnostics({
+      linked: group?.sourceItems || [],
+      statuses: scan,
+      unverified: detailUnverifiedCandidates.get(key) || [],
+      providers
+    });
+    const rejected = detailRejectionReasons.get(key) || new Map();
+    const dbState = sqlite.report();
+    return {
+      kind: 'DinoPatch-integrated-diagnostic',version: 1,
+      generatedAt: new Date().toISOString(), mode: 'integrated',
+      suppliers: verified.map(row => ({
+        provider: row.provider, reason: row.reason,
+        candidates: row.resultCount,
+        rejection: rejected.get(row.provider) || null,
+        attempts: Number(scan.find(x => x.provider === row.provider)?.attempts) || 0,
+        errors: Number(scan.find(x => x.provider === row.provider)?.failures) || 0
+      })),
+      sqlite: {
+        phase: dbState.phase || 'unknown',active: !!dbState.active,
+        pending: Number(dbState.pending) || 0,
+        healthy: dbCheck ? dbCheck.healthy === true : null,
+        integrity: dbCheck?.integrity || 'not-checked',
+        foreignKeyErrors: Number(dbCheck?.foreignKeyErrors) || 0,
+        // Only aggregate counters. Never export user titles or work keys.
+        works: Number(dbCheck?.works) || 0,
+        sources: Number(dbCheck?.sources) || 0
+      },
+      episodeRefresh: {
+        attempted: episodeAttempted, updated: episodeSucceeded,
+        failed: episodeFailed, daily: episodeBudgetCount()
+      }
+    };
+  }
+  function downloadDiagnosticReport(report) {
+    const json = JSON.stringify(report, null, 2);
+    if (typeof Blob === 'undefined' || typeof URL === 'undefined'
+      || typeof URL.createObjectURL !== 'function') {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText)
+        return navigator.clipboard.writeText(json).then(() => true, () => false);
+      return Promise.resolve(false);
+    }
+    const uri = URL.createObjectURL(new Blob([json],{type:'application/json;charset=utf-8'}));
+    try {
+      const link = document.createElement('a');
+      link.href = uri;
+      link.download = 'DinoPatch-integrated-diagnostics.json';
+      document.body?.append(link);
+      link.click();
+      link.remove();
+      return Promise.resolve(true);
+    }catch {
+      return Promise.resolve(false);
+    }finally {
+      setTimeout(() => URL.revokeObjectURL(uri), 2000);
+    }
+  }
+
   function renderSourcePicker(group, activeId, searching = false) {
     if (!integratedMode() || !Array.isArray(group?.sourceItems) || !group.sourceItems.length) return;
     const content = document.querySelector('#detailContent');
@@ -1305,7 +1394,32 @@
         else episodeSchedulerControl.pause();
         pause.textContent=episodePaused?'자동 갱신 재개':'자동 갱신 일시 중지';
       });
-      panel.append(info,refresh,pause);
+      const backup=document.createElement('button');
+      backup.type='button';backup.className='dino-diagnostics-backup';
+      backup.textContent=sqlite.isReady()?'SQLite 안전 백업':'SQLite 사용 불가';
+      backup.disabled=!sqlite.isReady();
+      backup.addEventListener('click',async()=>{
+        if(!integratedMode()||backup.disabled)return;
+        backup.disabled=true;backup.textContent='DB 백업 및 검증 중...';
+        const result=await sqlite.backup();
+        backup.textContent=result?.ok?'DB 백업 완료':'DB 백업 실패 · 다시 시도';
+        window.toast?.(result?.ok
+          ?'백업 생성 완료: '+result.filename+' (원본 DB 보존)'
+          :'백업 실패: '+String(result?.reason||'확인 필요'));
+        backup.disabled=false;
+      });
+      const exportLog=document.createElement('button');
+      exportLog.type='button';exportLog.className='dino-diagnostics-export';
+      exportLog.textContent='진단 JSON 저장';
+      exportLog.addEventListener('click',async()=>{
+        if(!integratedMode())return;
+        const reference=group.sourceItems.find(item=>sourceKey(item)===String(activeId))||group.sourceItems[0];
+        const currentCheck=await sqlite.diagnostic('diagnostics');
+        const ok=await downloadDiagnosticReport(diagnosticReport(group,reference,currentCheck));
+        window.toast?.(ok?'민감한 작품 이름을 제외한 진단 보고서를 저장했습니다.'
+          :'진단 보고서를 저장하지 못했습니다.');
+      });
+      panel.append(info,refresh,pause,backup,exportLog);
       choices.before(panel);
     });
     headingActions.append(linkedCount, editTitle, editLinks, showDashboard);
@@ -1384,6 +1498,7 @@
       const scanKey = reference.provider + ':' + sourceKey(reference);
       const scan = detailSearchDiagnostics.get(scanKey) || [];
       const potential = detailUnverifiedCandidates.get(scanKey) || [];
+      const rejected = detailRejectionReasons.get(scanKey) || new Map();
       const reasons = {
         linked: '연결 완료',
         'needs-identity-check': '작품 확인 필요',
@@ -1394,18 +1509,72 @@
         error: '응답 오류',
         'not-checked': '아직 검사하지 않음'
       };
+      const conflictLabels = {
+        'id-conflict': '외부 작품 ID 다름',
+        'season-different': '시즌·파트 다름',
+        'year-different': '방영 연도 다름',
+        'format-different': 'TV·극장판 등 형식 다름',
+        'year-unconfirmed': '방영 연도 확인 불가',
+        'identity-unconfirmed': '동일 작품 근거 부족'
+      };
       const summary = document.createElement('div');
       summary.className = 'dino-provider-connection-diagnostics';
       summary.setAttribute('aria-label', '공급원별 작품 연결 진단');
+      const current = reference;
+      const seq = detailSequence;
       for (const item of api.providerConnectionDiagnostics({
         linked: group.sourceItems, statuses: scan, unverified: potential, providers
       })) {
-        const detail = document.createElement('small');
-        detail.className = 'source-search-note dino-provider-diagnostic';
-        detail.dataset.provider = item.provider;
-        detail.dataset.reason = item.reason;
-        detail.textContent = (labels[item.provider] || item.provider) + ' · ' + reasons[item.reason];
-        summary.append(detail);
+        const entry = document.createElement('div');
+        entry.className = 'dino-provider-diagnostic';
+        entry.dataset.provider = item.provider;
+        entry.dataset.reason = item.reason;
+        const title = document.createElement('strong');
+        title.textContent = labels[item.provider] || item.provider;
+        const status = document.createElement('small');
+        status.className = 'source-search-note';
+        const rejection = rejected.get(item.provider);
+        status.textContent = reasons[item.reason]
+          + (rejection && item.reason !== 'linked' ? ' · ' + (conflictLabels[rejection] || rejection) : '');
+        entry.append(title, status);
+        const scanInfo = scan.find(row => row.provider === item.provider);
+        if (scanInfo) {
+          const detail = document.createElement('small');
+          detail.className = 'dino-provider-diagnostic-meta';
+          const queries = Array.isArray(scanInfo.queries) ? scanInfo.queries : [];
+          detail.textContent = '검색 ' + (scanInfo.attempts || 0) + '회 · 후보 '
+            + (scanInfo.resultCount || 0) + '개'
+            + (queries.length ? ' · 검색어: ' + queries.join(', ') : '');
+          entry.append(detail);
+        }
+        if (item.reason !== 'linked') {
+          const retryOne = document.createElement('button');
+          retryOne.type = 'button';
+          retryOne.className = 'dino-provider-retry';
+          retryOne.dataset.provider = item.provider;
+          retryOne.textContent = '이 공급원 재검색';
+          retryOne.setAttribute('aria-label', (labels[item.provider] || item.provider) + '만 다시 검색');
+          retryOne.addEventListener('click', async () => {
+            if (!integratedMode() || seq !== detailSequence) return;
+            retryOne.disabled = true;
+            retryOne.textContent = '확인 중...';
+            try {
+              for (const key of [...catalogRequestCache.keys()])
+                if (key.startsWith('["' + item.provider + '",')) catalogRequestCache.delete(key);
+              const discovered = await discoverSources(current, group,
+                { force: true, onlyProviders: [item.provider] });
+              if (!integratedMode() || seq !== detailSequence) return;
+              keepDetailGroup(discovered);
+              renderSourcePicker(discovered, activeId);
+              loadVerifiedEpisodeCounts(discovered, activeId, seq).catch(() => {});
+            } catch {
+              retryOne.disabled = false;
+              retryOne.textContent = '오류 · 다시 시도';
+            }
+          });
+          entry.append(retryOne);
+        }
+        summary.append(entry);
       }
       section.append(summary);
       const retry = document.createElement('button');
@@ -1759,6 +1928,17 @@
       usedToday: dailyPrefetchCount(), dailyLimit: PREFETCH_DAILY_LIMIT
     }),
     flushWorkIndex: () => workIndex.flush(),
+    getDiagnosticReport: id => {
+      const group = detailGroupsBySourceId.get(String(id));
+      const anchor = group?.sourceItems?.find(item=>sourceKey(item)===String(id));
+      return anchor ? diagnosticReport(group,anchor) : null;
+    },
+    getDetailRejectionReasons: id => {
+      if (!integratedMode()) return [];
+      const group = detailGroupsBySourceId.get(String(id));
+      const anchor = group?.sourceItems?.find(item => sourceKey(item) === String(id));
+      return anchor ? [...(detailRejectionReasons.get(anchor.provider + ':' + sourceKey(anchor)) || new Map())] : [];
+    },
     getDetailConnectionDiagnostics: id => {
       if (!integratedMode()) return [];
       const group = detailGroupsBySourceId.get(String(id));

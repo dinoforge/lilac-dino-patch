@@ -338,7 +338,7 @@
     return items.find(item => item.provider === preferredProvider) || items[0] || null;
   }
 
-  async function searchProviders({ providers = PROVIDERS, query = '', terms = [], search, localSearch = async () => null, concurrency = 6, maxPages = 1 } = {}) {
+  async function searchProviders({ providers = PROVIDERS, query = '', terms = [], search, localSearch = async () => null, concurrency = 6, maxPages = 1, timeoutMs = 0 } = {}) {
     if (typeof search !== 'function') throw new TypeError('search must be a function');
     const selectedProviders = [...new Set(providers)].filter(provider => PROVIDERS.includes(provider));
     const seenTerms = new Set(), searchTerms = [];
@@ -348,7 +348,23 @@
       seenTerms.add(key); searchTerms.push(term);
     }
     const pageLimit = Math.max(1, Math.min(3, Number.isInteger(maxPages) ? maxPages : 1));
-    const records = new Map(selectedProviders.map(provider => [provider, { items: [], attempts: 0, successes: 0, failures: 0, pages: 0, limited: false }]));
+    const deadline = Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0
+      ? Math.min(30000, Math.max(100, Number(timeoutMs))) : 0;
+    async function timedSearch(provider, term, cursor) {
+      if (!deadline) return search(provider, term, cursor);
+      let timer = null;
+      try {
+        return await Promise.race([
+          Promise.resolve().then(() => search(provider, term, cursor)),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error('provider search timed out')), deadline);
+          })
+        ]);
+      } finally {
+        if (timer !== null && typeof clearTimeout === 'function') clearTimeout(timer);
+      }
+    }
+    const records = new Map(selectedProviders.map(provider => [provider, { items: [], attempts: 0, successes: 0, failures: 0, pages: 0, limited: false, queries: [] }]));
     const tasks = [];
     for (const provider of selectedProviders) {
       const record = records.get(provider);
@@ -362,6 +378,7 @@
       for (const term of searchTerms) {
         if (/[가-힣]/.test(term) && ['animenosub', 'miruro'].includes(provider)) continue;
         record.attempts++;
+        if (!record.queries.includes(term) && record.queries.length < 8) record.queries.push(term);
         tasks.push({ provider, term });
       }
     }
@@ -378,7 +395,7 @@
           for (let page = 0; page < pageLimit; page++) {
             if (page > 0) record.attempts++;
             try {
-              const result = await search(task.provider, task.term, cursor);
+              const result = await timedSearch(task.provider, task.term, cursor);
               const items = Array.isArray(result) ? result : result?.data;
               record.successes++;
               record.pages++;
@@ -418,7 +435,8 @@
         failures: record.failures,
         pages: record.pages,
         pageLimitReached: record.limited,
-        resultCount: uniqueItems.size
+        resultCount: uniqueItems.size,
+        queries: record.queries.slice()
       };
     });
     return { items: statuses.flatMap(status => {
@@ -433,7 +451,7 @@
 
   function mergeSearchResults(...runs) {
     const providers = [...new Set(runs.flatMap(run => (run?.statuses || []).map(status => status.provider)))];
-    const records = new Map(providers.map(provider => [provider, { items: new Map(), attempts: 0, successes: 0, failures: 0, pages: 0, limited: false }]));
+    const records = new Map(providers.map(provider => [provider, { items: new Map(), attempts: 0, successes: 0, failures: 0, pages: 0, limited: false, queries: [] }]));
     for (const run of runs) {
       for (const status of run?.statuses || []) {
         const record = records.get(status.provider);
@@ -443,6 +461,9 @@
         record.failures += Number(status.failures) || 0;
         record.pages += Number(status.pages) || 0;
         record.limited ||= Boolean(status.pageLimitReached);
+        for (const term of Array.isArray(status.queries) ? status.queries : [])
+          if (typeof term === 'string' && !record.queries.includes(term) && record.queries.length < 8)
+            record.queries.push(term);
       }
       for (const item of run?.items || []) {
         const record = records.get(item?.provider), id = String(item?.mal_id ?? item?.id ?? '').trim();
@@ -459,13 +480,29 @@
         failures: record.failures,
         pages: record.pages,
         pageLimitReached: record.limited,
-        resultCount: record.items.size
+        resultCount: record.items.size,
+        queries: record.queries.slice()
       };
     });
     return { items: providers.flatMap(provider => [...records.get(provider).items.values()]), statuses };
   }
 
   // Each supplier's catalog response is distinct from a verified same-work link.
+  // Diagnostics only: returning a reason never authorizes a cross-provider merge.
+  function identityDifference(reference, candidate) {
+    const left = new Set(aliases(reference)), right = aliases(candidate);
+    if (!right.some(alias => left.has(alias))) return 'title-different';
+    if (!externalIdsCompatible(reference, candidate)) return 'id-conflict';
+    const aYear = year(reference), bYear = year(candidate);
+    if (aYear && bYear && aYear !== bYear) return 'year-different';
+    const aPart = part(reference), bPart = part(candidate);
+    if (aPart && bPart && aPart !== bPart) return 'season-different';
+    const aFormat = format(reference), bFormat = format(candidate);
+    if (aFormat && bFormat && aFormat !== bFormat) return 'format-different';
+    if (!aYear || !bYear) return 'year-unconfirmed';
+    return identityMatch(reference,candidate) ? 'matched' : 'identity-unconfirmed';
+  }
+
   function providerConnectionDiagnostics({ linked = [], statuses = [], unverified = [], providers = PROVIDERS } = {}) {
     const connected = new Set(linked.map(item => typeof item === 'string' ? item : item?.provider));
     const scanned = new Map(statuses.filter(item => PROVIDERS.includes(item?.provider))
@@ -1126,6 +1163,7 @@
     identityMatch,
     providersNeedingTitleVariants,
     providerConnectionDiagnostics,
+    identityDifference,
     titleVariantTerms,
     episodeSegment,
     excludedEpisode,

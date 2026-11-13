@@ -1335,3 +1335,62 @@ test('integrated SQLite initialization is not run when official individual suppl
   assert.match(bridge,/if \(!integratedMode\(\) \|\| !Array\.isArray\(group\?\.sourceItems\)/);
   assert.match(bridge,/if \(!integratedMode\(\)\) return \[\]/);
 });
+
+test('per-provider retry queries only the chosen missing supplier and retains all five status cards',async()=>{
+  const app=harness();
+  await app.window.openDetail(app.home.mal_id);
+  const picker=app.nodes.get('#detailContent').querySelector('.detail-source-picker');
+  const missing=picker.querySelectorAll('.dino-provider-diagnostic')
+    .find(item=>item.dataset.provider==='linkani');
+  assert.ok(missing);
+  assert.equal(missing.dataset.reason,'not-found');
+  const retry=missing.querySelector('.dino-provider-retry');
+  assert.ok(retry);
+  assert.match(retry.getAttribute('aria-label'),/링크애니/);
+  const count=app.calls.search.length;
+  retry.send('click');
+  await settle();await settle();await settle();
+  const newSearches=app.calls.search.slice(count);
+  assert.ok(newSearches.length>0);
+  assert.ok(newSearches.every(x=>x.provider==='linkani'),
+    'per-supplier button must not trigger a full five-source scan');
+  assert.equal(app.nodes.get('#detailContent').querySelectorAll('.dino-provider-diagnostic').length,5);
+});
+
+test('per-work diagnostics include rejection reasons and omit titles, URLs and paths from exported report',async()=>{
+  const app=harness();
+  await app.window.openDetail(app.home.mal_id);
+  const report=app.window.__dinoPatch03Bridge.getDiagnosticReport(app.home.mal_id);
+  assert.equal(report.kind,'DinoPatch-integrated-diagnostic');
+  assert.equal(report.mode,'integrated');
+  assert.equal(report.suppliers.length,5);
+  assert.ok(report.suppliers.every(row=>typeof row.candidates==='number'));
+  const serialized=JSON.stringify(report);
+  assert.doesNotMatch(serialized,/English Work|日本語のタイトル|https?:\/\/|D:\\|file:\/\/|title_english/);
+  assert.equal(app.window.__dinoPatch03Bridge.getDiagnosticReport('unknown-work'),null);
+});
+
+test('diagnostic export, SQLite snapshot and per-supplier styling remain integrated only',async()=>{
+  const app=harness();
+  await app.window.openDetail(app.home.mal_id);
+  const picker=app.nodes.get('#detailContent').querySelector('.detail-source-picker');
+  picker.querySelector('.dino-work-title-edit').send('click'); // Open editor without touching DB.
+  const statusButton=picker.children.flatMap(x=>x.children||[])
+    .find(x=>x.textContent==='공급원·DB 상태');
+  // The dashboard controls must be accessible in the integrated picker.
+  const dashboard=statusButton||picker.querySelectorAll('button').find(x=>x.textContent==='공급원·DB 상태');
+  assert.ok(dashboard);
+  dashboard.send('click');
+  await settle();await settle();
+  const panel=picker.querySelector('.dino-diagnostics-panel');
+  assert.ok(panel);
+  const exportBtn=panel.children.find(x=>x.className==='dino-diagnostics-export');
+  const backup=panel.children.find(x=>x.className==='dino-diagnostics-backup');
+  assert.ok(exportBtn);
+  assert.ok(backup);
+  assert.equal(backup.disabled,true,'SQLite backup must not be offered as completed when the DB is absent');
+  const individual=harness({integrated:false});
+  await individual.window.openDetail(individual.home.mal_id);
+  assert.equal(individual.window.__dinoPatch03Bridge.getDiagnosticReport(individual.home.mal_id),null);
+  assert.equal(individual.nodes.get('#detailContent').querySelectorAll('.dino-provider-retry').length,0);
+});

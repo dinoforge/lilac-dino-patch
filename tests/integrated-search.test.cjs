@@ -687,3 +687,36 @@ test('season and cour identity prevents incorrect automatic episode switching',(
   assert.equal(uniqueSameEpisode([{number:3,season:2}],reference,'miruro').number,3);
   assert.equal(uniqueSameEpisode([{number:3,season:2,isSpecial:true}],reference,'miruro'),null);
 });
+
+test('diagnostic explanations distinguish ID, season, year and format without authorizing unsafe links',()=>{
+  const {identityDifference,identityMatch}=require('../src/integrated-search.js');
+  const a={provider:'reanime',id:'a',title:'Same Work',year:2026,type:'TV',season:1};
+  assert.equal(identityDifference(a,{provider:'miruro',title:'Same Work',year:2025,type:'TV',season:1}),'year-different');
+  assert.equal(identityDifference(a,{provider:'miruro',title:'Same Work',year:2026,type:'TV',season:2}),'season-different');
+  assert.equal(identityDifference(a,{provider:'miruro',title:'Same Work',year:2026,type:'OVA',season:1}),'format-different');
+  assert.equal(identityDifference({...a,anilistId:123},{provider:'miruro',title:'Same Work',year:2026,anilistId:456}),'id-conflict');
+  assert.equal(identityDifference(a,{provider:'miruro',title:'Same Work',year:'',type:'TV',season:1}),'year-unconfirmed');
+  assert.equal(identityMatch(a,{provider:'miruro',title:'Same Work',year:2025}),false);
+});
+
+test('provider search tracks only actual queried titles, including merged multilingual retries',async()=>{
+  const first=await searchProviders({providers:['miruro'],query:'English Title',
+    search:async()=>({data:[]})});
+  const second=await searchProviders({providers:['miruro'],terms:['日本語のタイトル','English Variant'],search:async()=>({data:[]})});
+  const combined=mergeSearchResults(first,second);
+  assert.deepEqual(combined.statuses[0].queries,['English Title','日本語のタイトル','English Variant']);
+  assert.equal(combined.statuses[0].attempts,3);
+  assert.equal(combined.statuses[0].resultCount,0);
+});
+
+test('slow supplier request times out without blocking other supplier results',async()=>{
+  const result=await searchProviders({providers:['reanime','miruro'],query:'Safe Title',timeoutMs:100,
+    localSearch:async()=>null,
+    search:async provider=>provider==='reanime'?new Promise(()=>{}):{data:[{
+      provider:'miruro',mal_id:'miruro:found',title:'Safe Title',year:2026
+    }]}
+  });
+  assert.equal(result.statuses.find(x=>x.provider==='reanime').state,'failed');
+  assert.equal(result.statuses.find(x=>x.provider==='miruro').state,'ready');
+  assert.equal(result.items.length,1);
+});

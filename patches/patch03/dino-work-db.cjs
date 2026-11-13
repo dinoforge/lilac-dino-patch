@@ -2,6 +2,8 @@
 // Optional work index inside Electron's userData. Original title caches,
 // profiles, downloads, and renderer localStorage are never modified here.
 const path=require('node:path');
+const fs=require('node:fs');
+const crypto=require('node:crypto');
 const PROVIDERS=new Set(['reanime','miruro','animenosub','ohli24','linkani']);
 const BATCH_LIMIT=48;
 const FILE='dino-work-index.sqlite';
@@ -301,6 +303,37 @@ function createStore({app,DatabaseSync}={}){
         titleEdits:Number(db.prepare('SELECT COUNT(*) AS n FROM title_history').get().n)};
     }catch(error){return {available:false,reason:String(error?.message||error).slice(0,200)};}
   }
+  // Explicit, immutable, SQLite-consistent snapshot. Never restore, replace,
+  // or unlink the live DB here; leave all WAL and original user files intact.
+  function snapshot(){
+    if(!init())return {ok:false,reason:problem||'SQLite unavailable'};
+    try{
+      const check=diagnostics();
+      if(!check.available||!check.healthy)return {ok:false,reason:'SQLite 무결성 검사 실패 · 백업 중단'};
+      const folder=path.join(app.getPath('userData'),'DinoPatchBackups');
+      fs.mkdirSync(folder,{recursive:true,mode:0o700});
+      const stamp=new Date().toISOString().replace(/[:.]/g,'-');
+      const filename='dino-work-index-'+stamp+'-'+crypto.randomBytes(6).toString('hex')+'.sqlite';
+      const target=path.join(folder,filename);
+      if(fs.existsSync(target))return {ok:false,reason:'같은 이름의 DB 백업 파일이 이미 존재함'};
+      // VACUUM INTO copies a consistent snapshot even when the main DB uses
+      // WAL. The output must not exist; escaping the generated path is still
+      // required on Windows profiles containing apostrophes.
+      db.exec("VACUUM INTO '"+target.replace(/'/g,"''")+"'");
+      const Driver=DatabaseSync||require('node:sqlite').DatabaseSync;
+      const probe=new Driver(target,{readOnly:true});
+      try{
+        const healthy=probe.prepare('PRAGMA quick_check(1)').all()
+          .every(row=>row.quick_check==='ok');
+        const copies=Number(probe.prepare('SELECT COUNT(*) AS n FROM works').get()?.n);
+        if(!healthy||copies!==check.works)
+          return {ok:false,reason:'백업 검증 실패 · 생성된 파일은 원본과 별도로 보존',filename};
+      }finally{probe.close();}
+      return {ok:true,filename,folder,works:check.works,createdAt:new Date().toISOString()};
+    }catch(error){
+      return {ok:false,reason:String(error?.message||error).slice(0,200)};
+    }
+  }
   function linkHistory(){
     if(!init())return [];
     return db.prepare('SELECT action,anchor_provider,anchor_id,source_provider,source_id,created_at FROM link_history ORDER BY id DESC LIMIT 20').all();
@@ -386,7 +419,7 @@ function createStore({app,DatabaseSync}={}){
     }
   }
   function close(){if(db){db.close();db=null;ready=false;}}
-  return {status,upsert,lookup,recent,stats,search,preview,diagnostics,titleHistory,linkHistory,repair,close};
+  return {status,upsert,lookup,recent,stats,search,preview,diagnostics,snapshot,titleHistory,linkHistory,repair,close};
 }
 function register({app,ipcMain,DatabaseSync}={}){
   const store=createStore({app,DatabaseSync});
@@ -400,6 +433,7 @@ function register({app,ipcMain,DatabaseSync}={}){
       case 'search':return store.search(payload);
       case 'preview':return store.preview(payload);
       case 'diagnostics':return store.diagnostics();
+      case 'snapshot':return store.snapshot();
       case 'titleHistory':return store.titleHistory(payload);
       case 'linkHistory':return store.linkHistory();
       case 'attach':case 'detach':return store.repair(method,payload);

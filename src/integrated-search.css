@@ -344,3 +344,55 @@
 .detail-source-picker .dino-provider-diagnostic[data-reason="linked"]{
   color:var(--text)
 }
+
+/* Beta 8: integrated-only compact supplier status cards and precise retry.
+   The official individual-provider detail page never mounts this picker. */
+.detail-source-picker .dino-provider-connection-diagnostics{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));
+  align-items:stretch;gap:9px;margin:10px 0 4px
+}
+.detail-source-picker .dino-provider-diagnostic{
+  display:flex;flex-direction:column;align-items:stretch;gap:5px;
+  padding:11px 12px;border:1px solid var(--line);border-radius:11px;
+  background:var(--panel);min-width:0;line-height:1.5
+}
+.detail-source-picker .dino-provider-diagnostic strong{
+  color:var(--text);font-size:12px;line-height:1.3
+}
+.detail-source-picker .dino-provider-diagnostic .source-search-note{
+  margin:0;font-size:11px;min-height:16px;line-height:1.55;
+  white-space:normal;word-break:keep-all
+}
+.detail-source-picker .dino-provider-diagnostic-meta{
+  color:var(--muted);opacity:.85;font-size:10px;
+  overflow-wrap:anywhere;line-height:1.5
+}
+.detail-source-picker .dino-provider-diagnostic[data-reason="linked"]{
+  border-color:color-mix(in srgb,var(--lilac) 45%,var(--line));
+  background:color-mix(in srgb,var(--lilac) 8%,var(--panel))
+}
+.detail-source-picker .dino-provider-diagnostic[data-reason="error"],
+.detail-source-picker .dino-provider-diagnostic[data-reason="partial"]{
+  border-color:color-mix(in srgb,#d9a65b 45%,var(--line))
+}
+.detail-source-picker .dino-provider-retry{
+  align-self:flex-start;width:auto;max-width:100%;
+  margin-top:auto;padding:6px 10px;white-space:normal;
+  border-radius:8px;font-size:11px;font-weight:600
+}
+.detail-source-picker .dino-provider-retry:disabled{opacity:.6;cursor:progress}
+.detail-source-picker .dino-provider-retry:focus-visible{
+  outline:2px solid var(--lilac);outline-offset:2px
+}
+@media(max-width:580px){
+  .detail-source-picker .dino-provider-connection-diagnostics{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .detail-source-picker .dino-provider-diagnostic{padding:9px}
+  .detail-source-picker .dino-provider-retry{width:100%;justify-content:center}
+}
+@media(max-width:355px){
+  .detail-source-picker .dino-provider-connection-diagnostics{grid-template-columns:1fr}
+}
+@media(prefers-reduced-motion:reduce){
+  .detail-source-picker .dino-provider-retry{transition:none}
+}

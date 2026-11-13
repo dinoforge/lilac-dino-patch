@@ -386,3 +386,59 @@ test('invalid SQLite status falls back to the intact five-source cache without d
   assert.deepEqual(invoked,['status']);
   assert.equal(bag.get(api.WORK_INDEX_KEY),before);
 });
+
+test('SQLite manual snapshot creates a distinct verified copy and never replaces the live database',()=>{
+  const env=fixture();
+  try{
+    const first=work('8123','내가 저장한 제목',true);
+    assert.equal(env.store.upsert([first]).ok,true);
+    const dbPath=path.join(env.root,FILE);
+    const before=fs.readFileSync(dbPath);
+    const backup=env.store.snapshot();
+    assert.equal(backup.ok,true,backup.reason);
+    const target=path.join(env.root,'DinoPatchBackups',backup.filename);
+    assert.ok(fs.existsSync(target));
+    assert.equal(fs.readFileSync(dbPath).equals(before),true,
+      'creating a snapshot must not replace the original database bytes');
+    const {DatabaseSync}=require('node:sqlite');
+    const recovered=new DatabaseSync(target,{readOnly:true});
+    try{
+      assert.equal(recovered.prepare('PRAGMA quick_check(1)').all()[0].quick_check,'ok');
+      assert.equal(recovered.prepare('SELECT COUNT(*) AS n FROM works').get().n,1);
+    }finally{recovered.close();}
+    assert.equal(env.store.upsert([work('8124')]).ok,true);
+    const another=env.store.snapshot();
+    assert.equal(another.ok,true,another.reason);
+    assert.notEqual(another.filename,backup.filename);
+    assert.ok(fs.existsSync(target),'second backup must not overwrite the first');
+    const oldCopy=new DatabaseSync(target,{readOnly:true});
+    try{assert.equal(oldCopy.prepare('SELECT COUNT(*) AS n FROM works').get().n,1);}
+    finally{oldCopy.close();}
+    assert.equal(env.store.lookup(first.sources[0]).titles.manual,true);
+  }finally{env.close();}
+});
+
+test('pending work edits must commit before a SQLite snapshot or backup is rejected',async()=>{
+  const bag=new Map(),local={getItem:key=>bag.get(key)||null,setItem:(key,val)=>bag.set(key,String(val))};
+  const index=api.createWorkIndex(local);
+  let failNext=false,backups=0;
+  const rpc=async(method,payload)=>{
+    if(method==='status')return {available:true};
+    if(method==='upsert')return failNext?{ok:false,reason:'disk full'}:{ok:true,saved:payload.works.length};
+    if(method==='recent')return [];
+    if(method==='snapshot'){backups++;return {ok:true,filename:'safe.sqlite'};}
+    throw Error(method);
+  };
+  const adapter=sync.connect(index,rpc,{delay:()=>1});
+  assert.equal(await adapter.start(),true);
+  const data=work('8133');
+  index.remember({sourceItems:data.sources},{checked:true});
+  failNext=true;
+  const rejected=await adapter.backup();
+  assert.equal(rejected.ok,false);
+  assert.equal(backups,0,'never export a stale snapshot when pending writes failed');
+  failNext=false;
+  const good=await adapter.backup();
+  assert.equal(good.ok,true);
+  assert.equal(backups,1);
+});

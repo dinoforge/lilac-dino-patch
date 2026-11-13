@@ -141,6 +141,14 @@
       }));
       return result;
     }
+    async function backup(){
+      await start();
+      if(!active)return {ok:false,reason:reason||'SQLite DB를 사용할 수 없습니다.'};
+      // A snapshot must contain pending title and manual-link changes.
+      if(!await flush())return {ok:false,reason:'저장 대기 중인 변경사항이 있어 백업을 중단했습니다.'};
+      try{return await safeInvoke('snapshot')||{ok:false,reason:'백업 확인 없음'};}
+      catch(error){return {ok:false,reason:String(error?.message||error).slice(0,180)};}
+    }
     async function repair(method,anchor,source){
       await start();
       if(!active)return {ok:false,reason:'SQLite 작품 DB를 사용할 수 없습니다.'};
@@ -154,7 +162,7 @@
         return {...result,cacheUpdated};
       }catch(error){return {ok:false,reason:String(error?.message||error).slice(0,200)};}
     }
-    return {start,ensure,flush,stats,repair,diagnostic,report,isReady:()=>active};
+    return {start,ensure,flush,stats,backup,repair,diagnostic,report,isReady:()=>active};
   }
   const api={connect};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
