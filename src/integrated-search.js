@@ -501,6 +501,8 @@
     const verifiedTtl = DAY * 30, missingTtl = DAY * 7, errorTtl = DAY * 3;
     const searchTtl = 21600000, failedSearchTtl = 600000;
     const sourceKey = a => String(a?.mal_id ?? (a?.provider && a.id != null ? a.provider + ':' + a.id : ''));
+    // Provider-specific IDs can overlap; never overwrite another source.
+    const scopedKey = a => a.provider + ':' + sourceKey(a);
     const clean = a => typeof a === 'string' ? a.trim().slice(0, 240) : '';
     const namesOf = xs => [...new Set(xs.map(clean).filter(x => x.length > 1))].slice(0, 24);
     const compact = a => {
@@ -587,9 +589,9 @@
       row.names = namesOf([...row.names, ...names,
         ...items.flatMap(s => [s.title, s.title_english, s.title_japanese, s.displayTitle, ...(s.synonyms || [])])]);
       const ref = { ...items[0], synonyms: [...(items[0].synonyms || []), ...row.names] };
-      const merged = new Map(row.sources.filter(s => identityMatch(ref, s)).map(s => [sourceKey(s), s]));
+      const merged = new Map(row.sources.filter(s => identityMatch(ref, s)).map(s => [scopedKey(s), s]));
       for (const s of items) if (identityMatch(ref, s))
-        merged.set(sourceKey(s), { ...merged.get(sourceKey(s)), ...s });
+        merged.set(scopedKey(s), { ...merged.get(scopedKey(s)), ...s });
       row.sources = [...merged.values()];
       row.updatedAt = clock();
       const validatedOutcome = ['verified', 'missing', 'error'].includes(outcome)
@@ -639,7 +641,8 @@
       const key = titleKey(query);
       if (!key || !Array.isArray(result?.items) || !Array.isArray(result?.statuses)) return;
       data.searches = data.searches.filter(s => s.query !== key);
-      data.searches.push({ query: key, time: clock(), sourceIds: [...new Set(result.items.map(sourceKey).filter(Boolean))].slice(0, 450),
+      data.searches.push({ query: key, time: clock(), sourceIds: [...new Set(result.items.filter(item => item && PROVIDERS.includes(item.provider))
+          .map(scopedKey))].slice(0, 450),
         statuses: result.statuses.map(s => ({ provider: s.provider, state: s.state,
           attempts: s.attempts || 0, successes: s.successes || 0, failures: s.failures || 0,
           pages: s.pages || 0, pageLimitReached: !!s.pageLimitReached, resultCount: s.resultCount || 0 })) });
@@ -648,8 +651,18 @@
     const readSearch = query => {
       const row = data.searches.find(s => s.query === titleKey(query));
       if (!row || clock() - row.time > (row.statuses.every(s => s.state === 'ready') ? searchTtl : failedSearchTtl)) return null;
-      const lookup = new Map(data.works.flatMap(w => w.sources.map(s => [sourceKey(s), s])));
-      const items = row.sourceIds.map(id => lookup.get(id));
+      const sources = data.works.flatMap(w => w.sources);
+      const lookup = new Map(sources.map(s => [scopedKey(s), s]));
+      // Existing v1 snapshots used unscoped IDs. Keep unambiguous legacy
+      // entries readable, but re-search collisions instead of guessing.
+      const legacy = new Map(), ambiguous = new Set();
+      for (const item of sources) {
+        const id = sourceKey(item);
+        if (legacy.has(id) && scopedKey(legacy.get(id)) !== scopedKey(item)) ambiguous.add(id);
+        else legacy.set(id, item);
+      }
+      const items = row.sourceIds.map(id => lookup.get(id)
+        || (ambiguous.has(id) ? null : legacy.get(id)));
       return items.some(s => !s) ? null : { items, statuses: row.statuses, fromCache: true };
     };
     const invalidate = anchor => {
@@ -658,7 +671,8 @@
       row.checkedAt = 0;
       row.attemptedAt = 0;
       row.outcome = '';
-      data.searches = data.searches.filter(s => !s.sourceIds.some(id => row.sources.some(item => sourceKey(item) === id)));
+      data.searches = data.searches.filter(s => !s.sourceIds.some(id => row.sources.some(item =>
+        scopedKey(item) === id || sourceKey(item) === id)));
       touch();
     };
     return { find, remember, observe, rememberSearch, readSearch, invalidate, flush,
