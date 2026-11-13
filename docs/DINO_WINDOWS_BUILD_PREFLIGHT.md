@@ -81,8 +81,10 @@ GitHub 저장소 **Actions**에서 `Package DinoPatch Rust-native Windows UI`의
 4. 성공 시 `DinoPatch-Beta8-Windows-PREVIEW-TEST` 아티팩트에 PREVIEW ZIP이 저장됩니다.
 
 Windows 빌드·시작 점검을 통과해도 공식 앱 모든 버전에 대한 호환을 의미하지
-않습니다. 현재 Rust 패치 엔진은 미리 검증한 공식 버전 지문만 허용하며,
-그 외 버전이나 손상된 `app.asar`에는 쓰지 않습니다.
+않습니다. 현재 Rust 패치 엔진은 버전 번호를 허용 목록으로 제한하지 않고,
+앱 식별자·필수 파일·7개 구조 연결 지점·해시/백업/프로세스 상태를 재검사합니다.
+검사에 실패한 새 버전이나 손상된 `app.asar`에는 쓰지 않으며, 구조 검사가
+성공해도 실제 공급원 검색·재생 호환성까지 보장하지는 않습니다.
 
 ## 배포 전 안전 점검
 
