@@ -642,9 +642,11 @@ test('original rememberAnime callback passively indexes sorted catalog cards acr
     ...app.home,provider,id:'sorted-'+i,mal_id:provider+':sorted-'+i,
     title:'The Same Sorted Work',anilistId:470001,year:2026,type:'TV'
   }));
-  for(const anime of cards)
-    assert.equal(app.window.rememberAnime(anime),undefined,
-      'the original rememberAnime return behavior is preserved');
+  for(const anime of cards) {
+    app.window.rememberAnime(anime);
+    assert.equal(app.window.animeById(anime.mal_id),anime,
+      'original in-memory card lookup must remain intact');
+  }
   assert.equal(app.calls.search.length,0,'no provider lookup from original card path');
   const stats=app.window.__dinoPatch03Bridge.getWorkIndexStats();
   assert.equal(stats.works,1);
