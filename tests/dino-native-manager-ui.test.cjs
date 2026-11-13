@@ -10,6 +10,7 @@ const main = read('tools/dino-patch-manager/native-rust/src/main.rs');
 const gui = read('tools/dino-patch-manager/native-rust/src/gui.rs');
 const cargo = read('tools/dino-patch-manager/native-rust/Cargo.toml');
 const workflow = read('.github/workflows/build-dino-native-gui.yml');
+const preflight = read('scripts/dino-release-preflight.cjs');
 
 test('GUI feature selects native Windows GUI subsystem without changing CLI-only output', () => {
   assert.match(main, /^#!\[cfg_attr\(all\(windows, feature = "gui"\), windows_subsystem = "windows"\)\]/m);
@@ -45,4 +46,17 @@ test('Patch manager provides a safe status-first overview and direct actions', (
     'destructive operations must keep the safety confirmation');
   assert.match(gui, /self\.monitor\(\)/,
     'automatic monitoring behavior is unchanged');
+});
+
+test('Expensive Windows build runs only after the cheap Node preflight succeeds', () => {
+  assert.match(workflow,/^\s*workflow_dispatch:\s*$/m);
+  assert.doesNotMatch(workflow,/^\s*(?:push|pull_request|schedule):\s*$/m);
+  assert.match(workflow,/^  preflight:\s*$/m);
+  assert.match(workflow,/run: node scripts\/dino-release-preflight\.cjs/);
+  assert.match(workflow,/^    needs: preflight\s*$/m);
+  assert.match(preflight,/createHash\('sha256'\)/);
+  assert.match(preflight,/tests\/dino-sqlite-compat\.test\.cjs/);
+  assert.match(preflight,/tests\/dino-manual-link\.test\.cjs/);
+  assert.match(preflight,/tests\/dino-episode-refresh\.test\.cjs/);
+  assert.match(preflight,/tests\/patch03-global-integration\.test\.cjs/);
 });

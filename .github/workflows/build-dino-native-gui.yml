@@ -8,7 +8,20 @@ permissions:
   contents: read
 
 jobs:
+  # Cheap Linux checks run first. A failing regression must not start an
+  # expensive Windows Rust compile. Both jobs are still dispatch-only.
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify SQLite, episode refresh, patch hashes and GUI source contracts
+        run: node scripts/dino-release-preflight.cjs
   gui-windows:
+    needs: preflight
     runs-on: windows-2025
     timeout-minutes: 60
     defaults:
