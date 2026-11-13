@@ -10,6 +10,10 @@ on:
       - tests/patch03-global-integration.test.cjs
       - tests/integrated-search.test.cjs
       - tests/patch03-settings-preservation.test.cjs
+      - tests/dino-native-manager-ui.test.cjs
+      - tools/dino-patch-manager/native-rust/src/**
+      - tools/dino-patch-manager/native-rust/Cargo.toml
+      - .github/workflows/build-dino-native-gui.yml
       - .github/workflows/test-dino-integrated-global.yml
   workflow_dispatch:
 
@@ -34,6 +38,8 @@ jobs:
           node --test tests/patch03-global-integration.test.cjs
           node --test tests/integrated-search.test.cjs
           node --test tests/patch03-settings-preservation.test.cjs
+      - name: Verify native Rust manager UI and console-free Windows build contract
+        run: node --test tests/dino-native-manager-ui.test.cjs
       - name: Verify patch manifest module SHA-256
         shell: bash
         run: |
