@@ -8,6 +8,7 @@ on:
       - src/integrated-search.css
       - patches/patch03/**
       - tests/patch03-global-integration.test.cjs
+      - tests/integrated-search.test.cjs
       - tests/patch03-settings-preservation.test.cjs
       - .github/workflows/test-dino-integrated-global.yml
   workflow_dispatch:
@@ -31,6 +32,7 @@ jobs:
       - name: Verify global integration, missing-provider retries and real quality UI
         run: |
           node --test tests/patch03-global-integration.test.cjs
+          node --test tests/integrated-search.test.cjs
           node --test tests/patch03-settings-preservation.test.cjs
       - name: Verify patch manifest module SHA-256
         shell: bash
