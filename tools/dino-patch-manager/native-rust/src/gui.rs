@@ -662,12 +662,20 @@ impl DinoUi {
                 ui.vertical(|ui| {
                     ui.label(RichText::new("공식 릴리스 조회")
                         .size(14.0).strong().color(rgb(TEXT)));
-                    label(ui, "공식 릴리스 페이지 확인만 수행합니다. 원본은 변경하지 않습니다.");
+                    label(ui, "원본 앱과 DinoPatch 릴리스 페이지를 각각 엽니다. 자동 설치나 무단 변경은 하지 않습니다.");
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if action(ui, "최신 버전 확인", ButtonTone::Secondary, true) {
+                    if action(ui, "원본 앱 릴리스", ButtonTone::Secondary, true) {
                         ctx.open_url(egui::OpenUrl::new_tab(
                             "https://github.com/whispelyn-byte/LilacAnime-desktop/releases"
+                        ));
+                    }
+                    // The manager repository can be private. Never claim an
+                    // automatic version comparison without authenticated release
+                    // metadata; opening its page does not patch or download.
+                    if action(ui, "DinoPatch 업데이트 확인", ButtonTone::Secondary, true) {
+                        ctx.open_url(egui::OpenUrl::new_tab(
+                            "https://github.com/dinoforge/lilac-dino-patch/releases"
                         ));
                     }
                     if action(ui, "진단 정보", ButtonTone::Secondary, true) {
