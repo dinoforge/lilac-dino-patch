@@ -492,7 +492,14 @@
   // bounded profile storage and conservative verified provider identities.
   const WORK_INDEX_KEY = 'lilacDinoPatch.workIndex.v1';
   function createWorkIndex(storage, { clock = () => Date.now(), maxWorks = 350 } = {}) {
-    const DAY = 86400000, sourceTtl = DAY * 2, searchTtl = 21600000, retryTtl = 600000;
+    // Work identities are retained until the bounded LRU evicts them.
+    // The TTLs only determine when a new provider scan is permitted:
+    // all matched = 30 days, searched but missing a provider = 7 days,
+    // incomplete/failed scan = 3 days. Interactive query results use
+    // shorter TTLs so users can still find newly added anime promptly.
+    const DAY = 86400000;
+    const verifiedTtl = DAY * 30, missingTtl = DAY * 7, errorTtl = DAY * 3;
+    const searchTtl = 21600000, failedSearchTtl = 600000;
     const sourceKey = a => String(a?.mal_id ?? (a?.provider && a.id != null ? a.provider + ':' + a.id : ''));
     const clean = a => typeof a === 'string' ? a.trim().slice(0, 240) : '';
     const namesOf = xs => [...new Set(xs.map(clean).filter(x => x.length > 1))].slice(0, 24);
@@ -523,6 +530,7 @@
             .map(w => ({ id: String(w.id || '').slice(0, 160), sources: w.sources.map(compact).filter(Boolean).slice(0, 8),
               names: namesOf(Array.isArray(w.names) ? w.names : []),
               checkedAt: Number(w.checkedAt) || 0, attemptedAt: Number(w.attemptedAt) || 0,
+              outcome: ['verified', 'missing', 'error'].includes(w.outcome) ? w.outcome : '',
               updatedAt: Number(w.updatedAt) || 0 }))
             .filter(w => w.sources.length);
           data.searches = saved.searches.slice(-65).filter(s => s && typeof s.query === 'string'
@@ -555,16 +563,25 @@
       const w = rowFor(anchor);
       if (!w) return null;
       const ref = { ...anchor, synonyms: [...(Array.isArray(anchor.synonyms) ? anchor.synonyms : []), ...w.names] };
+      // Old v1 rows did not record scan outcome; recheck those after
+      // seven days, while keeping their validated provider links.
+      const ttl = w.outcome === 'verified' ? verifiedTtl
+        : w.outcome === 'missing' ? missingTtl
+        : w.outcome === 'error' ? errorTtl : missingTtl;
+      const verifiedOrMissing = w.outcome === 'verified' || w.outcome === 'missing';
+      const at = verifiedOrMissing ? w.checkedAt : (w.attemptedAt || w.checkedAt);
       return { sources: w.sources.filter(s => identityMatch(ref, s)), names: w.names.slice(),
         checkedAt: w.checkedAt, attemptedAt: w.attemptedAt || 0,
-        fresh: w.checkedAt > 0 && clock() - w.checkedAt < sourceTtl };
+        outcome: w.outcome || 'legacy',
+        fresh: at > 0 && clock() - at < ttl };
     };
-    const remember = (group, { checked = false, attempted = false, names = [] } = {}) => {
+    const remember = (group, { checked = false, attempted = false, names = [], outcome = '' } = {}) => {
       const items = (group?.sourceItems || []).map(compact).filter(Boolean);
       if (!items.length) return;
       let row = rowFor(items[0]);
       if (!row) {
-        row = { id: sourceKey(items[0]), sources: [], names: [], checkedAt: 0, attemptedAt: 0, updatedAt: 0 };
+        row = { id: sourceKey(items[0]), sources: [], names: [], checkedAt: 0,
+          attemptedAt: 0, outcome: '', updatedAt: 0 };
         data.works.push(row);
       }
       row.names = namesOf([...row.names, ...names,
@@ -575,8 +592,11 @@
         merged.set(sourceKey(s), { ...merged.get(sourceKey(s)), ...s });
       row.sources = [...merged.values()];
       row.updatedAt = clock();
-      if (checked) row.checkedAt = clock();
-      if (attempted || checked) row.attemptedAt = clock();
+      const validatedOutcome = ['verified', 'missing', 'error'].includes(outcome)
+        ? outcome : checked ? 'verified' : attempted ? 'error' : '';
+      if (validatedOutcome) row.outcome = validatedOutcome;
+      if (checked || validatedOutcome === 'verified' || validatedOutcome === 'missing') row.checkedAt = clock();
+      if (attempted || checked || validatedOutcome) row.attemptedAt = clock();
       if (data.works.length > maxWorks) {
         data.works.sort((a, b) => b.updatedAt - a.updatedAt);
         data.works.length = maxWorks;
@@ -595,7 +615,7 @@
     };
     const readSearch = query => {
       const row = data.searches.find(s => s.query === titleKey(query));
-      if (!row || clock() - row.time > (row.statuses.every(s => s.state === 'ready') ? searchTtl : retryTtl)) return null;
+      if (!row || clock() - row.time > (row.statuses.every(s => s.state === 'ready') ? searchTtl : failedSearchTtl)) return null;
       const lookup = new Map(data.works.flatMap(w => w.sources.map(s => [sourceKey(s), s])));
       const items = row.sourceIds.map(id => lookup.get(id));
       return items.some(s => !s) ? null : { items, statuses: row.statuses, fromCache: true };
@@ -605,6 +625,7 @@
       if (!row) return;
       row.checkedAt = 0;
       row.attemptedAt = 0;
+      row.outcome = '';
       data.searches = data.searches.filter(s => !s.sourceIds.some(id => row.sources.some(item => sourceKey(item) === id)));
       touch();
     };
