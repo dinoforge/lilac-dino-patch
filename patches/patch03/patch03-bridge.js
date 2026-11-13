@@ -39,6 +39,15 @@
   }
 
   const workIndex = api.createWorkIndex(localStorage);
+  // IPC is additive. If an older supported LilacAnime build lacks the
+  // SQLite preload method, keep the v1 work cache and original titles.
+  const sqlite = window.DinoSqliteSync?.connect(
+    workIndex, window.lilac?.dinoWorkIndex,
+    { delay: (fn,ms) => setTimeout(fn,ms) }
+  ) || { start:async()=>false,ensure:async anchor=>workIndex.find(anchor),
+    flush:async()=>false,isReady:()=>false,
+    report:()=>({active:false,phase:'legacy'}),stats:async()=>({available:false}) };
+  sqlite.start().catch(()=>{});
   const groupBySourceId = new Map();
   let resultGroups = [];
   let resultStatuses = [];
@@ -123,7 +132,7 @@
     const cached = detailDiscoveryCache.get(key);
     if (cached && Date.now() - cached.at < DISCOVERY_TTL_MS) return cached.promise;
     const promise = (async () => {
-      const stored = workIndex.find(anchor);
+      const stored = await sqlite.ensure(anchor);
       const seeds = [...(Array.isArray(knownGroup?.sourceItems) ? knownGroup.sourceItems : []),
         ...(stored?.sources || [])];
       // Foreground requests may bypass a background attempt that failed or
@@ -416,7 +425,13 @@
     } catch { return { offset: 0 }; }
   }
   function catalogSeedReachedTarget() {
-    return (workIndex.stats().providers.reanime || 0) >= CATALOG_SEED_TARGET;
+    // SQLite persists an unbounded catalog: 1000 is only the legacy
+    // localStorage safety ceiling, never a global works-table limit.
+    return !sqlite.isReady() &&
+      (workIndex.stats().providers.reanime || 0) >= CATALOG_SEED_TARGET;
+  }
+  function catalogSeedAtCapacity() {
+    return !sqlite.isReady() && workIndex.stats().works >= CATALOG_SEED_MAX_WORKS;
   }
   function catalogSeedExhausted(source, checkpoint = catalogSeedCheckpoint()) {
     return Number(checkpoint.exhaustedTotal) === Number(source?.total)
@@ -439,7 +454,7 @@
     // download. If no local Re:Anime list is ready, simply do nothing.
     if (!source) { catalogSeedStatus = 'no-local-index'; return; }
     if (catalogSeedReachedTarget()) { catalogSeedStatus = 'target-reached'; return; }
-    if (workIndex.stats().works >= CATALOG_SEED_MAX_WORKS) {
+    if (catalogSeedAtCapacity()) {
       catalogSeedStatus = 'db-capacity-reserved';
       return;
     }
@@ -466,7 +481,7 @@
       // most four LOCAL catalog pages per batch so the UI stays responsive.
       while (pages < CATALOG_SEED_MAX_LOCAL_PAGES
         && count < CATALOG_SEED_PAGE_SIZE
-        && reanimeCount < CATALOG_SEED_TARGET
+        && (sqlite.isReady() || reanimeCount < CATALOG_SEED_TARGET)
         && workIndex.stats().works < CATALOG_SEED_MAX_WORKS) {
         catalogSeedChecks++;
         const page = await window.lilac.providerCatalog('reanime', '', offset, 'popular');
@@ -478,8 +493,9 @@
         const items = page.data.slice(0, CATALOG_SEED_PAGE_SIZE);
         let scanned = 0;
         for (const item of items) {
-          if (count >= CATALOG_SEED_PAGE_SIZE || reanimeCount >= CATALOG_SEED_TARGET
-            || workIndex.stats().works >= CATALOG_SEED_MAX_WORKS) break;
+          if (count >= CATALOG_SEED_PAGE_SIZE ||
+            (!sqlite.isReady() && reanimeCount >= CATALOG_SEED_TARGET)
+            || catalogSeedAtCapacity()) break;
           scanned++;
           if (!isDinoProvider(item) || item.provider !== 'reanime'
             || !String(item.title || item.title_english || '').trim()) continue;
@@ -508,8 +524,14 @@
         catalogSeedStatus = 'write-failed';
         return;
       }
-      if ((workIndex.stats().providers.reanime || 0) < reanimeCount) {
+      if (!sqlite.isReady() && (workIndex.stats().providers.reanime || 0) < reanimeCount) {
         catalogSeedStatus = 'db-capacity-reserved';
+        return;
+      }
+      // The cursor moves ONLY after SQLite acknowledges the batch (when
+      // available), avoiding skipped titles if localStorage evicts hot rows.
+      if (sqlite.isReady() && !(await sqlite.flush())) {
+        catalogSeedStatus = 'sqlite-write-failed';
         return;
       }
       const completedAt = reachedEnd ? Date.now() : 0;
@@ -525,7 +547,7 @@
       catalogSeedImported += count;
       catalogSeedStatus = catalogSeedReachedTarget() ? 'target-reached'
         : reachedEnd ? 'catalog-end-reached'
-        : workIndex.stats().works >= CATALOG_SEED_MAX_WORKS
+        : catalogSeedAtCapacity()
           ? 'db-capacity-reserved' : 'imported';
       continueLater = !reachedEnd && !catalogSeedReachedTarget()
         && workIndex.stats().works < CATALOG_SEED_MAX_WORKS;
@@ -540,7 +562,7 @@
     if (!integratedMode() || catalogSeedBusy || catalogSeedTimer !== null
       || typeof window.lilac?.catalogIndexState !== 'function') return;
     if (catalogSeedReachedTarget()) { catalogSeedStatus = 'target-reached'; return; }
-    if (workIndex.stats().works >= CATALOG_SEED_MAX_WORKS) {
+    if (catalogSeedAtCapacity()) {
       catalogSeedStatus = 'db-capacity-reserved';
       return;
     }
@@ -1023,7 +1045,7 @@
     const initialGroup = isIntegrated ? (detailGroupsBySourceId.get(String(id))
       || (inIntegratedSearch ? groupBySourceId.get(String(id)) : null)) : null;
     const anchor = initialKnownSource(id, initialGroup);
-    const stored = isIntegrated && isDinoProvider(anchor) ? workIndex.find(anchor) : null;
+    const stored = isIntegrated && isDinoProvider(anchor) ? await sqlite.ensure(anchor) : null;
     const reference = stored ? { ...anchor, synonyms: [
       ...(Array.isArray(anchor.synonyms) ? anchor.synonyms : []), ...stored.names
     ] } : anchor;
@@ -1230,6 +1252,8 @@
     getMode: () => integratedMode() ? 'integrated' : 'provider',
     getSelectedProvider: selectedProvider,
     getWorkIndexStats: () => workIndex.stats(),
+    getSqliteStatus: () => sqlite.report(),
+    getSqliteStats: () => sqlite.stats(),
     getWorkTitles: id => {
       const anime = typeof window.animeById === 'function' ? window.animeById(id) : null;
       return canonicalTitleFor(anime);
@@ -1239,7 +1263,8 @@
       importedThisSession: catalogSeedImported, localPageReads: catalogSeedChecks,
       nextOffset: catalogSeedCheckpoint().offset,
       source: 'reanime', batchSize: CATALOG_SEED_PAGE_SIZE,
-      target: CATALOG_SEED_TARGET,
+      target: sqlite.isReady() ? null : CATALOG_SEED_TARGET,
+      storage: sqlite.isReady() ? 'sqlite' : 'legacy-localStorage',
       indexed: workIndex.stats().providers.reanime || 0,
       maxLocalPages: CATALOG_SEED_MAX_LOCAL_PAGES
     }),
