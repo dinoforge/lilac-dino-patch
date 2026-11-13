@@ -544,8 +544,7 @@
     } catch { /* broken or unavailable cache never changes original user data */ }
     let dirty = false, timer = null;
     const flush = () => {
-      if (!dirty) return;
-      dirty = false;
+      if (!dirty) return true;
       data.works.sort((a, b) => b.updatedAt - a.updatedAt);
       data.works.length = Math.min(data.works.length, maxWorks);
       data.searches = data.searches.slice(-65);
@@ -557,8 +556,15 @@
           data.works.pop();
           encoded = JSON.stringify(data);
         }
-        storage?.setItem(WORK_INDEX_KEY, encoded);
-      } catch { /* the old profile value remains intact if disk is full */ }
+        if (typeof storage?.setItem !== 'function') return false;
+        storage.setItem(WORK_INDEX_KEY, encoded);
+        dirty = false;
+        return true;
+      } catch {
+        // A failed write must not advance the catalog cursor: otherwise the
+        // next start would silently skip works that only lived in RAM.
+        return false;
+      }
     };
     const touch = () => {
       dirty = true;
