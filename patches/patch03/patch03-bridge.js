@@ -46,7 +46,8 @@
     { delay: (fn,ms) => setTimeout(fn,ms) }
   ) || { start:async()=>false,ensure:async anchor=>workIndex.find(anchor),
     flush:async()=>false,isReady:()=>false,
-    report:()=>({active:false,phase:'legacy'}),stats:async()=>({available:false}) };
+    report:()=>({active:false,phase:'legacy'}),stats:async()=>({available:false}),
+    diagnostic:async method=>['search','titleHistory','linkHistory'].includes(method)?[]:{ok:false,available:false} };
   sqlite.start().then(ready => {
     // The legacy 1000-work guard may have suppressed the first schedule
     // before the async SQLite handshake completed. Resume only after the
@@ -390,7 +391,7 @@
   const EPISODE_REFRESH_DELAY_MS = 20000;
   const episodeQueue = [];
   const episodeQueued = new Set();
-  let episodeTimer = null, episodeBusy = false;
+  let episodeTimer = null, episodeBusy = false, episodePaused = false;
   let episodeAttempted = 0, episodeSucceeded = 0, episodeFoundNew = 0, episodeFailed = 0;
   function airingStatus(item, fromAiringRail = false) {
     const status = String(item?.status || '').toLowerCase().trim().replace(/[_-]/g, ' ');
@@ -421,7 +422,7 @@
     return !at || Date.now() - at >= ttl;
   }
   function scheduleEpisodeRefresh(delay = EPISODE_REFRESH_DELAY_MS) {
-    if (!integratedMode() || episodeTimer !== null || episodeBusy || !episodeQueue.length
+    if (episodePaused || !integratedMode() || episodeTimer !== null || episodeBusy || !episodeQueue.length
       || episodeAttempted >= EPISODE_REFRESH_SESSION_LIMIT
       || episodeBudgetCount() >= EPISODE_REFRESH_DAILY_LIMIT) return;
     episodeTimer = setTimeout(() => {
@@ -431,9 +432,13 @@
   }
   const episodeMetrics = api.episodeMetrics;
   async function runNextEpisodeRefresh() {
-    if (episodeBusy || !integratedMode() || !episodeQueue.length
+    if (episodePaused || episodeBusy || !integratedMode() || !episodeQueue.length
       || episodeAttempted >= EPISODE_REFRESH_SESSION_LIMIT
       || episodeBudgetCount() >= EPISODE_REFRESH_DAILY_LIMIT) return;
+    if (window.navigator?.onLine === false) {
+      scheduleEpisodeRefresh(30000);
+      return;
+    }
     if (document.hidden === true || document.querySelector('#detailDialog')?.open
       || document.querySelector('#playerView')?.classList?.contains('active')) {
       scheduleEpisodeRefresh(15000);
@@ -446,7 +451,7 @@
     // A card can change from airing to completed while sitting in the queue.
     // An explicit completed status always cancels the pending supplier call.
     if (current?.status && !airingStatus(current)
-      || !next || !episodeCheckDue(next)) {
+      || !next || !next.__dinoForce && !episodeCheckDue(next)) {
       scheduleEpisodeRefresh(1800);
       return;
     }
@@ -473,7 +478,7 @@
       scheduleEpisodeRefresh(14000);
     }
   }
-  function queueAiringEpisodes(target,items) {
+  function queueAiringEpisodes(target,items,{force=false}={}) {
     if (!integratedMode() || !Array.isArray(items)
       || episodeAttempted >= EPISODE_REFRESH_SESSION_LIMIT
       || episodeBudgetCount() >= EPISODE_REFRESH_DAILY_LIMIT) return;
@@ -483,17 +488,25 @@
       const known = workIndex.find(item)?.sources || [item];
       for (const source of known) {
         if (!isDinoProvider(source) || !airingStatus(source,fromAiringRail)
-          || !episodeCheckDue(source)) continue;
+          || !force && !episodeCheckDue(source)) continue;
         const key = source.provider + ':' + sourceKey(source);
         if (episodeQueued.has(key)) continue;
         episodeQueued.add(key);
-        episodeQueue.push(source);
+        episodeQueue.push(force?{...source,__dinoForce:true}:source);
         if (episodeQueue.length >= 40) break;
       }
       if (episodeQueue.length >= 40) break;
     }
-    scheduleEpisodeRefresh();
+    scheduleEpisodeRefresh(force?250:EPISODE_REFRESH_DELAY_MS);
   }
+  const episodeSchedulerControl = {
+    pause(){episodePaused=true;if(episodeTimer!==null){if(typeof clearTimeout==='function')clearTimeout(episodeTimer);episodeTimer=null;}},
+    resume(){episodePaused=false;scheduleEpisodeRefresh(400);},
+    refresh(items){queueAiringEpisodes('#airingRail',items,{force:true});return episodeQueue.length;}
+  };
+  document.addEventListener?.('visibilitychange',()=>{
+    if(document.hidden!==true)scheduleEpisodeRefresh(400);
+  });
 
   const OBSERVED_CARD_TARGETS = new Set(['#seasonRail', '#airingRail', '#topRail',
     '#allGrid', '#catalogGrid', '#libraryGrid', '#searchGrid',
@@ -1012,6 +1025,22 @@
         renderSourcePicker(group, activeId, searching);
       });
       form.append(input, save, reset);
+      if(sqlite.isReady()){
+        const previous=document.createElement('button');
+        previous.type='button';previous.className='dino-work-title-reset';
+        previous.textContent='이전 제목';
+        previous.addEventListener('click',async()=>{
+          const history=await sqlite.diagnostic('titleHistory',reference);
+          if(!Array.isArray(history)||!history.length){
+            window.toast?.('저장된 제목 변경 이력이 없습니다.');return;
+          }
+          if(history[0].old_title){
+            input.value=history[0].old_title;
+            window.toast?.('이전 제목을 불러왔습니다. 저장을 누르면 적용됩니다.');
+          }
+        });
+        form.append(previous);
+      }
       choices.before(form);
       return input;
     }
@@ -1036,8 +1065,16 @@
       panel.append(explanation);
       async function submitRepair(method,item){
         const verb=method==='detach'?'분리':'연결';
-        if(typeof window.confirm==='function'&&!window.confirm(
-          (labels[item.provider]||item.provider)+' ('+sourceKey(item)+') 공급원을 '+verb+'할까요?'))return;
+        let summary=(labels[item.provider]||item.provider)+' ('+sourceKey(item)+') 공급원을 '+verb+'할까요?';
+        if(method==='attach'){
+          const preview=await sqlite.diagnostic('preview',{anchor:reference,source:item});
+          if(!preview?.ok){window.toast?.('연결 대상 확인 실패: '+String(preview?.reason||'저장된 공급원이 없습니다.'));return;}
+          if(!preview.compatible){window.toast?.('연도·형식·외부 ID가 다른 공급원이라 연결하지 않았습니다.');return;}
+          if(preview.sameWork){window.toast?.('이미 연결된 공급원입니다.');return;}
+          summary+='\n연결 대상: '+preview.target.title+'\n이동할 작품: '+preview.candidate.title
+            +'\n메타데이터: '+(preview.candidate.year||'연도 미상')+' / '+(preview.candidate.type||'형식 미상');
+        }
+        if(typeof window.confirm==='function'&&!window.confirm(summary))return;
         editLinks.disabled=true;
         try{
           const result=await sqlite.repair(method,reference,item);
@@ -1101,9 +1138,89 @@
       const note=document.createElement('small');
       note.textContent='대상 작품을 먼저 공급원 검색으로 DB에 등록해야 합니다. 재생 공급원 탭이 아닌 검색 결과의 원본 ID를 사용하세요.';
       panel.append(note);
+      const searchRow=document.createElement('div');
+      searchRow.className='dino-link-repair-row';
+      const searchInput=document.createElement('input');
+      searchInput.type='search';searchInput.placeholder='DB에 저장된 작품 검색';
+      searchInput.setAttribute('aria-label','연결 후보 작품 검색');
+      const searchButton=document.createElement('button');
+      searchButton.type='button';searchButton.textContent='DB 검색';
+      const results=document.createElement('div');
+      results.className='dino-link-search-results';
+      searchButton.addEventListener('click',async()=>{
+        const query=String(searchInput.value||'').trim();
+        if(query.length<2){window.toast?.('2자 이상 입력해 주세요.');return;}
+        searchButton.disabled=true;
+        try{
+          const works=await sqlite.diagnostic('search',{query,limit:10});
+          results.replaceChildren();
+          for(const found of Array.isArray(works)?works:[])
+            for(const candidate of found.sources||[]){
+              if(candidate.provider===reference.provider)continue;
+              const button=document.createElement('button');
+              button.type='button';button.className='dino-link-result';
+              button.textContent=(found.titles?.ko||found.titles?.en||found.names?.[0]||'작품')
+                +' · '+(labels[candidate.provider]||candidate.provider)+' · '+sourceKey(candidate);
+              button.addEventListener('click',()=>{
+                select.value=candidate.provider;input.value=sourceKey(candidate);
+                window.toast?.('연결 대상을 선택했습니다. 연결 버튼에서 확인해 주세요.');
+              });
+              results.append(button);
+            }
+          if(!results.children.length){
+            const noResult=document.createElement('small');
+            noResult.textContent='저장된 후보 작품이 없습니다.';
+            results.append(noResult);
+          }
+        }catch(error){window.toast?.('DB 검색 실패: '+String(error?.message||error));}
+        finally{searchButton.disabled=false;}
+      });
+      searchRow.append(searchInput,searchButton);
+      panel.append(searchRow,results);
+      const history=document.createElement('button');
+      history.type='button';history.textContent='최근 연결 변경 내역';
+      history.addEventListener('click',async()=>{
+        const rows=await sqlite.diagnostic('linkHistory');
+        const details=document.createElement('small');
+        details.textContent=Array.isArray(rows)&&rows.length
+          ?rows.slice(0,5).map(x=>x.action+' · '+x.source_provider+' / '+x.source_id).join(' | ')
+          :'연결 변경 기록이 없습니다.';
+        panel.append(details);history.disabled=true;
+      });
+      panel.append(history);
       choices.before(panel);
     });
-    headingActions.append(linkedCount, editTitle, editLinks);
+    const showDashboard=document.createElement('button');
+    showDashboard.type='button';showDashboard.className='dino-work-title-edit';
+    showDashboard.textContent='공급원·DB 상태';
+    showDashboard.addEventListener('click',async()=>{
+      const old=section.querySelector('.dino-diagnostics-panel');
+      if(old){old.remove();return;}
+      const panel=document.createElement('div');panel.className='dino-diagnostics-panel';
+      const [stats,dbCheck]=await Promise.all([sqlite.stats(),sqlite.diagnostic('diagnostics')]);
+      const list=Array.isArray(stats?.sources)?stats.sources:[];
+      const counts=providers.map(p=>(labels[p]||p)+': '+
+        (list.find(x=>x.provider===p)?.count||0)).join(' · ');
+      const info=document.createElement('p');
+      info.textContent='DB 작품 '+(stats?.works??'확인 불가')+'개 · '+counts
+        +' · 무결성: '+(dbCheck?.healthy?'정상':dbCheck?.reason||'확인 필요');
+      const refresh=document.createElement('button');
+      refresh.type='button';refresh.textContent='방영작 회차 새로 확인';
+      refresh.addEventListener('click',()=>{
+        const count=episodeSchedulerControl.refresh(group.sourceItems);
+        window.toast?.('회차 확인 대기: '+count+'개 (일일 요청 제한 적용)');
+      });
+      const pause=document.createElement('button');
+      pause.type='button';pause.textContent=episodePaused?'자동 갱신 재개':'자동 갱신 일시 중지';
+      pause.addEventListener('click',()=>{
+        if(episodePaused)episodeSchedulerControl.resume();
+        else episodeSchedulerControl.pause();
+        pause.textContent=episodePaused?'자동 갱신 재개':'자동 갱신 일시 중지';
+      });
+      panel.append(info,refresh,pause);
+      choices.before(panel);
+    });
+    headingActions.append(linkedCount, editTitle, editLinks, showDashboard);
     header.append(headingCopy, headingActions);
     const choices = document.createElement('div');
     choices.className = 'dino-source-track';
@@ -1398,7 +1515,8 @@
         catch { return; }
       }
       if (sequence !== offerSequence || contextKey(contextNow()) !== originKey
-        || !group?.sourceItems?.some(item => item.provider !== episode.provider)) return;
+        || !group?.sourceItems?.some(item => item.provider !== episode.provider
+          && api.identityMatch(anime,item))) return;
       const prior = document.querySelector('#dinoPlaybackAlternate');
       prior?.remove();
       const button = document.createElement('button');
@@ -1418,26 +1536,28 @@
             && playableEpisodeNumber(candidate) === number
             && Boolean(candidate.dub) === Boolean(reference.episode.dub);
           for (const item of group.sourceItems) {
-            if (item.provider === reference.episode.provider) continue;
+            if (item.provider === reference.episode.provider
+              || !api.identityMatch(reference.anime,item)) continue;
             let response;
             try { response = await window.lilac.providerDetail(item); }
             catch { continue; }
             const candidate = Array.isArray(response?.episodes) ? response.episodes.find(sameKind) : null;
-            if (!candidate || contextKey(contextNow()) !== originKey) continue;
+            if (!candidate || sequence !== offerSequence || contextKey(contextNow()) !== originKey) continue;
             if (typeof resolveIntoPlayer !== 'function') {
               window.toast?.('재생 전환 기능을 사용할 수 없습니다.');
               return;
             }
-            const seconds = Number(video.currentTime) > 0
+            const rawSeconds = Number(video.currentTime) > 0
               ? Number(video.currentTime)
               : (positions.get(originKey) || Number(reference.resumeSeconds) || 0);
+            const seconds = Math.max(0,Math.min(24*60*60,
+              Number.isFinite(rawSeconds)?rawSeconds:0));
             const duration = Number(video.duration);
             const progress = Number.isFinite(duration) && duration > 0 ? Math.min(94, seconds / duration * 100) : 0;
             const nextAnime = { ...item, ...(response?.data || {}), provider: item.provider, mal_id: sourceKey(item) };
             const nextEpisode = candidate.provider ? candidate : { ...candidate, provider: item.provider };
             const name = String(reference.subtitleTitle || nextAnime.title || item.title || '');
             const { currentUrl, offline, videoServers, videoServer, streamHeaders, resolving, ...rest } = reference;
-            clearOffer();
             await resolveIntoPlayer(
               () => window.lilac.providerResolve(nextEpisode),
               name + ' · ' + number + '화',
@@ -1446,10 +1566,15 @@
                 subtitleTitle: name, comparisonEpisodes: [] },
               name, number
             );
+            clearOffer();
             return;
           }
           window.toast?.('다른 공급원에서 동일한 회차를 확인하지 못했습니다.');
           button.textContent = '동일 회차 없음 · 다시 확인';
+        } catch(error) {
+          // Keep the original playback context available for another attempt.
+          button.textContent='전환 실패 · 다시 시도';
+          window.toast?.('공급원 전환 실패: '+String(error?.message||error).slice(0,150));
         } finally {
           switching = false;
           button.disabled = false;
@@ -1486,7 +1611,7 @@
     getMode: () => integratedMode() ? 'integrated' : 'provider',
     getSelectedProvider: selectedProvider,
     getWorkIndexStats: () => workIndex.stats(),
-    getEpisodeRefreshStatus: () => ({ queued:episodeQueue.length,
+    getEpisodeRefreshStatus: () => ({ paused:episodePaused,busy:episodeBusy,queued:episodeQueue.length,
       attempted:episodeAttempted,updated:episodeSucceeded,newEpisodes:episodeFoundNew,
       failed:episodeFailed,daily:episodeBudgetCount(),
       sessionLimit:EPISODE_REFRESH_SESSION_LIMIT,dailyLimit:EPISODE_REFRESH_DAILY_LIMIT }),
@@ -1496,6 +1621,10 @@
     },
     getSqliteStatus: () => sqlite.report(),
     getSqliteStats: () => sqlite.stats(),
+    getDiagnostics: () => sqlite.diagnostic('diagnostics'),
+    getLinkHistory: () => sqlite.diagnostic('linkHistory'),
+    pauseEpisodeRefresh: () => episodeSchedulerControl.pause(),
+    resumeEpisodeRefresh: () => episodeSchedulerControl.resume(),
     getWorkTitles: id => {
       const anime = typeof window.animeById === 'function' ? window.animeById(id) : null;
       return canonicalTitleFor(anime);

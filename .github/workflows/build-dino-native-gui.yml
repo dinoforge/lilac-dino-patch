@@ -97,22 +97,39 @@ jobs:
             $proc.WaitForExit(10000) | Out-Null
             $proc.Dispose()
           }
-      - name: Create Rust-only portable package
+      - name: Assemble Beta 8 PREVIEW candidate (not a verified release)
         shell: pwsh
         run: |
-          $root=Join-Path $env:RUNNER_TEMP 'dino-native-release'
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP 'dino-beta8-preview'
           $stage=Join-Path $root 'DinoPatchManager'
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item -LiteralPath 'target/release/dino-native-manager.exe' -Destination (Join-Path $stage 'LilacAnime-DinoPatch-Rust.exe')
-          $zip=Join-Path $env:RUNNER_TEMP 'LilacAnime-DinoPatch-Rust-Windows-x64.zip'
+          $exe=Join-Path $stage 'LilacAnime-DinoPatch-Rust.exe'
+          Copy-Item -LiteralPath 'target/release/dino-native-manager.exe' -Destination $exe
+          $readme=Join-Path (Get-Location).Path '../../../docs/releases/DINO_BETA8_PREVIEW.md'
+          Copy-Item -LiteralPath $readme -Destination (Join-Path $stage 'README.md')
+          $exeSha=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          $manifest=Join-Path (Get-Location).Path '../../../patches/patch03/manifest.json'
+          $manifestSha=(Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash
+          $receipt=@{
+            release='Beta 8 PREVIEW - unverified'
+            gitCommit=$env:GITHUB_SHA
+            originalAppBundled=$false
+            executableSha256=$exeSha
+            embeddedManifestSha256=$manifestSha
+            windowsGuiSubsystem=2
+          }
+          $receipt | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stage 'package-info.json') -Encoding utf8
+          "$exeSha  LilacAnime-DinoPatch-Rust.exe" | Set-Content -LiteralPath (Join-Path $stage 'SHA256SUMS.txt') -Encoding utf8
+          if (@(Get-ChildItem -LiteralPath $stage -File).Count -ne 4) { throw 'Preview package file list is unexpected' }
+          $zip=Join-Path $env:RUNNER_TEMP 'DinoPatch-Beta8-PREVIEW-Windows-x64.zip'
           Compress-Archive -LiteralPath $stage -DestinationPath $zip -CompressionLevel Optimal
-          if (@(Get-ChildItem -LiteralPath $stage -Recurse -File).Count -ne 1) { throw 'Unexpected files in native package' }
           $sha=(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
-          Write-Host "Portable native Rust ZIP SHA-256: $sha"
-          Write-Host "Portable native Rust ZIP bytes: $((Get-Item $zip).Length)"
+          Write-Host "Beta 8 PREVIEW ZIP SHA-256: $sha"
+          Write-Host "Beta 8 PREVIEW ZIP bytes: $((Get-Item $zip).Length)"
       - uses: actions/upload-artifact@v4
         with:
-          name: DinoPatch-Rust-Native-Windows-TEST
-          path: ${{ runner.temp }}/LilacAnime-DinoPatch-Rust-Windows-x64.zip
+          name: DinoPatch-Beta8-Windows-PREVIEW-TEST
+          path: ${{ runner.temp }}/DinoPatch-Beta8-PREVIEW-Windows-x64.zip
           if-no-files-found: error
           retention-days: 7

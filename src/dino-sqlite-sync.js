@@ -112,6 +112,15 @@
       return active?await safeInvoke('stats').catch(()=>({available:false})):
         {available:false,reason};
     }
+    async function diagnostic(method,payload=null){
+      await start();
+      if(!active)return method==='search'||method==='titleHistory'||method==='linkHistory'
+        ?[]:{available:false,reason};
+      const result=await safeInvoke(method,payload).catch(error=>({
+        ok:false,available:false,reason:String(error?.message||error).slice(0,180)
+      }));
+      return result;
+    }
     async function repair(method,anchor,source){
       await start();
       if(!active)return {ok:false,reason:'SQLite 작품 DB를 사용할 수 없습니다.'};
@@ -125,7 +134,7 @@
         return {...result,cacheUpdated};
       }catch(error){return {ok:false,reason:String(error?.message||error).slice(0,200)};}
     }
-    return {start,ensure,flush,stats,repair,report,isReady:()=>active};
+    return {start,ensure,flush,stats,repair,diagnostic,report,isReady:()=>active};
   }
   const api={connect};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;

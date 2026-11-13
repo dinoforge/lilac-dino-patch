@@ -1107,3 +1107,16 @@ test('an airing title that becomes completed before its scheduled poll is not qu
   assert.equal(app.window.__dinoPatch03Bridge.getEpisodeRefreshStatus().queued,1,
     'new airing announcements can be scheduled after a skipped old request');
 });
+
+test('episode scheduler can pause and resume without touching provider settings',()=>{
+  const app=harness();
+  const bridge=app.window.__dinoPatch03Bridge;
+  const sourceBefore=app.storage.get('contentSource');
+  assert.equal(bridge.getEpisodeRefreshStatus().paused,false);
+  bridge.pauseEpisodeRefresh();
+  assert.equal(bridge.getEpisodeRefreshStatus().paused,true);
+  bridge.resumeEpisodeRefresh();
+  assert.equal(bridge.getEpisodeRefreshStatus().paused,false);
+  assert.equal(app.storage.get('contentSource'),sourceBefore);
+  assert.equal(bridge.getEpisodeRefreshStatus().dailyLimit,18);
+});

@@ -425,6 +425,11 @@ pub fn apply(root:&Path,manual:bool)->Result<Status>{
     write_json_atomic(&pending,&state)?;
     // From this point, never delete pending.json on failure.
     fs::rename(&temp,archive_path(&root))?;
+    // Keep the pending recovery record intact on disk corruption or a
+    // partially completed replacement. Never acknowledge an unverified ASAR.
+    if sha(&archive_path(&root))?!=new_sha {
+        return Err(fail("패치 파일 교체 후 SHA-256 검증 실패. 복구 기록을 보존합니다."));
+    }
     write_json_atomic(&data_root.join("state.json"),&state)?;
     fs::remove_file(&pending)?;
     let after=inspect(&root);
@@ -451,11 +456,21 @@ pub fn uninstall(root:&Path)->Result<Status>{
     if sha(&temp)?!=state["originalSha256"].as_str().unwrap_or("") {
         return Err(fail("임시 복원 ASAR 검증 실패"));
     }
-    // Preserve the previous state until the file swap succeeds.
-    fs::rename(&temp,&archive)?;
+    // Record the intended uninstall BEFORE mutating app.asar. A power loss
+    // between the atomic swap and state write is now recoverable through the
+    // same verified pending record used for patch application.
+    let data=state_root(&root)?;
+    let pending=data.join("pending.json");
+    if pending.exists(){return Err(fail("이전 미완료 패치 기록이 있습니다. 복구 검증이 필요합니다."));}
     let mut new=state.clone();
     new["status"]=json!("UNPATCHED");
-    write_json_atomic(&state_root(&root)?.join("state.json"),&new)?;
+    write_json_atomic(&pending,&new)?;
+    fs::rename(&temp,&archive)?;
+    if sha(&archive)?!=state["originalSha256"].as_str().unwrap_or("") {
+        return Err(fail("복원 파일 교체 후 SHA-256 검증 실패. 복구 기록을 보존합니다."));
+    }
+    write_json_atomic(&data.join("state.json"),&new)?;
+    fs::remove_file(&pending)?;
     let done=inspect(&root);
     if done.status!="UNPATCHED" {return Err(fail("패치 해제 후 검사 실패"));}
     Ok(done)
@@ -470,7 +485,8 @@ pub fn review_recovery(root:&Path)->Result<Status>{
     asar::file_only(&marker)?;
     let pending:Value=serde_json::from_slice(&fs::read(&marker)?)?;
     if pending["schemaVersion"]!=1 || pending["target"]!=root.to_string_lossy().as_ref()
-        || pending["version"]!=version || pending["patchVersion"]!=PATCH_VERSION || pending["status"]!="APPLIED" {
+        || pending["version"]!=version || pending["patchVersion"]!=PATCH_VERSION
+        || !matches!(pending["status"].as_str(), Some("APPLIED"|"UNPATCHED")) {
         return Err(fail("복구 기록의 설치 대상·버전·상태가 현재와 다릅니다."));
     }
     for name in ["app.asar.dino-writing","app.asar.dino-restore"] {
@@ -490,7 +506,8 @@ pub fn review_recovery(root:&Path)->Result<Status>{
         if state["version"]!=version || state["patchVersion"]!=PATCH_VERSION || state["originalSha256"]!=original {
             return Err(fail("기존 상태 기록이 pending과 충돌합니다."));
         }
-        if state["status"]=="APPLIED" && state["patchedSha256"]!=current_sha {
+        if state["status"]=="APPLIED" && state["patchedSha256"]!=current_sha
+            && !(pending["status"]=="UNPATCHED" && current_sha==original) {
             return Err(fail("기록된 적용 파일 SHA-256과 실제 파일이 다릅니다."));
         }
     }

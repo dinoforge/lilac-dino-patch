@@ -29,7 +29,7 @@ test('manual detach retains canonical title, preserves other suppliers and rejec
     const initial=row();
     assert.equal(env.store.upsert([initial]).ok,true);
     const anchor=initial.sources[0],moving=initial.sources[1];
-    assert.equal(env.store.status().schema,2);
+    assert.equal(env.store.status().schema,3);
     const result=env.store.repair('detach',{anchor,source:moving});
     assert.equal(result.ok,true,result.reason);
     assert.equal(env.store.stats().works,2);

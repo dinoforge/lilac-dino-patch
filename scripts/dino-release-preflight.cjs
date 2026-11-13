@@ -63,8 +63,10 @@ const tests = [
   'tests/patch03-settings-preservation.test.cjs',
   'tests/dino-sqlite-compat.test.cjs',
   'tests/dino-manual-link.test.cjs',
+  'tests/dino-db-hardening.test.cjs',
   'tests/dino-episode-refresh.test.cjs',
-  'tests/dino-native-manager-ui.test.cjs'
+  'tests/dino-native-manager-ui.test.cjs',
+  'tests/dino-beta8-hardening.test.cjs'
 ];
 function run(command,args,cwd=root){
   console.log('RUN: '+command+' '+args.join(' '));

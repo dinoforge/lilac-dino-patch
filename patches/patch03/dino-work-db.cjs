@@ -74,14 +74,21 @@ function createStore({app,DatabaseSync}={}){
       db.exec('PRAGMA journal_mode=WAL');
       db.exec('PRAGMA synchronous=NORMAL');
       const version=Number(db.prepare('PRAGMA user_version').get().user_version)||0;
-      if(version>2)throw Error('newer SQLite schema: read-only fallback');
+      if(version>3)throw Error('newer SQLite schema: read-only fallback');
       db.exec('CREATE TABLE IF NOT EXISTS works(work_id TEXT PRIMARY KEY,names_json TEXT NOT NULL,title_ko TEXT NOT NULL,title_en TEXT NOT NULL,title_ja TEXT NOT NULL,ko_source TEXT NOT NULL,ko_checked_at INTEGER NOT NULL,manual INTEGER NOT NULL,checked_at INTEGER NOT NULL,attempted_at INTEGER NOT NULL,outcome TEXT NOT NULL,updated_at INTEGER NOT NULL)');
       db.exec('CREATE TABLE IF NOT EXISTS work_sources(provider TEXT NOT NULL,source_id TEXT NOT NULL,work_id TEXT NOT NULL REFERENCES works(work_id),item_json TEXT NOT NULL,PRIMARY KEY(provider,source_id))');
       db.exec('CREATE INDEX IF NOT EXISTS idx_dino_source_work ON work_sources(work_id)');
       db.exec('CREATE INDEX IF NOT EXISTS idx_dino_work_updated ON works(updated_at DESC)');
       db.exec('CREATE INDEX IF NOT EXISTS idx_dino_work_ko ON works(title_ko)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_dino_work_ko_nocase ON works(title_ko COLLATE NOCASE)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_dino_work_en_nocase ON works(title_en COLLATE NOCASE)');
       db.exec('CREATE TABLE IF NOT EXISTS manual_pair_blocks(left_provider TEXT NOT NULL,left_id TEXT NOT NULL,right_provider TEXT NOT NULL,right_id TEXT NOT NULL,PRIMARY KEY(left_provider,left_id,right_provider,right_id))');
-      if(version<2)db.exec('PRAGMA user_version=2');
+      // Added to schema v3 without rewriting the existing work/profile tables.
+      db.exec('CREATE TABLE IF NOT EXISTS title_history(id INTEGER PRIMARY KEY AUTOINCREMENT,work_id TEXT NOT NULL,old_title TEXT NOT NULL,new_title TEXT NOT NULL,changed_at INTEGER NOT NULL,source TEXT NOT NULL)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_dino_title_history_work ON title_history(work_id,id DESC)');
+      db.exec('CREATE TABLE IF NOT EXISTS link_history(id INTEGER PRIMARY KEY AUTOINCREMENT,action TEXT NOT NULL,anchor_provider TEXT NOT NULL,anchor_id TEXT NOT NULL,source_provider TEXT NOT NULL,source_id TEXT NOT NULL,created_at INTEGER NOT NULL)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_dino_link_history_time ON link_history(id DESC)');
+      if(version<3)db.exec('PRAGMA user_version=3');
       ready=true;return true;
     }catch(error){
       problem=String(error?.message||error).slice(0,250);
@@ -89,7 +96,7 @@ function createStore({app,DatabaseSync}={}){
       db=null;return false;
     }
   }
-  function status(){return {available:init(),schema:ready?2:0,reason:ready?'':problem,engine:'node:sqlite'};}
+  function status(){return {available:init(),schema:ready?3:0,reason:ready?'':problem,engine:'node:sqlite'};}
   function readRow(id){
     const row=db.prepare('SELECT * FROM works WHERE work_id=?').get(id);
     if(!row)return null;
@@ -112,6 +119,7 @@ function createStore({app,DatabaseSync}={}){
     const members=db.prepare('SELECT provider,source_id,item_json FROM work_sources WHERE work_id=?');
     const putWork=db.prepare('INSERT INTO works(work_id,names_json,title_ko,title_en,title_ja,ko_source,ko_checked_at,manual,checked_at,attempted_at,outcome,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(work_id) DO UPDATE SET names_json=excluded.names_json,title_ko=excluded.title_ko,title_en=excluded.title_en,title_ja=excluded.title_ja,ko_source=excluded.ko_source,ko_checked_at=excluded.ko_checked_at,manual=excluded.manual,checked_at=excluded.checked_at,attempted_at=excluded.attempted_at,outcome=excluded.outcome,updated_at=excluded.updated_at');
     const putSource=db.prepare('INSERT INTO work_sources(provider,source_id,work_id,item_json) VALUES(?,?,?,?) ON CONFLICT(provider,source_id) DO UPDATE SET item_json=excluded.item_json WHERE work_sources.work_id=excluded.work_id');
+    const recordTitle=db.prepare('INSERT INTO title_history(work_id,old_title,new_title,changed_at,source) VALUES(?,?,?,?,?)');
     try{
       db.exec('BEGIN IMMEDIATE');
       for(const work of normalized){
@@ -165,6 +173,10 @@ function createStore({app,DatabaseSync}={}){
           if(!titles.en)titles.en=previous.title_en;
           if(!titles.ja)titles.ja=previous.title_ja;
         }
+        if(previous&&titles.ko!==previous.title_ko
+          &&(titles.manual||previous.manual||work.explicitManualReset))
+          recordTitle.run(id,previous.title_ko,titles.ko,
+            Math.max(Date.now(),titles.koCheckedAt),'manual');
         const names=[...new Set([...work.names,
           ...(previous?parse(previous.names_json)||[]:[]),titles.ko,titles.en,titles.ja]
           .map(clean).filter(Boolean))].slice(0,24);
@@ -217,6 +229,71 @@ function createStore({app,DatabaseSync}={}){
     return {available:true,works:Number(db.prepare('SELECT COUNT(*) AS n FROM works').get().n),
       sources:db.prepare('SELECT provider,COUNT(*) AS n FROM work_sources GROUP BY provider').all()
         .map(x=>({provider:x.provider,count:Number(x.n)}))};
+  }
+  function search(request={}){
+    if(!init())return [];
+    const query=clean(request?.query);
+    if(query.length<2)return [];
+    const limit=Math.min(40,Math.max(1,number(request?.limit)||12));
+    // Escape SQL wildcards: user input must never become a full-table match.
+    const escaped=query.replace(/[\\%_]/g,value=>'\\'+value);
+    const prefix=escaped+'%',pattern='%'+escaped+'%';
+    const keys=new Set();
+    const sql="SELECT work_id FROM works WHERE title_ko LIKE ? ESCAPE '\\' OR title_en LIKE ? ESCAPE '\\' ORDER BY updated_at DESC LIMIT ?";
+    for(const match of db.prepare(sql).all(prefix,prefix,limit))keys.add(match.work_id);
+    // Fallback substring/names search only when indexed prefix candidates
+    // are insufficient. Return a bounded page even for a very large DB.
+    if(keys.size<limit){
+      const fallback=db.prepare("SELECT work_id FROM works WHERE title_ko LIKE ? ESCAPE '\\' OR title_en LIKE ? ESCAPE '\\' OR names_json LIKE ? ESCAPE '\\' ORDER BY updated_at DESC LIMIT ?")
+        .all(pattern,pattern,pattern,limit);
+      for(const found of fallback){keys.add(found.work_id);if(keys.size>=limit)break;}
+    }
+    return [...keys].map(id=>readRow(id)).filter(Boolean);
+  }
+  function preview(request){
+    if(!init())return {ok:false,reason:problem};
+    const anchor=request?.anchor,source=request?.source;
+    if(!object(anchor)||!object(source)||!PROVIDERS.has(anchor.provider)
+      ||!PROVIDERS.has(source.provider)||!sourceKey(anchor)||!sourceKey(source))
+      return {ok:false,reason:'invalid source identity'};
+    const target=lookup(anchor),candidate=lookup(source);
+    if(!target||!candidate)return {ok:false,reason:'공급원을 먼저 검색해 작품 DB에 저장해 주세요.'};
+    const stored=candidate.sources.find(x=>x.provider===source.provider
+      && sourceKey(x)===sourceKey(source));
+    if(!stored)return {ok:false,reason:'unknown source'};
+    const conflicts=target.sources.some(x=>x.provider===source.provider
+      && sourceKey(x)!==sourceKey(source))||target.sources.some(x=>identityConflict(x,stored));
+    return {ok:true,sameWork:target.id===candidate.id,compatible:!conflicts,
+      target:{title:target.titles.ko||target.titles.en||target.names[0]||'',id:target.id},
+      candidate:{title:candidate.titles.ko||candidate.titles.en||candidate.names[0]||'',
+        provider:source.provider,sourceId:sourceKey(source),year:number(stored.year),
+        type:clean(stored.type),anilistId:stored.anilistId||null}};
+  }
+  function titleHistory(request){
+    if(!init()||!object(request)||!PROVIDERS.has(request.provider))return [];
+    const item=db.prepare('SELECT work_id FROM work_sources WHERE provider=? AND source_id=?')
+      .get(request.provider,sourceKey(request));
+    if(!item)return [];
+    return db.prepare('SELECT old_title,new_title,changed_at,source FROM title_history WHERE work_id=? ORDER BY id DESC LIMIT 12')
+      .all(item.work_id);
+  }
+  function diagnostics(){
+    if(!init())return {available:false,reason:problem};
+    try{
+      const quick=db.prepare('PRAGMA quick_check').all().every(x=>x.quick_check==='ok');
+      const foreign=db.prepare('PRAGMA foreign_key_check').all();
+      return {available:true,healthy:quick&&foreign.length===0,schema:3,
+        integrity:quick?'ok':'failed',foreignKeyErrors:foreign.length,
+        works:Number(db.prepare('SELECT COUNT(*) AS n FROM works').get().n),
+        sources:Number(db.prepare('SELECT COUNT(*) AS n FROM work_sources').get().n),
+        manualPairs:Number(db.prepare('SELECT COUNT(*) AS n FROM manual_pair_blocks').get().n),
+        repairedLinks:Number(db.prepare('SELECT COUNT(*) AS n FROM link_history').get().n),
+        titleEdits:Number(db.prepare('SELECT COUNT(*) AS n FROM title_history').get().n)};
+    }catch(error){return {available:false,reason:String(error?.message||error).slice(0,200)};}
+  }
+  function linkHistory(){
+    if(!init())return [];
+    return db.prepare('SELECT action,anchor_provider,anchor_id,source_provider,source_id,created_at FROM link_history ORDER BY id DESC LIMIT 20').all();
   }
   // Explicit user repair is transactional: never use the ordinary automatic
   // upsert to move a source between works.
@@ -282,6 +359,8 @@ function createStore({app,DatabaseSync}={}){
       }
       db.prepare('UPDATE work_sources SET work_id=? WHERE provider=? AND source_id=?')
         .run(destination,source.provider,sourceKey(source));
+      db.prepare('INSERT INTO link_history(action,anchor_provider,anchor_id,source_provider,source_id,created_at) VALUES(?,?,?,?,?,?)')
+        .run(method,anchor.provider,sourceKey(anchor),source.provider,sourceKey(source),now);
       mark.run(now,targetId);
       if(method==='attach'){
         if(db.prepare('SELECT 1 FROM work_sources WHERE work_id=? LIMIT 1').get(sourceId))
@@ -297,7 +376,7 @@ function createStore({app,DatabaseSync}={}){
     }
   }
   function close(){if(db){db.close();db=null;ready=false;}}
-  return {status,upsert,lookup,recent,stats,repair,close};
+  return {status,upsert,lookup,recent,stats,search,preview,diagnostics,titleHistory,linkHistory,repair,close};
 }
 function register({app,ipcMain,DatabaseSync}={}){
   const store=createStore({app,DatabaseSync});
@@ -308,6 +387,11 @@ function register({app,ipcMain,DatabaseSync}={}){
       case 'lookup':return store.lookup(payload);
       case 'recent':return store.recent(payload);
       case 'stats':return store.stats();
+      case 'search':return store.search(payload);
+      case 'preview':return store.preview(payload);
+      case 'diagnostics':return store.diagnostics();
+      case 'titleHistory':return store.titleHistory(payload);
+      case 'linkHistory':return store.linkHistory();
       case 'attach':case 'detach':return store.repair(method,payload);
       default:return {ok:false,reason:'unknown method'};
     }
