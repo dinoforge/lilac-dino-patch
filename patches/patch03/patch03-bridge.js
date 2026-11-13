@@ -13,6 +13,7 @@
   const officialSwitchView = window.switchView;
   const officialShowHomeList = window.showHomeList;
   const officialRenderCards = window.renderCards;
+  const officialRememberAnime = window.rememberAnime;
 
   function disablePatch(reason) {
     sourceSelect?.querySelector('option[value="integrated"]')?.remove();
@@ -338,6 +339,17 @@
   const OBSERVED_CARD_TARGETS = new Set(['#seasonRail', '#airingRail', '#topRail',
     '#allGrid', '#catalogGrid', '#libraryGrid', '#searchGrid',
     '#pvRail', '#movieRail', '#adultRail']);
+  // Original card() calls rememberAnime() even when sorted/catalog pages
+  // append cards directly instead of using renderCards(). Keep that path
+  // observable too, while preserving the original in-memory lookup contract.
+  if (typeof officialRememberAnime === 'function') {
+    window.rememberAnime = function (item, ...args) {
+      const result = officialRememberAnime.call(this, item, ...args);
+      if (integratedMode() && isDinoProvider(item))
+        workIndex.observe([item], { limit: 1 });
+      return result;
+    };
+  }
   function observeOriginalCards(target, items) {
     if (!integratedMode() || !OBSERVED_CARD_TARGETS.has(target) || !Array.isArray(items)) return;
     const flattened = [];
@@ -365,7 +377,9 @@
   const CATALOG_SEED_KEY = 'lilacDinoPatch.workIndex.originalCatalogSeed.v1';
   const CATALOG_SEED_DAY_MS = 24 * 60 * 60 * 1000;
   const CATALOG_SEED_PAGE_SIZE = 36;
-  const CATALOG_SEED_MAX_WORKS = 240;
+  // Leave room in the 350-work local LRU for Miruro, Animenosub,
+  // 애니24 and 링크애니 cards gathered from the original renderer.
+  const CATALOG_SEED_MAX_WORKS = 160;
   let catalogSeedBusy = false;
   let catalogSeedTimer = null;
   let catalogSeedImported = 0;
