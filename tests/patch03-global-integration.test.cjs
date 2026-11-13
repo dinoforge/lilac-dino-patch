@@ -1463,7 +1463,9 @@ test('selected accent persists inside integrated picker only',async()=>{
   button.send('click');
   assert.equal(picker.dataset.dinoAccent,'mint');
   assert.equal(app.storage.get('lilacDinoPatch.integratedAccent.v1'),'mint');
-  const individual=harness({integrated:false,persistedStorage:app.storage});
+  const individualStore=new Map(app.storage);
+  individualStore.delete('lilacDinoPatch.searchMode');
+  const individual=harness({integrated:false,persistedStorage:individualStore});
   await individual.window.openDetail(individual.home.mal_id);
   assert.equal(individual.nodes.get('#detailContent').querySelector('.dino-accent-switch'),null);
 });
