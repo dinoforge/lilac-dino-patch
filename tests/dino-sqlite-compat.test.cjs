@@ -312,3 +312,77 @@ test('an older hot-cache entry hydrates its current SQLite titles and links befo
     assert.equal(exactLookups,1,'one authoritative hydration per source is sufficient');
   }finally{env.close();}
 });
+
+test('corrupt SQLite pages trigger read-only local-cache fallback before WAL or schema mutation',()=>{
+  const changes=[];
+  let closed=0;
+  class CorruptDatabase {
+    prepare(sql){
+      if(sql==='PRAGMA quick_check(1)')return {all:()=>[{quick_check:'database disk image is malformed'}]};
+      throw Error('unexpected query on corrupted database: '+sql);
+    }
+    exec(sql){changes.push(sql);}
+    close(){closed++;}
+  }
+  const store=createStore({app:{getPath:()=>'/profile'},DatabaseSync:CorruptDatabase});
+  const state=store.status();
+  assert.equal(state.available,false);
+  assert.equal(state.recovery,'local-cache-fallback');
+  assert.equal(state.dbPreserved,true);
+  assert.match(state.reason,/무결성 검사 실패/);
+  assert.deepEqual(changes,[],'must not enable WAL or rewrite schema on broken DB');
+  assert.equal(closed,1);
+  assert.equal(store.upsert([work('9901')]).ok,false);
+  assert.deepEqual(changes,[],'later writes must also remain blocked');
+});
+
+test('invalid SQLite foreign keys are preserved and reported without automatic database repair',()=>{
+  const changes=[];
+  class DamagedRelations {
+    prepare(sql){
+      if(sql==='PRAGMA quick_check(1)')return {all:()=>[{quick_check:'ok'}]};
+      if(sql==='PRAGMA foreign_key_check')return {all:()=>[{table:'work_sources',rowid:3}]};
+      throw Error(sql);
+    }
+    exec(sql){changes.push(sql);}
+    close(){}
+  }
+  const store=createStore({app:{getPath:()=>'/profile'},DatabaseSync:DamagedRelations});
+  const state=store.status();
+  assert.equal(state.available,false);
+  assert.equal(state.recovery,'local-cache-fallback');
+  assert.match(state.reason,/외래키 오류/);
+  assert.deepEqual(changes,[]);
+});
+
+test('SQLite integrity checks occur before journal configuration and never remove user backups',()=>{
+  const dbSource=fs.readFileSync(path.join(__dirname,'../patches/patch03/dino-work-db.cjs'),'utf8');
+  const init=dbSource.split('function init()')[1].split('function status()')[0];
+  assert.ok(init.indexOf("PRAGMA quick_check(1)") < init.indexOf('PRAGMA journal_mode=WAL'));
+  assert.ok(init.indexOf('PRAGMA foreign_key_check') < init.indexOf('CREATE TABLE IF NOT EXISTS works'));
+  assert.doesNotMatch(init,/unlinkSync|rmSync|renameSync|DROP TABLE|VACUUM|DELETE FROM/);
+});
+
+test('invalid SQLite status falls back to the intact five-source cache without deleting manual titles',async()=>{
+  const bag=new Map(),local={getItem:key=>bag.get(key)||null,setItem:(key,v)=>bag.set(key,String(v))};
+  const index=api.createWorkIndex(local);
+  const record=work('9981','사용자가 저장한 제목',true);
+  index.remember({sourceItems:record.sources});
+  index.rememberTitles(record.sources[0],{ko:'사용자가 저장한 제목'},{source:'manual'});
+  assert.equal(index.flush(),true);
+  const before=bag.get(api.WORK_INDEX_KEY);
+  const invoked=[];
+  const adapter=sync.connect(index,async method=>{
+    invoked.push(method);
+    if(method==='status')return {available:false,reason:'SQLite 무결성 검사 실패'};
+    throw Error('Must not read or write a corrupt database');
+  });
+  assert.equal(await adapter.start(),false);
+  const cached=await adapter.ensure(record.sources[3]);
+  assert.equal(cached.titles.ko,'사용자가 저장한 제목');
+  assert.equal(cached.titles.manual,true);
+  assert.equal(cached.sources.length,5);
+  assert.equal(adapter.report().phase,'legacy');
+  assert.deepEqual(invoked,['status']);
+  assert.equal(bag.get(api.WORK_INDEX_KEY),before);
+});

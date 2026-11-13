@@ -329,3 +329,18 @@
   width:100%;margin:0;color:var(--muted);font-size:11px;line-height:1.65;overflow-wrap:anywhere
 }
 .detail-source-picker .dino-diagnostics-panel button{border-radius:8px}
+
+/* Integrated-mode-only supplier diagnostics. Do not style the official
+   individual-provider player or overwrite its supplier controls. */
+.detail-source-picker .dino-provider-connection-diagnostics{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));
+  gap:5px;margin:7px 0 9px;min-width:0
+}
+.detail-source-picker .dino-provider-diagnostic{
+  display:block;margin:0;padding:7px 9px;line-height:1.4;
+  border:1px solid var(--line);border-radius:7px;
+  color:var(--muted);font-size:11px;overflow-wrap:anywhere
+}
+.detail-source-picker .dino-provider-diagnostic[data-reason="linked"]{
+  color:var(--text)
+}

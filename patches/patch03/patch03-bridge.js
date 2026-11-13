@@ -48,12 +48,13 @@
     flush:async()=>false,isReady:()=>false,
     report:()=>({active:false,phase:'legacy'}),stats:async()=>({available:false}),
     diagnostic:async method=>['search','titleHistory','linkHistory'].includes(method)?[]:{ok:false,available:false} };
-  sqlite.start().then(ready => {
-    // The legacy 1000-work guard may have suppressed the first schedule
-    // before the async SQLite handshake completed. Resume only after the
-    // unbounded durable store confirms it is ready.
-    if (ready) scheduleOriginalCatalogSeed();
-  }).catch(()=>{});
+  // The integrated work index is additive. Do not even initialize its
+  // SQLite connection while LilacAnime is in an individual supplier mode.
+  // Changing mode reloads the original renderer and starts this on next boot.
+  if (api.readSourceSettings(localStorage).mode === 'integrated')
+    sqlite.start().then(ready => {
+      if (ready) scheduleOriginalCatalogSeed();
+    }).catch(()=>{});
   const groupBySourceId = new Map();
   let resultGroups = [];
   let resultStatuses = [];
@@ -188,7 +189,7 @@
     const identityKey = anchor.provider + ':' + sourceKey(anchor);
     const key = identityKey + (background ? ':background' : ':foreground');
     const cached = detailDiscoveryCache.get(key);
-    if (cached && Date.now() - cached.at < DISCOVERY_TTL_MS) return cached.promise;
+    if (!force && cached && Date.now() - cached.at < DISCOVERY_TTL_MS) return cached.promise;
     const promise = (async () => {
       const stored = await sqlite.ensure(anchor);
       const seeds = [...(Array.isArray(knownGroup?.sourceItems) ? knownGroup.sourceItems : []),
@@ -302,16 +303,21 @@
         : allMatched ? 'verified' : 'missing';
       workIndex.remember(group, { checked: complete, attempted: true,
         outcome, names: verifiedAliases });
-      detailSearchDiagnostics.set(identityKey, diagnostics.statuses || []);
-      // Report exact-title candidates that still lack safe identity evidence
-      // separately from providers that returned no search results at all.
+      // A user can open the same work through any verified supplier. Share
+      // this scan snapshot between the linked source identities, not just the
+      // original anchor, without persisting transient network failures.
       const unverified = [...new Set(identity.items.filter(item =>
         strongTitleCandidate(identity.reference, item)
         && !api.identityMatch(identity.reference, item)
       ).map(item => item.provider))];
-      detailUnverifiedCandidates.set(identityKey, unverified);
-      if (detailSearchDiagnostics.size > 120) detailSearchDiagnostics.delete(detailSearchDiagnostics.keys().next().value);
-      if (detailUnverifiedCandidates.size > 120)
+      for (const item of [anchor, ...group.sourceItems]) {
+        const scanKey = item.provider + ':' + sourceKey(item);
+        detailSearchDiagnostics.set(scanKey, diagnostics.statuses || []);
+        detailUnverifiedCandidates.set(scanKey, unverified);
+      }
+      while (detailSearchDiagnostics.size > 120)
+        detailSearchDiagnostics.delete(detailSearchDiagnostics.keys().next().value);
+      while (detailUnverifiedCandidates.size > 120)
         detailUnverifiedCandidates.delete(detailUnverifiedCandidates.keys().next().value);
       return group;
     })();
@@ -1378,18 +1384,30 @@
       const scanKey = reference.provider + ':' + sourceKey(reference);
       const scan = detailSearchDiagnostics.get(scanKey) || [];
       const potential = detailUnverifiedCandidates.get(scanKey) || [];
-      const missing = scan.filter(item => item.state === 'ready' && item.resultCount === 0);
-      const failed = scan.filter(item => item.state === 'failed' || item.state === 'partial');
-      if (missing.length || failed.length || potential.length) {
-        const diagnostic = document.createElement('small');
-        diagnostic.className = 'source-search-note';
-        diagnostic.textContent = [
-          missing.length ? '검색 결과 없음: ' + missing.map(item => labels[item.provider] || item.provider).join(', ') : '',
-          failed.length ? '응답 오류: ' + failed.map(item => labels[item.provider] || item.provider).join(', ') : '',
-          potential.length ? '작품 확인 필요: ' + potential.map(provider => labels[provider] || provider).join(', ') : ''
-        ].filter(Boolean).join(' · ');
-        section.append(diagnostic);
+      const reasons = {
+        linked: '연결 완료',
+        'needs-identity-check': '작품 확인 필요',
+        'not-found': '검색 결과 없음',
+        'unrelated-results': '다른 작품만 검색됨',
+        'page-limited': '검색 페이지 제한 · 재검사 필요',
+        partial: '일부 응답 오류 · 재검사 필요',
+        error: '응답 오류',
+        'not-checked': '아직 검사하지 않음'
+      };
+      const summary = document.createElement('div');
+      summary.className = 'dino-provider-connection-diagnostics';
+      summary.setAttribute('aria-label', '공급원별 작품 연결 진단');
+      for (const item of api.providerConnectionDiagnostics({
+        linked: group.sourceItems, statuses: scan, unverified: potential, providers
+      })) {
+        const detail = document.createElement('small');
+        detail.className = 'source-search-note dino-provider-diagnostic';
+        detail.dataset.provider = item.provider;
+        detail.dataset.reason = item.reason;
+        detail.textContent = (labels[item.provider] || item.provider) + ' · ' + reasons[item.reason];
+        summary.append(detail);
       }
+      section.append(summary);
       const retry = document.createElement('button');
       retry.type = 'button';
       retry.className = 'dino-source-retry';
@@ -1575,8 +1593,10 @@
     const contextNow = () => typeof currentPlaybackContext !== 'undefined' ? currentPlaybackContext : null;
     const contextKey = context => {
       const episode = context?.episode;
-      return episode ? String(episode.provider || '') + ':' +
-        String(episode.url || episode.token || episode.id || episode.number || '') : '';
+      return episode ? String(context?.anime?.provider || '') + ':' +
+        sourceKey(context.anime) + ':' + String(episode.provider || '') + ':' +
+        String(episode.url || episode.token || episode.id || episode.number || '') + ':' +
+        api.episodeSegment(episode) : '';
     };
     const clearOffer = () => {
       offerSequence++;
@@ -1612,7 +1632,7 @@
       button.textContent = '다른 공급원에서 이 회차 재생';
       button.title = '같은 작품과 화수를 확인한 다른 공급원으로 전환합니다';
       button.addEventListener('click', async () => {
-        if (switching || contextKey(contextNow()) !== originKey) return;
+        if (switching || !integratedMode() || contextKey(contextNow()) !== originKey) return;
         switching = true;
         button.disabled = true;
         button.textContent = '동일 회차 확인 중...';
@@ -1739,6 +1759,18 @@
       usedToday: dailyPrefetchCount(), dailyLimit: PREFETCH_DAILY_LIMIT
     }),
     flushWorkIndex: () => workIndex.flush(),
+    getDetailConnectionDiagnostics: id => {
+      if (!integratedMode()) return [];
+      const group = detailGroupsBySourceId.get(String(id));
+      if (!group?.sourceItems?.length) return [];
+      const anchor = group.sourceItems.find(item => sourceKey(item) === String(id)) || group.sourceItems[0];
+      const key = anchor.provider + ':' + sourceKey(anchor);
+      return api.providerConnectionDiagnostics({
+        linked: group.sourceItems,
+        statuses: detailSearchDiagnostics.get(key) || [],
+        unverified: detailUnverifiedCandidates.get(key) || [], providers
+      });
+    },
     getSearchDiagnostics: () => resultStatuses.map(item => ({
       provider: item.provider, state: item.state, results: item.resultCount,
       pages: item.pages || 0, pageLimitReached: !!item.pageLimitReached

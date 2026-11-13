@@ -1158,7 +1158,8 @@ test('yearless candidate whose detailed release year conflicts stays separate',a
   assert.equal(buttons(app).length,1,
     'identical title is not evidence enough when detailed year differs');
   const picker=app.nodes.get('#detailContent').querySelector('.detail-source-picker');
-  assert.ok(!picker.children.some(node=>String(node.textContent).includes('작품 확인 필요')),
+  assert.ok(!picker.querySelectorAll('.dino-provider-diagnostic').some(node=>
+    node.dataset.provider==='animenosub' && node.dataset.reason==='needs-identity-check'),
     'a proven different release year is a rejection, not an unverified match');
 });
 
@@ -1174,7 +1175,8 @@ test('a matching-title candidate without a verifiable year is shown as unverifie
   await app.window.openDetail(app.home.mal_id);
   assert.equal(buttons(app).length,1);
   const picker=app.nodes.get('#detailContent').querySelector('.detail-source-picker');
-  assert.ok(picker.children.some(node=>String(node.textContent).includes('작품 확인 필요')),
+  assert.ok(picker.querySelectorAll('.dino-provider-diagnostic').some(node=>
+    node.dataset.provider==='animenosub' && node.dataset.reason==='needs-identity-check'),
     'an unresolved exact-title candidate must not be reported as a confirmed miss');
 });
 
@@ -1275,4 +1277,61 @@ test('manual Korean title edits request an immediate SQLite flush',()=>{
   assert.match(bridge,/if \(sqlite\.isReady\(\)\) sqlite\.flush\(\)\.then\(ok =>/);
   assert.match(bridge,/if \(!workIndex\.flush\(\)\)/);
   assert.doesNotMatch(bridge,/localStorage\.clear\(\)/);
+});
+
+test('integrated detail displays five supplier-specific connection reasons',async()=>{
+  const app=harness();
+  await app.window.openDetail(app.home.mal_id);
+  const selector=app.nodes.get('#detailContent').querySelector('.detail-source-picker');
+  const diagnostics=selector.querySelectorAll('.dino-provider-diagnostic');
+  assert.equal(diagnostics.length,5);
+  const reasons=Object.fromEntries(diagnostics.map(x=>[x.dataset.provider,x.dataset.reason]));
+  assert.equal(reasons.reanime,'linked');
+  assert.equal(reasons.miruro,'linked');
+  assert.equal(reasons.animenosub,'not-found');
+  assert.equal(reasons.ohli24,'not-found');
+  assert.equal(reasons.linkani,'not-found');
+  const apiRows=app.window.__dinoPatch03Bridge.getDetailConnectionDiagnostics(app.home.mal_id);
+  assert.equal(apiRows.length,5);
+  assert.equal(apiRows.find(x=>x.provider==='linkani').reason,'not-found');
+});
+
+test('individual supplier mode shows no connected-supplier diagnosis and does not scan other suppliers',async()=>{
+  const app=harness({integrated:false});
+  await app.window.openDetail(app.home.mal_id);
+  assert.deepEqual(app.calls.search,[]);
+  assert.equal(app.nodes.get('#detailContent').querySelectorAll('.dino-provider-diagnostic').length,0);
+  assert.equal(app.window.__dinoPatch03Bridge.getDetailConnectionDiagnostics(app.home.mal_id).length,0);
+});
+
+test('season-divergent fallback episodes do not resolve or alter the previous playback',async()=>{
+  const app=harness();
+  await app.window.openDetail(app.home.mal_id);
+  Object.assign(app.sandbox.currentPlaybackContext,{
+    anime:app.home,
+    episode:{provider:'reanime',season:2,number:3,url:'https://original.example/3'}
+  });
+  let calls=0,switched=0;
+  app.replay.resolve=async()=>{switched++;};
+  app.window.lilac.providerDetail=async item=>({
+    data:item,episodes:[{provider:item.provider,season:1,number:3,url:'https://wrong.example/3'}]
+  });
+  app.window.lilac.providerResolve=async()=>{calls++;return {url:'https://wrong.example/stream'};};
+  app.events.get('DOMContentLoaded')();
+  app.video.send('error');
+  await settle();await settle();
+  const offer=app.playbackStatus.children.find(item=>item.id==='dinoPlaybackAlternate');
+  assert.ok(offer);
+  offer.send('click');
+  await settle();await settle();
+  assert.equal(calls,0);
+  assert.equal(switched,0);
+  assert.equal(app.sandbox.currentPlaybackContext.episode.season,2);
+});
+
+test('integrated SQLite initialization is not run when official individual supplier mode is selected',()=>{
+  assert.match(bridge,/if \(api\.readSourceSettings\(localStorage\)\.mode === 'integrated'\)\s*sqlite\.start\(\)/);
+  assert.match(bridge,/if \(!integratedMode\(\)\) return officialSearch\.call\(this, query\)/);
+  assert.match(bridge,/if \(!integratedMode\(\) \|\| !Array\.isArray\(group\?\.sourceItems\)/);
+  assert.match(bridge,/if \(!integratedMode\(\)\) return \[\]/);
 });

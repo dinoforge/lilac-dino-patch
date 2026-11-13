@@ -618,3 +618,72 @@ test('rapid manual title edits and reset receive increasing durable timestamps',
   assert.equal(JSON.parse(bag.get(require('../src/integrated-search.js').WORK_INDEX_KEY))
     .works[0].titles.manual,false);
 });
+
+test('all five suppliers show distinct connection reasons rather than treating search hits as links',()=>{
+  const {providerConnectionDiagnostics}=require('../src/integrated-search.js');
+  const rows=providerConnectionDiagnostics({
+    linked:[{provider:'animenosub'}],
+    statuses:[
+      {provider:'reanime',state:'ready',resultCount:0},
+      {provider:'miruro',state:'ready',resultCount:5},
+      {provider:'ohli24',state:'partial',resultCount:2},
+      {provider:'linkani',state:'failed',resultCount:0}
+    ],
+    unverified:['miruro']
+  });
+  const byProvider=Object.fromEntries(rows.map(row=>[row.provider,row.reason]));
+  assert.deepEqual(byProvider,{
+    reanime:'not-found',miruro:'needs-identity-check',
+    animenosub:'linked',ohli24:'partial',linkani:'error'
+  });
+  const uncertain=providerConnectionDiagnostics({statuses:[{
+    provider:'miruro',state:'ready',resultCount:3
+  }]});
+  assert.equal(uncertain.find(row=>row.provider==='miruro').reason,'unrelated-results');
+  assert.equal(uncertain.find(row=>row.provider==='linkani').reason,'not-checked');
+  assert.equal(providerConnectionDiagnostics({statuses:[{
+    provider:'linkani',state:'ready',pageLimitReached:true,resultCount:1
+  }]}).find(row=>row.provider==='linkani').reason,'page-limited');
+});
+
+test('partially successful provider lookups can try another official title before giving up',()=>{
+  const {providersNeedingTitleVariants}=require('../src/integrated-search.js');
+  assert.deepEqual(providersNeedingTitleVariants({statuses:[
+    {provider:'miruro',state:'partial',resultCount:0},
+    {provider:'reanime',state:'failed',resultCount:0},
+    {provider:'linkani',state:'ready',resultCount:2}
+  ]}),['miruro']);
+});
+
+test('episode zero, specials, OVA, previews and false episode numbers are excluded from regular counts',()=>{
+  const {excludedEpisode,playableEpisodeNumber,episodeMetrics}=require('../src/integrated-search.js');
+  assert.equal(excludedEpisode({number:0}),true);
+  assert.equal(excludedEpisode({name:'0화'}),true);
+  assert.equal(excludedEpisode({name:'Episode 0'}),true);
+  assert.equal(excludedEpisode({name:'Trailer'}),true);
+  assert.equal(excludedEpisode({name:'PV1'}),true);
+  assert.equal(excludedEpisode({type:'movie',number:1}),true);
+  assert.equal(excludedEpisode({name:'특별편 1화'}),true);
+  assert.equal(excludedEpisode({name:'OVA 1',number:1}),true);
+  assert.equal(excludedEpisode({kind:'special',number:1}),true);
+  assert.equal(playableEpisodeNumber({name:'0화'}),null);
+  assert.equal(playableEpisodeNumber({number:7}),7);
+  assert.equal(playableEpisodeNumber({number:0}),null);
+  const facts=episodeMetrics({episodes:[
+    {number:0},{name:'특별편 1화'},{type:'OVA',number:2},
+    {number:1},{number:2},{number:2,dub:true},{name:'3화'}
+  ]});
+  assert.deepEqual(facts,{count:3,latest:3});
+});
+
+test('season and cour identity prevents incorrect automatic episode switching',()=>{
+  const {episodeSegment,uniqueSameEpisode}=require('../src/integrated-search.js');
+  assert.equal(episodeSegment({season:'시즌 2'}),'part:2');
+  assert.equal(episodeSegment({cour:2}),'part:2');
+  const reference={number:3,dub:false,season:2};
+  assert.equal(uniqueSameEpisode([{number:3,season:1}],reference,'miruro'),null);
+  assert.equal(uniqueSameEpisode([{number:3}],reference,'miruro'),null,
+    'unknown season is not enough evidence for automatic playback switching');
+  assert.equal(uniqueSameEpisode([{number:3,season:2}],reference,'miruro').number,3);
+  assert.equal(uniqueSameEpisode([{number:3,season:2,isSpecial:true}],reference,'miruro'),null);
+});

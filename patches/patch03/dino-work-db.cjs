@@ -69,12 +69,20 @@ function createStore({app,DatabaseSync}={}){
       const Driver=DatabaseSync||require('node:sqlite').DatabaseSync;
       if(typeof Driver!=='function')throw Error('node:sqlite not available');
       db=new Driver(path.join(app.getPath('userData'),FILE));
+      // Verify the database BEFORE WAL configuration, DDL or migration.
+      // Never auto-delete, rename, reset or overwrite a damaged user DB.
+      // An intact v1 local cache remains available in the renderer.
+      const check=db.prepare('PRAGMA quick_check(1)').all();
+      if(!check.length||check.some(item=>item.quick_check!=='ok'))
+        throw Error('SQLite 무결성 검사 실패 · 원본 DB 보존, 로컬 캐시로 전환');
+      const links=db.prepare('PRAGMA foreign_key_check').all();
+      if(links.length)throw Error('SQLite 외래키 오류 · 원본 DB 보존, 로컬 캐시로 전환');
+      const version=Number(db.prepare('PRAGMA user_version').get().user_version)||0;
+      if(version>3)throw Error('newer SQLite schema: read-only fallback');
       db.exec('PRAGMA foreign_keys=ON');
       db.exec('PRAGMA busy_timeout=3000');
       db.exec('PRAGMA journal_mode=WAL');
       db.exec('PRAGMA synchronous=NORMAL');
-      const version=Number(db.prepare('PRAGMA user_version').get().user_version)||0;
-      if(version>3)throw Error('newer SQLite schema: read-only fallback');
       db.exec('CREATE TABLE IF NOT EXISTS works(work_id TEXT PRIMARY KEY,names_json TEXT NOT NULL,title_ko TEXT NOT NULL,title_en TEXT NOT NULL,title_ja TEXT NOT NULL,ko_source TEXT NOT NULL,ko_checked_at INTEGER NOT NULL,manual INTEGER NOT NULL,checked_at INTEGER NOT NULL,attempted_at INTEGER NOT NULL,outcome TEXT NOT NULL,updated_at INTEGER NOT NULL)');
       db.exec('CREATE TABLE IF NOT EXISTS work_sources(provider TEXT NOT NULL,source_id TEXT NOT NULL,work_id TEXT NOT NULL REFERENCES works(work_id),item_json TEXT NOT NULL,PRIMARY KEY(provider,source_id))');
       db.exec('CREATE INDEX IF NOT EXISTS idx_dino_source_work ON work_sources(work_id)');
@@ -96,7 +104,8 @@ function createStore({app,DatabaseSync}={}){
       db=null;return false;
     }
   }
-  function status(){return {available:init(),schema:ready?3:0,reason:ready?'':problem,engine:'node:sqlite'};}
+  function status(){return {available:init(),schema:ready?3:0,reason:ready?'':problem,
+    engine:'node:sqlite',recovery:ready?'none':'local-cache-fallback',dbPreserved:true};}
   function readRow(id){
     const row=db.prepare('SELECT * FROM works WHERE work_id=?').get(id);
     if(!row)return null;

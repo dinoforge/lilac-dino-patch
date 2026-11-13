@@ -465,11 +465,34 @@
     return { items: providers.flatMap(provider => [...records.get(provider).items.values()]), statuses };
   }
 
+  // Each supplier's catalog response is distinct from a verified same-work link.
+  function providerConnectionDiagnostics({ linked = [], statuses = [], unverified = [], providers = PROVIDERS } = {}) {
+    const connected = new Set(linked.map(item => typeof item === 'string' ? item : item?.provider));
+    const scanned = new Map(statuses.filter(item => PROVIDERS.includes(item?.provider))
+      .map(item => [item.provider, item]));
+    const candidates = new Set(unverified.filter(item => PROVIDERS.includes(item)));
+    return [...new Set(providers)].filter(item => PROVIDERS.includes(item)).map(provider => {
+      const status = scanned.get(provider);
+      const resultCount = Math.max(0, Number(status?.resultCount) || 0);
+      let reason = 'not-checked';
+      if (connected.has(provider)) reason = 'linked';
+      else if (candidates.has(provider)) reason = 'needs-identity-check';
+      else if (status?.state === 'failed') reason = 'error';
+      else if (status?.state === 'partial') reason = 'partial';
+      else if (status?.pageLimitReached) reason = 'page-limited';
+      else if (status?.state === 'skipped' || !status) reason = 'not-checked';
+      else if (resultCount === 0) reason = 'not-found';
+      else reason = 'unrelated-results';
+      return { provider, reason, resultCount };
+    });
+  }
+
   function providersNeedingTitleVariants(result, providers = PROVIDERS) {
     const statuses = new Map((result?.statuses || []).map(status => [status.provider, status]));
     return [...new Set(providers)].filter(provider => {
       const status = statuses.get(provider);
-      return ['ready', 'skipped'].includes(status?.state) && Number(status.resultCount) === 0;
+      return ['ready', 'partial', 'skipped'].includes(status?.state)
+        && Number(status.resultCount) === 0;
     });
   }
 
@@ -503,36 +526,54 @@
     return result;
   }
 
-  // Duplicate matching numbers (e.g. multiple editions of episode 3)
-  // cannot be selected automatically, nor may an episode belong to a
-  // different supplier.
+  // Episode 0, specials and bonus releases are not regular episodes, even
+  // if a supplier's detail API omitted its usual special flag.
+  function excludedEpisode(episode) {
+    if (!episode || episode.playable === false || episode.special === true
+      || episode.isSpecial === true || episode.is_special === true) return true;
+    if (episode.number != null && episode.number !== '' && Number(episode.number) === 0) return true;
+    const category = String(episode.type || episode.kind || episode.category || '').trim();
+    if (/^(?:special|sp|ova|oad|trailer|preview|recap|movie|film|특별편|총집편|극장판|予告|特別編)$/i.test(category)) return true;
+    const name = String(episode.name || episode.title || '').trim();
+    if (/^(?:(?:제|第)\s*|ep(?:isode)?\.?\s*#?\s*)?0(?=\s*(?:화|회|話|$|[-:]))/i.test(name)) return true;
+    return /^(?:OVA|OAD|SP|PV|Trailer|Preview|Recap|특별편|총집편|극장판|予告|特別編)(?:\b|\s|\d|[-:：]|$)/i.test(name);
+  }
+  function episodeSegment(episode) {
+    const raw = episode?.seasonNumber ?? episode?.season ?? episode?.cour ?? episode?.part ?? '';
+    const segment = String(raw).normalize('NFKC').trim().toLowerCase();
+    if (!segment) return '';
+    const match = segment.match(/^(?:(?:season|cour|part|시즌|파트)\s*)?(\d{1,3})(?:\s*(?:기|期))?$/i);
+    return match ? 'part:' + Number(match[1]) : segment.slice(0, 40);
+  }
+  function playableEpisodeNumber(episode) {
+    if (excludedEpisode(episode)) return null;
+    const numeric = Number(episode.number);
+    if (episode.number != null && episode.number !== '' && Number.isInteger(numeric))
+      return numeric > 0 && numeric < 10000 ? numeric : null;
+    const label = String(episode.name || episode.title || '').trim();
+    const match = label.match(/^(?:제\s*|第\s*)?(?:ep(?:isode)?\.?\s*#?\s*)?(\d{1,4})(?=\s*(?:화|회|話|$|[-:]))/i);
+    return match && Number(match[1]) > 0 ? Number(match[1]) : null;
+  }
+  // If only one supplier reports a season/cour, do not assume that episode
+  // numbering is the same on the other supplier.
   function uniqueSameEpisode(episodes, reference, provider) {
     const number = playableEpisodeNumber(reference);
     if (!number || !PROVIDERS.includes(provider) || !Array.isArray(episodes)) return null;
-    const matches = episodes.filter(item => item && item.playable !== false && !item.special
+    const segment = episodeSegment(reference);
+    const matches = episodes.filter(item => item && !excludedEpisode(item)
       && playableEpisodeNumber(item) === number
       && Boolean(item.dub) === Boolean(reference.dub)
+      && ((!segment && !episodeSegment(item)) || (segment && segment === episodeSegment(item)))
       && (!item.provider || item.provider === provider));
     return matches.length === 1 ? { ...matches[0], provider } : null;
   }
 
-
-  // Provider detail endpoints may list both dubs/subs, specials and repeats.
-  // Compare only distinct playable episode numbers for the latest count.
-  function playableEpisodeNumber(episode) {
-    if(!episode || episode.special || episode.playable === false)return null;
-    const numeric=Number(episode.number);
-    if(Number.isInteger(numeric) && numeric>0 && numeric<10000)return numeric;
-    const label=String(episode.name || episode.title || '').trim();
-    const match=label.match(/^(?:제\s*|第\s*)?(?:ep(?:isode)?\.?\s*#?\s*)?(\d{1,4})(?=\s*(?:화|회|話|$|[-:]))/i);
-    return match ? Number(match[1]) : null;
-  }
   function episodeMetrics(response) {
     if(!Array.isArray(response?.episodes) || response.unavailable)return null;
     const numbered=new Set();
     let unnumbered=0,latest=0;
     for(const episode of response.episodes.slice(0,5000)){
-      if(!episode || episode.special || episode.playable === false)continue;
+      if(excludedEpisode(episode))continue;
       const number=playableEpisodeNumber(episode);
       if(number){
         numbered.add(number);
@@ -1084,7 +1125,10 @@
     metadataCompatible,
     identityMatch,
     providersNeedingTitleVariants,
+    providerConnectionDiagnostics,
     titleVariantTerms,
+    episodeSegment,
+    excludedEpisode,
     uniqueSameEpisode
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
