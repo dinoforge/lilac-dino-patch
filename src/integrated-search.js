@@ -491,7 +491,9 @@
   // Like the original Korean title index: timestamped, batched local writes,
   // bounded profile storage and conservative verified provider identities.
   const WORK_INDEX_KEY = 'lilacDinoPatch.workIndex.v1';
-  function createWorkIndex(storage, { clock = () => Date.now(), maxWorks = 350 } = {}) {
+  function createWorkIndex(storage, { clock = () => Date.now(), maxWorks = 1800 } = {}) {
+    // Allow 1,000 pre-indexed Re:Anime works while leaving capacity for
+    // discoveries and cards from the other four content providers.
     // Work identities are retained until the bounded LRU evicts them.
     // The TTLs only determine when a new provider scan is permitted:
     // all matched = 30 days, searched but missing a provider = 7 days,
@@ -525,7 +527,7 @@
     let data = { version: 1, works: [], searches: [] };
     try {
       const raw = storage?.getItem(WORK_INDEX_KEY);
-      if (raw && raw.length < 2500000) {
+      if (raw && raw.length < 4000000) {
         const saved = JSON.parse(raw);
         if (saved?.version === 1 && Array.isArray(saved.works) && Array.isArray(saved.searches)) {
           data.works = saved.works.slice(0, maxWorks).filter(w => w && Array.isArray(w.sources))
@@ -547,7 +549,16 @@
       data.works.sort((a, b) => b.updatedAt - a.updatedAt);
       data.works.length = Math.min(data.works.length, maxWorks);
       data.searches = data.searches.slice(-65);
-      try { storage?.setItem(WORK_INDEX_KEY, JSON.stringify(data)); } catch {}
+      try {
+        let encoded = JSON.stringify(data);
+        // Keep the profile cache below Electron localStorage's usual quota;
+        // LRU eviction is bounded and never touches original LilacAnime data.
+        while (encoded.length > 3700000 && data.works.length > 1) {
+          data.works.pop();
+          encoded = JSON.stringify(data);
+        }
+        storage?.setItem(WORK_INDEX_KEY, encoded);
+      } catch { /* the old profile value remains intact if disk is full */ }
     };
     const touch = () => {
       dirty = true;
