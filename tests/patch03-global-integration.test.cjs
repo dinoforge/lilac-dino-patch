@@ -446,3 +446,25 @@ test('already searched cards never trigger duplicate background scans',async()=>
   assert.equal(app.window.__dinoPatch03Bridge.getPrefetchStatus().queued,0);
   assert.equal(app.scheduled.length,0);
 });
+
+
+test('source index records missing versus provider outage for separate expiry policies',async()=>{
+  const missing=harness();
+  await missing.window.openDetail(missing.home.mal_id);
+  missing.window.__dinoPatch03Bridge.flushWorkIndex();
+  const missingStore=JSON.parse(missing.storage.get(api.WORK_INDEX_KEY));
+  const missingRow=missingStore.works.find(row=>row.sources.some(item=>item.mal_id===missing.home.mal_id));
+  assert.equal(missingRow.outcome,'missing','fully answered scan with unmatched providers is a 7-day missing check');
+  assert.ok(missingRow.checkedAt>0);
+
+  const failed=harness();
+  const original=failed.window.lilac.providerCatalog;
+  failed.window.lilac.providerCatalog=(provider,...args)=>
+    provider==='ohli24'?Promise.reject(Error('provider unavailable')):original(provider,...args);
+  await failed.window.openDetail(failed.home.mal_id);
+  failed.window.__dinoPatch03Bridge.flushWorkIndex();
+  const failedStore=JSON.parse(failed.storage.get(api.WORK_INDEX_KEY));
+  const failedRow=failedStore.works.find(row=>row.sources.some(item=>item.mal_id===failed.home.mal_id));
+  assert.equal(failedRow.outcome,'error','incomplete scan gets short retry without deleting known links');
+  assert.ok(failedRow.attemptedAt>0);
+});
