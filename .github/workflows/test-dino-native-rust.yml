@@ -85,24 +85,24 @@ jobs:
           # files and the additive preload/main bridge, not just an APPLIED flag.
           $env:DINO_VERIFY_ASAR=$asar
           @'
-import os,sys
-from pathlib import Path
-sys.path.insert(0,os.path.join(os.environ['GITHUB_WORKSPACE'],'tools','dino-patch-manager'))
-from installed_asar import Archive
-a=Archive(Path(os.environ['DINO_VERIFY_ASAR']))
-files=('src/integrated-search.js','src/dino-sqlite-sync.js',
-       'electron/dino-work-db.cjs','src/patch03-bridge.js')
-for name in files:
-    data=a.read(name)
-    assert len(data)>100, f'Missing or empty SQLite patch runtime: {name}'
-preload=a.read('electron/preload.cjs').decode('utf-8')
-main=a.read('electron/main.cjs').decode('utf-8')
-html=a.read('src/index.html').decode('utf-8')
-assert "dinoWorkIndex:" in preload
-assert "require('./dino-work-db.cjs').register" in main
-assert html.count('<script src="dino-sqlite-sync.js"></script>')==1
-print('PASS: Official installed ASAR contains the SQLite IPC and renderer runtime')
-'@ | python -
+          import os,sys
+          from pathlib import Path
+          sys.path.insert(0,os.path.join(os.environ['GITHUB_WORKSPACE'],'tools','dino-patch-manager'))
+          from installed_asar import Archive
+          a=Archive(Path(os.environ['DINO_VERIFY_ASAR']))
+          files=('src/integrated-search.js','src/dino-sqlite-sync.js',
+                 'electron/dino-work-db.cjs','src/patch03-bridge.js')
+          for name in files:
+              data=a.read(name)
+              assert len(data)>100, f'Missing or empty SQLite patch runtime: {name}'
+          preload=a.read('electron/preload.cjs').decode('utf-8')
+          main=a.read('electron/main.cjs').decode('utf-8')
+          html=a.read('src/index.html').decode('utf-8')
+          assert "dinoWorkIndex:" in preload
+          assert "require('./dino-work-db.cjs').register" in main
+          assert html.count('<script src="dino-sqlite-sync.js"></script>')==1
+          print('PASS: Official installed ASAR contains the SQLite IPC and renderer runtime')
+          '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'SQLite ASAR verification failed' }
           if ((Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash -eq $beforeHash) { throw 'ASAR was not patched' }
           $uninstalled = Run-Manager 'uninstall'
