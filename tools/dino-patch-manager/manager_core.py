@@ -2579,7 +2579,16 @@ def _validate_previous_patch_record(root: Path, state: dict[str, Any], manifest:
 
     expected_modified = sorted(manifest.get("officialRuntimeModifiedAllowlist", []))
     expected_modules = sorted(item["destination"] for item in manifest.get("runtimeModules", []))
-    if sorted(state.get("modifiedOfficialFiles", [])) != expected_modified or sorted(state.get("addedPatchFiles", [])) != expected_modules:
+    state_modified = sorted(state.get("modifiedOfficialFiles", []))
+    state_modules = sorted(state.get("addedPatchFiles", []))
+    # A pre-SQLite patch used exactly two official files and three Dino
+    # modules. Accept that KNOWN scope for verified uninstall/recovery only;
+    # never infer ownership of unknown files from a journal.
+    legacy_modified = sorted(EXPECTED_CONNECTION_FILES)
+    legacy_modules = sorted(EXPECTED_MODULES)
+    if (state_modified, state_modules) == (legacy_modified, legacy_modules):
+        expected_modified, expected_modules = legacy_modified, legacy_modules
+    elif (state_modified, state_modules) != (expected_modified, expected_modules):
         raise CompatibilityBlocked("이전 패치가 관리한 파일 목록이 현재 디노 패치 범위와 다릅니다.", "PARTIAL_OR_UNKNOWN")
 
     entries = {entry.get("path"): entry for entry in backup.get("files", []) if isinstance(entry, dict)}
