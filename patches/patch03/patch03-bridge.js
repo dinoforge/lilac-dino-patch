@@ -369,79 +369,78 @@
   }
 
 
-  // The official Re:Anime catalog is already persisted by LilacAnime.
-  // Its sorted 'popular' page reads the ORIGINAL on-disk index, with no
-  // supplier HTTP call. Copy up to 36 NEW works every 24 hours, resume from
-  // the last local offset, and stop at 1,000 indexed Re:Anime identities.
-  // Other four suppliers continue to populate the same DB passively from
-  // original cards; keep headroom for those sources.
+  // Only use the official Re:Anime index already persisted by LilacAnime.
+  // Its "popular" providerCatalog paging is fulfilled from the MAIN PROCESS
+  // local sorted index. A 36-item page is a batch size, NOT a daily quota.
+  // Read one idle batch at a time until 1,000 works are indexed or the
+  // original catalog ends. The other four suppliers retain DB headroom.
   const CATALOG_SEED_KEY = 'lilacDinoPatch.workIndex.originalCatalogSeed.v1';
-  const CATALOG_SEED_DAY_MS = 24 * 60 * 60 * 1000;
   const CATALOG_SEED_PAGE_SIZE = 36;
   const CATALOG_SEED_TARGET = 1000;
   const CATALOG_SEED_MAX_WORKS = 1600;
   const CATALOG_SEED_MAX_LOCAL_PAGES = 4;
+  const CATALOG_SEED_BATCH_DELAY_MS = 1400;
+  const CATALOG_SEED_PAUSE_DELAY_MS = 15000;
+  const CATALOG_SEED_EXHAUSTED_RECHECK_MS = 7 * 24 * 60 * 60 * 1000;
   let catalogSeedBusy = false;
   let catalogSeedTimer = null;
-  let catalogSeedWakeTimer = null;
   let catalogSeedImported = 0;
   let catalogSeedChecks = 0;
   let catalogSeedStatus = 'idle';
   function catalogSeedCheckpoint() {
     try {
       const saved = JSON.parse(localStorage.getItem(CATALOG_SEED_KEY) || 'null');
-      return saved && Number.isFinite(saved.time) && Number.isInteger(saved.offset)
-        && saved.offset >= 0 ? saved : { time: 0, offset: 0 };
-    } catch { return { time: 0, offset: 0 }; }
+      return saved && Number.isInteger(saved.offset) && saved.offset >= 0
+        ? saved : { offset: 0 };
+    } catch { return { offset: 0 }; }
   }
   function catalogSeedReachedTarget() {
     return (workIndex.stats().providers.reanime || 0) >= CATALOG_SEED_TARGET;
   }
-  function scheduleNextCatalogSeedDay() {
-    if (catalogSeedWakeTimer !== null || !integratedMode() || catalogSeedReachedTarget()
-      || workIndex.stats().works >= CATALOG_SEED_MAX_WORKS
-      || typeof setTimeout !== 'function') return;
-    const { time } = catalogSeedCheckpoint();
-    if (!time) return;
-    // 24-hour interval, not a midnight boundary (avoids two scans within
-    // minutes on consecutive calendar days).
-    const delay = Math.max(1000, time + CATALOG_SEED_DAY_MS - Date.now() + 1000);
-    catalogSeedWakeTimer = setTimeout(() => {
-      catalogSeedWakeTimer = null;
-      scheduleOriginalCatalogSeed();
-    }, delay);
+  function catalogSeedExhausted(source, checkpoint = catalogSeedCheckpoint()) {
+    return Number(checkpoint.exhaustedTotal) === Number(source?.total)
+      && Number(source?.total) > 0
+      && Date.now() - (Number(checkpoint.exhaustedAt) || 0)
+        < CATALOG_SEED_EXHAUSTED_RECHECK_MS;
+  }
+  function catalogSeedForegroundBusy() {
+    return document.hidden === true || document.querySelector('#detailDialog')?.open
+      || document.querySelector('#playerView')?.classList?.contains('active');
   }
   async function seedFromOriginalCatalog(indexState) {
     if (!integratedMode() || catalogSeedBusy
       || typeof window.lilac?.providerCatalog !== 'function') return;
-    const source = indexState?.sources?.find(entry => entry.provider === 'reanime'
-      && Number(entry.total) > 0);
-    // No locally built index: don't activate the original catalog and
-    // accidentally launch a costly 20,000-entry upstream download.
+    const source = indexState?.sources?.find(entry =>
+      entry.provider === 'reanime' && Number(entry.total) > 0);
+    // Never call activateCatalog(), which may start an upstream full-catalog
+    // download. If no local Re:Anime list is ready, simply do nothing.
     if (!source) { catalogSeedStatus = 'no-local-index'; return; }
-    const checkpoint = catalogSeedCheckpoint();
-    if (Date.now() - checkpoint.time < CATALOG_SEED_DAY_MS) {
-      catalogSeedStatus = 'already-imported-today';
-      scheduleNextCatalogSeedDay();
-      return;
-    }
-    if (catalogSeedReachedTarget()) {
-      catalogSeedStatus = 'target-reached';
-      return;
-    }
+    if (catalogSeedReachedTarget()) { catalogSeedStatus = 'target-reached'; return; }
     if (workIndex.stats().works >= CATALOG_SEED_MAX_WORKS) {
       catalogSeedStatus = 'db-capacity-reserved';
       return;
     }
+    const checkpoint = catalogSeedCheckpoint();
+    if (catalogSeedExhausted(source, checkpoint)) {
+      catalogSeedStatus = 'catalog-end-reached';
+      return;
+    }
+    if (catalogSeedForegroundBusy()) {
+      catalogSeedStatus = 'paused-for-playback';
+      scheduleOriginalCatalogSeed(indexState, CATALOG_SEED_PAUSE_DELAY_MS);
+      return;
+    }
+
     catalogSeedBusy = true;
     catalogSeedStatus = 'reading-local-index';
+    let continueLater = false;
     try {
       const total = Math.max(1, Number(source.total));
       let offset = checkpoint.offset < total ? checkpoint.offset : 0;
       let count = 0, pages = 0, reachedEnd = false;
       let reanimeCount = workIndex.stats().providers.reanime || 0;
-      // Skip cards already in DB without spending today's quota, but read
-      // at most four LOCAL index pages so startup stays inexpensive.
+      // Skip duplicates already seen in any original source card; visit at
+      // most four LOCAL catalog pages per batch so the UI stays responsive.
       while (pages < CATALOG_SEED_MAX_LOCAL_PAGES
         && count < CATALOG_SEED_PAGE_SIZE
         && reanimeCount < CATALOG_SEED_TARGET
@@ -462,78 +461,80 @@
           if (!isDinoProvider(item) || item.provider !== 'reanime'
             || !String(item.title || item.title_english || '').trim()) continue;
           const already = workIndex.find(item)?.sources?.some(existing =>
-            existing.provider === item.provider && sourceKey(existing) === sourceKey(item));
+            existing.provider === 'reanime' && sourceKey(existing) === sourceKey(item));
           if (already) continue;
-          // No title enrichment or live matching here. Preserve any already
-          // verified connections and their 30/7/3-day refresh timestamps.
+          // A list entry is an observation, not proof of playback
+          // availability or a completed five-provider search.
           workIndex.remember({ sourceItems: [item] });
           count++;
           reanimeCount++;
         }
         offset += scanned;
-        if (offset >= total || scanned === 0 || page.done || items.length < CATALOG_SEED_PAGE_SIZE) {
+        if (offset >= total || scanned === 0 || page.done
+          || items.length < CATALOG_SEED_PAGE_SIZE) {
           offset = 0;
           reachedEnd = true;
           break;
         }
-        if (scanned < items.length) break; // pause at the exact daily quota
+        if (scanned < items.length) break;
       }
-      if (pages === 0) return;
-      // Only advance the saved cursor after the work index is durably saved.
-      // If localStorage is full, keep the old cursor for a later retry.
+      if (!pages) return;
+      // Commit the work cache first, then the cursor. Never skip unsaved
+      // entries if localStorage is full or the user exits mid-write.
       if (!workIndex.flush()) {
         catalogSeedStatus = 'write-failed';
         return;
       }
       if ((workIndex.stats().providers.reanime || 0) < reanimeCount) {
-        // Size-based LRU eviction can discard newly imported rows. Don't
-        // advance the offset past content that wasn't retained on disk.
         catalogSeedStatus = 'db-capacity-reserved';
         return;
       }
-      catalogSeedImported += count;
+      const completedAt = reachedEnd ? Date.now() : 0;
       try {
         localStorage.setItem(CATALOG_SEED_KEY, JSON.stringify({
-          time: Date.now(), offset
+          offset, time: Date.now(), exhaustedAt: completedAt,
+          exhaustedTotal: reachedEnd ? total : 0
         }));
       } catch {
         catalogSeedStatus = 'checkpoint-write-failed';
         return;
       }
+      catalogSeedImported += count;
       catalogSeedStatus = catalogSeedReachedTarget() ? 'target-reached'
         : reachedEnd ? 'catalog-end-reached'
         : workIndex.stats().works >= CATALOG_SEED_MAX_WORKS
           ? 'db-capacity-reserved' : 'imported';
-      scheduleNextCatalogSeedDay();
+      continueLater = !reachedEnd && !catalogSeedReachedTarget()
+        && workIndex.stats().works < CATALOG_SEED_MAX_WORKS;
     } catch {
-      // A changed original IPC contract is not proof of a source outage.
       catalogSeedStatus = 'read-failed';
-    } finally { catalogSeedBusy = false; }
+    } finally {
+      catalogSeedBusy = false;
+      if (continueLater) scheduleOriginalCatalogSeed(indexState, CATALOG_SEED_BATCH_DELAY_MS);
+    }
   }
-  function scheduleOriginalCatalogSeed(state = null) {
+  function scheduleOriginalCatalogSeed(state = null, delay = 5000) {
     if (!integratedMode() || catalogSeedBusy || catalogSeedTimer !== null
       || typeof window.lilac?.catalogIndexState !== 'function') return;
-    if (catalogSeedReachedTarget()) {
-      catalogSeedStatus = 'target-reached';
-      return;
-    }
+    if (catalogSeedReachedTarget()) { catalogSeedStatus = 'target-reached'; return; }
     if (workIndex.stats().works >= CATALOG_SEED_MAX_WORKS) {
       catalogSeedStatus = 'db-capacity-reserved';
       return;
     }
-    if (Date.now() - catalogSeedCheckpoint().time < CATALOG_SEED_DAY_MS) {
-      scheduleNextCatalogSeedDay();
-      return;
+    if (state) {
+      const local = state.sources?.find(source => source.provider === 'reanime'
+        && Number(source.total) > 0);
+      if (!local) return;
+      if (catalogSeedExhausted(local)) {
+        catalogSeedStatus = 'catalog-end-reached';
+        return;
+      }
     }
-    // An existing original catalog state is required. We never activate
-    // another source solely to populate Dino's index.
-    if (state && !state.sources?.some(source => source.provider === 'reanime'
-      && Number(source.total) > 0)) return;
     catalogSeedTimer = setTimeout(() => {
       catalogSeedTimer = null;
       (state ? Promise.resolve(state) : window.lilac.catalogIndexState())
         .then(seedFromOriginalCatalog).catch(() => { catalogSeedStatus = 'read-failed'; });
-    }, 5000);
+    }, delay);
   }
   if (typeof window.lilac?.catalogIndexState === 'function') {
     scheduleOriginalCatalogSeed();
@@ -1108,7 +1109,7 @@
       status: catalogSeedStatus,
       importedThisSession: catalogSeedImported, localPageReads: catalogSeedChecks,
       nextOffset: catalogSeedCheckpoint().offset,
-      source: 'reanime', dailyLimit: CATALOG_SEED_PAGE_SIZE,
+      source: 'reanime', batchSize: CATALOG_SEED_PAGE_SIZE,
       target: CATALOG_SEED_TARGET,
       indexed: workIndex.stats().providers.reanime || 0,
       maxLocalPages: CATALOG_SEED_MAX_LOCAL_PAGES
