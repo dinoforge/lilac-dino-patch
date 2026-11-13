@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>디노 패치 관리자</title>
+  <link rel="stylesheet" href="manager.css">
+  <script defer src="renderer.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand"><h1>디노 패치 관리자</h1></div>
+      <div class="topbar-meta"><span id="managerVersion" class="version-tag">관리자 v1.2.4</span></div>
+    </header>
+
+    <section class="card source-card" aria-labelledby="sourceHeading">
+      <div class="source-location">
+        <div class="source-version">
+          <span class="location-label">LilacAnime 버전</span>
+          <strong id="officialVersion">확인 중</strong>
+        </div>
+        <div class="location-copy">
+          <span id="sourceHeading" class="location-label">원본 폴더</span>
+          <strong id="targetPath" title="원본 경로를 확인하고 있습니다.">원본을 검색하고 있습니다.</strong>
+        </div>
+        <div class="button-row source-actions">
+          <button id="chooseRoot" class="button secondary">원본 폴더 변경</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card patch-list-card" aria-labelledby="patchListHeading">
+      <div class="list-heading">
+        <div class="list-heading-copy">
+          <h2 id="patchListHeading">패치 목록</h2>
+          <div class="patch-list-subline">
+            <p class="hint">공식 원본 변경을 감지해 안정된 뒤 호환성을 확인합니다.</p>
+            <span id="autoManageStatus" class="automation-status" data-state="neutral" role="status">실행 시 자동 검사 · 필요 시 적용</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="patchRows" class="patch-list" aria-label="사용 가능한 패치">
+        <article class="patch-row" aria-labelledby="dinoPatchName">
+          <div class="patch-row-main">
+            <div class="patch-mark" aria-hidden="true">D</div>
+            <div class="patch-copy">
+              <div class="patch-title-line"><h3 id="dinoPatchName">디노 패치</h3><span id="targetPatchVersion" class="patch-version">버전 확인 중</span></div>
+              <p>통합 검색 · 동일 작품 묶기 · 공급원 선택</p>
+            </div>
+            <span id="patchBadge" class="status-chip neutral">검사 대기</span>
+          </div>
+          <details id="patchDetails" class="patch-details">
+            <summary>세부 정보</summary>
+            <div class="patch-detail-grid">
+              <div><span>공식 기준</span><strong id="patchOfficialBase">확인 중</strong></div>
+              <div><span>적용 방식</span><strong>공식 상세 화면과 플레이어 연결</strong></div>
+              <div class="patch-detail-wide"><span>관리 범위</span><strong>매니페스트에 기록된 패치 파일만 백업·적용·해제합니다.</strong></div>
+            </div>
+          </details>
+        </article>
+      </div>
+    </section>
+
+    <details class="card advanced-tools">
+      <summary>고급 도구 <span class="hint">재검사 · 해제 · 백업 복원 · 기록</span></summary>
+      <div class="advanced-content">
+        <section class="manual-actions" aria-labelledby="manualActionsHeading">
+          <div class="management-section-heading"><h3 id="manualActionsHeading">수동 관리</h3><span class="hint">평소 작업은 자동으로 처리합니다.</span></div>
+          <div class="button-row manual-action-buttons">
+            <button id="inspect" class="button secondary" disabled>원본 다시 확인</button>
+            <button id="uninstall" class="button danger" disabled>디노 패치 해제</button>
+          </div>
+        </section>
+
+        <section class="card backup-card" aria-labelledby="backupHeading">
+          <div class="backup-heading"><div><h3 id="backupHeading">백업 및 작업 기록</h3><p class="hint">복원은 선택한 백업의 파일 지문을 확인한 뒤 진행합니다.</p></div></div>
+          <div class="backup-actions">
+            <label class="backup-picker"><span>복원할 백업</span><select id="backupSelect" aria-label="복원할 백업" disabled><option>사용 가능한 백업 없음</option></select></label>
+            <button id="restore" class="button secondary" disabled>백업 복원</button>
+            <button id="history" class="button secondary" disabled>작업 기록</button>
+          </div>
+        </section>
+
+        <section class="update-section" aria-labelledby="updateHeading">
+          <div class="management-section-heading"><h3 id="updateHeading">공식 릴리스 조회</h3><span class="hint">버전 조회만 합니다. 소스 파일은 변경하지 않습니다.</span></div>
+          <p id="updateStatus" class="update-status">업데이트 확인 전</p>
+          <div class="button-row update-actions">
+            <button id="checkUpdates" class="button secondary">최신 버전 확인</button>
+            <button id="diagnostics" class="button secondary">진단 정보</button>
+          </div>
+        </section>
+        <details class="log-details"><summary>상세 작업 로그</summary><pre id="log" aria-live="polite"></pre></details>
+      </div>
+    </details>
+
+    <section class="result-card" aria-labelledby="resultHeading" aria-live="polite">
+      <div class="result-row">
+        <p id="resultHeading" class="result-label">작업 상태</p>
+        <p id="message" class="message">공식 원본과 호환성을 확인하고 있습니다.</p>
+        <div id="activityStatus" class="result-actions" hidden><span id="busyBadge" class="status-chip neutral">대기</span></div>
+      </div>
+      <div class="activity-track" aria-hidden="true"><span></span></div>
+      <section id="safetyCard" class="safety" aria-label="안전 안내" hidden>
+        <div class="safety-mark" aria-hidden="true">!</div>
+        <div class="safety-copy"><h2 id="safetyTitle">원본 보호</h2><p id="safetyMessage"></p></div>
+      </section>
+      <p id="detail" class="detail" hidden></p>
+    </section>
+
+    <footer id="themeStatus" hidden>LilacAnime 테마 정보를 읽지 못했습니다.</footer>
+  </main>
+</body>
+</html>

@@ -1,49 +1,54 @@
 # 디노 패치 관리자
 
-Windows용 관리자는 하나의 프로그램으로 배포합니다. 최종 폴더는 실행 파일과 PyInstaller 보조 런타임, 패치 데이터로 구성되며 사용자의 Python 설치가 필요하지 않습니다.
+관리자는 A번에서 승인된 Electron HTML/CSS 화면을 사용하고, 패치 적용은 기존 `manager_core.py` 엔진에 위임합니다. 렌더러는 파일 경로를 직접 다루거나 셸 명령을 실행하지 않습니다. Electron main은 allowlist된 JSON 요청만 Python 엔진에 전달합니다.
 
+## Windows 배포 폴더
+
+관리자 빌드는 기존 Node.js, Electron 38.8.6, electron-builder와 Python/PyInstaller를 재사용합니다. 빌드 스크립트는 npm 설치를 실행하지 않습니다.
+
+```text
 LilacAnime/
 └─ DinoPatchManager/
    ├─ 디노패치관리자.exe
-   ├─ _internal/                 # EXE 실행에 필요한 런타임과 지원 파일
-   └─ manager.log                # 읽기 전용 테마 감지 실패 등 진단 기록
+   ├─ resources/
+   │  ├─ app.asar
+   │  ├─ manager-engine/       # PyInstaller Python 엔진과 Patch 03 자산
+   │  └─ manager-node/node.exe # 공식 원본 계약 검사에 사용
+   └─ runtime/                 # 관리자 전용 appData/userData/sessionData/cache/logs
+```
 
-개발 저장소에서는 소스를 tools/dino-patch-manager/에 유지합니다. 패치 데이터는 실행 파일에 포함됩니다. 관리자는 EXE 위치의 상위 폴더에서 소스형 LilacAnime 구조를 찾아 지원 여부를 검사합니다. 설치된 ASAR 패키지 구조는 지원하지 않습니다.
+공식 원본 폴더 아래 `DinoPatchManager`에 배치하고 실행하면 경로 상위에서 소스형 LilacAnime를 자동 검색합니다. 원본을 찾지 못하면 사용자가 선택한 폴더만 검사합니다. 설치된 `app.asar` 구조는 패치 대상이 아닙니다.
 
-## 사용 흐름
+## 작업 흐름
 
-1. 배포 폴더를 공식 LilacAnime 소스 폴더 바로 아래 DinoPatchManager로 둡니다.
-2. 디노패치관리자.exe를 실행하면 실행 경로에서 원본을 찾습니다.
-3. 고정 버전·원본 파일 트리·필수 연결 지점·공식 IPC·관리 패치 상태를 확인합니다.
-4. 미적용 상태이며 검증을 통과하면 변경 파일 백업 후 자동으로 적용합니다. 이미 적용됐으면 파일을 다시 쓰지 않습니다.
-5. 자동 검색이 실패하면 폴더 선택으로 소스 폴더를 지정할 수 있습니다.
+관리자 시작 시 공식 버전·파일 지문·패치 상태를 검사합니다. 지원되는 미적용 원본이면 기존 엔진이 변경 파일을 백업한 뒤 적용하고, 이미 적용된 원본이면 파일을 다시 쓰지 않습니다. 지원 버전이 아니거나 사용자 수정이 감지되면 중단하고 원인을 표시합니다.
 
-지원 기준은 공식 v0.5.54 (e4ac62214f5c4863eebae5052633e7f9f33dcbaa)입니다. 패치는 공식 src/app.js, src/index.html 연결부 두 파일과 통합 검색 모듈 세 개만 수정·추가합니다. electron/main.cjs, preload, 플레이어, 공급원 어댑터, 자막 및 Whisper는 교체하지 않습니다. 예상하지 못한 공식 변경이나 기존 사용자 수정이 감지되면 적용을 중단합니다.
+패치 해제와 백업 복원은 버튼으로 명시적으로 실행합니다. 공식 업데이트 조회는 최신 태그를 비교할 뿐이며, 공식 원본 다운로드나 업데이트 설치는 현재 지원하지 않습니다. 새 버전의 기준 지문과 마이그레이션 계약이 준비되지 않았다면 승인 후에도 업데이트를 거부합니다.
 
-## 복원 및 업데이트
+## 테마와 프로필
 
-- 패치 해제는 관리자 기록과 현재 전체 파일 지문이 적용 결과와 일치할 때만 패치가 변경한 파일을 백업 내용으로 되돌립니다.
-- 백업 복원은 선택한 백업의 원본 버전, manifest 허용 파일 집합, 해시 및 현재 적용 트리를 다시 확인합니다. 사용자 변경을 덮어쓰지 않습니다.
-- 관리자 파일과 백업 자료는 LilacAnime/DinoPatchManager에 저장합니다. 패치 해제는 관리자·기록·백업을 제거하지 않습니다.
-- 관리자 시작 시 앱 프로세스 실행 여부를 확인합니다. 확인할 수 없거나 LilacAnime가 실행 중이면 파일 작업을 중단합니다.
-- 공식 GitHub 릴리스 조회는 별도로 수행합니다. 새 버전은 표시하지만 새로운 기준 지문과 호환성 계약을 이 관리자에 추가하기 전까지 자동 공식 업데이트는 지원하지 않습니다. 승인 요청만으로 원본 파일을 교체하지 않습니다.
+관리자 Electron의 `appData`, `userData`, `sessionData`, 캐시, 로그 및 크래시 자료는 관리자 전용 경로에 분리합니다. 개발 및 검증 실행은 OS Temp의 서로 다른 경로를 사용합니다.
 
-## 테마
-
-관리자는 공식 원본의 localStorage.theme를 읽기 전용으로 확인하고, 창 활성화와 주기 확인 때 화면 테마를 갱신합니다. 과거 SQLite localStorage 형식은 읽을 수 있습니다. 현재 Chromium LevelDB 형식은 직접 해석하지 않으므로 해당 경우 진단을 남기고 Windows 앱 테마 또는 다크 기본값으로 표시합니다. 이 경우 LilacAnime 테마 자동 연동이 성공한 것처럼 표시하지 않습니다. 원본 설정을 변경하지 않습니다.
+공식 테마는 기존 엔진의 read-only `read_official_theme` 경로로 확인합니다. 읽을 수 없으면 Windows 앱 테마 또는 안전한 다크 기본값을 적용하고 실패를 표시합니다. 원본 설정 파일은 변경하지 않습니다.
 
 ## 개발 및 빌드
 
-개발 모드는 저장소 루트에서만 실행됩니다.
+개발 UI는 `tools\dino-patch-manager\run.bat`으로 실행합니다. Windows 배포본은 다음으로 생성합니다.
 
-    python tools\dino-patch-manager\manager_gui.py
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\dino-patch-manager\build_windows.ps1
+```
 
-Python 3.10 이상과 Tkinter가 필요합니다. 런처는 패키지를 설치하지 않습니다.
+빌드는 저장소에 이미 설치된 Electron/PyInstaller 도구를 사용하며 의존성 설치를 실행하지 않습니다. 앱 조립 작업은 새 OS Temp 폴더에서 진행하고, 결과는 `release` 아래 지정한 버전 폴더에 저장합니다. 같은 이름의 폴더가 이미 있으면 기존 산출물을 덮어쓰지 않고 중단합니다.
 
-관리자 Windows 배포본은 DinoPatchManager.spec로 onedir/windowed 형태를 만듭니다. 빌드 시 PyInstaller가 이미 설치되어 있어야 하며, 빌드 스크립트는 pip, npm, npm ci를 실행하지 않습니다. 결과 폴더는 기존 경로를 덮어쓰지 않습니다.
+패치 엔진 테스트:
 
-관리자 엔진 테스트:
+```text
+python -m unittest discover -s tools\dino-patch-manager\tests -p "test_*.py" -v
+```
 
-    python -m unittest discover -s tools\dino-patch-manager\tests -v
+실제 테스트는 OS Temp의 합성 원본과 격리 프로필만 사용합니다. 실제 설치 앱, 사용자 프로필, 시청 기록, 자막 저장소는 사용하지 않습니다.
 
-테스트는 OS Temp의 합성 소스와 가짜 테마 저장소만 사용합니다. 실제 LilacAnime 설치·사용자 프로필·시청 기록은 사용하지 않습니다.
+## 기존 Tkinter 구현
+
+`manager_gui.py`와 기존 PyInstaller spec은 기존 검증 기록 보존을 위해 그대로 유지합니다. 기본 런처와 배포 빌드는 Electron UI만 제공합니다. 두 UI는 하나의 `manager_core.py` 패치 엔진을 공유합니다.

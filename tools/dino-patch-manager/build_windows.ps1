@@ -1,5 +1,16 @@
 $ErrorActionPreference = "Stop"
 
+# Electron is the only supported packaged UI; preserve the old Tk spec and source.
+$electronBuild = Join-Path $PSScriptRoot "build_electron_windows.ps1"
+if (-not (Test-Path -LiteralPath $electronBuild -PathType Leaf)) {
+    throw "The Electron manager build script is missing. No legacy GUI build was started."
+}
+& $electronBuild
+if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+    throw "Electron manager build failed with exit code $LASTEXITCODE."
+}
+return
+
 $managerSource = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $managerSource "..\..")).Path
 $expectedRoot = "D:\Codex-Coding-Folder\LilacAnime-Player"

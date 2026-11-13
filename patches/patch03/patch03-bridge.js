@@ -10,6 +10,8 @@
   const officialSearch = window.doSearch;
   const officialOpenDetail = window.openDetail;
   const officialSyncChoices = window.syncSettingChoices;
+  const officialSwitchView = window.switchView;
+  const officialShowHomeList = window.showHomeList;
 
   function disablePatch(reason) {
     sourceSelect?.querySelector('option[value="integrated"]')?.remove();
@@ -18,6 +20,7 @@
   }
 
   if (!api || typeof officialSearch !== 'function' || typeof officialOpenDetail !== 'function'
+    || typeof officialSwitchView !== 'function'
     || typeof window.lilac?.providerCatalog !== 'function' || typeof window.lilac?.providerDetail !== 'function'
     || typeof window.lilac?.providerResolve !== 'function' || !sourceSelect || !sourceChoices) {
     disablePatch('required official renderer or IPC contract is missing');
@@ -32,6 +35,17 @@
   let detailSequence = 0;
   let currentQuery = '';
   let filterRoot = document.querySelector('#searchProviderFilters');
+
+  window.switchView = function (view, ...args) {
+    if (view !== 'search') searchSequence++;
+    return officialSwitchView.call(this, view, ...args);
+  };
+  if (typeof officialShowHomeList === 'function') {
+    window.showHomeList = function (...args) {
+      searchSequence++;
+      return officialShowHomeList.apply(this, args);
+    };
+  }
 
   const integratedMode = () => localStorage.getItem('contentSource') === 'integrated';
   function selectedProvider() {
@@ -217,7 +231,7 @@
       button.dataset.providerSource = String(item.mal_id);
       button.setAttribute('aria-pressed', String(String(item.mal_id) === String(activeId)));
       button.textContent = labels[item.provider] || item.provider;
-      button.addEventListener('click', () => window.openDetail(String(item.mal_id)));
+      button.addEventListener('click', () => window.openDetail(String(item.mal_id), { sourceSelection: true }));
       choices.append(button);
     }
     section.append(title, choices);
@@ -225,12 +239,18 @@
     anchor?.before(section);
   }
 
-  window.openDetail = async function (id) {
+  window.openDetail = async function (id, options = {}) {
     const inIntegratedSearch = integratedMode() && document.querySelector('#searchView')?.classList.contains('active');
     const group = inIntegratedSearch ? groupBySourceId.get(String(id)) : null;
     const sequence = ++detailSequence;
-    const result = await officialOpenDetail.call(this, id);
-    if (sequence === detailSequence && group) renderSourcePicker(group, id);
+    const selected = group ? api.chooseSource(group, {
+      provider: currentFilter,
+      preferredProvider: selectedProvider(),
+      sourceId: (options?.sourceSelection || currentFilter === 'all') ? id : ''
+    }) : null;
+    const selectedId = String(selected?.mal_id ?? id);
+    const result = await officialOpenDetail.call(this, selectedId);
+    if (sequence === detailSequence && group) renderSourcePicker(group, selectedId);
     return result;
   };
 

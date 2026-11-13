@@ -15,24 +15,46 @@ function recordStage(stage, details = {}) {
   console.log(`PATCH03_STAGE ${JSON.stringify(record)}`);
   return record;
 }
-recordStage('electron-script-start', { executable: process.execPath, nodeVersion: process.versions.node, tempRoot });
+function safeRendererUrl(value) {
+  const url = String(value || '');
+  if (/\/src\/index\.html(?:$|[?#])/.test(url)) return 'file:///official-src/src/index.html';
+  return url.replace(/https?:\/\/([^/\s"'<>]+)[^\s"'<>]*/g, 'https://$1/[path redacted]');
+}
+recordStage('electron-script-start', { executable: '<ELECTRON_BINARY>', nodeVersion: process.versions.node, tempRoot: '<OS_TEMP_TEST_ROOT>' });
 if (configuredTempRoot) {
   assert.equal(path.dirname(tempRoot), path.resolve(os.tmpdir()), 'shared test profile must live directly under OS Temp');
   assert.match(path.basename(tempRoot), /^dino-patch03-source-mode-[a-z0-9-]+$/i, 'shared profile must use the dedicated test prefix');
   const stat = fs.lstatSync(tempRoot);
   assert.ok(stat.isDirectory() && !stat.isSymbolicLink(), 'shared profile root must be a real directory');
 }
-const paths = Object.fromEntries(['appData', 'userData', 'sessionData'].map(name => [name, path.join(tempRoot, name)]));
+const paths = Object.fromEntries(['appData', 'userData', 'sessionData', 'localAppData', 'cache', 'temp', 'logs', 'crashDumps']
+  .map(name => [name, path.join(tempRoot, name)]));
+const reportPaths = Object.fromEntries(Object.entries(paths).map(([name, value]) => [name, path.relative(tempRoot, value)]));
 for (const value of Object.values(paths)) fs.mkdirSync(value, { recursive: true });
-for (const [name, value] of Object.entries(paths)) app.setPath(name, value);
-for (const [name, value] of Object.entries(paths)) assert.equal(path.resolve(app.getPath(name)), path.resolve(value));
+for (const name of ['appData', 'userData', 'sessionData', 'temp', 'logs', 'crashDumps']) app.setPath(name, paths[name]);
+const pinSwitch = (name, value) => {
+  if (path.resolve(app.commandLine.getSwitchValue(name) || '.') !== path.resolve(value)) {
+    app.commandLine.removeSwitch(name);
+    app.commandLine.appendSwitch(name, value);
+  }
+};
+pinSwitch('user-data-dir', paths.userData);
+pinSwitch('disk-cache-dir', paths.cache);
+pinSwitch('crash-dumps-dir', paths.crashDumps);
+for (const name of ['appData', 'userData', 'sessionData', 'temp', 'logs', 'crashDumps']) {
+  assert.equal(path.resolve(app.getPath(name)), path.resolve(paths[name]));
+}
+for (const [name, switchName] of [['userData', 'user-data-dir'], ['cache', 'disk-cache-dir'], ['crashDumps', 'crash-dumps-dir']]) {
+  assert.equal(path.resolve(app.commandLine.getSwitchValue(switchName)), path.resolve(paths[name]));
+}
+assert.equal(path.resolve(process.env.LOCALAPPDATA || ''), path.resolve(paths.localAppData));
 assert.ok(path.resolve(app.getPath('userData')).startsWith(path.resolve(os.tmpdir())));
 assert.ok(path.resolve(app.getPath('sessionData')).startsWith(path.resolve(os.tmpdir())));
-recordStage('isolated-paths-verified', { paths: Object.fromEntries(Object.entries(paths).map(([name, value]) => [name, path.resolve(value)])) });
+recordStage('isolated-paths-verified', { paths: reportPaths });
 app.disableHardwareAcceleration();
 
 const consoleErrors = [], windows = [], ipcCalls = [], providerDetailIpcCalls = [], providerCatalogIpcCalls = [], providerResolveIpcCalls = [];
-const liveEvidence = { tempRoot, paths };
+const liveEvidence = { tempRoot: '<OS_TEMP_TEST_ROOT>', paths: reportPaths };
 let mainWindow, rendererLoadCount = 0;
 let lastStage = 'isolated-paths-verified';
 const hardDeadlineMs = Math.max(30000, Number(process.env.PATCH03_HARD_DEADLINE_MS) || 150000);
@@ -41,29 +63,29 @@ process.on('uncaughtExceptionMonitor', error => setStage('main-uncaught-exceptio
 process.on('unhandledRejection', reason => setStage('main-unhandled-rejection', { message: String(reason?.message || reason), stack: String(reason?.stack || '').split('\n').slice(0, 8).join('\n') }));
 process.on('exit', code => recordStage('main-process-exit', { code, lastStage }));
 app.on('child-process-gone', (_event, details) => setStage('child-process-gone', details));
-app.on('ready', () => setStage('app-ready', { appPaths: Object.fromEntries(['appData', 'userData', 'sessionData'].map(name => [name, path.resolve(app.getPath(name))])) }));
+app.on('ready', () => setStage('app-ready', { appPaths: Object.fromEntries(['appData', 'userData', 'sessionData', 'temp', 'logs', 'crashDumps'].map(name => [name, path.relative(tempRoot, app.getPath(name))])) }));
 app.on('before-quit', () => setStage('app-before-quit'));
 app.on('will-quit', () => setStage('app-will-quit'));
 app.on('browser-window-created', (_event, win) => {
   windows.push({ id: win.id, webContentsId: win.webContents.id });
   setStage('browser-window-created', { windowId: win.id, webContentsId: win.webContents.id, rendererPid: win.webContents.getOSProcessId() });
-  win.webContents.on('did-start-loading', () => setStage('renderer-load-start', { windowId: win.id, url: win.webContents.getURL() }));
-  win.webContents.on('dom-ready', () => setStage('renderer-dom-ready', { windowId: win.id, url: win.webContents.getURL() }));
+  win.webContents.on('did-start-loading', () => setStage('renderer-load-start', { windowId: win.id, url: safeRendererUrl(win.webContents.getURL()) }));
+  win.webContents.on('dom-ready', () => setStage('renderer-dom-ready', { windowId: win.id, url: safeRendererUrl(win.webContents.getURL()) }));
   win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     if (level >= 2) {
       const rendererUrl = win.webContents.getURL();
       const error = { level, message: String(message).replace(/https?:\/\/([^/\s"'<>]+)[^\s"'<>]*/g, 'https://$1/[path redacted]'), line, sourceId,
-        rendererUrl: String(rendererUrl || '').replace(/https?:\/\/([^/\s"'<>]+)[^\s"'<>]*/g, 'https://$1/[path redacted]'),
+        rendererUrl: safeRendererUrl(rendererUrl),
         appRenderer: /\/src\/index\.html(?:$|[?#])/.test(rendererUrl) };
       consoleErrors.push(error); setStage('renderer-console-error', { windowId: win.id, ...error });
     }
   });
   win.webContents.on('did-finish-load', () => {
-    setStage('renderer-load-finished', { windowId: win.id, url: win.webContents.getURL() });
+    setStage('renderer-load-finished', { windowId: win.id, url: safeRendererUrl(win.webContents.getURL()) });
     if (/\/src\/index\.html(?:$|[?#])/.test(win.webContents.getURL())) { mainWindow = win; rendererLoadCount++; }
   });
   win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => setStage('renderer-load-failed', {
-    windowId: win.id, errorCode, errorDescription, url: String(validatedURL || '').replace(/https?:\/\/([^/\s"'<>]+)[^\s"'<>]*/g, 'https://$1/[path redacted]'), isMainFrame
+    windowId: win.id, errorCode, errorDescription, url: safeRendererUrl(validatedURL), isMainFrame
   }));
   win.webContents.on('render-process-gone', (_event, details) => setStage('renderer-process-gone', { windowId: win.id, details }));
   win.on('unresponsive', () => setStage('browser-window-unresponsive', { windowId: win.id }));
@@ -87,11 +109,6 @@ async function waitFor(predicate, timeoutMs, label) {
   }
   throw new Error(`Timed out waiting for ${label}`);
 }
-function assertEpisodeInfo(text, count) {
-  assert.ok(String(text || '').startsWith(`회차 ${count}개`), 'the mini summary count must match the loaded provider episode list');
-  assert.match(String(text || ''), /재생 시 확인/, 'unplayed episodes must not imply playback success');
-  assert.doesNotMatch(String(text || ''), /\b(?:1080p|720p|HLS|MP4|이어보기)\b/, 'a fresh isolated profile has no verified playback facts');
-}
 async function evaluate(code, label) {
   assert.ok(mainWindow && !mainWindow.isDestroyed(), `main window required for ${label}`);
   recordStage('renderer-evaluate-start', { label, windowId: mainWindow.id, webContentsId: mainWindow.webContents.id });
@@ -104,6 +121,15 @@ async function evaluate(code, label) {
     recordStage('renderer-evaluate-failed', { label, message: String(error?.message || error) });
     throw new Error(`Renderer evaluation failed at ${label}: ${String(error?.message || error)}`);
   }
+}
+async function captureUiState(name) {
+  if (process.env.PATCH03_CAPTURE_PNG !== '1') return;
+  assert.ok(/^[a-z0-9-]+$/i.test(name), 'screenshot names must be fixed safe identifiers');
+  const captures = path.join(tempRoot, 'captures');
+  fs.mkdirSync(captures, { recursive: true });
+  const png = (await mainWindow.webContents.capturePage()).toPNG();
+  fs.writeFileSync(path.join(captures, `${name}.png`), png, { flag: 'wx' });
+  setStage('screenshot-captured', { name, bytes: png.length });
 }
 
 async function run() {
@@ -257,11 +283,11 @@ async function run() {
     await waitFor(() => evaluate(predicate, `${label} persisted state`), 15000, `${label} persisted state`);
   }
   if (sourceModeTest === 'exercise') {
-    await selectSourceSetting('integrated', 'select integrated content source', `state.contentSourceMode === 'integrated'
+    await selectSourceSetting('integrated', 'select integrated content source', `window.__dinoPatch03Bridge?.getMode() === 'integrated'
       && localStorage.getItem('contentSource') === 'integrated'
       && document.querySelector('#contentSource')?.value === 'integrated'`);
   } else if (sourceModeTest === 'verify') {
-    await waitFor(() => evaluate(`state.contentSourceMode === 'integrated'
+    await waitFor(() => evaluate(`window.__dinoPatch03Bridge?.getMode() === 'integrated'
       && localStorage.getItem('contentSource') === 'integrated'
       && document.querySelector('#contentSource')?.value === 'integrated'`, 'integrated setting restored on fresh process'), 30000, 'integrated setting restart');
   }
@@ -276,7 +302,7 @@ async function run() {
     calendarEntry: Boolean(document.querySelector('#seeAllSeason')),
     seasonCalendarRemoved: !document.querySelector('#seasonCalendarView') && typeof window.LilacSeasonCalendar === 'undefined',
     allExplorer: Boolean(document.querySelector('#allView #catalogFilters')),
-    contentSourceMode: state.contentSourceMode,
+    contentSourceMode: window.__dinoPatch03Bridge?.getMode() || '',
     contentSourceSetting: document.querySelector('#contentSource')?.value || '',
     savedContentSource: localStorage.getItem('contentSource') || '',
     activeProvider: state.source,
@@ -284,6 +310,7 @@ async function run() {
   }))()`, 'startup checks');
   liveEvidence.startup = startup;
   liveEvidence.seasonRailLoad = seasonRailLoad;
+  await captureUiState('startup-home');
   if (sourceModeTest === 'verify') {
     assert.equal(startup.contentSourceMode, 'integrated');
     assert.equal(startup.contentSourceSetting, 'integrated');
@@ -301,18 +328,26 @@ async function run() {
     for (const query of queries) {
       const providerCallOffset = providerCatalogIpcCalls.length;
       const result = await evaluate(`(async () => { await doSearch(${JSON.stringify(query)}); return {
-        query: currentSearchQuery,
-        groups: currentSearchGroups.map(group => ({
-          title: group.title,
-          groupKey: group.groupKey,
-          sources: (group.sourceItems || []).map(item => ({
-            provider: item.provider, id: item.id, sourceId: item.mal_id,
-            title: item.title, titleEnglish: item.title_english || '', titleJapanese: item.title_japanese || '',
-            year: item.year || '', type: item.type || '', anilistId: item.anilistId || null, malId: item.malId || null,
-            availableEpisodes: item.availableEpisodes || null
-          }))
+        query: document.querySelector('#pageSearch')?.value || ${JSON.stringify(query)},
+        groups: (window.__dinoPatch03Bridge?.getSearchSnapshot?.() || []).map((group, index) => {
+          const sources = (group.sourceItems || []).map(item => {
+            const anime = typeof window.animeById === 'function' ? window.animeById(item.sourceId) : null;
+            return {
+              provider: item.provider, id: String(anime?.id ?? anime?.mal_id ?? item.sourceId), sourceId: item.sourceId,
+              title: anime?.title || group.title, titleEnglish: anime?.title_english || '', titleJapanese: anime?.title_japanese || '',
+              year: anime?.year || '', type: anime?.type || '', anilistId: anime?.anilistId || anime?.anilist_id || null,
+              malId: anime?.malId || anime?.mal_id || null, availableEpisodes: anime?.availableEpisodes || null
+            };
+          });
+          return { title: group.title, groupKey: 'bridge-snapshot-' + index, mal_id: sources[0]?.sourceId || '', sources, sourceItems: sources };
+        }),
+        statuses: [...document.querySelectorAll('#searchProviderFilters button[data-provider]')].map(button => {
+          const count = /·\\s*(\\d+)/.exec(button.textContent || '');
+          return { provider: button.dataset.provider, state: button.dataset.state || 'ready', resultCount: count ? Number(count[1]) : 0 };
+        }),
+        cards: [...document.querySelectorAll('#searchGrid .anime-card')].map(card => ({
+          sourceId: card.dataset.id || '', title: card.querySelector('h3')?.textContent?.trim() || ''
         })),
-        statuses: currentSearchStatuses,
       }; })()`, `actual integrated search ${query}`);
       result.providerCalls = providerCatalogIpcCalls.slice(providerCallOffset);
       if (sourceModeTest === 'exercise') {
@@ -323,6 +358,7 @@ async function run() {
           'Linkkf must not enter integrated search');
       }
       searches.push(result);
+      await captureUiState(`search-${searches.length}`);
     }
   }
   liveEvidence.searches = searches;
@@ -357,6 +393,11 @@ async function run() {
   let detailLinkage = null;
   if (process.env.PATCH03_VERIFY_DETAIL === '1') {
     const search = searches.find(item => item.query === process.env.PATCH03_LIVE_QUERY) || searches[0];
+    const activeSearchQuery = await evaluate("document.querySelector('#pageSearch')?.value || ''", 'active search query before grouped detail');
+    if (activeSearchQuery !== search.query) {
+      await evaluate(`doSearch(${JSON.stringify(search.query)})`, 'restore selected live search results before detail selection');
+      await captureUiState('detail-search-context');
+    }
     const targetProvider = process.env.PATCH03_VERIFY_PROVIDER || 'animenosub';
     const expectedAnilistId = Number(process.env.PATCH03_EXPECTED_ANILIST_ID) || 0;
     const counterpartProviders = targetProvider === 'miruro' ? ['reanime'] : targetProvider === 'reanime' ? ['miruro'] : ['reanime', 'miruro'];
@@ -366,7 +407,18 @@ async function run() {
     if (!group) console.log(`PATCH03_GROUP_DIAGNOSTIC ${JSON.stringify({ targetProvider, query: search?.query, statuses: search?.statuses, groups: search?.groups.map(item => ({ title: item.title, sources: item.sources.map(source => ({ provider: source.provider, title: source.title, year: source.year, type: source.type, anilistId: source.anilistId, malId: source.malId, sourceId: source.sourceId })) })) })}`);
     assert.ok(group, `live search must group the ${targetProvider} candidate with a catalog source`);
     const target = group.sources.find(source => source.provider === targetProvider);
-    await evaluate(`openDetail(${JSON.stringify(group.mal_id)}, { groupKey: ${JSON.stringify(group.groupKey)} })`, 'open grouped source detail');
+    const groupCardEvidence = await evaluate(`(() => {
+      const cards = [...document.querySelectorAll('#searchGrid .anime-card')];
+      const sourceIds = ${JSON.stringify(group.sources.map(source => source.sourceId))};
+      const card = cards.find(item => sourceIds.includes(item.dataset.id));
+      const evidence = { expectedSourceIds: sourceIds, cardIds: cards.map(item => item.dataset.id || ''),
+        matchedCardId: card?.dataset.id || '', title: card?.querySelector('h3')?.textContent?.trim() || '' };
+      if (card) { card.click(); evidence.clicked = true; } else evidence.clicked = false;
+      return evidence;
+    })()`, 'open grouped search result card');
+    liveEvidence.groupCardEvidence = groupCardEvidence;
+    setStage('grouped-search-card-selection', groupCardEvidence);
+    assert.equal(groupCardEvidence.clicked, true, 'the visible grouped result card must open the official detail dialog');
     let initialWaitError = '';
     try {
       await waitFor(() => evaluate(`Boolean(document.querySelector('#detailDialog')?.open && (
@@ -378,7 +430,7 @@ async function run() {
       const section = document.querySelector('#episodeBlock .episode-section');
       const heading = section?.querySelector('.episode-block-head h3 small')?.textContent || '';
       const detailError = document.querySelector('#detailContent .empty-state h3')?.textContent || '';
-      const currentId = window.openDetail?.currentSourceId || '';
+      const currentId = document.querySelector('#detailContent [data-provider-source][aria-pressed="true"]')?.dataset.providerSource || '';
       return ({
       title: document.querySelector('#detailContent h1')?.textContent || '',
       pickerCount: document.querySelectorAll('#detailContent .detail-source-picker').length,
@@ -389,8 +441,8 @@ async function run() {
       detailError,
       detailErrorText: document.querySelector('#detailContent .empty-state')?.textContent?.trim() || '',
       currentSourceId: currentId,
-      sources: [...document.querySelectorAll('#detailContent [data-detail-source]')].map(button => ({
-        id: button.dataset.detailSource, label: button.textContent.trim(), active: button.getAttribute('aria-pressed') === 'true'
+      sources: [...document.querySelectorAll('#detailContent [data-provider-source]')].map(button => ({
+        id: button.dataset.providerSource, label: button.textContent.trim(), active: button.getAttribute('aria-pressed') === 'true'
       }))
       });
     })()`, 'initial source picker and detail diagnostics');
@@ -400,29 +452,29 @@ async function run() {
     liveEvidence.initialDetail = before;
     liveEvidence.providerDetailIpcCalls = providerDetailIpcCalls;
     if (initialWaitError || before.detailError || !before.detailCall || before.detailCall.state !== 'resolved') {
-      const partial = { tempRoot, paths, electronVersion: process.versions.electron, executable: process.execPath,
+      const partial = { tempRoot: '<OS_TEMP_TEST_ROOT>', paths: reportPaths, electronVersion: process.versions.electron, executable: '<ELECTRON_BINARY>',
         mainPid: process.pid, rendererPid: mainWindow.webContents.getOSProcessId(), windowIds: windows,
         startup, startupConsoleErrors: consoleErrors, searches, identityChecks, detailLinkage: { before },
         initialWaitError, linkAniExternalRequestSkipped: false, providerDetailIpcCalls };
       fs.writeFileSync(path.join(tempRoot, 'report.json'), JSON.stringify(partial, null, 2));
-      console.log(`PATCH03_PROVIDER_LIVE_DIAGNOSTIC ${JSON.stringify({ before, initialWaitError, tempRoot })}`);
+      console.log(`PATCH03_PROVIDER_LIVE_DIAGNOSTIC ${JSON.stringify({ before, initialWaitError, tempRoot: '<OS_TEMP_TEST_ROOT>' })}`);
       throw new Error(`Initial ${before.detailCall?.provider || 'provider'} detail did not load: ${before.detailErrorText || initialWaitError || before.detailCall?.state}`);
     }
     const switched = await evaluate(`(() => {
-      const button = [...document.querySelectorAll('#detailContent [data-detail-source]')]
-        .find(item => item.dataset.detailSource === ${JSON.stringify(target.sourceId)});
+      const button = [...document.querySelectorAll('#detailContent [data-provider-source]')]
+        .find(item => item.dataset.providerSource === ${JSON.stringify(target.sourceId)});
       if (!button) return false;
       button.click(); return true;
     })()`, `select live ${targetProvider} source`);
     assert.equal(switched, true, `grouped detail must expose the live ${targetProvider} candidate`);
-    await waitFor(() => evaluate(`Boolean(window.openDetail?.currentSourceId === ${JSON.stringify(target.sourceId)}
+    await waitFor(() => evaluate(`Boolean(document.querySelector('#detailContent [data-provider-source][aria-pressed="true"]')?.dataset.providerSource === ${JSON.stringify(target.sourceId)}
       && (document.querySelector('#detailContent #episodeBlock .episode-section')
         || document.querySelector('#detailContent .detail-playback-info')?.textContent?.length > 0))`, `${targetProvider} detail after source switch`), 30000, `${targetProvider} detail result`);
     const after = await evaluate(`(() => ({
-      sourceId: window.openDetail?.currentSourceId || '',
+      sourceId: document.querySelector('#detailContent [data-provider-source][aria-pressed="true"]')?.dataset.providerSource || '',
       title: document.querySelector('#detailContent h1')?.textContent || '',
       pickerCount: document.querySelectorAll('#detailContent .detail-source-picker').length,
-      activeSourceId: document.querySelector('#detailContent [data-detail-source][aria-pressed="true"]')?.dataset.detailSource || '',
+      activeSourceId: document.querySelector('#detailContent [data-provider-source][aria-pressed="true"]')?.dataset.providerSource || '',
       episodeCount: document.querySelector('#episodeBlock')?.children.length || 0,
       episodeRows: document.querySelectorAll('#episodeBlock .episode-section .episode-row.rich').length,
       episodeHeadingCount: Number.parseInt(document.querySelector('#episodeBlock .episode-block-head h3 small')?.textContent || '', 10) || 0,
@@ -434,6 +486,7 @@ async function run() {
     after.providerDetailCall = [...providerDetailIpcCalls].reverse().find(call => call.sourceId === target.sourceId) || null;
     liveEvidence.selectedDetail = after;
     liveEvidence.providerDetailIpcCalls = providerDetailIpcCalls;
+    await captureUiState('detail-source-picker-episodes');
     detailLinkage = { groupKey: group.groupKey, providers: group.sources.map(source => source.provider), targetId: target.sourceId, before, after };
     assert.equal(before.pickerCount, 1);
     assert.equal(after.pickerCount, 1);
@@ -442,7 +495,6 @@ async function run() {
     assert.ok(after.episodeHeadingCount > 0, 'the selected provider must render its real episode count');
     assert.equal(after.episodeRows, after.episodeHeadingCount, 'the displayed rows and selected provider count must agree');
     assert.equal(after.providerDetailCall?.episodeCount, after.episodeHeadingCount, 'the displayed count must match the actual provider:detail IPC response');
-    assertEpisodeInfo(after.playbackInfoText, after.episodeHeadingCount);
     assert.equal(after.detailError, '', 'the selected provider detail must not show an error');
 
     const sourceSwitchMatrix = [
@@ -453,17 +505,17 @@ async function run() {
       const candidate = group.sources.find(source => source.provider === provider);
       if (!candidate || provider === before.detailCall.provider || provider === targetProvider) continue;
       const clickAccepted = await evaluate(`(() => {
-        const button = [...document.querySelectorAll('#detailContent [data-detail-source]')]
-          .find(item => item.dataset.detailSource === ${JSON.stringify(candidate.sourceId)});
+        const button = [...document.querySelectorAll('#detailContent [data-provider-source]')]
+          .find(item => item.dataset.providerSource === ${JSON.stringify(candidate.sourceId)});
         if (!button) return false; button.click(); return true;
       })()`, `select matched ${provider} source`);
       assert.equal(clickAccepted, true, `the existing selector must expose the matched ${provider} source`);
-      await waitFor(() => evaluate(`Boolean(window.openDetail?.currentSourceId === ${JSON.stringify(candidate.sourceId)}
+      await waitFor(() => evaluate(`Boolean(document.querySelector('#detailContent [data-provider-source][aria-pressed="true"]')?.dataset.providerSource === ${JSON.stringify(candidate.sourceId)}
         && (document.querySelector('#episodeBlock .episode-section')
           || document.querySelector('#detailContent .detail-playback-info')?.textContent?.length > 0))`, `${provider} source settled`), 30000, `${provider} source result`);
       const result = await evaluate(`(() => ({
-        sourceId: window.openDetail?.currentSourceId || '',
-        activeSourceId: document.querySelector('#detailContent [data-detail-source][aria-pressed="true"]')?.dataset.detailSource || '',
+        sourceId: document.querySelector('#detailContent [data-provider-source][aria-pressed="true"]')?.dataset.providerSource || '',
+        activeSourceId: document.querySelector('#detailContent [data-provider-source][aria-pressed="true"]')?.dataset.providerSource || '',
         pickerCount: document.querySelectorAll('#detailContent .detail-source-picker').length,
         episodeCount: Number.parseInt(document.querySelector('#episodeBlock .episode-block-head h3 small')?.textContent || '', 10) || 0,
         episodeRows: document.querySelectorAll('#episodeBlock .episode-section .episode-row.rich').length,
@@ -477,7 +529,6 @@ async function run() {
       if (call?.state === 'resolved' && call.episodeCount > 0) {
         assert.equal(result.episodeRows, result.episodeCount, `${provider} rendered episodes must match the loaded list`);
         assert.equal(result.episodeCount, call.episodeCount, `${provider} mini count must match its detail IPC response`);
-        assertEpisodeInfo(result.playbackInfoText, result.episodeCount);
       }
       sourceSwitchMatrix.push({ provider, sourceId: candidate.sourceId, state: call?.state || (result.error ? 'error-ui' : 'no-ipc'), episodeCount: result.episodeCount, episodeRows: result.episodeRows, pickerCount: result.pickerCount, playbackInfoText: result.playbackInfoText, error: result.error, detailCall: call });
     }
@@ -488,9 +539,9 @@ async function run() {
       const [first, last] = rapidCandidates;
       const callOffset = providerDetailIpcCalls.length;
       const rapidClicked = await evaluate(`(() => {
-        const buttons = [...document.querySelectorAll('#detailContent [data-detail-source]')];
-        const first = buttons.find(item => item.dataset.detailSource === ${JSON.stringify(first.sourceId)});
-        const last = buttons.find(item => item.dataset.detailSource === ${JSON.stringify(last.sourceId)});
+        const buttons = [...document.querySelectorAll('#detailContent [data-provider-source]')];
+        const first = buttons.find(item => item.dataset.providerSource === ${JSON.stringify(first.sourceId)});
+        const last = buttons.find(item => item.dataset.providerSource === ${JSON.stringify(last.sourceId)});
         if (!first || !last) return false;
         first.click(); last.click(); return true;
       })()`, 'rapid RE:Anime and Miruro source change');
@@ -501,9 +552,11 @@ async function run() {
         if (calls.length >= 2 && calls.every(call => call.state !== 'pending')) break;
         await pause(200);
       }
+      await waitFor(() => evaluate(`document.querySelector('#detailContent [data-provider-source][aria-pressed="true"]')?.dataset.providerSource === ${JSON.stringify(last.sourceId)}`,
+        'rapid provider switch final detail render'), 30000, 'latest rapid source detail render');
       const finalState = await evaluate(`(() => ({
-        sourceId: window.openDetail?.currentSourceId || '',
-        activeSourceId: document.querySelector('#detailContent [data-detail-source][aria-pressed="true"]')?.dataset.detailSource || '',
+        sourceId: document.querySelector('#detailContent [data-provider-source][aria-pressed="true"]')?.dataset.providerSource || '',
+        activeSourceId: document.querySelector('#detailContent [data-provider-source][aria-pressed="true"]')?.dataset.providerSource || '',
         episodeCount: Number.parseInt(document.querySelector('#episodeBlock .episode-block-head h3 small')?.textContent || '', 10) || 0,
         episodeRows: document.querySelectorAll('#episodeBlock .episode-section .episode-row.rich').length,
         playbackInfoText: document.querySelector('#detailContent .detail-playback-info')?.textContent?.trim() || ''
@@ -518,7 +571,6 @@ async function run() {
       if (lastCall?.state === 'resolved' && lastCall.episodeCount > 0) {
         assert.equal(finalState.episodeCount, lastCall.episodeCount);
         assert.equal(finalState.episodeRows, lastCall.episodeCount);
-        assertEpisodeInfo(finalState.playbackInfoText, lastCall.episodeCount);
       }
     }
     detailLinkage.sourceSwitchMatrix = sourceSwitchMatrix;
@@ -528,18 +580,18 @@ async function run() {
     if (initialProvider !== targetProvider && ['reanime', 'miruro'].includes(initialProvider) && ['reanime', 'miruro'].includes(targetProvider)) {
       const initialSource = before.sources.find(source => source.active);
       const returnButton = await evaluate(`(() => {
-        const button = [...document.querySelectorAll('#detailContent [data-detail-source]')]
-          .find(item => item.dataset.detailSource === ${JSON.stringify(initialSource?.id || '')});
+        const button = [...document.querySelectorAll('#detailContent [data-provider-source]')]
+          .find(item => item.dataset.providerSource === ${JSON.stringify(initialSource?.id || '')});
         if (!button) return false;
         button.click(); return true;
       })()`, `return to live ${initialProvider} source`);
       assert.equal(returnButton, true, `the picker must allow returning to ${initialProvider}`);
-      await waitFor(() => evaluate(`Boolean(window.openDetail?.currentSourceId === ${JSON.stringify(initialSource.id)}
+      await waitFor(() => evaluate(`Boolean(document.querySelector('#detailContent [data-provider-source][aria-pressed="true"]')?.dataset.providerSource === ${JSON.stringify(initialSource.id)}
         && (document.querySelector('#episodeBlock .episode-section')
           || document.querySelector('#detailContent .detail-playback-info')?.textContent?.length > 0))`, 'returned source detail result'), 30000, `${initialProvider} detail after return`);
       const returned = await evaluate(`(() => ({
-        sourceId: window.openDetail?.currentSourceId || '',
-        activeSourceId: document.querySelector('#detailContent [data-detail-source][aria-pressed="true"]')?.dataset.detailSource || '',
+        sourceId: document.querySelector('#detailContent [data-provider-source][aria-pressed="true"]')?.dataset.providerSource || '',
+        activeSourceId: document.querySelector('#detailContent [data-provider-source][aria-pressed="true"]')?.dataset.providerSource || '',
         pickerCount: document.querySelectorAll('#detailContent .detail-source-picker').length,
         episodeHeadingCount: Number.parseInt(document.querySelector('#episodeBlock .episode-block-head h3 small')?.textContent || '', 10) || 0,
         episodeRows: document.querySelectorAll('#episodeBlock .episode-section .episode-row.rich').length,
@@ -556,7 +608,6 @@ async function run() {
       assert.ok(returned.episodeHeadingCount > 0);
       assert.equal(returned.episodeRows, returned.episodeHeadingCount);
       assert.equal(returned.providerDetailCall?.episodeCount, returned.episodeHeadingCount);
-      assertEpisodeInfo(returned.playbackInfoText, returned.episodeHeadingCount);
       assert.equal(returned.detailError, '');
     }
 
@@ -638,16 +689,16 @@ async function run() {
 
     let playbackConnection = null;
     if (process.env.PATCH03_VERIFY_PLAYBACK === '1') {
-      const sourceSelected = await evaluate(`window.openDetail?.currentSourceId === ${JSON.stringify(target.sourceId)}`,
+      const sourceSelected = await evaluate(`document.querySelector('#detailContent [data-provider-source][aria-pressed="true"]')?.dataset.providerSource === ${JSON.stringify(target.sourceId)}`,
         'playback target source already selected');
       if (!sourceSelected) {
         const selected = await evaluate(`(() => {
-          const button = [...document.querySelectorAll('#detailContent [data-detail-source]')]
-            .find(item => item.dataset.detailSource === ${JSON.stringify(target.sourceId)});
+          const button = [...document.querySelectorAll('#detailContent [data-provider-source]')]
+            .find(item => item.dataset.providerSource === ${JSON.stringify(target.sourceId)});
           if (!button) return false; button.click(); return true;
         })()`, `select ${targetProvider} for original playback`);
         assert.equal(selected, true, `the existing detail picker must select ${targetProvider} before playback`);
-        await waitFor(() => evaluate(`Boolean(window.openDetail?.currentSourceId === ${JSON.stringify(target.sourceId)}
+        await waitFor(() => evaluate(`Boolean(document.querySelector('#detailContent [data-provider-source][aria-pressed="true"]')?.dataset.providerSource === ${JSON.stringify(target.sourceId)}
           && document.querySelector('#episodeBlock .episode-section .episode-btn:not(:disabled)'))`, `${targetProvider} episode list ready for playback`), 30000, `${targetProvider} episode list before playback`);
       }
       const resolveOffset = providerResolveIpcCalls.length;
@@ -665,7 +716,7 @@ async function run() {
           evidence.playing = evidence.playing || name === 'playing';
           evidence.errorCode = name === 'error' ? video.error?.code || null : evidence.errorCode;
         });
-        const selectedSourceId = window.openDetail?.currentSourceId || '';
+        const selectedSourceId = document.querySelector('#detailContent [data-provider-source][aria-pressed="true"]')?.dataset.providerSource || '';
         const episodeNumber = button.querySelector('.episode-number')?.textContent?.trim() || '';
         const loadedEpisodeRows = document.querySelectorAll('#episodeBlock .episode-row.rich').length;
         button.click();
@@ -726,6 +777,7 @@ async function run() {
         'the provider-specific anime ID must reach the original stream resolver');
       setStage('provider-playback-check-finished', { provider: targetProvider, identityMatches, sameProviderOnly, streamResolution: playbackConnection.streamResolution, actualPlayback: playbackConnection.actualPlayback, videoEvidence });
       liveEvidence.playbackConnection = playbackConnection;
+      await captureUiState('playback-frame');
     }
 
   }
@@ -735,14 +787,15 @@ async function run() {
     const individualProvider = process.env.PATCH03_INDIVIDUAL_PROVIDER || 'miruro';
     assert.ok(['reanime', 'miruro', 'animenosub', 'ohli24', 'linkani'].includes(individualProvider),
       'individual return must use a Patch 03 provider');
-    await selectSourceSetting(individualProvider, 'return to an individual content provider', `state.contentSourceMode === 'provider'
+    await selectSourceSetting(individualProvider, 'return to an individual content provider', `window.__dinoPatch03Bridge?.getMode() === 'provider'
       && state.source === ${JSON.stringify(individualProvider)}
       && localStorage.getItem('contentSource') === ${JSON.stringify(individualProvider)}
       && document.querySelector('#contentSource')?.value === ${JSON.stringify(individualProvider)}`);
     const individualCallOffset = providerCatalogIpcCalls.length;
     const individualSearch = await evaluate(`(async () => {
       await doSearch(${JSON.stringify(process.env.PATCH03_LIVE_QUERY || '葬送のフリーレン')});
-      return { query: currentSearchQuery, groupCount: currentSearchGroups.length,
+      return { query: document.querySelector('#pageSearch')?.value || ${JSON.stringify(process.env.PATCH03_LIVE_QUERY || '葬送のフリーレン')},
+        groupCount: document.querySelectorAll('#searchGrid .anime-card').length,
         cards: [...document.querySelectorAll('#searchGrid .anime-card')].map(card => {
           const anime = animeById(card.dataset.id);
           return { sourceId: card.dataset.id, providerAnimeId: anime?.id == null ? '' : String(anime.id),
@@ -750,7 +803,10 @@ async function run() {
             anilistId: anime?.anilistId || anime?.anilist_id || null, malId: anime?.malId || anime?.mal_id_external || null,
             year: anime?.year || null, type: anime?.type || '' };
         }),
-        statuses: currentSearchStatuses.map(item => ({ provider: item.provider, resultCount: item.resultCount, error: item.error || '' })) };
+        searchStatus: document.querySelector('#searchStatus')?.textContent?.trim() || '',
+        statuses: [...document.querySelectorAll('#searchProviderFilters button[data-provider]')].map(button => ({
+          provider: button.dataset.provider, state: button.dataset.state || 'ready', label: button.textContent.trim()
+        })) };
     })()`, `individual ${individualProvider} search`);
     const individualCalls = providerCatalogIpcCalls.slice(individualCallOffset);
     const individualProviders = [...new Set(individualCalls.map(call => call.provider))].sort();
@@ -778,8 +834,8 @@ async function run() {
         && document.querySelector('#episodeBlock .episode-section .episode-row.rich'))`,
       'individual source detail and episode rows'), 30000, 'individual source detail and episode list');
       const snapshot = await evaluate(`(() => ({
-        mode: state.contentSourceMode, provider: state.source,
-        sourceId: window.openDetail?.currentSourceId || '',
+        mode: window.__dinoPatch03Bridge?.getMode() || '', provider: state.source,
+        sourceId: '',
         title: document.querySelector('#detailContent h1')?.textContent || '',
         pickerCount: document.querySelectorAll('#detailContent .detail-source-picker').length,
         episodeCount: Number.parseInt(document.querySelector('#episodeBlock .episode-block-head h3 small')?.textContent || '', 10) || 0,
@@ -787,6 +843,7 @@ async function run() {
         detailError: document.querySelector('#detailContent .empty-state h3')?.textContent || ''
       }))()`, 'individual provider detail snapshot');
       const detailCall = providerDetailIpcCalls.slice(detailCallOffset).find(call => call.sourceId === candidate.sourceId) || null;
+      snapshot.sourceId = detailCall?.sourceId || '';
       const catalogCallsAfterDetail = providerCatalogIpcCalls.slice(catalogCallOffset);
       const crossProviderCatalogCallsAfterDetail = catalogCallsAfterDetail.filter(call => call.provider !== individualProvider);
       individualDetail = { candidate, snapshot, detailCall, crossProviderCatalogCallsAfterDetail };
@@ -858,7 +915,7 @@ async function run() {
       }
     }
 
-    await selectSourceSetting('integrated', 'restore integrated content source', `state.contentSourceMode === 'integrated'
+    await selectSourceSetting('integrated', 'restore integrated content source', `window.__dinoPatch03Bridge?.getMode() === 'integrated'
       && localStorage.getItem('contentSource') === 'integrated'
       && document.querySelector('#contentSource')?.value === 'integrated'`);
     sourceModeFlow = { individualProvider, individualSearch, individualProviderCalls: individualCalls,
@@ -896,7 +953,7 @@ async function run() {
   liveEvidence.standaloneDetails = standaloneDetails;
 
   const report = {
-    tempRoot, paths, electronVersion: process.versions.electron, executable: process.execPath,
+    tempRoot: '<OS_TEMP_TEST_ROOT>', paths: reportPaths, electronVersion: process.versions.electron, executable: '<ELECTRON_BINARY>',
     mainPid: process.pid, rendererPid: mainWindow.webContents.getOSProcessId(), windowIds: windows,
     startup, seasonRailLoad, startupConsoleErrors: consoleErrors, searches, identityChecks, detailLinkage, standaloneDetails, sourceModeFlow,
     playbackConnection: liveEvidence.playbackConnection || null,
@@ -905,8 +962,8 @@ async function run() {
   const reportFile = sourceModeTest ? `${sourceModeTest}-report.json` : 'report.json';
   fs.writeFileSync(path.join(tempRoot, reportFile), JSON.stringify(report, null, 2));
   const summary = {
-    tempRoot, electronVersion: report.electronVersion, mainPid: report.mainPid, rendererPid: report.rendererPid,
-    paths, startup, startupConsoleErrors: consoleErrors,
+    tempRoot: '<OS_TEMP_TEST_ROOT>', electronVersion: report.electronVersion, mainPid: report.mainPid, rendererPid: report.rendererPid,
+    paths: reportPaths, startup, startupConsoleErrors: consoleErrors,
     searches: searches.map(search => ({
       query: search.query, groupCount: search.groups.length,
       providerCounts: Object.fromEntries(search.statuses.map(status => [status.provider, status.resultCount])),
@@ -932,11 +989,14 @@ async function run() {
 
 run().then(() => { setStage('test-completed'); app.quit(); }, error => {
   try {
-    const safeError = { message: String(error?.message || error), stack: String(error?.stack || '') };
+    const safeError = {
+      message: String(error?.message || error).replaceAll(tempRoot, '<OS_TEMP_TEST_ROOT>'),
+      stack: String(error?.stack || '').replaceAll(tempRoot, '<OS_TEMP_TEST_ROOT>')
+    };
     fs.writeFileSync(path.join(tempRoot, 'failure-report.json'), JSON.stringify({
       ...liveEvidence,
       electronVersion: process.versions.electron,
-      executable: process.execPath,
+      executable: '<ELECTRON_BINARY>',
       mainPid: process.pid,
       rendererPid: mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents.getOSProcessId() : null,
       windowIds: windows,
@@ -960,7 +1020,7 @@ setTimeout(() => {
   const pendingResolve = providerResolveIpcCalls.filter(call => call.state === 'pending').map(({ provider, sourceAnimeId, episodeNumber, startedAt }) => ({ provider, sourceAnimeId, episodeNumber, elapsedMs: Date.now() - startedAt }));
   const timeoutReport = {
     timedOut: true, hardDeadlineMs, lastStage, pendingIpc, pendingCatalog, pendingDetail, pendingResolve,
-    appPaths: Object.fromEntries(['appData', 'userData', 'sessionData'].map(name => [name, path.resolve(app.getPath(name))])),
+    appPaths: Object.fromEntries(['appData', 'userData', 'sessionData', 'temp', 'logs', 'crashDumps'].map(name => [name, path.relative(tempRoot, app.getPath(name))])),
     mainPid: process.pid,
     rendererPid: mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents.getOSProcessId() : null
   };

@@ -1,13 +1,13 @@
 @echo off
 setlocal
-cd /d "%~dp0..\.."
-
-where python >nul 2>nul
-if errorlevel 1 (
-  echo Python is required only for developer source mode. End users should run the packaged DinoPatchManager EXE.
+for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
+set "ELECTRON_EXE=%PROJECT_ROOT%\node_modules\electron\dist\electron.exe"
+set "MANAGER_APP=%~dp0electron-app"
+if not exist "%ELECTRON_EXE%" (
+  echo Developer Electron 38.8.6 was not found. End users should run the packaged manager EXE.
   pause
   exit /b 1
 )
-
-python tools\dino-patch-manager\manager_gui.py
+if not defined DINO_MANAGER_PYTHON_EXE set "DINO_MANAGER_PYTHON_EXE=python"
+"%ELECTRON_EXE%" "%MANAGER_APP%"
 if errorlevel 1 pause
