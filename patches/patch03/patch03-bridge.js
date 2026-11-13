@@ -99,6 +99,11 @@
     const known = group?.sourceItems?.find(item => sourceKey(item) === String(id));
     return known || (typeof window.animeById === 'function' ? window.animeById(id) : null);
   }
+  function commonTitleGroup(group) {
+    if (!Array.isArray(group?.sourceItems)) return group;
+    const ko = group.sourceItems.map(canonicalTitleFor).find(t => t?.ko)?.ko;
+    return ko ? { ...group, displayTitle: ko } : group;
+  }
   function verifiedGroupFor(anchor, candidates) {
     const accepted = [anchor], seen = new Set([anchor.provider + ':' + sourceKey(anchor)]);
     for (const item of candidates) {
@@ -109,8 +114,8 @@
       accepted.push(item);
     }
     const groups = api.groupResults(accepted, selectedProvider());
-    return groups.find(group => group.sourceItems.some(item => item.provider === anchor.provider
-      && sourceKey(item) === sourceKey(anchor))) || api.groupResults([anchor], selectedProvider())[0];
+    return commonTitleGroup(groups.find(group => group.sourceItems.some(item => item.provider === anchor.provider
+      && sourceKey(item) === sourceKey(anchor))) || api.groupResults([anchor], selectedProvider())[0]);
   }
   async function discoverSources(anchor, knownGroup, { background = false } = {}) {
     const identityKey = anchor.provider + ':' + sourceKey(anchor);
@@ -665,6 +670,8 @@
     groupBySourceId.clear();
     for (const group of resultGroups) {
       keepDetailGroup(group);
+      const canonical = commonTitleGroup(group);
+      if (canonical !== group) group.displayTitle = canonical.displayTitle;
       for (const item of group.sourceItems || []) groupBySourceId.set(String(item.mal_id), group);
     }
     renderFilters();
