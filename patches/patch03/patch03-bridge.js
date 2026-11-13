@@ -1379,8 +1379,20 @@
       const counts=providers.map(p=>(labels[p]||p)+': '+
         (list.find(x=>x.provider===p)?.count||0)).join(' · ');
       const info=document.createElement('p');
-      info.textContent='DB 작품 '+(stats?.works??'확인 불가')+'개 · '+counts
-        +' · 무결성: '+(dbCheck?.healthy?'정상':dbCheck?.reason||'확인 필요');
+      const dbState=sqlite.report();
+      const dbHealthy=sqlite.isReady() && dbCheck?.healthy===true;
+      info.textContent=dbHealthy
+        ? 'DB 작품 '+(stats?.works??'확인 불가')+'개 · '+counts+' · 무결성: 정상'
+        : 'SQLite 상태 확인 필요 · 기존 로컬 기록 사용';
+      const recovery=document.createElement('p');
+      recovery.className='dino-sqlite-recovery-notice';
+      recovery.setAttribute('role','status');
+      recovery.textContent=dbHealthy
+        ? 'DB가 정상입니다. 안전 백업을 만든 뒤 변경 기록을 관리할 수 있습니다.'
+        : 'SQLite 연결 또는 무결성 검사에 문제가 있습니다. 기존 DB·백업은 삭제하거나 덮어쓰지 마세요. '
+          +'자동 원본 복원은 하지 않습니다. 진단 JSON을 보관하고 DB 및 WAL/SHM 파일을 함께 복사한 뒤 '
+          +'검증된 별도 백업으로만 수동 복구하세요.'
+          +(dbState?.phase ? ' · 현재 상태: '+dbState.phase : '');
       const refresh=document.createElement('button');
       refresh.type='button';refresh.textContent='방영작 회차 새로 확인';
       refresh.addEventListener('click',()=>{
@@ -1419,7 +1431,7 @@
         window.toast?.(ok?'민감한 작품 이름을 제외한 진단 보고서를 저장했습니다.'
           :'진단 보고서를 저장하지 못했습니다.');
       });
-      panel.append(info,refresh,pause,backup,exportLog);
+      panel.append(info,recovery,refresh,pause,backup,exportLog);
       choices.before(panel);
     });
     headingActions.append(linkedCount, editTitle, editLinks, showDashboard);

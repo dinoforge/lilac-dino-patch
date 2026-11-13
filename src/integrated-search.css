@@ -480,3 +480,20 @@
   .detail-source-picker .dino-source-heading-actions{gap:6px}
   .detail-source-picker .dino-source-option{flex-basis:180px;width:180px}
 }
+
+/* SQLite recovery is advisory only; show loss-prevention instructions in
+   integrated diagnostics without altering official provider panels. */
+.detail-source-picker.dino-integrated-picker .dino-sqlite-recovery-notice{
+  display:block;
+  flex:1 1 100%;
+  margin:0;
+  border:1px solid var(--line);
+  border-radius:8px;
+  padding:10px 12px;
+  font-size:11px;
+  line-height:1.65;
+  color:var(--muted);
+  background:var(--panel);
+  white-space:normal;
+  overflow-wrap:anywhere
+}

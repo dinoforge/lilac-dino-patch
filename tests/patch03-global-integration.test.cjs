@@ -1433,3 +1433,21 @@ test('new compact layout is scoped to the integrated picker rather than official
   const style=fs.readFileSync(path.join(__dirname,'../src/integrated-search.css'),'utf8');
   assert.match(style,/\.detail-source-picker\.dino-integrated-picker\s*\{[^}]*box-sizing:border-box;/s);
 });
+
+
+test('degraded SQLite diagnostic UI gives non-destructive manual recovery guidance',async()=>{
+  const app=harness();
+  await app.window.openDetail(app.home.mal_id);
+  const picker=app.nodes.get('#detailContent').querySelector('.detail-source-picker');
+  const dashboard=picker.querySelectorAll('button').find(x=>x.textContent==='공급원·DB 상태');
+  assert.ok(dashboard);
+  dashboard.send('click');
+  await settle();await settle();
+  const panel=picker.querySelector('.dino-diagnostics-panel');
+  const notice=panel.querySelector('.dino-sqlite-recovery-notice');
+  assert.ok(notice,'recovery instructions must remain visible when SQLite is unavailable');
+  assert.equal(notice.getAttribute('role'),'status');
+  assert.match(notice.textContent,/삭제하거나 덮어쓰지 마세요/);
+  assert.match(notice.textContent,/자동 원본 복원은 하지 않습니다/);
+  assert.equal(panel.querySelector('.dino-diagnostics-backup').disabled,true);
+});
