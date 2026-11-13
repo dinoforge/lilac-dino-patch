@@ -404,8 +404,10 @@
         < CATALOG_SEED_EXHAUSTED_RECHECK_MS;
   }
   function catalogSeedForegroundBusy() {
-    return document.hidden === true || document.querySelector('#detailDialog')?.open
-      || document.querySelector('#playerView')?.classList?.contains('active');
+    // A minimized window is ideal for LOCAL index work. Pause only when
+    // interacting with a detail modal or playing video, never for visibility.
+    return Boolean(document.querySelector('#detailDialog')?.open
+      || document.querySelector('#playerView')?.classList?.contains('active'));
   }
   async function seedFromOriginalCatalog(indexState) {
     if (!integratedMode() || catalogSeedBusy
