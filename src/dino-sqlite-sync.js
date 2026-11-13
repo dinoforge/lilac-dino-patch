@@ -5,8 +5,14 @@
   // LilacAnime Korean title files. Works without IPC on older installations.
   function connect(index,invoke,{delay=(fn,ms)=>setTimeout(fn,ms)}={}){
     let active=false,phase='legacy',reason='',timer=null,flushing=null,started=null;
-    const pending=new Map();
-    const key=row=>String(row?.sources?.[0]?.provider||'')+':'+String(row?.sources?.[0]?.mal_id||'');
+    const pending=new Map(), hydrated=new Set();
+    const sourceId=item=>String(item?.provider||'')+':'+String(item?.mal_id
+      ??(item?.provider&&item?.id!=null?item.provider+':'+item.id:''));
+    const key=row=>sourceId(row?.sources?.[0]);
+    const markHydrated=row=>{
+      for(const item of row?.sources||[])if(item?.provider)hydrated.add(sourceId(item));
+      if(hydrated.size>1200)hydrated.clear();
+    };
     const safeInvoke=async(method,payload)=>invoke(method,payload);
     let skippedConflicts=0;
     // Old v1 cards may contain a now-invalid cross-season match or two links
@@ -80,8 +86,10 @@
           const recent=await safeInvoke('recent',{limit:180});
           // The database is authoritative after explicit detach/attach.
           // An old merged memory group must never swallow separate works.
-          if(Array.isArray(recent)&&recent.length)
+          if(Array.isArray(recent)&&recent.length) {
             index.replaceRows(recent,[],{persist:false});
+            for(const row of recent)markHydrated(row);
+          }
           phase='ready';
           if(pending.size)schedule();
           return true;
@@ -99,11 +107,23 @@
       const cached=index.find(anchor);
       const id=String(anchor.mal_id??(anchor.id!=null?anchor.provider+':'+anchor.id:''));
       // Fuzzy title matching is not proof of exact supplier ownership.
-      if(cached?.fresh&&cached.sources.some(item=>item.provider===anchor.provider
+      // The hot localStorage cache can be older than SQLite (especially
+      // beyond the 180-work startup page). Hydrate each exact source once
+      // before trusting a fresh local cache or a prior manual split.
+      const identity=sourceId({provider:anchor.provider,mal_id:id});
+      // Even a hydrated cache must flush new manual edits before navigating
+      // away from the detail view or another source card.
+      if(pending.size && !await flush())return index.find(anchor);
+      if(hydrated.has(identity)&&cached?.sources?.some(item=>item.provider===anchor.provider
         && String(item.mal_id)===id))return cached;
       try{
         const work=await safeInvoke('lookup',{provider:anchor.provider,mal_id:anchor.mal_id,id:anchor.id});
-        if(work?.sources?.length)index.importRows([work]);
+        if(work?.sources?.length) {
+          // SQLite owns the exact source split/attach mapping. Do not heuristically
+          // add stale legacy sources to the authoritative work on hydration.
+          index.replaceRows([work],[anchor],{persist:false});
+          markHydrated(work);
+        }else hydrated.add(identity);
       }catch{ /* SQLite outages never break original provider detail flow */ }
       return index.find(anchor);
     }

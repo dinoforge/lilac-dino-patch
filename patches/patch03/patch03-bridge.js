@@ -967,7 +967,13 @@
       if (missing.length && typeof window.lilac.titleVariants === 'function') {
         const variants = await window.lilac.titleVariants(query).then(value => Array.isArray(value) ? value : []).catch(() => []);
         if (sequence !== searchSequence) return;
-        const nativeTitles = reference?.sourceItems?.flatMap(item => [item.title, item.title_english, item.title_japanese, item.romaji]) || [];
+        const nativeTitles = reference?.sourceItems?.flatMap(item => {
+          const stored = workIndex.find(item);
+          return [item.title, item.title_english, item.title_japanese, item.title_native,
+            item.title_romaji, item.romaji, ...(Array.isArray(item.synonyms) ? item.synonyms : []),
+            stored?.titles?.ko, stored?.titles?.en, stored?.titles?.ja,
+            ...(stored?.names || [])];
+        }) || [];
         const terms = api.titleVariantTerms({ query, displayTitles: nativeTitles, variants, limit: 3 });
         if (terms.length) {
           const extra = await api.searchProviders({ ...options, providers: missing, query: '', terms });
@@ -1068,7 +1074,14 @@
         }
         if (!workIndex.rememberTitles(reference, { ko: value }, { source: 'manual' })
           && canonicalTitleFor(reference)?.ko !== value) return;
-        workIndex.flush();
+        if (!workIndex.flush()) {
+          window.toast?.('제목을 로컬 캐시에 저장하지 못했습니다. 저장 공간을 확인해 주세요.');
+          return;
+        }
+        // Commit the edit immediately; a queued debounce can be lost on exit.
+        if (sqlite.isReady()) sqlite.flush().then(ok => {
+          if (!ok) window.toast?.('SQLite 제목 저장 실패 · 로컬 기록은 유지됩니다.');
+        }).catch(() => window.toast?.('SQLite 제목 저장 오류 · 로컬 기록은 유지됩니다.'));
         form.remove();
         renderSourcePicker(group, activeId, searching);
       };
@@ -1082,8 +1095,14 @@
       reset.className = 'dino-work-title-reset';
       reset.textContent = '자동 제목 사용';
       reset.addEventListener('click', () => {
-        workIndex.resetManualKoreanTitle(reference);
-        workIndex.flush();
+        if (!workIndex.resetManualKoreanTitle(reference)) return;
+        if (!workIndex.flush()) {
+          window.toast?.('자동 제목 전환을 로컬 캐시에 저장하지 못했습니다.');
+          return;
+        }
+        if (sqlite.isReady()) sqlite.flush().then(ok => {
+          if (!ok) window.toast?.('SQLite 자동 제목 전환 저장 실패 · 로컬 기록은 유지됩니다.');
+        }).catch(() => window.toast?.('SQLite 자동 제목 전환 저장 오류'));
         form.remove();
         renderSourcePicker(group, activeId, searching);
       });
@@ -1599,16 +1618,18 @@
         button.textContent = '동일 회차 확인 중...';
         try {
           const reference = contextNow(), number = playableEpisodeNumber(reference.episode);
-          const sameKind = candidate => candidate?.playable !== false && !candidate?.special
-            && playableEpisodeNumber(candidate) === number
-            && Boolean(candidate.dub) === Boolean(reference.episode.dub);
+          if (!number) return;
           for (const item of group.sourceItems) {
             if (item.provider === reference.episode.provider
               || !api.identityMatch(reference.anime,item)) continue;
             let response;
             try { response = await window.lilac.providerDetail(item); }
             catch { continue; }
-            const candidate = Array.isArray(response?.episodes) ? response.episodes.find(sameKind) : null;
+            const detailed = response?.data;
+            if (detailed && (detailed.provider !== item.provider
+              || sourceKey(detailed) !== sourceKey(item)
+              || !api.identityMatch(reference.anime, detailed))) continue;
+            const candidate = api.uniqueSameEpisode(response?.episodes, reference.episode, item.provider);
             if (!candidate || sequence !== offerSequence || contextKey(contextNow()) !== originKey) continue;
             if (typeof resolveIntoPlayer !== 'function') {
               window.toast?.('재생 전환 기능을 사용할 수 없습니다.');
@@ -1621,12 +1642,18 @@
               Number.isFinite(rawSeconds)?rawSeconds:0));
             const duration = Number(video.duration);
             const progress = Number.isFinite(duration) && duration > 0 ? Math.min(94, seconds / duration * 100) : 0;
-            const nextAnime = { ...item, ...(response?.data || {}), provider: item.provider, mal_id: sourceKey(item) };
-            const nextEpisode = candidate.provider ? candidate : { ...candidate, provider: item.provider };
+            const nextAnime = { ...item, ...(detailed || {}), provider: item.provider, mal_id: sourceKey(item) };
+            const nextEpisode = candidate;
+            // Pre-resolve without disturbing the old playback context.
+            let prepared;
+            try { prepared = await window.lilac.providerResolve(nextEpisode); }
+            catch { continue; }
+            if (typeof prepared?.url !== 'string' || !prepared.url
+              || sequence !== offerSequence || contextKey(contextNow()) !== originKey) continue;
             const name = String(reference.subtitleTitle || nextAnime.title || item.title || '');
             const { currentUrl, offline, videoServers, videoServer, streamHeaders, resolving, ...rest } = reference;
             await resolveIntoPlayer(
-              () => window.lilac.providerResolve(nextEpisode),
+              () => Promise.resolve(prepared),
               name + ' · ' + number + '화',
               { ...rest, episode: nextEpisode, anime: nextAnime, seriesEpisodes: response.episodes,
                 resolveKind: 'provider', resumeSeconds: seconds, resumeProgress: progress,

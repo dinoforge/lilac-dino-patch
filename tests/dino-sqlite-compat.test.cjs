@@ -259,3 +259,56 @@ test('SQLite retains last confirmed latest episode across stale passive cards, r
       .sources.find(s=>s.provider==='miruro').dinoEpisode,undefined);
   }finally{env.close();}
 });
+
+test('manual title revisions win over stale equal-time cache writes across SQLite restart',()=>{
+  const env=fixture();
+  try{
+    const first=work('9501','내가 확정한 제목',true);
+    assert.equal(env.store.upsert([first]).ok,true);
+    const stale=work('9501','이전 세션에서 남은 잘못된 제목',true);
+    stale.titles.koCheckedAt=first.titles.koCheckedAt;
+    assert.equal(env.store.upsert([stale]).ok,true);
+    assert.equal(env.store.lookup(first.sources[0]).titles.ko,'내가 확정한 제목');
+    const revised=work('9501','최신 수동 제목',true);
+    revised.titles.koCheckedAt=first.titles.koCheckedAt+1;
+    assert.equal(env.store.upsert([revised]).ok,true);
+    env.store.close();
+    const reopened=createStore({app:{getPath:()=>env.root}});
+    try {
+      assert.equal(reopened.lookup(first.sources[4]).titles.ko,'최신 수동 제목');
+      assert.equal(reopened.lookup(first.sources[4]).titles.manual,true);
+      assert.equal(reopened.lookup(first.sources[4]).sources.length,5);
+    }finally{reopened.close();}
+  }finally{env.close();}
+});
+
+test('an older hot-cache entry hydrates its current SQLite titles and links before use',async()=>{
+  const env=fixture();
+  try{
+    const bag=new Map(),local={getItem:k=>bag.get(k)||null,setItem:(k,v)=>bag.set(k,String(v))};
+    const index=api.createWorkIndex(local,{clock:()=>1900000000000});
+    const canonical=work('9511','SQLite에서 확정한 한국어 제목',true);
+    canonical.titles.koCheckedAt=2000000000000;
+    assert.equal(env.store.upsert([canonical]).ok,true);
+    index.remember({sourceItems:[canonical.sources[0]]},{checked:true,attempted:true,outcome:'verified'});
+    index.rememberTitles(canonical.sources[0],{ko:'과거 로컬 제목'},{source:'manual'});
+    assert.equal(index.flush(),true);
+    let exactLookups=0;
+    const rpc=async(method,payload)=>{
+      if(method==='status')return env.store.status();
+      if(method==='upsert')return env.store.upsert(payload.works);
+      if(method==='recent')return []; // Simulate a work older than startup's 180-row page.
+      if(method==='lookup'){exactLookups++;return env.store.lookup(payload);}
+      throw Error('unexpected '+method);
+    };
+    const adapter=sync.connect(index,rpc,{delay:()=>1});
+    assert.equal(await adapter.start(),true);
+    const restored=await adapter.ensure(canonical.sources[0]);
+    assert.equal(restored.titles.ko,'SQLite에서 확정한 한국어 제목');
+    assert.equal(restored.titles.manual,true);
+    assert.equal(restored.sources.length,5);
+    assert.equal(exactLookups,1);
+    await adapter.ensure(canonical.sources[0]);
+    assert.equal(exactLookups,1,'one authoritative hydration per source is sufficient');
+  }finally{env.close();}
+});

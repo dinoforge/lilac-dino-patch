@@ -473,18 +473,47 @@
     });
   }
 
+  // Reserve bounded searches for scripts beyond the original query. Many
+  // provider catalogs do not support Korean queries, but do index Latin/Japanese.
   function titleVariantTerms({ query = '', displayTitles = [], variants = [], limit = 3 } = {}) {
     const max = Number.isInteger(Number(limit)) ? Math.max(0, Math.min(5, Number(limit))) : 3;
     if (!max) return [];
-    const queryKey = titleKey(query), seen = new Set(), terms = [];
+    const queryKey = titleKey(query), seen = new Set(), buckets = { latin: [], japanese: [], korean: [], other: [] };
     for (const value of [...displayTitles, ...variants]) {
-      const term = String(value || '').trim(), key = titleKey(term);
-      if (!key || key === queryKey || seen.has(key)) continue;
+      const term = String(value || '').trim().slice(0, 240), key = titleKey(term);
+      if (key.length < 2 || key === queryKey || seen.has(key)) continue;
       seen.add(key);
-      terms.push(term);
-      if (terms.length >= max) break;
+      const language = /[\u3040-\u30ff\u3400-\u9fff]/u.test(term) ? 'japanese'
+        : /[가-힣]/.test(term) ? 'korean'
+        : /[a-z]/i.test(term) ? 'latin' : 'other';
+      buckets[language].push(term);
     }
-    return terms;
+    const queryScript = /[가-힣]/.test(query) ? 'korean'
+      : /[\u3040-\u30ff\u3400-\u9fff]/u.test(query) ? 'japanese' : 'latin';
+    const priority = queryScript === 'korean' ? ['latin', 'japanese', 'korean', 'other']
+      : queryScript === 'japanese' ? ['latin', 'korean', 'japanese', 'other']
+        : ['japanese', 'korean', 'latin', 'other'];
+    const result = [];
+    while (result.length < max && priority.some(lang => buckets[lang].length)) {
+      for (const lang of priority) {
+        if (result.length >= max) break;
+        if (buckets[lang].length) result.push(buckets[lang].shift());
+      }
+    }
+    return result;
+  }
+
+  // Duplicate matching numbers (e.g. multiple editions of episode 3)
+  // cannot be selected automatically, nor may an episode belong to a
+  // different supplier.
+  function uniqueSameEpisode(episodes, reference, provider) {
+    const number = playableEpisodeNumber(reference);
+    if (!number || !PROVIDERS.includes(provider) || !Array.isArray(episodes)) return null;
+    const matches = episodes.filter(item => item && item.playable !== false && !item.special
+      && playableEpisodeNumber(item) === number
+      && Boolean(item.dub) === Boolean(reference.dub)
+      && (!item.provider || item.provider === provider));
+    return matches.length === 1 ? { ...matches[0], provider } : null;
   }
 
 
@@ -747,7 +776,8 @@
           row.titles.ko = ko;
           row.titles.koSource = 'manual';
           row.titles.manual = true;
-          row.titles.koCheckedAt = clock();
+          // Monotonic edits avoid equal-millisecond timestamps reviving a stale title.
+          row.titles.koCheckedAt = Math.max(clock(), row.titles.koCheckedAt + 1);
           changed = true;
         }
       } else if (ko && !row.titles.manual
@@ -781,7 +811,7 @@
       const fallback = row.sources.map(providerTitles).find(title => title.ko)?.ko || '';
       row.titles = { ...row.titles, ko: fallback,
         koSource: fallback ? 'provider' : '',
-        koCheckedAt: fallback ? clock() : 0, manual: false };
+        koCheckedAt: Math.max(clock(), row.titles.koCheckedAt + 1), manual: false };
       if (fallback) row.names = namesOf([fallback, ...row.names]);
       row.updatedAt = clock(); touch(); notify(row, { manualReset: true });
       return true;
@@ -1054,7 +1084,8 @@
     metadataCompatible,
     identityMatch,
     providersNeedingTitleVariants,
-    titleVariantTerms
+    titleVariantTerms,
+    uniqueSameEpisode
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.LilacIntegratedSearch = api;

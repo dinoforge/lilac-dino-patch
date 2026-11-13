@@ -574,3 +574,47 @@ test('SQLite hydration preserves the newer per-supplier episode snapshot',()=>{
   assert.equal(idx.episodeState(a).latest,17,
     'newer SQLite episode state should hydrate the local cache');
 });
+
+test('multilingual title variants reserve Latin and Japanese slots despite many Korean aliases', () => {
+  const {titleVariantTerms}=require('../src/integrated-search.js');
+  const terms=titleVariantTerms({
+    query:'보랏빛 작품',limit:3,
+    displayTitles:['보라 제목 1','보라 제목 2','Purple Anime','紫のアニメ','Violet Anime'],
+    variants:['보라 추가 제목']
+  });
+  assert.deepEqual(terms,['Purple Anime','紫のアニメ','보라 제목 1']);
+  assert.deepEqual(titleVariantTerms({query:'Purple Anime',
+    displayTitles:['紫のアニメ','보랏빛 작품','English Variant'],limit:3}),
+    ['紫のアニメ','보랏빛 작품','English Variant']);
+});
+
+test('provider playback only selects a unique same-number and same-dub episode', () => {
+  const {uniqueSameEpisode}=require('../src/integrated-search.js');
+  const reference={provider:'reanime',number:7,dub:false};
+  const right={number:7,dub:false,url:'https://video.example/episode-7'};
+  assert.equal(uniqueSameEpisode([right,{number:7,dub:true}],reference,'miruro').provider,'miruro');
+  assert.equal(uniqueSameEpisode([right,{...right,url:'https://video.example/episode-7-alt'}],
+    reference,'miruro'),null,'same episode number in two editions is ambiguous');
+  assert.equal(uniqueSameEpisode([{...right,provider:'linkani'}],reference,'miruro'),null);
+  assert.equal(uniqueSameEpisode([{...right,special:true}],reference,'miruro'),null);
+  assert.equal(uniqueSameEpisode([{...right,number:8}],reference,'miruro'),null);
+});
+
+test('rapid manual title edits and reset receive increasing durable timestamps', () => {
+  const {createWorkIndex}=require('../src/integrated-search.js');
+  const bag=new Map();
+  const storage={getItem:key=>bag.get(key)||null,setItem:(key,v)=>bag.set(key,String(v))};
+  const anchor=item('reanime','rapid-title',{year:2026,anilistId:987654,type:'TV'});
+  const index=createWorkIndex(storage,{clock:()=>1900000000000});
+  index.remember({sourceItems:[anchor]});
+  assert.equal(index.rememberTitles(anchor,{ko:'첫 번째 수동 제목'},{source:'manual'}),true);
+  const first=index.find(anchor).titles.koCheckedAt;
+  assert.equal(index.rememberTitles(anchor,{ko:'두 번째 수동 제목'},{source:'manual'}),true);
+  const second=index.find(anchor).titles.koCheckedAt;
+  assert.ok(second>first,'later edits cannot have equal SQLite revision times');
+  assert.equal(index.resetManualKoreanTitle(anchor),true);
+  assert.ok(index.find(anchor).titles.koCheckedAt>second);
+  assert.equal(index.flush(),true);
+  assert.equal(JSON.parse(bag.get(require('../src/integrated-search.js').WORK_INDEX_KEY))
+    .works[0].titles.manual,false);
+});

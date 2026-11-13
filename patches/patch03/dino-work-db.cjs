@@ -154,9 +154,10 @@ function createStore({app,DatabaseSync}={}){
         const previous=workFind.get(id),titles={...work.titles};
         if(previous){
           const previousTime=Number(previous.ko_checked_at)||0;
-          // Never roll back user-edited Korean titles through old cached data.
+          // SQLite wins equal-time manual-title ties over stale v1 imports.
+           // Never roll back user-edited Korean titles through old cached data.
           if((previous.manual&&!titles.manual&&!work.explicitManualReset)
-            ||(previous.manual&&titles.manual&&previousTime>titles.koCheckedAt)){
+            ||(previous.manual&&titles.manual&&previousTime>=titles.koCheckedAt)){
             titles.ko=previous.title_ko;titles.koSource='manual';
             titles.koCheckedAt=previousTime;titles.manual=true;
           }else if(!titles.ko&&previous.title_ko&&!work.explicitManualReset){

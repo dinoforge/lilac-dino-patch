@@ -117,11 +117,14 @@ function harness({ integrated=true, firstReturnsUnrelated=false, persistedStorag
     }
   };
   if(catalogState) window.lilac.catalogIndexState=async()=>catalogState;
+  const replay={resolve:null},playerContext={};
   const sandbox=vm.createContext({window,document,localStorage,
+    currentPlaybackContext:playerContext,
+    resolveIntoPlayer:(...args)=>replay.resolve?.(...args),
     setTimeout:(fn,delay)=>{fn.__testDelay=delay;scheduled.push(fn);return scheduled.length;},console});
   vm.runInContext(bridge,sandbox,{filename:'patch03-bridge.js'});
   assert.equal(window.__dinoPatch03Bridge?.active,true);
-  return {window,document,storage,nodes,calls,events,home,other,unrelated,video,psQuality,psQualityList,sandbox,status,sourceSelect,playbackStatus,scheduled};
+  return {window,document,storage,nodes,calls,events,home,other,unrelated,video,psQuality,psQualityList,sandbox,status,sourceSelect,playbackStatus,scheduled,replay};
 }
 const buttons=app=>app.nodes.get('#detailContent').querySelector('.detail-source-picker')?.querySelectorAll('[data-provider-source]')||[];
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
@@ -1180,4 +1183,96 @@ test('manual supplier refresh overrides a previously fresh scan without deleting
   assert.match(source,/if \(!force && stored\?\.fresh/);
   assert.match(source,/discoverSources\(current, group, \{ force: true \}\)/);
   assert.doesNotMatch(source,/localStorage\.clear\(|DROP TABLE|DELETE FROM dino_work/);
+});
+
+test('global Korean search spends limited aliases on Japanese and English supplier titles',async()=>{
+  const app=harness();
+  app.window.lilac.titleVariants=async()=>[
+    '한국어 제목 여러 개','또다른 한국어 별명','日本語のタイトル','English Work'
+  ];
+  await app.window.doSearch('일본어 한글 제목');
+  assert.ok(app.calls.search.some(x=>x.provider==='miruro'&&x.query==='English Work'),
+    'foreign-language providers must receive Latin title aliases');
+  assert.ok(app.calls.search.some(x=>x.query==='日本語のタイトル'),
+    'Japanese alias should not be displaced by Korean-only alternatives');
+});
+
+test('terminal playback fallback refuses duplicate same-number editions and keeps the old player',async()=>{
+  const app=harness();
+  await app.window.openDetail(app.home.mal_id);
+  Object.assign(app.sandbox.currentPlaybackContext,{
+    anime:app.home,episode:{provider:'reanime',number:3,url:'https://original.example/3'}
+  });
+  let switchCalls=0,resolveCalls=0;
+  app.replay.resolve=async()=>{switchCalls++;};
+  app.window.lilac.providerDetail=async item=>({
+    data:item,episodes:[{provider:item.provider,number:3,dub:false,url:'https://other.example/3'},
+      {provider:item.provider,number:3,dub:false,url:'https://other.example/3-alt'}]
+  });
+  app.window.lilac.providerResolve=async()=>{resolveCalls++;return {url:'https://other.example/stream'}};
+  app.events.get('DOMContentLoaded')();
+  app.video.send('error');
+  await settle();await settle();
+  const offer=app.playbackStatus.children.find(x=>x.id==='dinoPlaybackAlternate');
+  assert.ok(offer,'same-work source should be offered after terminal error');
+  offer.send('click');
+  await settle();await settle();
+  assert.equal(resolveCalls,0,'duplicate episodes must be rejected before stream lookup');
+  assert.equal(switchCalls,0,'original player must not be changed');
+  assert.equal(app.sandbox.currentPlaybackContext.episode.provider,'reanime');
+});
+
+test('failed fallback pre-resolution leaves existing playback context unchanged',async()=>{
+  const app=harness();
+  await app.window.openDetail(app.home.mal_id);
+  const context={anime:app.home,episode:{provider:'reanime',number:3,url:'https://original.example/3'}};
+  Object.assign(app.sandbox.currentPlaybackContext,context);
+  let switchCalls=0;
+  app.replay.resolve=async()=>{switchCalls++;};
+  app.window.lilac.providerDetail=async item=>({
+    data:item,episodes:[{provider:item.provider,number:3,dub:false,url:'https://other.example/3'}]
+  });
+  app.window.lilac.providerResolve=async()=>{throw Error('provider stream offline')};
+  app.events.get('DOMContentLoaded')();
+  app.video.send('error');
+  await settle();await settle();
+  const offer=app.playbackStatus.children.find(x=>x.id==='dinoPlaybackAlternate');
+  assert.ok(offer);
+  offer.send('click');
+  await settle();await settle();
+  assert.equal(switchCalls,0,'do not enter a new player when pre-resolution fails');
+  assert.equal(app.sandbox.currentPlaybackContext.episode,context.episode);
+});
+
+test('a uniquely verified alternative can keep the old playback position',async()=>{
+  const app=harness();
+  await app.window.openDetail(app.home.mal_id);
+  Object.assign(app.sandbox.currentPlaybackContext,{
+    anime:app.home,episode:{provider:'reanime',number:3,url:'https://original.example/3'}
+  });
+  app.video.currentTime=98;app.video.duration=540;
+  const switched=[];
+  app.replay.resolve=async (...args)=>switched.push(args);
+  app.window.lilac.providerDetail=async item=>({
+    data:item,episodes:[{provider:item.provider,number:3,dub:false,url:'https://other.example/3'}]
+  });
+  app.window.lilac.providerResolve=async()=>({url:'https://other.example/video.m3u8'});
+  app.events.get('DOMContentLoaded')();
+  app.video.send('error');
+  await settle();await settle();
+  const offer=app.playbackStatus.children.find(x=>x.id==='dinoPlaybackAlternate');
+  assert.ok(offer);
+  offer.send('click');
+  await settle();await settle();
+  assert.equal(switched.length,1);
+  assert.equal(switched[0][2].anime.provider,'miruro');
+  assert.equal(switched[0][2].episode.number,3);
+  assert.equal(switched[0][2].resumeSeconds,98);
+  assert.equal((await switched[0][0]()).url,'https://other.example/video.m3u8');
+});
+
+test('manual Korean title edits request an immediate SQLite flush',()=>{
+  assert.match(bridge,/if \(sqlite\.isReady\(\)\) sqlite\.flush\(\)\.then\(ok =>/);
+  assert.match(bridge,/if \(!workIndex\.flush\(\)\)/);
+  assert.doesNotMatch(bridge,/localStorage\.clear\(\)/);
 });
