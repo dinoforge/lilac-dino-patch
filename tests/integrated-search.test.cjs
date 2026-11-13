@@ -484,7 +484,7 @@ test('user-edited Korean title is authoritative and reset allows original resolv
   assert.equal(read.find(b).titles.manual,true);
   assert.equal(read.resetManualKoreanTitle(b),true);
   assert.equal(read.find(a).titles.manual,false);
-  assert.equal(read.find(a).titles.koSource,'provider'===read.find(a).titles.koSource?'provider':'');
+  assert.equal(read.find(a).titles.koSource,'provider');
   assert.equal(read.rememberTitles(a,{ko:'다시 조회한 한국어 제목'}, {source:'official'}),true);
   assert.equal(read.find(b).titles.ko,'다시 조회한 한국어 제목');
   read.flush();
