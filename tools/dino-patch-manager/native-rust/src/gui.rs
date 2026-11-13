@@ -131,6 +131,27 @@ fn safety_for(status: &transaction::Status) -> Option<(&'static str, &'static st
     }
 }
 
+// Short, actionable guidance for the status-first screen. This is advisory
+// text only: all file-mutating operations still use checked Rust transactions.
+fn next_step(status: &transaction::Status, busy: bool) -> &'static str {
+    if busy {
+        return "다음 단계 · 작업 결과를 확인한 뒤 필요한 작업을 선택하세요.";
+    }
+    match status.status.as_str() {
+        "NO_SOURCE" => "다음 단계 · 공식 LilacAnime 설치 폴더를 선택하세요.",
+        "SOURCE_FOUND" => "다음 단계 · 원본 호환성 및 현재 패치 상태를 검사하세요.",
+        "UNPATCHED" | "ALREADY_UNPATCHED" if status.manually_uninstalled =>
+            "다음 단계 · 수동 해제 상태를 유지합니다. 재적용은 직접 선택할 수 있습니다.",
+        "UNPATCHED" | "ALREADY_UNPATCHED" =>
+            "다음 단계 · 준비가 되면 안전한 패치 적용을 선택하세요.",
+        "APPLIED" | "ALREADY_APPLIED" =>
+            "다음 단계 · 필요 시 원본 상태를 다시 검사하거나 고급 관리에서 원복하세요.",
+        "CONFLICT" | "PARTIAL_OR_UNKNOWN" | "UNSUPPORTED" =>
+            "다음 단계 · 적용을 중단하고 원본과 백업을 보존한 채 진단을 확인하세요.",
+        _ => "다음 단계 · 원본 상태를 먼저 확인하세요.",
+    }
+}
+
 struct ResultMessage {
     name: String,
     result: Result<transaction::Status>,
@@ -488,7 +509,7 @@ impl DinoUi {
     fn source_card(&mut self, ui: &mut Ui) {
         card(ui, |ui| {
             heading(ui, "설치 원본");
-            label(ui, "원본 선택과 경로 확인은 사용자 데이터 및 패치 상태를 변경하지 않습니다.");
+            label(ui, "경로 입력만으로 원본 파일을 변경하지 않습니다. 자동 감시가 켜져 있으면 검사 후 패치가 적용될 수 있습니다.");
             ui.add_space(9.0);
 
             let version_text = if self.status.version.is_empty() {
@@ -583,7 +604,7 @@ impl DinoUi {
 
     fn patch_list_card(&mut self, ui: &mut Ui) {
         card(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.vertical(|ui| {
                     heading(ui, "패치 목록");
                     ui.add_space(2.0);
@@ -644,7 +665,7 @@ impl DinoUi {
 
     fn advanced_card(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         card(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new("수동 관리").size(14.0).strong().color(rgb(TEXT)));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     label(ui, "자동 감시와 별도로 원본을 다시 검증합니다.");
@@ -708,7 +729,7 @@ impl DinoUi {
                     });
                 });
             ui.add_space(11.0);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.vertical(|ui| {
                     ui.label(RichText::new("공식 릴리스 조회")
                         .size(14.0).strong().color(rgb(TEXT)));
