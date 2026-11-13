@@ -18,6 +18,8 @@ const MANIFEST: &str = include_str!("../../../../patches/patch03/manifest.json")
 const INTEGRATED_JS: &[u8] = include_bytes!("../../../../src/integrated-search.js");
 const INTEGRATED_CSS: &[u8] = include_bytes!("../../../../src/integrated-search.css");
 const PATCH_BRIDGE: &[u8] = include_bytes!("../../../../patches/patch03/patch03-bridge.js");
+const SQLITE_SYNC: &[u8] = include_bytes!("../../../../src/dino-sqlite-sync.js");
+const SQLITE_MAIN: &[u8] = include_bytes!("../../../../patches/patch03/dino-work-db.cjs");
 const PATCH_VERSION: &str = "1.0.0";
 
 #[derive(Clone, Debug)]
@@ -175,14 +177,22 @@ pub fn replacements(archive:&Archive, version:&str)->Result<BTreeMap<String,Vec<
     let manifest=base_manifest(version)?;
     let connections=manifest["connections"].as_array()
         .ok_or_else(||fail("manifest 연결 목록이 없습니다."))?;
-    if connections.len()!=5 { return Err(fail("manifest 연결 수가 5개가 아닙니다.")); }
+    if connections.len()!=5 { return Err(fail("manifest의 기존 연결 수가 5개가 아닙니다.")); }
+    // Both extra bridges are additive, pinned to reviewed official versions.
+    // If either anchor is absent the transaction aborts BEFORE any ASAR write.
+    let optional=manifest["optionalConnections"].as_array()
+        .ok_or_else(||fail("SQLite 연결 목록이 없습니다."))?;
+    if optional.len()!=2{return Err(fail("SQLite 연결 수가 2개가 아닙니다."));}
     let mut changes=BTreeMap::new();
-    changes.insert("src/app.js".into(),archive.read("src/app.js")?);
-    changes.insert("src/index.html".into(),archive.read("src/index.html")?);
+    for path in ["src/app.js","src/index.html","electron/main.cjs","electron/preload.cjs"] {
+        changes.insert(path.into(),archive.read(path)?);
+    }
     let mut connection_count=BTreeMap::new();
-    for item in connections {
+    for item in connections.iter().chain(optional.iter()) {
         let path=item["file"].as_str().ok_or_else(||fail("manifest 연결 경로가 없습니다."))?;
-        if !matches!(path,"src/app.js"|"src/index.html") {return Err(fail("허가되지 않은 원본 파일 변경입니다."));}
+        if !matches!(path,"src/app.js"|"src/index.html"|"electron/main.cjs"|"electron/preload.cjs") {
+            return Err(fail("허가되지 않은 원본 파일 변경입니다."));
+        }
         *connection_count.entry(path).or_insert(0usize)+=1;
         let before=item["before"].as_str().ok_or_else(||fail("manifest before 정보가 없습니다."))?;
         let after=item["after"].as_str().ok_or_else(||fail("manifest after 정보가 없습니다."))?;
@@ -196,13 +206,19 @@ pub fn replacements(archive:&Archive, version:&str)->Result<BTreeMap<String,Vec<
             item["description"].as_str().unwrap_or("connection"))?;
         changes.insert(path.into(),modified);
     }
-    if connection_count.get("src/app.js")!=Some(&1) || connection_count.get("src/index.html")!=Some(&4) {
+    if connection_count.get("src/app.js")!=Some(&1)
+        || connection_count.get("src/index.html")!=Some(&4)
+        || connection_count.get("electron/main.cjs")!=Some(&1)
+        || connection_count.get("electron/preload.cjs")!=Some(&1)
+        || connection_count.len()!=4 {
         return Err(fail("manifest의 공식 연결 대상 개수가 잘못됐습니다."));
     }
     for (path,data) in [
         ("src/integrated-search.js",INTEGRATED_JS),
         ("src/integrated-search.css",INTEGRATED_CSS),
         ("src/patch03-bridge.js",PATCH_BRIDGE),
+        ("src/dino-sqlite-sync.js",SQLITE_SYNC),
+        ("electron/dino-work-db.cjs",SQLITE_MAIN),
     ] {
         if archive.contains(path) {return Err(fail(format!("이미 ASAR에 패치 파일이 있습니다: {path}")));}
         let entry=manifest["runtimeModules"].as_array().ok_or_else(||fail("패치 파일 목록이 없습니다."))?
@@ -212,7 +228,7 @@ pub fn replacements(archive:&Archive, version:&str)->Result<BTreeMap<String,Vec<
         if got!=expected.to_uppercase(){return Err(fail(format!("패치 모듈 SHA-256 불일치: {path}")));}
         changes.insert(path.into(),data.to_vec());
     }
-    for p in ["src/app.js","src/index.html"] {
+    for p in ["src/app.js","src/index.html","electron/main.cjs","electron/preload.cjs"] {
         if changes[p]==archive.read(p)? { return Err(fail("원본 연결 파일이 수정되지 않았습니다.")); }
     }
     Ok(changes)
@@ -279,7 +295,8 @@ pub fn inspect(root:&Path)->Status {
             }
             return Ok(Status::new("PARTIAL_OR_UNKNOWN",&version,"패치 기록 상태 값이 올바르지 않습니다."));
         }
-        if ["src/integrated-search.js","src/integrated-search.css","src/patch03-bridge.js"]
+        if ["src/integrated-search.js","src/integrated-search.css","src/patch03-bridge.js",
+            "src/dino-sqlite-sync.js","electron/dino-work-db.cjs"]
             .iter().any(|x|archive.contains(x)) {
             return Ok(Status::new("PARTIAL_OR_UNKNOWN",&version,"기존 패치 모듈은 있으나 검증된 패치 기록이 없습니다."));
         }
