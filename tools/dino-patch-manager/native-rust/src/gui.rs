@@ -812,7 +812,7 @@ impl eframe::App for DinoUi {
                                     label(ui, "LilacAnime · 원본 보존형 패치 관리자");
                                 });
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    pill(ui, "Rust 네이티브 · v0.2.1", StatusTone::Neutral);
+                                    pill(ui, "Rust 네이티브 · v0.2.0", StatusTone::Neutral);
                                 });
                             });
                             ui.add_space(15.0);
