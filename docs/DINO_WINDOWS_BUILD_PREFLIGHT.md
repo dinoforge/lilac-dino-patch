@@ -1,6 +1,6 @@
 # DinoPatch Windows EXE 빌드 전 점검 (CI 절약)
 
-이 문서는 `feature/dino-windows-build-preflight` 개발 브랜치의 절차입니다.
+이 문서는 Beta 8 PREVIEW 검증 브랜치에서 사용하는 사전 점검·빌드 절차입니다.
 실행 파일은 기존 공식 LilacAnime 설치본의 `app.asar`를 안전하게 패치하는
 **독립 Rust 관리자**입니다. 공식 앱 실행 파일, 원본 ASAR 또는 영상 파일은
 DinoPatch에 포함하지 않습니다.
@@ -30,7 +30,27 @@ node scripts/dino-release-preflight.cjs --rust
 이때 Rust 검사는 `cargo test --no-default-features`이고 Windows GUI
 바이너리를 만들지 않습니다. 테스트 중 실제 공식 앱은 수정하지 않습니다.
 
-## 2. Windows GUI 로컬 빌드
+## 2. Windows에서 CI 없이 PREVIEW ZIP 만들기
+
+기존 LilacAnime 설치본을 수정하지 않는 로컬 패키징 명령:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\\scripts\\dino-beta8-build-local.ps1
+```
+
+스크립트는 변경사항이 없는 Git 체크아웃에서만 실행하며, 다음을 차례대로 검사합니다.
+
+- Node SQLite·회차·UI 회귀 테스트 및 Rust CLI 테스트
+- Rust Windows GUI 실행 파일 빌드
+- EXE PE 서브시스템 `2` (CMD 창 없음) 확인
+- 커밋 ID·SHA-256 영수증을 포함한 PREVIEW ZIP 생성
+
+결과 ZIP은 `dist-dino-beta8-preview` 폴더에 저장하며 기존 ZIP이 있으면 덮어쓰지 않습니다.
+로컬에서 패키지를 만들어도 **실제 Windows GUI 실행과 공식 ASAR
+적용·복구가 검증됐다는 뜻은 아닙니다.** Cargo.lock이 없는 개발 상태에서는
+빌드 종속성을 완전하게 고정한 재현성도 아직 확보되지 않았습니다.
+
+## 3. Windows GUI 로컬 빌드 (EXE만 필요할 때)
 
 Windows에 Rust stable이 설치돼 있고 1단계를 통과했을 때:
 
@@ -47,18 +67,18 @@ GUI 버전에는 `#![cfg_attr(all(windows, feature = "gui"), windows_subsystem =
 Windows PE 헤더 검사 및 앱 시작 테스트를 통과하기 전에는 이를 최종 검증된
 실행 파일로 표시하지 않습니다.
 
-## 3. GitHub Actions를 한 번만 사용할 때
+## 4. GitHub Actions를 한 번만 사용할 때
 
 GitHub 저장소 **Actions**에서 `Package DinoPatch Rust-native Windows UI`의
 **Run workflow**를 선택하고
-`feature/dino-windows-build-preflight` 브랜치를 지정합니다.
+`feature/dino-beta8-preflight-ready` 브랜치를 지정합니다.
 이 워크플로는 `workflow_dispatch`만 사용합니다. 푸시/PR에서는
 자동 실행되지 않습니다.
 
-1. 저렴한 Ubuntu 사전 검사가 먼저 실행됩니다.
+1. Ubuntu에서 Node 회귀 테스트·Rust 소스 구문 검사·Rust CLI 테스트가 먼저 실행됩니다.
 2. 모든 검사가 통과해야 Windows-2025 Rust GUI 컴파일을 시작합니다.
 3. Windows GUI PE 서브시스템 `2` 확인과 무효 ASAR 테스트를 진행합니다.
-4. 성공 시 `DinoPatch-Rust-Native-Windows-TEST` 아티팩트에 Windows ZIP이 저장됩니다.
+4. 성공 시 `DinoPatch-Beta8-Windows-PREVIEW-TEST` 아티팩트에 PREVIEW ZIP이 저장됩니다.
 
 Windows 빌드·시작 점검을 통과해도 공식 앱 모든 버전에 대한 호환을 의미하지
 않습니다. 현재 Rust 패치 엔진은 미리 검증한 공식 버전 지문만 허용하며,

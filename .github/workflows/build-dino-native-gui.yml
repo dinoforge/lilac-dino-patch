@@ -20,6 +20,15 @@ jobs:
           node-version: '22'
       - name: Verify SQLite, episode refresh, patch hashes and GUI source contracts
         run: node scripts/dino-release-preflight.cjs
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Parse Rust manager source without a Windows runner
+        working-directory: tools/dino-patch-manager/native-rust
+        run: cargo fmt --all
+      - name: Exercise native CLI engine before expensive Windows compilation
+        working-directory: tools/dino-patch-manager/native-rust
+        run: cargo test --no-default-features
   gui-windows:
     needs: preflight
     runs-on: windows-2025

@@ -12,6 +12,7 @@ const bridge=read('patches/patch03/patch03-bridge.js');
 const db=read('patches/patch03/dino-work-db.cjs');
 const workflow=read('.github/workflows/build-dino-native-gui.yml');
 const release=read('docs/releases/DINO_BETA8_PREVIEW.md');
+const localBuild=read('scripts/dino-beta8-build-local.ps1');
 
 test('apply and uninstall preserve a pending crash-recovery record until swap and hash confirmation',()=>{
   const apply=transaction.split('pub fn apply(')[1].split('pub fn uninstall(')[0];
@@ -55,4 +56,21 @@ test('Beta 8 candidate contains source receipt and no original LilacAnime execut
   assert.match(workflow,/SHA256SUMS\.txt/);
   assert.match(release,/정식 Beta 8 릴리스가 아닙니다/);
   assert.match(release,/별도 테스트 프로필/);
+});
+
+test('Local build script refuses dirty source, performs free tests and never writes to LilacAnime installation',()=>{
+  assert.match(localBuild,/git status --porcelain/);
+  assert.match(localBuild,/dino-release-preflight\.cjs/);
+  assert.match(localBuild,/--rust/);
+  assert.match(localBuild,/cargo build --release --features gui/);
+  assert.match(localBuild,/\$subsystem -ne 2/);
+  assert.match(localBuild,/Refusing to overwrite an existing preview ZIP/);
+  assert.match(localBuild,/originalAppBundled = \$false/);
+  assert.doesNotMatch(localBuild,/(?:Set-Content|Copy-Item|Remove-Item)[^\n]*(?:app\.asar|LilacAnime\\)/i);
+});
+test('Manual CI release checks Rust CLI before allocating a Windows machine',()=>{
+  const first=workflow.indexOf('cargo test --no-default-features');
+  const second=workflow.indexOf('gui-windows:');
+  assert.ok(first>=0&&second>first);
+  assert.match(workflow,/^    needs: preflight$/m);
 });
