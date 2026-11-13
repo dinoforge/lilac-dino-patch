@@ -443,7 +443,16 @@
       return;
     }
     const next = episodeQueue.shift();
-    if (!next || !episodeCheckDue(next)) { scheduleEpisodeRefresh(1800); return; }
+    if (next) episodeQueued.delete(next.provider + ':' + sourceKey(next));
+    const current = next && workIndex.find(next)?.sources.find(source =>
+      source.provider === next.provider && sourceKey(source) === sourceKey(next));
+    // A card can change from airing to completed while sitting in the queue.
+    // An explicit completed status always cancels the pending supplier call.
+    if (current?.status && !airingStatus(current)
+      || !next || !episodeCheckDue(next)) {
+      scheduleEpisodeRefresh(1800);
+      return;
+    }
     episodeBusy = true;
     episodeAttempted++;
     recordEpisodeAttempt();
