@@ -603,6 +603,38 @@
       }
       touch();
     };
+
+    // Opportunistically reuse entries already delivered to the original
+    // renderer (season, airing, library, search or a catalog card). This
+    // creates no IPC/network request and never marks an observed card as a
+    // completed five-provider verification. Existing checksums, outcomes and
+    // checkedAt timestamps survive re-rendering.
+    const observe = (items, { limit = 24 } = {}) => {
+      const max = Math.max(0, Math.min(36, Number(limit) || 0));
+      const seen = new Set();
+      let added = 0, updated = 0;
+      for (const raw of Array.isArray(items) ? items : []) {
+        if (added + updated >= max) break;
+        const item = compact(raw);
+        if (!item) continue;
+        const key = item.provider + ':' + sourceKey(item);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const row = rowFor(item);
+        const old = row?.sources.find(source => source.provider === item.provider
+          && sourceKey(source) === sourceKey(item));
+        if (old) {
+          // Title aliases discovered by the original display-title system may
+          // arrive after the first card has already been rendered.
+          const itemNames = namesOf([item.title, item.title_english,
+            item.title_japanese, item.displayTitle, ...(item.synonyms || [])]);
+          if (!itemNames.some(name => !row.names.includes(name))) continue;
+          updated++;
+        } else added++;
+        remember({ sourceItems: [item] });
+      }
+      return { added, updated };
+    };
     const rememberSearch = (query, result) => {
       const key = titleKey(query);
       if (!key || !Array.isArray(result?.items) || !Array.isArray(result?.statuses)) return;
@@ -629,8 +661,14 @@
       data.searches = data.searches.filter(s => !s.sourceIds.some(id => row.sources.some(item => sourceKey(item) === id)));
       touch();
     };
-    return { find, remember, rememberSearch, readSearch, invalidate, flush,
-      stats: () => ({ works: data.works.length, searches: data.searches.length }) };
+    return { find, remember, observe, rememberSearch, readSearch, invalidate, flush,
+      stats: () => ({
+        works: data.works.length, searches: data.searches.length,
+        providers: Object.fromEntries(PROVIDERS.map(provider => [
+          provider, data.works.reduce((sum, work) =>
+            sum + Number(work.sources.some(item => item.provider === provider)), 0)
+        ]))
+      }) };
   }
 
   const api = {
