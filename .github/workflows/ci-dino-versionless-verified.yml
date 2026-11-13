@@ -1,0 +1,160 @@
+name: Versionless DinoPatch Windows safe-apply verification
+
+# Isolated branch, no trigger in the release branch.
+on:
+  push:
+    branches:
+      - ci/dino-versionless-verified-20261113
+
+permissions:
+  contents: read
+
+jobs:
+  # Cheap Linux checks run first. A failing regression must not start an
+  # expensive Windows Rust compile. Both jobs are still dispatch-only.
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify SQLite, episode refresh, patch hashes and GUI source contracts
+        run: node scripts/dino-release-preflight.cjs
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Parse Rust manager source without a Windows runner
+        working-directory: tools/dino-patch-manager/native-rust
+        run: cargo fmt --all
+      - name: Exercise native CLI engine before expensive Windows compilation
+        working-directory: tools/dino-patch-manager/native-rust
+        run: cargo test --no-default-features
+  gui-windows:
+    needs: preflight
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: tools/dino-patch-manager/native-rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify embedded module hashes on Windows before compiling
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          node scripts/dino-release-preflight.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows source hashes or Node regressions failed' }
+      - name: Compile the entire native Rust desktop manager
+        shell: pwsh
+        run: |
+          cargo fmt --all
+          cargo build --release --features gui
+          if ($LASTEXITCODE -ne 0) { throw 'Rust desktop manager could not compile' }
+          if (-not (Test-Path -LiteralPath 'target/release/dino-native-manager.exe' -PathType Leaf)) { throw 'Native Rust executable missing' }
+      - name: Verify versionless patch, backup rollover and safe uninstall on Windows
+        shell: pwsh
+        run: |
+          cargo test --no-default-features official_updates_keep_historical_backups_and_uninstall_current_version
+          if ($LASTEXITCODE -ne 0) { throw 'Windows safe patch upgrade/uninstall regression failed' }
+      - name: Verify PE executable has Windows GUI subsystem (no CMD console)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Join-Path (Get-Location).Path 'target/release/dino-native-manager.exe'
+          $bytes=[System.IO.File]::ReadAllBytes($exe)
+          if ($bytes.Length -lt 256 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+            throw 'Native Rust executable does not contain a valid DOS/PE header'
+          }
+          $peOffset=[BitConverter]::ToInt32($bytes,0x3c)
+          if ($peOffset -lt 64 -or $peOffset + 96 -ge $bytes.Length) {
+            throw 'Native Rust PE optional header is invalid'
+          }
+          $subsystem=[BitConverter]::ToUInt16($bytes,$peOffset + 24 + 68)
+          # IMAGE_SUBSYSTEM_WINDOWS_GUI = 2, CONSOLE = 3.
+          if ($subsystem -ne 2) {
+            throw "Rust manager would open a console window: PE subsystem=$subsystem (expected Windows GUI = 2)"
+          }
+          Write-Host 'PASS: Windows GUI subsystem; native manager does not create a CMD console at startup'
+      - name: Smoke-test real Rust Windows GUI startup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Join-Path (Get-Location).Path 'target/release/dino-native-manager.exe'
+          # Reproduce the reported app.asar-as-directory state without
+          # modifying or deleting a real installation or an existing backup.
+          $fixture=Join-Path $env:RUNNER_TEMP 'dino-invalid-asar-fixture'
+          New-Item -ItemType Directory -Force -Path (Join-Path $fixture 'resources/app.asar') | Out-Null
+          Set-Content -LiteralPath (Join-Path $fixture 'LilacAnime.exe') -Value 'CI marker'
+          $env:DINO_ORIGINAL_ROOT=$fixture
+          $env:APPDATA=Join-Path $env:RUNNER_TEMP 'dino-native-smoke-profile'
+          New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
+          $psi=[System.Diagnostics.ProcessStartInfo]::new($exe)
+          $psi.UseShellExecute=$false
+          $psi.CreateNoWindow=$false
+          $psi.RedirectStandardError=$true
+          $proc=[System.Diagnostics.Process]::Start($psi)
+          if (-not $proc) { throw 'Native Rust GUI did not launch' }
+          try {
+            Start-Sleep -Seconds 18
+            if ($proc.HasExited) {
+              $errorText=$proc.StandardError.ReadToEnd()
+              throw "Rust GUI terminated immediately (code=$($proc.ExitCode)): $errorText"
+            }
+            if (-not (Test-Path -LiteralPath (Join-Path $fixture 'resources/app.asar') -PathType Container)) {
+              throw 'Native Rust GUI modified the invalid original ASAR folder'
+            }
+            if (@(Get-ChildItem -LiteralPath $env:APPDATA -Recurse -File -Filter original-app.asar).Count -ne 0) {
+              throw 'GUI created an unexpected original ASAR backup for an invalid folder'
+            }
+            $log=Join-Path $env:APPDATA 'DinoPatchManager/native-manager.log'
+            if (-not (Test-Path -LiteralPath $log -PathType Leaf)) {
+              throw 'Rust native startup diagnostic log was not generated'
+            }
+            Write-Host 'Native Rust GUI stayed open for 18 seconds with invalid ASAR directory and preserved the source'
+          } finally {
+            if (-not $proc.HasExited) { $proc.Kill($true) }
+            $proc.WaitForExit(10000) | Out-Null
+            $proc.Dispose()
+          }
+      - name: Assemble Beta 8 PREVIEW candidate (not a verified release)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP 'dino-beta8-preview'
+          $stage=Join-Path $root 'DinoPatchManager'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          $exe=Join-Path $stage 'LilacAnime-DinoPatch-Rust.exe'
+          Copy-Item -LiteralPath 'target/release/dino-native-manager.exe' -Destination $exe
+          $readme=Join-Path (Get-Location).Path '../../../docs/releases/DINO_BETA8_PREVIEW.md'
+          Copy-Item -LiteralPath $readme -Destination (Join-Path $stage 'README.md')
+          $exeSha=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          $manifest=Join-Path (Get-Location).Path '../../../patches/patch03/manifest.json'
+          $manifestSha=(Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash
+          $receipt=@{
+            release='Beta 8 PREVIEW - unverified'
+            gitCommit=$env:GITHUB_SHA
+            originalAppBundled=$false
+            executableSha256=$exeSha
+            embeddedManifestSha256=$manifestSha
+            windowsGuiSubsystem=2
+          }
+          $receipt | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stage 'package-info.json') -Encoding utf8
+          "$exeSha  LilacAnime-DinoPatch-Rust.exe" | Set-Content -LiteralPath (Join-Path $stage 'SHA256SUMS.txt') -Encoding utf8
+          if (@(Get-ChildItem -LiteralPath $stage -File).Count -ne 4) { throw 'Preview package file list is unexpected' }
+          $zip=Join-Path $env:RUNNER_TEMP 'DinoPatch-Beta8-PREVIEW-Windows-x64.zip'
+          Compress-Archive -LiteralPath $stage -DestinationPath $zip -CompressionLevel Optimal
+          $sha=(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+          Write-Host "Beta 8 PREVIEW ZIP SHA-256: $sha"
+          Write-Host "Beta 8 PREVIEW ZIP bytes: $((Get-Item $zip).Length)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DinoPatch-Beta8-Windows-PREVIEW-TEST
+          path: ${{ runner.temp }}/DinoPatch-Beta8-PREVIEW-Windows-x64.zip
+          if-no-files-found: error
+          retention-days: 7
