@@ -143,7 +143,20 @@ function createStore({app,DatabaseSync}={}){
           Math.max(work.attemptedAt,Number(previous?.attempted_at)||0),
           previous&&Number(previous.checked_at)>work.checkedAt?previous.outcome:work.outcome,
           Math.max(work.updatedAt,Number(previous?.updated_at)||0));
-        for(const src of work.sources)putSource.run(src.provider,sourceKey(src),id,JSON.stringify(src));
+        for(const src of work.sources){
+          const previousSource=sourceFind.get(src.provider,sourceKey(src));
+          const earlier=previousSource?parse(previousSource.item_json):null;
+          const incomingEpisode=src.dinoEpisode;
+          const storedEpisode=earlier?.dinoEpisode;
+          // Passive catalog cards do not include episode metadata. Preserve
+          // the last verified snapshot across a legacy-cache migration or a
+          // delayed provider search response.
+          const older=Number(incomingEpisode?.attemptedAt)||0;
+          const newer=Number(storedEpisode?.attemptedAt)||0;
+          const selected=storedEpisode && newer>=older ? storedEpisode : incomingEpisode;
+          const item=selected?{...src,dinoEpisode:selected}:src;
+          putSource.run(src.provider,sourceKey(src),id,JSON.stringify(item));
+        }
       }
       db.exec('COMMIT');return {ok:true,saved:normalized.length};
     }catch(error){
