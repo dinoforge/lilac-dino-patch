@@ -100,7 +100,7 @@ function createStore({app,DatabaseSync}={}){
             ||(previous.manual&&titles.manual&&previousTime>titles.koCheckedAt)){
             titles.ko=previous.title_ko;titles.koSource='manual';
             titles.koCheckedAt=previousTime;titles.manual=true;
-          }else if(!titles.ko&&previous.title_ko){
+          }else if(!titles.ko&&previous.title_ko&&!work.explicitManualReset){
             titles.ko=previous.title_ko;titles.koSource=previous.ko_source;
             titles.koCheckedAt=previousTime;
           }
