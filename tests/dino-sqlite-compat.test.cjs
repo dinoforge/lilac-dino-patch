@@ -169,3 +169,32 @@ test('official Korean title is not downgraded to an older provider-only title',(
     assert.equal(row.titles.koSource,'official');
   }finally{env.close();}
 });
+
+
+test('SQLite retains last confirmed latest episode across stale passive cards, restarts and five suppliers',()=>{
+  const env=fixture();
+  try{
+    const episodeWork=work('808','공통 한국어 제목',true);
+    episodeWork.sources[0].dinoEpisode={
+      state:'ready',latest:12,count:12,checkedAt:1900000000000,
+      attemptedAt:1900000000000,newEpisodes:2
+    };
+    assert.equal(env.store.upsert([episodeWork]).ok,true);
+    const cached=work('808','공급원 원래 제목',false);
+    assert.equal(env.store.upsert([cached]).ok,true);
+    const kept=env.store.lookup({provider:'reanime',mal_id:'reanime:808'});
+    assert.equal(kept.sources.find(s=>s.provider==='reanime').dinoEpisode.latest,12);
+    assert.equal(kept.titles.ko,'공통 한국어 제목');
+    assert.equal(kept.titles.manual,true);
+    const next=work('808','공급원 원래 제목',false);
+    next.sources[0].dinoEpisode={
+      state:'ready',latest:13,count:13,checkedAt:1900000005000,
+      attemptedAt:1900000005000,newEpisodes:1
+    };
+    assert.equal(env.store.upsert([next]).ok,true);
+    assert.equal(env.store.lookup({provider:'reanime',mal_id:'reanime:808'})
+      .sources.find(s=>s.provider==='reanime').dinoEpisode.latest,13);
+    assert.equal(env.store.lookup({provider:'miruro',mal_id:'miruro:808'})
+      .sources.find(s=>s.provider==='miruro').dinoEpisode,undefined);
+  }finally{env.close();}
+});
