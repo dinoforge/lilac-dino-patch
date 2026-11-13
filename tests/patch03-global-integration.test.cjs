@@ -853,3 +853,28 @@ test('manual Korean title survives original resolver updates after restart',asyn
   assert.equal(second.window.__dinoPatch03Bridge.getWorkTitles(second.other.mal_id).ko,
     '내가 정한 표준 작품명');
 });
+
+
+test('integrated picker highlights the active supplier and shows common title and count', async()=>{
+  const app=harness();
+  await app.window.openDetail(app.home.mal_id);
+  await settle();await settle();
+  const picker=app.nodes.get('#detailContent').querySelector('.detail-source-picker');
+  assert.ok(picker);
+  const title=picker.querySelector('.dino-source-heading-name');
+  assert.match(title.textContent,/일본어 한글 제목/);
+  assert.equal(picker.querySelector('.dino-source-linked-count').textContent,'2/5개 연결');
+  assert.match(picker.querySelector('.dino-source-hint').textContent,/회차.*화질/);
+  const tabs=buttons(app);
+  assert.equal(tabs.length,2);
+  assert.ok(tabs.some(b=>b.attributes.get('aria-pressed')==='true'));
+  assert.ok(tabs.some(b=>b.attributes.get('aria-pressed')==='false'));
+  assert.ok(tabs.every(b=>b.dataset.availability==='ready'));
+  assert.ok(tabs.every(b=>['measured','reported','unknown'].includes(b.dataset.quality)));
+  assert.ok(tabs.every(b=>b.attributes.has('aria-label')));
+  const css=fs.readFileSync(path.join(__dirname,'../src/integrated-search.css'),'utf8');
+  assert.match(css,/\.dino-source-option\[aria-pressed="true"\]::after\s*\{[^}]*content:"선택 중"/s);
+  assert.match(css,/\.search-provider-chip:focus-visible\s*\{/s);
+  assert.match(css,/@media\(prefers-reduced-motion:reduce\)/);
+});
+
