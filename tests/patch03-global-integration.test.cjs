@@ -134,7 +134,8 @@ test('integrated settings apply to home cards and resolve all matching provider 
   const sources=buttons(app);
   assert.equal(sources.length,2);
   assert.deepEqual(sources.map(x=>x.dataset.providerSource).sort(),['miruro:miruro-show','reanime:home-show']);
-  assert.ok(app.calls.local.some(x=>x.provider==='reanime'));
+  assert.ok(!app.calls.search.some(x=>x.provider==='reanime'),
+    'the already selected provider must not be queried again to verify its own card');
   assert.ok(app.calls.search.some(x=>x.provider==='miruro'&&x.query==='English Work'));
   assert.ok(sources.some(x=>x.textContent.includes('12화')));
   assert.ok(sources.some(x=>x.textContent.includes('10화')));
@@ -549,4 +550,81 @@ test('already verified connections are not overwritten by the original catalog s
   const saved=after.works.find(row=>row.sources.some(source=>source.mal_id===first.home.mal_id));
   assert.equal(saved.sources.length,2,'existing verified supplier mapping survives');
   assert.equal(saved.checkedAt,original.checkedAt,'local list data does not change verification timestamp');
+});
+
+
+test('visible original cards from all five providers populate one conservative local identity without extra queries',async()=>{
+  const app=harness();
+  const providers=api.PROVIDERS;
+  const cards=providers.map((provider,i)=>({
+    ...app.home,provider,id:'observed-'+i,mal_id:provider+':observed-'+i,
+    title:'Observed work',title_english:'Observed work',anilistId:770900
+  }));
+  const before=app.calls.search.length;
+  for(const card of cards)
+    app.window.renderCards('#seasonRail',[card]);
+  const snapshot=app.window.__dinoPatch03Bridge.getWorkIndexStats();
+  assert.equal(snapshot.works,1,'the exact same AniList identity must coalesce');
+  assert.deepEqual(Object.keys(snapshot.providers).sort(),providers.slice().sort());
+  assert.ok(providers.every(provider=>snapshot.providers[provider]===1));
+  assert.equal(app.calls.search.length,before,'observing already fetched cards must not call provider APIs');
+  app.window.__dinoPatch03Bridge.flushWorkIndex();
+  const saved=JSON.parse(app.storage.get(api.WORK_INDEX_KEY));
+  assert.equal(saved.works[0].sources.length,5);
+  assert.equal(saved.works[0].checkedAt,0,'mere observation does not count as provider verification');
+  assert.equal(saved.works[0].outcome,'');
+});
+
+test('an observed five-source work opens from cached IDs without redundant searches',async()=>{
+  const app=harness();
+  const cards=api.PROVIDERS.map((provider,i)=>({
+    ...app.home,provider,id:'cached-'+i,mal_id:provider+':cached-'+i,
+    title:'Common work',year:2026,anilistId:app.home.anilistId
+  }));
+  for(const card of cards)app.window.renderCards('#topRail',[card]);
+  assert.equal(app.calls.search.length,0);
+  await app.window.openDetail(app.home.mal_id);
+  assert.equal(app.calls.search.length,0,'verified matching cards already provide five supplier IDs');
+  assert.equal(buttons(app).length,5);
+  assert.equal(app.window.__dinoPatch03Bridge.getWorkIndexStats().works,1);
+});
+
+test('observed cards with different seasons or conflicting media IDs never merge',async()=>{
+  const app=harness();
+  const first={...app.home,provider:'reanime',id:'season-one',mal_id:'reanime:season-one',
+    anilistId:880001,title:'Same title',year:2026};
+  const second={...first,provider:'miruro',id:'season-two',mal_id:'miruro:season-two',
+    anilistId:880002,title:'Same title',year:2026};
+  app.window.renderCards('#topRail',[first,second]);
+  const snapshot=app.window.__dinoPatch03Bridge.getWorkIndexStats();
+  assert.equal(snapshot.providers.reanime,1);
+  assert.equal(snapshot.providers.miruro,1);
+  const cached=JSON.parse((()=>{
+    app.window.__dinoPatch03Bridge.flushWorkIndex();return app.storage.get(api.WORK_INDEX_KEY)
+  })());
+  assert.equal(cached.works.length,2);
+});
+
+test('background matching excludes known suppliers and keeps explicit detail retries available',async()=>{
+  const app=harness();
+  app.nodes.get('#detailDialog').open=false;
+  app.window.renderCards('#seasonRail',[app.home]);
+  assert.equal(app.scheduled.length,1);
+  app.scheduled.shift()();
+  for(let i=0;i<14;i++)await settle();
+  assert.ok(app.calls.search.length>0);
+  assert.ok(!app.calls.search.some(req=>req.provider==='reanime'),
+    'already known source should not be searched in background');
+  const before=app.calls.search.length;
+  await app.window.openDetail(app.home.mal_id);
+  assert.ok(app.calls.search.length>before,
+    'foreground lookup may retry an incomplete background pass rather than waiting three days');
+  assert.ok(buttons(app).length>=2);
+});
+
+test('provider mode does not modify the hybrid observed-work cache',async()=>{
+  const app=harness({integrated:false});
+  app.window.renderCards('#seasonRail',[app.home]);
+  assert.equal(app.window.__dinoPatch03Bridge.getWorkIndexStats().works,0);
+  assert.equal(app.calls.search.length,0);
 });
