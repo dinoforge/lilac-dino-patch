@@ -149,6 +149,8 @@ struct DinoUi {
     backup_id: String,
     show_log: bool,
     show_path_editor: bool,
+    path_draft: String,
+    show_advanced: bool,
     pending_action: Option<&'static str>,
 }
 
@@ -177,6 +179,7 @@ fn detect_installed_root() -> String {
 impl Default for DinoUi {
     fn default() -> Self {
         let root = detect_installed_root();
+        let path_draft = root.clone();
         let has_root = !root.is_empty();
         diagnostics::write("Electron-style native Rust management UI initialized");
         Self {
@@ -195,6 +198,8 @@ impl Default for DinoUi {
             backup_id: String::new(),
             show_log: false,
             show_path_editor: false,
+            path_draft,
+            show_advanced: false,
             pending_action: None,
         }
     }
@@ -352,6 +357,8 @@ impl DinoUi {
                 path
             };
             self.root = root.to_string_lossy().to_string();
+            self.path_draft = self.root.clone();
+            self.backup_id.clear();
             self.last_archive_change = None;
             self.last_monitor = Instant::now();
             self.status = transaction::Status::new(
@@ -423,6 +430,9 @@ impl DinoUi {
                 ui.label(RichText::new(headline).size(20.0).strong().color(rgb(TEXT)));
                 ui.add_space(3.0);
                 ui.label(RichText::new(details).size(12.0).color(rgb(MUTED)));
+                ui.add_space(7.0);
+                ui.label(RichText::new(next_step(&self.status, self.busy))
+                    .size(12.0).strong().color(rgb(ACCENT)));
                 ui.add_space(14.0);
                 ui.horizontal_wrapped(|ui| {
                     pill(ui, "1. 원본 선택", if has_root {
@@ -477,60 +487,96 @@ impl DinoUi {
 
     fn source_card(&mut self, ui: &mut Ui) {
         card(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.allocate_ui_with_layout(
-                    Vec2::new(112.0, 44.0),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        label(ui, "LilacAnime 버전");
-                        ui.label(RichText::new(if self.status.version.is_empty() {
-                            "확인 전".to_string()
-                        } else {
-                            format!("v{}", self.status.version)
-                        }).size(13.0).strong().color(rgb(TEXT)));
-                    },
-                );
-                ui.add_space(10.0);
-                // Reserve width for the source-change button before rendering
-                // the often very long Windows installation path.
-                let path_width = (ui.available_width() - 148.0).max(180.0);
-                ui.allocate_ui_with_layout(
-                    Vec2::new(path_width, 44.0),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        label(ui, "원본 폴더");
-                        let path = if self.root.is_empty() {
-                            "원본을 검색하고 있습니다.".to_string()
-                        } else {
-                            self.root.clone()
-                        };
-                        ui.add(egui::Label::new(
-                            RichText::new(path).size(12.0).strong().color(rgb(TEXT))
-                        ).truncate());
-                    },
-                );
+            heading(ui, "설치 원본");
+            label(ui, "원본 선택과 경로 확인은 사용자 데이터 및 패치 상태를 변경하지 않습니다.");
+            ui.add_space(9.0);
+
+            let version_text = if self.status.version.is_empty() {
+                "확인 전".to_owned()
+            } else {
+                format!("v{}", self.status.version)
+            };
+            let path_text = if self.root.trim().is_empty() {
+                "원본 폴더가 선택되지 않았습니다.".to_owned()
+            } else {
+                self.root.clone()
+            };
+            // Keep the full path accessible through a hover tooltip. At the
+            // minimum window size the path moves to its own full-width row.
+            if ui.available_width() < 720.0 {
+                label(ui, "LilacAnime 버전");
+                ui.label(RichText::new(&version_text).size(13.0).strong().color(rgb(TEXT)));
+                ui.add_space(7.0);
+                label(ui, "원본 폴더");
+                ui.add(egui::Label::new(
+                    RichText::new(&path_text).size(12.0).strong().color(rgb(TEXT))
+                ).truncate()).on_hover_text(&path_text);
+                ui.add_space(9.0);
                 if action(ui, "원본 폴더 변경", ButtonTone::Secondary, !self.busy) {
                     self.choose_folder();
                 }
-            });
-            if self.show_path_editor {
-                ui.add_space(8.0);
+            } else {
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.root)
-                        .hint_text(r"D:\LilacAnime")
-                        .desired_width(550.0));
-                    if action(ui, "경로 검사", ButtonTone::Secondary, !self.busy) {
-                        self.last_archive_change = None;
-                        self.enqueue("원본 다시 확인");
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(112.0, 44.0),
+                        Layout::top_down(Align::Min),
+                        |ui| {
+                            label(ui, "LilacAnime 버전");
+                            ui.label(RichText::new(&version_text)
+                                .size(13.0).strong().color(rgb(TEXT)));
+                        },
+                    );
+                    ui.add_space(10.0);
+                    let path_width = (ui.available_width() - 152.0).max(160.0);
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(path_width, 44.0),
+                        Layout::top_down(Align::Min),
+                        |ui| {
+                            label(ui, "원본 폴더");
+                            ui.add(egui::Label::new(
+                                RichText::new(&path_text).size(12.0).strong().color(rgb(TEXT))
+                            ).truncate()).on_hover_text(&path_text);
+                        },
+                    );
+                    if action(ui, "원본 폴더 변경", ButtonTone::Secondary, !self.busy) {
+                        self.choose_folder();
                     }
                 });
             }
-            if ui.small_button(if self.show_path_editor {
-                "경로 직접 입력 닫기"
-            } else {
-                "경로 직접 입력"
-            }).clicked() {
-                self.show_path_editor = !self.show_path_editor;
+
+            ui.add_space(7.0);
+            if self.show_path_editor {
+                label(ui, "검사할 새 경로 · 입력 중에는 기존 설치 경로가 유지됩니다.");
+                ui.add_enabled(
+                    !self.busy,
+                    egui::TextEdit::singleline(&mut self.path_draft)
+                        .hint_text(r"D:\LilacAnime")
+                        .desired_width(ui.available_width()),
+                );
+                ui.add_space(6.0);
+                ui.horizontal_wrapped(|ui| {
+                    if action(ui, "경로 검사", ButtonTone::Primary,
+                        !self.busy && !self.path_draft.trim().is_empty()) {
+                        let candidate = self.path_draft.trim().to_owned();
+                        if self.root != candidate {
+                            self.root = candidate;
+                            self.backup_id.clear();
+                            self.status = transaction::Status::new(
+                                "SOURCE_FOUND", "", "새 설치 폴더를 선택했습니다. 구조 검사 중입니다."
+                            );
+                        }
+                        self.last_archive_change = None;
+                        self.show_path_editor = false;
+                        self.enqueue("원본 다시 확인");
+                    }
+                    if action(ui, "입력 취소", ButtonTone::Secondary, !self.busy) {
+                        self.path_draft = self.root.clone();
+                        self.show_path_editor = false;
+                    }
+                });
+            } else if ui.small_button("경로 직접 입력").clicked() {
+                self.path_draft = self.root.clone();
+                self.show_path_editor = true;
             }
         });
     }
@@ -611,7 +657,8 @@ impl DinoUi {
                     self.enqueue("원본 다시 확인");
                 }
                 if action(ui, "디노 패치 수동 적용", ButtonTone::Primary,
-                    !self.busy && has_root && self.status.status != "APPLIED") {
+                    !self.busy && has_root && matches!(self.status.status.as_str(),
+                        "UNPATCHED" | "ALREADY_UNPATCHED")) {
                     self.ask("디노 패치 수동 적용");
                 }
                 if action(ui, "복구 기록 확인", ButtonTone::Secondary,
@@ -619,7 +666,8 @@ impl DinoUi {
                     self.enqueue("복구 상태 검사");
                 }
                 if action(ui, "디노 패치 해제", ButtonTone::Danger,
-                    !self.busy && self.status.status == "APPLIED") {
+                    !self.busy && matches!(self.status.status.as_str(),
+                        "APPLIED" | "ALREADY_APPLIED")) {
                     self.ask("디노 패치 해제");
                 }
             });
@@ -649,7 +697,9 @@ impl DinoUi {
                                 label(ui, format!("복원할 백업  {id}"));
                             });
                         if action(ui, "백업 복원", ButtonTone::Secondary,
-                            !self.busy && !self.backup_id.is_empty() && self.status.status == "APPLIED") {
+                            !self.busy && !self.backup_id.is_empty()
+                                && matches!(self.status.status.as_str(),
+                                    "APPLIED" | "ALREADY_APPLIED")) {
                             self.ask("백업 복원");
                         }
                         if action(ui, "작업 기록", ButtonTone::Secondary, !self.busy) {
@@ -734,16 +784,18 @@ impl DinoUi {
             .inner_margin(Margin::symmetric(15, 12))
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("작업 상태").size(11.0).strong().color(rgb(ACCENT)));
-                    ui.add_space(5.0);
-                    ui.label(RichText::new(&self.status.reason)
-                        .size(12.0).strong().color(rgb(TEXT)));
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new("현재 진단").size(12.0).strong().color(rgb(ACCENT)));
                     if self.busy {
                         ui.spinner();
                         pill(ui, "진행 중", StatusTone::Warning);
                     }
                 });
+                ui.add_space(5.0);
+                // Reason text gets the entire card width instead of sharing
+                // a single line with the status badge/spinner.
+                ui.label(RichText::new(&self.status.reason)
+                    .size(12.0).color(rgb(TEXT)));
                 if let Some((title, note)) = safety_for(&self.status) {
                     ui.add_space(9.0);
                     Frame::new()
@@ -826,13 +878,30 @@ impl eframe::App for DinoUi {
                             ui.add_space(15.0);
                             self.overview_card(ui);
                             ui.add_space(12.0);
+                            self.result_card(ui);
+                            ui.add_space(12.0);
                             self.source_card(ui);
                             ui.add_space(12.0);
                             self.patch_list_card(ui);
                             ui.add_space(12.0);
-                            self.advanced_card(ui, ctx);
-                            ui.add_space(12.0);
-                            self.result_card(ui);
+                            let advanced_title = if self.show_advanced {
+                                "고급 관리 접기"
+                            } else {
+                                "고급 관리 열기 · 원복 / 백업 / 작업 로그 / 업데이트"
+                            };
+                            if ui.add_sized(
+                                [ui.available_width(), 38.0],
+                                Button::new(advanced_title)
+                                    .fill(rgb(SURFACE))
+                                    .stroke(Stroke::new(1.0, rgb(BORDER)))
+                                    .corner_radius(CornerRadius::same(9)),
+                            ).clicked() {
+                                self.show_advanced = !self.show_advanced;
+                            }
+                            if self.show_advanced {
+                                ui.add_space(9.0);
+                                self.advanced_card(ui, ctx);
+                            }
                             ui.add_space(10.0);
                             label(ui, "설치된 공식 원본만 수정합니다. 검사에 실패하면 변경하지 않고 백업을 보존합니다.");
                             ui.add_space(12.0);
