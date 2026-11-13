@@ -507,8 +507,9 @@ test('original local Re:Anime index seeds 36 titles without a five-provider netw
   assert.equal(first.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().nextOffset,36);
 
   const repeat=harness({persistedStorage:storage,catalogState:state,catalogItems:works});
-  assert.equal(repeat.scheduled.length,0,'no local catalog reading on every launch');
+  assert.equal(repeat.scheduled.length,1,'the next local read is scheduled for tomorrow, not startup');
   assert.equal(repeat.calls.search.length,0);
+  assert.equal(repeat.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().indexed,36);
   const checkpointKey='lilacDinoPatch.workIndex.originalCatalogSeed.v1';
   const checkpoint=JSON.parse(storage.get(checkpointKey));
   storage.set(checkpointKey,JSON.stringify({...checkpoint,time:Date.now()-25*60*60*1000}));
@@ -661,4 +662,91 @@ test('original rememberAnime callback passively indexes sorted catalog cards acr
   const saved=JSON.parse(app.storage.get(api.WORK_INDEX_KEY));
   assert.equal(saved.works[0].sources.length,5);
   assert.equal(saved.works[0].checkedAt,0);
+});
+
+
+test('offline catalog import continues 36 NEW works a day until 1000 then stops permanently',async()=>{
+  const limit=1000,day=24*60*60*1000;
+  const catalogItems=Array.from({length:1100},(_,i)=>({
+    provider:'reanime',id:'daily-'+i,mal_id:'reanime:daily-'+i,
+    title:'Daily Catalog Work '+i,anilistId:300000+i,year:2026,type:'TV'
+  }));
+  const catalogState={sources:[{provider:'reanime',total:catalogItems.length,status:'ready'}]};
+  const storage=new Map([['contentSource','reanime']]);
+  let imported=0;
+  const checkpointKey='lilacDinoPatch.workIndex.originalCatalogSeed.v1';
+  for(let dayIndex=0;dayIndex<29;dayIndex++){
+    const app=harness({persistedStorage:storage,catalogState,catalogItems});
+    const pending=app.scheduled.shift();
+    if(dayIndex<28)assert.ok(pending,'new day must schedule a local read');
+    if(!pending){
+      assert.equal(imported,limit);
+      break;
+    }
+    pending();
+    await settle();await settle();await settle();
+    app.window.__dinoPatch03Bridge.flushWorkIndex();
+    const indexed=app.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus();
+    const added=indexed.indexed-imported;
+    assert.ok(added>=0 && added<=36,'at most 36 distinct indexed sources per day');
+    if(dayIndex<27)assert.equal(added,36,'a full local catalog should supply 36 new works');
+    imported=indexed.indexed;
+    assert.equal(indexed.target,limit);
+    assert.ok(app.calls.search.every(query=>query.provider==='reanime'
+      && query.query==='' && query.sort==='popular'),'no five-provider search requests');
+    if(imported>=limit){
+      assert.equal(indexed.status,'target-reached');
+      assert.equal(app.scheduled.length,0,'no tomorrow timer after target is reached');
+      break;
+    }
+    const checkpoint=JSON.parse(storage.get(checkpointKey));
+    storage.set(checkpointKey,JSON.stringify({...checkpoint,time:Date.now()-25*60*60*1000}));
+  }
+  assert.equal(imported,limit,'28 daily batches must reach 1,000 and stop');
+  const final=harness({persistedStorage:storage,catalogState,catalogItems});
+  assert.equal(final.scheduled.length,0,'restarting after target never re-seeds');
+  assert.equal(final.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().indexed,limit);
+  assert.equal(final.window.__dinoPatch03Bridge.getWorkIndexStats().works,limit);
+  assert.equal(final.calls.search.length,0);
+});
+
+test('duplicates already observed from native cards do not consume daily 36 new-work quota',async()=>{
+  const catalogItems=Array.from({length:160},(_,i)=>({
+    provider:'reanime',id:'duplicate-'+i,mal_id:'reanime:duplicate-'+i,
+    title:'Duplicate Work '+i,anilistId:500000+i,year:2026,type:'TV'
+  }));
+  const state={sources:[{provider:'reanime',total:catalogItems.length,status:'ready'}]};
+  const app=harness({catalogState:state,catalogItems});
+  app.window.renderCards('#topRail',catalogItems.slice(0,20));
+  assert.equal(app.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().indexed,20);
+  app.scheduled.shift()();
+  await settle();await settle();await settle();
+  const seed=app.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus();
+  assert.equal(seed.importedThisSession,36,'duplicates do not spend daily new-work budget');
+  assert.equal(seed.indexed,56);
+  assert.equal(seed.localPageReads,2,'the importer skips duplicate cards using only local pages');
+  assert.equal(seed.nextOffset,56,'the next daily cursor skips exactly the scanned entries');
+  assert.ok(app.calls.search.every(query=>query.provider==='reanime'&&query.sort==='popular'));
+});
+
+test('failed local index persistence cannot advance daily checkpoint and skip unsaved works',async()=>{
+  class StorageFull extends Map {
+    set(key,value) {
+      if(key===api.WORK_INDEX_KEY)throw Error('quota exceeded');
+      return super.set(key,value);
+    }
+  }
+  const storage=new StorageFull([['contentSource','reanime']]);
+  const catalogItems=Array.from({length:60},(_,i)=>({
+    provider:'reanime',id:'quota-'+i,mal_id:'reanime:quota-'+i,
+    title:'Quota Work '+i,anilistId:600000+i,year:2026,type:'TV'
+  }));
+  const app=harness({persistedStorage:storage,
+    catalogState:{sources:[{provider:'reanime',total:catalogItems.length,status:'ready'}]},
+    catalogItems});
+  app.scheduled.shift()();
+  await settle();await settle();await settle();
+  assert.equal(app.window.__dinoPatch03Bridge.getOriginalCatalogSeedStatus().status,'write-failed');
+  assert.equal(storage.has('lilacDinoPatch.workIndex.originalCatalogSeed.v1'),false);
+  assert.equal(storage.has(api.WORK_INDEX_KEY),false);
 });
