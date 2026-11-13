@@ -5,11 +5,15 @@ on:
     branches: [feature/dino-native-rust-manager]
     paths:
       - src/integrated-search.js
+      - src/dino-sqlite-sync.js
       - src/integrated-search.css
       - patches/patch03/**
       - tests/patch03-global-integration.test.cjs
       - tests/integrated-search.test.cjs
       - tests/patch03-settings-preservation.test.cjs
+      - tests/dino-sqlite-compat.test.cjs
+      - tools/dino-patch-manager/native-rust/src/transaction.rs
+      - scripts/validate-patch03-clean-source.cjs
       - tests/dino-native-manager-ui.test.cjs
       - tools/dino-patch-manager/native-rust/src/**
       - tools/dino-patch-manager/native-rust/Cargo.toml
@@ -32,12 +36,15 @@ jobs:
       - name: Check patch runtime syntax
         run: |
           node --check src/integrated-search.js
+          node --check src/dino-sqlite-sync.js
           node --check patches/patch03/patch03-bridge.js
+          node --check patches/patch03/dino-work-db.cjs
       - name: Verify global integration, missing-provider retries and real quality UI
         run: |
           node --test tests/patch03-global-integration.test.cjs
           node --test tests/integrated-search.test.cjs
           node --test tests/patch03-settings-preservation.test.cjs
+          node --test tests/dino-sqlite-compat.test.cjs
       - name: Verify native Rust manager UI and console-free Windows build contract
         run: node --test tests/dino-native-manager-ui.test.cjs
       - name: Verify patch manifest module SHA-256
