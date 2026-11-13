@@ -43,11 +43,17 @@
       try{return await flushing}finally{flushing=null;}
     }
     const initialRows=index.exportRows();
-    index.setPersistenceHook(row=>{
+    // No SQLite bridge? Keep the original v1 cache ONLY. An inactive
+    // persistence hook would otherwise retain every observed work in RAM.
+    if(typeof invoke==='function')index.setPersistenceHook(row=>{
       if(!row?.sources?.length)return;
       pending.set(key(row),row);
       schedule();
     });
+    const disableFailedBridge=()=>{
+      index.setPersistenceHook(null);
+      pending.clear();
+    };
     async function start(){
       if(started)return started;
       started=(async()=>{
@@ -55,7 +61,10 @@
         phase='checking';
         try{
           const status=await safeInvoke('status');
-          if(!status?.available){phase='legacy';reason=String(status?.reason||'SQLite unavailable');return false;}
+          if(!status?.available){
+            phase='legacy';reason=String(status?.reason||'SQLite unavailable');
+            disableFailedBridge();return false;
+          }
           // V1 remains intact. The SQLite transaction must acknowledge EVERY
           // imported batch before the store becomes authoritative for reads.
           phase='migrating';
@@ -71,6 +80,7 @@
         }catch(error){
           active=false;phase='legacy';
           reason=String(error?.message||error).slice(0,200);
+          disableFailedBridge();
           return false;
         }
       })();
