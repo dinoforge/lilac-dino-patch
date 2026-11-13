@@ -1483,5 +1483,5 @@ test('season observation is local-only and available in diagnostics',async()=>{
   await settle();await settle();
   const note=picker.querySelector('.dino-season-observation');
   assert.ok(note);
-  assert.match(note.textContent,/새로 관측한 방영 시작 작품/);
+  assert.match(note.textContent,/새로 관측한 공급원 항목/);
 });
