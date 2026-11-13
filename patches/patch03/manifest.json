@@ -40,7 +40,7 @@
       "file": "src/index.html",
       "description": "통합 모듈을 공식 앱 스크립트 전후로 로드",
       "before": "<script src=\"app.js\"></script>",
-      "after": "<script src=\"integrated-search.js\"></script>\n  <script src=\"app.js\"></script>\n  <script src=\"patch03-bridge.js\"></script>"
+      "after": "<script src=\"integrated-search.js\"></script>\n  <script src=\"app.js\"></script>\n  <script src=\"dino-sqlite-sync.js\"></script>\n  <script src=\"patch03-bridge.js\"></script>"
     }
   ],
   "runtimeModules": [
@@ -58,11 +58,23 @@
       "source": "patches/patch03/patch03-bridge.js",
       "destination": "src/patch03-bridge.js",
       "sha256": "2A517E9C183A53696A893A855985CD6E5FC530178C77457334B452ED0DC0574A"
+    },
+    {
+      "source": "src/dino-sqlite-sync.js",
+      "destination": "src/dino-sqlite-sync.js",
+      "sha256": "PENDING"
+    },
+    {
+      "source": "patches/patch03/dino-work-db.cjs",
+      "destination": "electron/dino-work-db.cjs",
+      "sha256": "PENDING"
     }
   ],
   "officialRuntimeModifiedAllowlist": [
     "src/app.js",
-    "src/index.html"
+    "src/index.html",
+    "electron/main.cjs",
+    "electron/preload.cjs"
   ],
   "officialApis": [
     {
@@ -114,7 +126,7 @@
           "file": "src/index.html",
           "description": "통합 모듈을 공식 앱 스크립트 전후로 로드",
           "before": "<script src=\"app.js\"></script>",
-          "after": "<script src=\"integrated-search.js\"></script>\n  <script src=\"app.js\"></script>\n  <script src=\"patch03-bridge.js\"></script>"
+          "after": "<script src=\"integrated-search.js\"></script>\n  <script src=\"app.js\"></script>\n  <script src=\"dino-sqlite-sync.js\"></script>\n  <script src=\"patch03-bridge.js\"></script>"
         }
       ]
     }
@@ -125,5 +137,24 @@
     "sourceVerification": "Matching external IDs or conservative alternate-title, release-year and season checks",
     "quality": "Decoded video height shown only after verified playback; never inferred from a catalog",
     "retry": "Manual retry for an initially undetected provider"
+  },
+  "optionalConnections": [
+    {
+      "file": "electron/main.cjs",
+      "description": "원본 main의 ready 진입 지점에 SQLite 전용 IPC만 추가하고 오류 시 원본을 유지",
+      "before": "app.whenReady().then(async () => {",
+      "after": "app.whenReady().then(async () => {\n  try { require('./dino-work-db.cjs').register({ app, ipcMain }); }\n  catch (error) { console.warn('[DinoPatch] SQLite fallback:', String(error?.message || error)); }"
+    },
+    {
+      "file": "electron/preload.cjs",
+      "description": "원본 contextBridge 객체에 제한된 SQLite IPC 함수 하나만 추가",
+      "before": "contextBridge.exposeInMainWorld('lilac', {",
+      "after": "contextBridge.exposeInMainWorld('lilac', {\n  dinoWorkIndex: (method, payload = null) => ipcRenderer.invoke('dino:work-index', method, payload),"
+    }
+  ],
+  "optionalPatchApi": {
+    "name": "dinoWorkIndex",
+    "channel": "dino:work-index",
+    "availableWhen": "Electron builtin node:sqlite enabled; otherwise safe localStorage fallback"
   }
 }
