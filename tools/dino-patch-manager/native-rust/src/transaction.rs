@@ -784,6 +784,7 @@ mod versionless_tests {
         let previous=std::env::var_os("APPDATA");
         std::env::set_var("APPDATA",&profile);
         let result=(||->Result<()>{
+            let canonical_root=installed_root(&root)?;
             let asar_path=root.join("resources").join("app.asar");
             fixture(&asar_path,"0.5.64",false)?;
             let ready=inspect(&root);
@@ -791,7 +792,7 @@ mod versionless_tests {
             let first=apply(&root,true)?;
             assert_eq!(first.status,"APPLIED","{}",first.reason);
             assert_eq!(uninstall(&root)?.status,"UNPATCHED");
-            let data=state_root(&root)?;
+            let data=state_root(&canonical_root)?;
             let archived_backup=data.join("original-app.asar");
             let original_hash=sha(&archived_backup)?;
             let original_state=fs::read(data.join("state.json"))?;
@@ -804,12 +805,12 @@ mod versionless_tests {
             assert!(review.manually_uninstalled);
             let result=apply(&root,true)?;
             assert_eq!(result.status,"APPLIED","{}",result.reason);
-            let active=read_state(&root)?.unwrap();
+            let active=read_state(&canonical_root)?.unwrap();
             assert_eq!(active["version"],"0.5.65");
             assert_eq!(active["backupFile"],backup_filename("0.5.65"));
             assert_eq!(sha(&archived_backup)?,original_hash);
             assert_eq!(fs::read(data.join("state.json"))?,original_state);
-            assert_eq!(sha(&backup_for_state(&root,&active)?)?,
+            assert_eq!(sha(&backup_for_state(&canonical_root,&active)?)?,
                 active["originalSha256"].as_str().unwrap());
             assert_eq!(uninstall(&root)?.status,"UNPATCHED");
             assert_eq!(sha(&asar_path)?,active["originalSha256"].as_str().unwrap());
@@ -823,7 +824,7 @@ mod versionless_tests {
             assert_eq!(future.status,"UNPATCHED", "{}",future.reason);
             let result=apply(&root,true)?;
             assert_eq!(result.status,"APPLIED","{}",result.reason);
-            let latest=read_state(&root)?.unwrap();
+            let latest=read_state(&canonical_root)?.unwrap();
             assert_eq!(latest["version"],"0.5.66");
             assert_eq!(uninstall(&root)?.status,"UNPATCHED");
             assert_eq!(sha(&archived_backup)?,original_hash);

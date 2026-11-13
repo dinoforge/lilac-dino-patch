@@ -128,3 +128,13 @@ test('all embedded JavaScript and CSS files retain exact bytes on Windows checko
   assert.ok(byteCheck>=0&&compile>byteCheck,
     'byte-level runtime verification must precede expensive Windows compile');
 });
+
+test('Windows fixture looks up old backups via the same canonical root as the manager',()=>{
+  assert.match(transaction,/let canonical_root=installed_root\(&root\)\?/);
+  assert.match(transaction,/let data=state_root\(&canonical_root\)\?/);
+  assert.match(transaction,/backup_for_state\(&canonical_root,&active\)\?/);
+  const safeTest=workflow.indexOf('Verify versionless patch, backup rollover and safe uninstall on Windows');
+  const expensiveCompile=workflow.indexOf('Compile the entire native Rust desktop manager');
+  assert.ok(safeTest>=0&&expensiveCompile>safeTest,
+    'run the cheap Windows patch regression before the expensive GUI build');
+});
