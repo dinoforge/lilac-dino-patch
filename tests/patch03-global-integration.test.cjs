@@ -31,7 +31,7 @@ class Elements {
   insertAdjacentElement(_position,item){this.append(item);}
   querySelectorAll(selector){
     const matching = element => {
-      if(selector==='.detail-source-picker'||selector==='.detail-actions'||selector==='.detail-meta'||selector==='.dino-source-track')
+      if(selector.startsWith('.') && !selector.includes(' '))
         return element.className.split(' ').includes(selector.slice(1));
       if(selector==='[data-provider-source]')
         return element.dataset.providerSource!==undefined;
