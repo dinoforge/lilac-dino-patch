@@ -15,7 +15,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 sha1 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-eframe = { version = "0.33", default-features = false, features = ["wgpu", "default_fonts", "x11", "wayland"], optional = true }
+eframe = { version = "0.33", default-features = false, features = ["wgpu", "default_fonts", "x11", "wayland", "persistence"], optional = true }
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
