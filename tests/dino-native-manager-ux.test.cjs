@@ -150,3 +150,12 @@ test('saved UI zoom is validated and does not persist source or automatic patch 
   assert.match(gui,/fn persist_egui_memory\(&self\) -> bool \{[\s\S]*?false/);
   assert.match(gui,/글자 크기와 창 크기는 다음 실행에도 유지됩니다/);
 });
+
+
+test('disabled actions explain why they cannot run',()=>{
+  const helper=gui.slice(gui.indexOf('fn action(ui: &mut Ui'),
+    gui.indexOf('fn card(ui: &mut Ui',gui.indexOf('fn action(ui: &mut Ui')));
+  assert.match(helper,/if enabled \{[\s\S]*?response\.clicked\(\)/);
+  assert.match(helper,/on_disabled_hover_text\(/);
+  assert.match(helper,/설치 원본과 패치 상태를 먼저 확인하세요/);
+});
