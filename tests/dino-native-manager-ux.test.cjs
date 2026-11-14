@@ -147,5 +147,6 @@ test('saved UI zoom is validated and does not persist source or automatic patch 
   const save=method('    fn save(&mut self, storage: &mut dyn eframe::Storage) {',
     '    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {');
   assert.doesNotMatch(save,/root|backup|auto_enabled|path_draft|transaction|status/);
+  assert.match(gui,/fn persist_egui_memory\(&self\) -> bool \{[\s\S]*?false/);
   assert.match(gui,/글자 크기와 창 크기는 다음 실행에도 유지됩니다/);
 });
