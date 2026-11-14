@@ -41,15 +41,22 @@ fn action(ui: &mut Ui, label: &str, tone: ButtonTone, enabled: bool) -> bool {
         ButtonTone::Secondary => (SURFACE, TEXT, BORDER),
         ButtonTone::Danger => (0x332528, 0xF1CBCB, 0x654147),
     };
-    ui.add_enabled(
+    let response = ui.add_enabled(
         enabled,
         Button::new(RichText::new(label).size(13.0).strong().color(rgb(ink)))
             .fill(rgb(fill))
             .stroke(Stroke::new(1.0, rgb(edge)))
             .corner_radius(CornerRadius::same(9))
             .min_size(Vec2::new(0.0, 36.0)),
-    )
-    .clicked()
+    );
+    // Disabled actions need a visible explanation, not just a dim button.
+    if enabled {
+        response.clicked()
+    } else {
+        response.on_disabled_hover_text(
+            "현재 상태에서는 실행할 수 없습니다. 설치 원본과 패치 상태를 먼저 확인하세요."
+        ).clicked()
+    }
 }
 
 fn card(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
