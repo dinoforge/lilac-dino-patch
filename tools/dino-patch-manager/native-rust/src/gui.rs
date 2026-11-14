@@ -11,13 +11,16 @@ use std::time::{Duration, Instant, SystemTime};
 
 const PAGE: u32 = 0x111820;
 const CARD: u32 = 0x172029;
-const BORDER: u32 = 0x2B3944;
+const BORDER: u32 = 0x3B4C5B;
 const ACCENT: u32 = 0x91C9B6;
 const BUTTON: u32 = 0x9AD6B7;
 const TEXT: u32 = 0xE8EDF2;
-const MUTED: u32 = 0xA1AFB8;
+// Readable secondary text against dark panels, including small status labels.
+const MUTED: u32 = 0xCAD6DF;
 const SURFACE: u32 = 0x222F39;
 const SURFACE_DARK: u32 = 0x19252E;
+
+const TEXT_ZOOM: [f32; 3] = [1.0, 1.2, 1.4];
 
 fn rgb(value: u32) -> Color32 {
     Color32::from_rgb((value >> 16) as u8, (value >> 8) as u8, value as u8)
@@ -38,7 +41,7 @@ fn action(ui: &mut Ui, label: &str, tone: ButtonTone, enabled: bool) -> bool {
     };
     ui.add_enabled(
         enabled,
-        Button::new(RichText::new(label).size(12.0).strong().color(rgb(ink)))
+        Button::new(RichText::new(label).size(13.0).strong().color(rgb(ink)))
             .fill(rgb(fill))
             .stroke(Stroke::new(1.0, rgb(edge)))
             .corner_radius(CornerRadius::same(9))
@@ -60,11 +63,11 @@ fn card(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
 }
 
 fn label(ui: &mut Ui, text: impl Into<String>) {
-    ui.label(RichText::new(text).size(11.0).color(rgb(MUTED)));
+    ui.label(RichText::new(text).size(12.5).color(rgb(MUTED)));
 }
 
 fn heading(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).size(16.0).strong().color(rgb(TEXT)));
+    ui.label(RichText::new(text).size(17.0).strong().color(rgb(TEXT)));
 }
 
 #[derive(Clone, Copy)]
@@ -91,7 +94,7 @@ fn pill(ui: &mut Ui, text: &str, tone: StatusTone) {
         .corner_radius(CornerRadius::same(16))
         .inner_margin(Margin::symmetric(11, 6))
         .show(ui, |ui| {
-            ui.label(RichText::new(text).size(11.0).strong().color(rgb(color)));
+            ui.label(RichText::new(text).size(12.0).strong().color(rgb(color)));
         });
 }
 
@@ -172,6 +175,7 @@ struct DinoUi {
     show_path_editor: bool,
     path_draft: String,
     show_advanced: bool,
+    text_zoom_index: usize,
     pending_action: Option<&'static str>,
 }
 
@@ -221,12 +225,35 @@ impl Default for DinoUi {
             show_path_editor: false,
             path_draft,
             show_advanced: false,
+            text_zoom_index: 0,
             pending_action: None,
         }
     }
 }
 
 impl DinoUi {
+    // A visible, keyboard-accessible control. Zoom changes the entire egui
+    // layout, including explicitly sized Korean labels and diagnostic logs.
+    // No font files or settings are written to the user's app profile.
+    fn readability_controls(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new("글자 크기")
+                .size(13.0).strong().color(rgb(TEXT)));
+            for (index, title) in ["기본 100%", "크게 120%", "매우 크게 140%"]
+                .iter().enumerate()
+            {
+                if ui.selectable_label(self.text_zoom_index == index, *title)
+                    .on_hover_text("관리자 전체의 글자와 버튼 크기를 조절합니다.")
+                    .clicked()
+                {
+                    self.text_zoom_index = index;
+                    ctx.set_zoom_factor(TEXT_ZOOM[index]);
+                }
+            }
+        });
+        label(ui, "글자가 흐리면 크기를 높여 주세요. 설정은 이번 실행에만 적용됩니다.");
+    }
+
     fn record(&mut self, text: impl Into<String>) {
         let message = text.into();
         diagnostics::write(&message);
@@ -451,12 +478,12 @@ impl DinoUi {
                     });
                 });
                 ui.add_space(7.0);
-                ui.label(RichText::new(headline).size(20.0).strong().color(rgb(TEXT)));
+                ui.label(RichText::new(headline).size(21.0).strong().color(rgb(TEXT)));
                 ui.add_space(3.0);
-                ui.label(RichText::new(details).size(12.0).color(rgb(MUTED)));
+                ui.label(RichText::new(details).size(13.0).color(rgb(MUTED)));
                 ui.add_space(7.0);
                 ui.label(RichText::new(next_step(&self.status, self.busy))
-                    .size(12.0).strong().color(rgb(ACCENT)));
+                    .size(13.0).strong().color(rgb(ACCENT)));
                 ui.add_space(14.0);
                 ui.horizontal_wrapped(|ui| {
                     pill(ui, "1. 원본 선택", if has_root {
@@ -792,7 +819,7 @@ impl DinoUi {
                             .stick_to_bottom(true).show(ui, |ui| {
                                 for line in &self.activity {
                                     ui.label(RichText::new(line)
-                                        .font(FontId::new(10.5, FontFamily::Monospace))
+                                        .font(FontId::new(12.0, FontFamily::Monospace))
                                         .color(rgb(MUTED)));
                                 }
                             });
@@ -822,7 +849,7 @@ impl DinoUi {
                 // Reason text gets the entire card width instead of sharing
                 // a single line with the status badge/spinner.
                 ui.label(RichText::new(&self.status.reason)
-                    .size(12.0).color(rgb(TEXT)));
+                    .size(13.0).color(rgb(TEXT)));
                 if let Some((title, note)) = safety_for(&self.status) {
                     ui.add_space(9.0);
                     Frame::new()
@@ -892,16 +919,16 @@ impl eframe::App for DinoUi {
                         ui.vertical_centered(|ui| {
                             ui.set_max_width(860.0);
                             ui.set_min_width(ui.available_width().min(860.0));
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 ui.vertical(|ui| {
                                     ui.label(RichText::new("DinoPatch Manager")
                                         .size(28.0).strong().color(rgb(TEXT)));
                                     label(ui, "LilacAnime · 원본 보존형 패치 관리자");
                                 });
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    pill(ui, "Rust 네이티브 · v0.2.0", StatusTone::Neutral);
-                                });
+                                pill(ui, "Rust 네이티브 · v0.2.0", StatusTone::Neutral);
                             });
+                            ui.add_space(10.0);
+                            self.readability_controls(ui, ctx);
                             ui.add_space(15.0);
                             self.overview_card(ui);
                             ui.add_space(12.0);
@@ -944,8 +971,15 @@ fn register_windows_fonts(ctx: &egui::Context) {
     #[cfg(windows)]
     {
         let windows = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into());
-        let path = PathBuf::from(windows).join("Fonts").join("malgun.ttf");
-        if let Ok(bytes) = std::fs::read(path) {
+        let directory = PathBuf::from(windows).join("Fonts");
+        // Use the regular Korean font first. Some Windows installations omit
+        // a particular family file, so try other preinstalled Korean fonts.
+        // Font data is loaded only into egui; no font is bundled or exported.
+        let candidates = ["malgun.ttf", "malgunbd.ttf", "malgunsl.ttf"];
+        let found = candidates.iter().find_map(|name| {
+            std::fs::read(directory.join(name)).ok().map(|bytes| (*name, bytes))
+        });
+        if let Some((name, bytes)) = found {
             let mut fonts = egui::FontDefinitions::default();
             fonts.font_data.insert(
                 "dino-hangul".into(),
@@ -955,8 +989,9 @@ fn register_windows_fonts(ctx: &egui::Context) {
                 fonts.families.entry(family).or_default().insert(0, "dino-hangul".into());
             }
             ctx.set_fonts(fonts);
+            diagnostics::write(&format!("Korean UI font loaded: {name}"));
         } else {
-            diagnostics::write("Windows Malgun Gothic font unavailable; using bundled fallback");
+            diagnostics::write("Windows Korean font missing; bundled fallback may not contain Hangul glyphs");
         }
     }
     #[cfg(not(windows))]
