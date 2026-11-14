@@ -5,9 +5,8 @@ name: DinoPatch Beta 8 - one-time Rust Windows GUI verification
 # No publishing and no changes to the protected manual release workflow.
 on:
   push:
-    branches: [ci/dino-beta8-native-gui-once-20261114]
-    paths:
-      - .github/workflows/dino-native-gui-one-shot-20261114.yml
+    branches:
+      - ci/dino-beta8-native-gui-once-20261114
 
 permissions:
   contents: read
