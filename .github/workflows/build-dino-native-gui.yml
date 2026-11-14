@@ -91,7 +91,9 @@ jobs:
           Set-Content -LiteralPath (Join-Path $fixture 'LilacAnime.exe') -Value 'CI marker'
           $env:DINO_ORIGINAL_ROOT=$fixture
           $env:APPDATA=Join-Path $env:RUNNER_TEMP 'dino-native-smoke-profile'
+          $env:LOCALAPPDATA=Join-Path $env:RUNNER_TEMP 'dino-native-smoke-local-profile'
           New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA | Out-Null
           $psi=[System.Diagnostics.ProcessStartInfo]::new($exe)
           $psi.UseShellExecute=$false
           $psi.CreateNoWindow=$false
