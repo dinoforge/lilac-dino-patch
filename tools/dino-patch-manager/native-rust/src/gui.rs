@@ -165,9 +165,78 @@ fn next_step(status: &transaction::Status, busy: bool) -> &'static str {
 }
 
 struct ResultMessage {
+    root: String,
+    generation: u64,
     name: String,
-    result: Result<transaction::Status>,
-    backup_id: Option<String>,
+    operation_error: Option<String>,
+    status: Option<transaction::Status>,
+    status_error: Option<String>,
+    backups: std::result::Result<Vec<BackupItem>, String>,
+}
+
+enum WorkerMessage {
+    Progress {
+        root: String,
+        generation: u64,
+        text: &'static str,
+    },
+    Completed(ResultMessage),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct BackupItem {
+    id: String,
+    version: String,
+    created_at: String,
+    restorable: bool,
+}
+
+fn parse_backup_items(value: &serde_json::Value) -> std::result::Result<Vec<BackupItem>, String> {
+    let items = value.get("items").and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "백업 목록 응답에 items 배열이 없습니다.".to_owned())?;
+    items.iter().enumerate().map(|(index, item)| {
+        let required_text = |key: &str| item.get(key).and_then(serde_json::Value::as_str)
+            .filter(|text| !text.trim().is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| format!("백업 목록 {index}번 항목의 {key} 값이 올바르지 않습니다."));
+        let restorable = item.get("restorable").and_then(serde_json::Value::as_bool)
+            .ok_or_else(|| format!("백업 목록 {index}번 항목의 복원 가능 상태가 없습니다."))?;
+        Ok(BackupItem {
+            id: required_text("id")?,
+            version: required_text("version")?,
+            created_at: required_text("createdAt")?,
+            restorable,
+        })
+    }).collect()
+}
+
+fn operation_stage(kind: &str) -> &'static str {
+    match kind {
+        "원본 다시 확인" => "원본 구조와 현재 파일 상태 확인 중",
+        "자동 검사" | "디노 패치 수동 적용" => "원본·백업 검증 및 패치 적용 작업 중",
+        "디노 패치 해제" | "백업 복원" => "원본·백업 SHA-256 검증 및 복원 작업 중",
+        "복구 상태 검사" | "복구 기록 정리" => "복구 기록·원본·백업 검증 중",
+        "백업 목록 새로 고침" => "현재 버전 백업 목록 읽는 중",
+        _ => "작업 진행 중",
+    }
+}
+
+fn completed_operation_state(
+    error: Option<&str>,
+    status: Option<&transaction::Status>,
+) -> &'static str {
+    if error.is_some() {
+        return "오류 발생 · 진단 로그를 확인하세요";
+    }
+    match status.map(|value| value.status.as_str()) {
+        Some("CONFLICT") => "확인 완료 · 파일 충돌 감지",
+        Some("PARTIAL_OR_UNKNOWN") => "확인 완료 · 상태 재검증 필요",
+        Some("UNSUPPORTED") => "검사 완료 · 호환되지 않는 소스",
+        Some("APPLIED") | Some("ALREADY_APPLIED") => "완료 · 패치 상태 확인",
+        Some("UNPATCHED") | Some("ALREADY_UNPATCHED") => "완료 · 원본 상태 확인",
+        Some("NO_SOURCE") => "확인 완료 · 설치 원본 미발견",
+        _ => "작업 완료 · 결과 상태 확인",
+    }
 }
 
 struct DinoUi {
@@ -175,11 +244,16 @@ struct DinoUi {
     status: transaction::Status,
     auto_enabled: bool,
     busy: bool,
+    operation_state: String,
+    task_generation: u64,
     activity: Vec<String>,
-    response: Option<Receiver<ResultMessage>>,
+    response: Option<Receiver<WorkerMessage>>,
     last_archive_change: Option<(u64, Option<SystemTime>)>,
     last_monitor: Instant,
-    backup_id: String,
+    backup_items: Vec<BackupItem>,
+    backup_list_root: Option<String>,
+    backup_error: Option<String>,
+    selected_backup_id: Option<String>,
     show_log: bool,
     show_path_editor: bool,
     path_draft: String,
@@ -225,11 +299,16 @@ impl Default for DinoUi {
             },
             auto_enabled: true,
             busy: false,
+            operation_state: "대기 중".into(),
+            task_generation: 0,
             activity: vec!["DinoPatch Rust 관리자가 시작됐습니다.".into()],
             response: None,
             last_archive_change: None,
             last_monitor: Instant::now() - Duration::from_secs(5),
-            backup_id: String::new(),
+            backup_items: Vec::new(),
+            backup_list_root: None,
+            backup_error: None,
+            selected_backup_id: None,
             show_log: false,
             show_path_editor: false,
             path_draft,
@@ -288,57 +367,165 @@ impl DinoUi {
         }
     }
 
+    fn clear_backup_list(&mut self) {
+        self.backup_items.clear();
+        self.backup_list_root = None;
+        self.backup_error = None;
+        self.selected_backup_id = None;
+    }
+
+    fn set_root(&mut self, root: String) {
+        if self.root != root {
+            self.root = root;
+            self.task_generation = self.task_generation.wrapping_add(1);
+            self.clear_backup_list();
+            self.operation_state = "새 설치 경로에서 원본과 백업을 확인해야 합니다.".into();
+        }
+    }
+
+    fn selected_backup(&self) -> Option<&BackupItem> {
+        if self.backup_list_root.as_deref() != Some(self.root.trim()) {
+            return None;
+        }
+        let id = self.selected_backup_id.as_deref()?;
+        self.backup_items.iter().find(|item| item.id == id)
+    }
+
+    fn task_is_current(&self, root: &str, generation: u64) -> bool {
+        self.task_generation == generation && self.root.trim() == root
+    }
+
+    fn can_restore_selected_backup(&self) -> bool {
+        !self.busy
+            && matches!(self.status.status.as_str(), "APPLIED" | "ALREADY_APPLIED")
+            && self.selected_backup().is_some_and(|item| item.restorable)
+    }
+
+    fn update_backup_list(
+        &mut self,
+        root: &str,
+        result: std::result::Result<Vec<BackupItem>, String>,
+    ) {
+        if root != self.root.trim() {
+            return;
+        }
+        self.backup_list_root = Some(root.to_owned());
+        match result {
+            Ok(items) => {
+                if self.selected_backup_id.as_ref().is_some_and(|selected| {
+                    !items.iter().any(|item| &item.id == selected)
+                }) {
+                    self.selected_backup_id = None;
+                }
+                self.backup_items = items;
+                self.backup_error = None;
+            }
+            Err(error) => {
+                self.backup_items.clear();
+                self.selected_backup_id = None;
+                self.backup_error = Some(error.clone());
+                self.record(format!("백업 목록 조회 실패: {error}"));
+                self.show_log = true;
+                self.show_advanced = true;
+            }
+        }
+    }
+
     fn enqueue(&mut self, kind: &'static str) {
         if self.busy || self.root.trim().is_empty() {
             return;
         }
+        if kind == "백업 복원" && !self.can_restore_selected_backup() {
+            self.record("복원 가능한 백업이 선택되지 않아 작업을 시작하지 않았습니다.");
+            self.operation_state = "안전 중단 · 복원 가능한 백업을 선택하세요".into();
+            self.show_log = true;
+            self.show_advanced = true;
+            return;
+        }
+
         self.busy = true;
-        self.record(format!("{kind} 작업 시작"));
-        let root = PathBuf::from(self.root.trim());
-        let backup = self.backup_id.clone();
+        self.operation_state = "작업 요청 접수".into();
+        self.record(format!("{kind} 작업 요청 접수"));
+        self.task_generation = self.task_generation.wrapping_add(1);
+        let generation = self.task_generation;
+        let root_label = self.root.trim().to_owned();
+        let root = PathBuf::from(&root_label);
+        let backup_id = if kind == "백업 복원" {
+            self.selected_backup_id.clone()
+        } else {
+            None
+        };
+        if kind != "백업 목록 새로 고침" {
+            self.selected_backup_id = None;
+        }
         let (sender, receiver) = mpsc::channel();
         self.response = Some(receiver);
         let spawned = std::thread::Builder::new()
             .name("dino-native-gui-task".into())
             .stack_size(16 * 1024 * 1024)
             .spawn(move || {
+                let _ = sender.send(WorkerMessage::Progress {
+                    root: root_label.clone(),
+                    generation,
+                    text: operation_stage(kind),
+                });
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     match kind {
-                        "원본 다시 확인" => Ok(transaction::inspect(&root)),
-                        "자동 검사" => transaction::apply(&root, false),
-                        "디노 패치 수동 적용" => transaction::apply(&root, true),
-                        "디노 패치 해제" => transaction::uninstall(&root),
-                        "복구 상태 검사" => transaction::review_recovery(&root),
-                        "복구 기록 정리" => transaction::recover(&root),
-                        "백업 복원" => transaction::restore(&root, &backup),
+                        "원본 다시 확인" | "백업 목록 새로 고침" => Ok(()),
+                        "자동 검사" => transaction::apply(&root, false).map(|_| ()),
+                        "디노 패치 수동 적용" => transaction::apply(&root, true).map(|_| ()),
+                        "디노 패치 해제" => transaction::uninstall(&root).map(|_| ()),
+                        "복구 상태 검사" => transaction::review_recovery(&root).map(|_| ()),
+                        "복구 기록 정리" => transaction::recover(&root).map(|_| ()),
+                        "백업 복원" => match backup_id.as_deref() {
+                            Some(id) => transaction::restore(&root, id).map(|_| ()),
+                            None => Err(crate::fail("복원할 백업 ID가 선택되지 않았습니다.")),
+                        },
                         _ => Err(crate::fail("지원하지 않는 관리자 작업입니다.")),
                     }
                 }));
-                let result = outcome.unwrap_or_else(|_| {
-                    Err(crate::fail(
-                        "Rust 작업 내부 오류가 발생했습니다. 원본과 백업을 유지하고 진단 로그를 확인하세요.",
-                    ))
-                });
-                let backup_id = if result.is_ok() {
-                    transaction::backups(&root).ok()
-                        .and_then(|v| {
-                            v["items"].as_array()
-                                .and_then(|items| items.first())
-                                .and_then(|item| item["id"].as_str())
-                                .map(str::to_owned)
-                        })
-                } else {
-                    None
+                let operation_error = match outcome {
+                    Ok(Ok(())) => None,
+                    Ok(Err(error)) => Some(error.to_string()),
+                    Err(_) => Some(
+                        "Rust 작업 내부 오류가 발생했습니다. 원본과 백업을 유지하고 진단 로그를 확인하세요.".into(),
+                    ),
                 };
-                let _ = sender.send(ResultMessage {
-                    name: kind.to_string(),
-                    result,
-                    backup_id,
+                let _ = sender.send(WorkerMessage::Progress {
+                    root: root_label.clone(),
+                    generation,
+                    text: "작업 결과와 현재 파일 상태 확인 중",
                 });
+                let (status, status_error) = match std::panic::catch_unwind(
+                    std::panic::AssertUnwindSafe(|| transaction::inspect(&root)),
+                ) {
+                    Ok(status) => (Some(status), None),
+                    Err(_) => (
+                        None,
+                        Some("작업 결과 뒤 현재 파일 상태를 확인하는 중 내부 오류가 발생했습니다.".into()),
+                    ),
+                };
+                let backups = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    transaction::backups(&root)
+                })) {
+                    Ok(Ok(value)) => parse_backup_items(&value),
+                    Ok(Err(error)) => Err(error.to_string()),
+                    Err(_) => Err("백업 목록 조회 중 내부 오류가 발생했습니다.".into()),
+                };
+                let _ = sender.send(WorkerMessage::Completed(ResultMessage {
+                    root: root_label,
+                    generation,
+                    name: kind.to_string(),
+                    operation_error,
+                    status,
+                    status_error,
+                    backups,
+                }));
             });
         if let Err(error) = spawned {
             self.record(format!("작업 스레드를 실행할 수 없습니다: {error}"));
             self.busy = false;
+            self.operation_state = "오류 발생 · 작업 스레드를 시작하지 못했습니다".into();
             self.response = None;
             self.show_log = true;
             self.show_advanced = true;
@@ -346,42 +533,76 @@ impl DinoUi {
     }
 
     fn poll_result(&mut self) {
-        let outcome = self.response.as_ref().and_then(|rx| match rx.try_recv() {
-            Ok(event) => Some(Ok(event)),
-            Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => Some(Err(
-                "작업 스레드가 응답 없이 종료됐습니다. native-manager.log에서 오류를 확인하세요.",
-            )),
-        });
-        if let Some(outcome) = outcome {
-            self.busy = false;
-            self.response = None;
-            match outcome {
-                Ok(event) => match event.result {
-                    Ok(status) => {
-                        self.record(format!("{} · {} · {}", event.name, status.status, status.reason));
-                        self.status = status;
-                        self.backup_id = event.backup_id.unwrap_or_default();
+        let mut events = Vec::new();
+        let mut disconnected = false;
+        if let Some(receiver) = self.response.as_ref() {
+            loop {
+                match receiver.try_recv() {
+                    Ok(event) => events.push(event),
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        disconnected = true;
+                        break;
                     }
-                    Err(error) => {
-                        let message = format!("{} 실패: {error}", event.name);
-                        self.record(&message);
-                        self.status = transaction::Status::new(
-                            "PARTIAL_OR_UNKNOWN", &self.status.version, message
-                        );
-                        self.show_log = true;
-                        self.show_advanced = true;
-                    }
-                },
-                Err(message) => {
-                    self.record(message);
-                    self.status = transaction::Status::new(
-                        "PARTIAL_OR_UNKNOWN", &self.status.version, message
-                    );
-                    self.show_log = true;
-                    self.show_advanced = true;
                 }
             }
+        }
+        for event in events {
+            match event {
+                WorkerMessage::Progress { root, generation, text }
+                    if self.task_is_current(&root, generation) => {
+                        self.operation_state = text.into();
+                    }
+                WorkerMessage::Progress { .. } => {}
+                WorkerMessage::Completed(event)
+                    if self.task_is_current(&event.root, event.generation) => {
+                        self.busy = false;
+                        self.response = None;
+                        if let Some(status) = event.status {
+                            self.status = status;
+                        } else {
+                            self.status = transaction::Status::new(
+                                "PARTIAL_OR_UNKNOWN", &self.status.version,
+                                "작업은 종료됐지만 현재 파일 상태를 다시 확인하지 못했습니다. 진단 로그를 확인하세요."
+                            );
+                        }
+                        self.update_backup_list(&event.root, event.backups);
+                        if let Some(error) = event.operation_error {
+                            self.record(format!("{} 실패: {error}", event.name));
+                            self.operation_state = completed_operation_state(
+                                Some(&error), Some(&self.status)
+                            ).into();
+                            self.show_log = true;
+                            self.show_advanced = true;
+                        } else if let Some(error) = event.status_error {
+                            self.record(format!("{} 후 상태 재검사 실패: {error}", event.name));
+                            self.operation_state = completed_operation_state(
+                                Some(&error), Some(&self.status)
+                            ).into();
+                            self.show_log = true;
+                            self.show_advanced = true;
+                        } else {
+                            self.record(format!("{} · {} · {}", event.name,
+                                self.status.status, self.status.reason));
+                            self.operation_state = completed_operation_state(
+                                None, Some(&self.status)
+                            ).into();
+                        }
+                    }
+                WorkerMessage::Completed(_) => {}
+            }
+        }
+        if disconnected && self.busy {
+            let message = "작업 스레드가 응답 없이 종료됐습니다. native-manager.log에서 오류를 확인하세요.";
+            self.record(message);
+            self.status = transaction::Status::new(
+                "PARTIAL_OR_UNKNOWN", &self.status.version, message
+            );
+            self.operation_state = "오류 발생 · 작업 응답이 끊겼습니다".into();
+            self.busy = false;
+            self.response = None;
+            self.show_log = true;
+            self.show_advanced = true;
         }
     }
 
@@ -431,9 +652,8 @@ impl DinoUi {
             } else {
                 path
             };
-            self.root = root.to_string_lossy().to_string();
+            self.set_root(root.to_string_lossy().to_string());
             self.path_draft = self.root.clone();
-            self.backup_id.clear();
             self.last_archive_change = None;
             self.last_monitor = Instant::now();
             self.status = transaction::Status::new(
@@ -636,8 +856,7 @@ impl DinoUi {
                         !self.busy && !self.path_draft.trim().is_empty()) {
                         let candidate = self.path_draft.trim().to_owned();
                         if self.root != candidate {
-                            self.root = candidate;
-                            self.backup_id.clear();
+                            self.set_root(candidate);
                             self.status = transaction::Status::new(
                                 "SOURCE_FOUND", "", "새 설치 폴더를 선택했습니다. 구조 검사 중입니다."
                             );
@@ -720,6 +939,17 @@ impl DinoUi {
     }
 
     fn advanced_card(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let backup_list_current = self.backup_list_root.as_deref() == Some(self.root.trim());
+        let backup_items = if backup_list_current {
+            self.backup_items.clone()
+        } else {
+            Vec::new()
+        };
+        let backup_error = if backup_list_current {
+            self.backup_error.clone()
+        } else {
+            None
+        };
         card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new("수동 관리").size(14.0).strong().color(rgb(TEXT)));
@@ -756,27 +986,55 @@ impl DinoUi {
                 .inner_margin(Margin::symmetric(14, 11))
                 .show(ui, |ui| {
                     ui.set_min_width(ui.available_width());
-                    ui.label(RichText::new("백업 및 작업 기록")
+                    ui.label(RichText::new("백업 목록 및 작업 기록")
                         .size(14.0).strong().color(rgb(TEXT)));
-                    label(ui, "선택한 백업을 SHA-256으로 확인한 뒤에만 원본을 복원합니다.");
+                    label(ui, "현재 설치 경로에서 엔진이 반환한 백업만 표시합니다. 복원 직전 엔진이 경로·버전·SHA-256을 다시 확인합니다.");
+                    ui.add_space(6.0);
+                    if !backup_list_current {
+                        label(ui, "현재 설치 경로의 백업 목록을 아직 확인하지 않았습니다.");
+                    } else if let Some(error) = backup_error {
+                        ui.label(RichText::new(format!("백업 목록 오류: {error}"))
+                            .size(12.0).color(rgb(0xF0A5A5)));
+                    } else if backup_items.is_empty() {
+                        label(ui, "현재 버전에서 조회된 백업이 없습니다.");
+                    } else {
+                        label(ui, format!("현재 엔진 반환 항목 {}개", backup_items.len()));
+                        for backup in &backup_items {
+                            Frame::new()
+                                .fill(rgb(PAGE))
+                                .stroke(Stroke::new(1.0, rgb(BORDER)))
+                                .corner_radius(CornerRadius::same(9))
+                                .inner_margin(Margin::symmetric(11, 8))
+                                .show(ui, |ui| {
+                                    ui.set_min_width(ui.available_width());
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.radio_value(
+                                            &mut self.selected_backup_id,
+                                            Some(backup.id.clone()),
+                                            "",
+                                        );
+                                        ui.vertical(|ui| {
+                                            label(ui, format!("백업 ID  {}", backup.id));
+                                            label(ui, format!("LilacAnime v{} · 생성 {}",
+                                                backup.version, backup.created_at));
+                                        });
+                                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                            pill(ui,
+                                                if backup.restorable { "복원 가능" } else { "복원 불가" },
+                                                if backup.restorable { StatusTone::Good } else { StatusTone::Bad });
+                                        });
+                                    });
+                                });
+                        }
+                    }
                     ui.add_space(6.0);
                     ui.horizontal_wrapped(|ui| {
-                        let id = if self.backup_id.is_empty() {
-                            "사용 가능한 백업 없음".to_owned()
-                        } else {
-                            self.backup_id.clone()
-                        };
-                        Frame::new().fill(rgb(PAGE))
-                            .stroke(Stroke::new(1.0, rgb(BORDER)))
-                            .corner_radius(CornerRadius::same(9))
-                            .inner_margin(Margin::symmetric(12, 9))
-                            .show(ui, |ui| {
-                                label(ui, format!("복원할 백업  {id}"));
-                            });
-                        if action(ui, "백업 복원", ButtonTone::Secondary,
-                            !self.busy && !self.backup_id.is_empty()
-                                && matches!(self.status.status.as_str(),
-                                    "APPLIED" | "ALREADY_APPLIED")) {
+                        if action(ui, "백업 목록 새로 고침", ButtonTone::Secondary,
+                            !self.busy && !self.root.trim().is_empty()) {
+                            self.enqueue("백업 목록 새로 고침");
+                        }
+                        if action(ui, "백업 복원", ButtonTone::Primary,
+                            self.can_restore_selected_backup()) {
                             self.ask("백업 복원");
                         }
                         if action(ui, "작업 기록", ButtonTone::Secondary, !self.busy) {
@@ -866,8 +1124,19 @@ impl DinoUi {
                     ui.label(RichText::new("현재 진단").size(12.0).strong().color(rgb(ACCENT)));
                     if self.busy {
                         ui.spinner();
-                        pill(ui, "진행 중", StatusTone::Warning);
                     }
+                    let tone = if self.busy {
+                        StatusTone::Warning
+                    } else if self.operation_state.starts_with("오류 발생") {
+                        StatusTone::Bad
+                    } else if self.operation_state.starts_with("안전 중단") {
+                        StatusTone::Warning
+                    } else if self.operation_state.starts_with("완료") {
+                        StatusTone::Good
+                    } else {
+                        StatusTone::Neutral
+                    };
+                    pill(ui, &self.operation_state, tone);
                 });
                 ui.add_space(5.0);
                 // Reason text gets the entire card width instead of sharing
@@ -905,6 +1174,15 @@ impl DinoUi {
                 "원본과 백업·중단된 작업 기록이 일치할 때만 복구 기록을 별도로 보존하고 정리합니다.",
             _ => "선택한 작업을 진행하시겠습니까?",
         };
+        let backup_details = if operation == "백업 복원" {
+            self.selected_backup().map(|backup| format!(
+                "대상 경로: {}\n현재 앱 버전: v{}\n선택 백업 버전: v{}\n백업 ID: {}",
+                self.root.trim(), self.status.version, backup.version, backup.id
+            )).unwrap_or_else(|| "복원 대상 백업을 현재 경로에서 확인할 수 없습니다.".into())
+        } else {
+            String::new()
+        };
+        let can_continue = operation != "백업 복원" || self.can_restore_selected_backup();
         egui::Window::new("DinoPatch · 작업 확인")
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .resizable(false)
@@ -914,12 +1192,16 @@ impl DinoUi {
                 heading(ui, operation);
                 ui.add_space(8.0);
                 ui.label(RichText::new(explanation).size(12.0).color(rgb(TEXT)));
+                if !backup_details.is_empty() {
+                    ui.add_space(8.0);
+                    ui.label(RichText::new(backup_details).size(11.5).color(rgb(MUTED)));
+                }
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     if action(ui, "취소", ButtonTone::Secondary, true) {
                         self.pending_action = None;
                     }
-                    if action(ui, "계속", ButtonTone::Primary, true) {
+                    if action(ui, "계속", ButtonTone::Primary, can_continue) {
                         self.pending_action = None;
                         self.enqueue(operation);
                     }
@@ -1071,4 +1353,67 @@ pub fn start() -> Result<()> {
             Ok(Box::new(app))
         })
     ).map_err(|error| crate::fail(format!("Rust GUI 실행 실패: {error}")))
+}
+
+#[cfg(test)]
+mod backup_list_tests {
+    use super::{operation_stage, parse_backup_items, BackupItem};
+    use serde_json::json;
+
+    #[test]
+    fn backup_list_accepts_zero_items() {
+        assert!(parse_backup_items(&json!({ "items": [] })).unwrap().is_empty());
+    }
+
+    #[test]
+    fn backup_list_preserves_single_item_metadata() {
+        let items = parse_backup_items(&json!({
+            "items": [{
+                "id": "backup-1",
+                "version": "0.5.65",
+                "createdAt": "2026-11-14T12:00:00Z",
+                "restorable": true
+            }]
+        })).unwrap();
+
+        assert_eq!(items, vec![BackupItem {
+            id: "backup-1".into(),
+            version: "0.5.65".into(),
+            created_at: "2026-11-14T12:00:00Z".into(),
+            restorable: true,
+        }]);
+    }
+
+    #[test]
+    fn backup_list_keeps_all_items_and_non_restorable_state() {
+        let items = parse_backup_items(&json!({
+            "items": [
+                {"id":"backup-a","version":"0.5.65","createdAt":"t1","restorable":true},
+                {"id":"backup-b","version":"0.5.65","createdAt":"t2","restorable":false}
+            ]
+        })).unwrap();
+
+        assert_eq!(items.len(), 2);
+        assert!(items[0].restorable);
+        assert!(!items[1].restorable);
+        assert_eq!(items[1].id, "backup-b");
+    }
+
+    #[test]
+    fn malformed_backup_list_fails_closed() {
+        assert!(parse_backup_items(&json!({})).is_err());
+        assert!(parse_backup_items(&json!({ "items": [{
+            "id":"backup-a","version":"0.5.65","createdAt":"t1"
+        }]})).is_err());
+        assert!(parse_backup_items(&json!({ "items": [{
+            "id":" ","version":"0.5.65","createdAt":"t1","restorable":true
+        }]})).is_err());
+    }
+
+    #[test]
+    fn operation_stages_are_truthful_and_do_not_claim_percentages() {
+        assert_eq!(operation_stage("원본 다시 확인"), "원본 구조와 현재 파일 상태 확인 중");
+        assert_eq!(operation_stage("백업 복원"), "원본·백업 SHA-256 검증 및 복원 작업 중");
+        assert!(!operation_stage("자동 검사").contains('%'));
+    }
 }

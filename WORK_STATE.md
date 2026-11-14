@@ -784,3 +784,13 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 공식 v0.5.65 설치 아카이브 SHA-256 `BF659DA28112B53196947C08B75D91AC6667DC94726176EEAE93D7F051EAE8AA`, `app.asar` SHA-256 `9A5BBCDDDA592F173D6E1C5BC01AC0BBBEC8D003C40CB3A4113AFB307A08DA12`를 확인했다. OS Temp의 최소 설치 복사본에서 최초 적용, 재실행 멱등성, 해제, 명시적 재적용, 재해제를 확인했고 최종 `app.asar`는 공식 SHA로 복원됐으며 백업은 1개로 유지됐다.
 - Windows Rust GUI 빌드 통과: EXE SHA-256 `18FACEEFDB09884E985C05C78546C4539669C835965F585038C5D3461A565C48`, PE subsystem 2. 실제 GUI 시작 스모크는 OS Temp 경로에서 창 생성, 잘못된 ASAR 디렉터리의 비파괴 안전 거부, 백업 미생성을 확인했다. 실제 LilacAnime 앱 실행·사용자 설치본 검증은 하지 않았다.
 - `cargo fmt --all -- --check`는 기존 Rust 파일 전반의 미포맷 기준 때문에 실패했다. 기존 전체 형식을 대량 재작성하지 않았다. 원격 저장소에는 테스트·검증 Actions 16개를 비활성화하고 YAML 정의는 보존했다. 배포/릴리즈와 수동 패키징 워크플로는 활성 상태로 유지했다.
+
+## 2026-11-14 Beta 8 관리자 진행·백업 UI 보강
+
+- `feature/dino-beta8-manager-progress-backup-ui`에서 `gui.rs`의 작업 진행 표시를 실제 작업 단계 이벤트로 바꾸고, 완료 후 상태/백업 재조회, 오류·패닉·채널 종료 시 busy 해제, 설치 경로/세대 불일치 작업 결과 무시를 추가했다. 측정되지 않은 퍼센트는 표시하지 않는다.
+- 백업 UI는 `transaction::backups()`의 결과만 비동기로 표시한다. ID·버전·생성 시각·복원 가능 상태를 보여 주고, 선택된 복원 가능 백업만 확인창을 거쳐 전달한다. 경로 변경 시 목록과 선택을 초기화한다. `transaction.rs`의 SHA-256 및 복구 저널 검증은 유지했다.
+- `tests/dino-native-manager-ux.test.cjs`에서 단계 표시·stale 응답·오류 정리·백업 목록·선택 ID·확인 취소 계약을 보강했다. Node UI 23/23, release preflight 199/199, 전체 npm 568 통과·0 실패·17 건너뜀, Rust CLI 7/7, GUI feature Rust 12/12, Windows release GUI build 통과, `git diff --check` 통과.
+- `cargo fmt --all -- --check`는 기존 `gui.rs` 기준 43개 rustfmt 차이와 수정본 48개 차이로 실패했다. 무관한 전체 재포맷은 수행하지 않았다.
+- 새 EXE `C:\Users\공룡\.codex\task-temp\01a12bb7-ff6d-7643-b619-0d53d12c7730\beta8-ui-cargo-target\release\dino-native-manager.exe`, SHA-256 `8474D8046769762F93C06CC4AC7912E1AC3C820403B86CB7215E158496279DA2`. 격리 v0.5.65 사본에서 GUI 시작, 940×840 창, 원본 인식 및 자동 적용 표시를 확인했다. 화면 대상이 어긋난 뒤 GUI 조작을 중지해 목록 선택·취소·복원 UI는 미검증이다.
+- 격리 사본은 CLI로 복원하고 `app.asar` 공식 SHA-256 `9A5BBCDDDA592F173D6E1C5BC01AC0BBBEC8D003C40CB3A4113AFB307A08DA12`, `UNPATCHED`, 패치 모듈 부재를 확인했다. 백업 ASAR 및 상태 파일은 격리 경로에 남았다. 실제 사용자 자료와 A32 배포본은 변경하지 않았다.
+- GitHub Actions 실행은 0회다. 원격 활성 워크플로는 manual/tag/release 전용이며 현재 작업 브랜치 push 대상 workflow는 비활성화 상태임을 확인했다. GUI 직접 조작의 잔여 항목을 남기고 실제 사용자 설치본 테스트·정식 릴리스는 하지 않았다.
