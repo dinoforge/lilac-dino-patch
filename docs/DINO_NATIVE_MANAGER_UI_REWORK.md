@@ -86,3 +86,31 @@ cargo build --release --features gui
 소스 기반 UI 계약 테스트 **16개를 별도 JavaScript 실행 환경에서 재현하여 통과**했습니다.
 테스트 도중 실제 Rust 컴파일 및 Windows 실행은 수행하지 않았으므로 Windows UI 확인은
 여전히 미완료입니다. 기존 Windows EXE는 변경하지 않았습니다.
+
+
+## UI 설정 재시작 보존 및 검증 준비 (2026-11-14)
+
+- Rust `eframe 0.33`에 `persistence` 기능을 활성화했습니다.
+- 글자 크기 **100% / 120% / 140%**, 고급 관리 메뉴의 접힘 상태, 기본 창 크기/위치가 재시작 후에도 복원되도록 연결했습니다.
+- 저장된 확대율 값은 0~2 범위로 검증하며 손상되었을 경우 기본 100%로 초기화합니다.
+- **설치 경로, 입력 중인 경로, 백업 ID, 자동 패치 정책, 사용자 데이터는 UI 설정 저장 대상에서 제외**했습니다. egui 편집기 내부 상태의 자동 저장도 해제했습니다.
+- Windows GUI CI 스모크 테스트에서 `APPDATA`와 `LOCALAPPDATA`를 각각 테스트 전용 경로로 격리합니다.
+- 이전 문단의 "확대 상태는 이 실행에만 유지"는 당시 구현에 대한 기록입니다. **이 브랜치부터 확대율이 다음 실행에도 유지됩니다.**
+- UI 계약 검사 **18개를 별도 JavaScript 실행 환경에서 재현하여 모두 통과**했습니다. 이 검사는 실제 Node.js, Rust 컴파일 또는 Windows 실행 검증을 대신하지 않습니다.
+
+### 새 브랜치에서 수행할 검증
+
+```powershell
+node --test tests/dino-native-manager-ui.test.cjs tests/dino-native-manager-ux.test.cjs
+node scripts/dino-release-preflight.cjs
+cd tools/dino-patch-manager/native-rust
+cargo fmt --all -- --check
+cargo test --no-default-features
+cargo build --release --features gui
+```
+
+Windows 실행에서 확대율·고급 메뉴·창 위치가 **프로그램 재시작 후 유지되는지** 확인하세요.
+시스템 DPI 변경 후 폰트 크기, 텍스트 잘림, 입력 포커스, 한글 글리프를 재점검해야 합니다.
+
+**이번 단계 미검증:** Rust GUI 실제 컴파일, Windows DPI별 실화면 확인, 공식 앱 복사본 패치/해제,
+실제 공급원 5개 재생, EXE/ZIP 재빌드 및 정식 릴리스 결정입니다. 이전 배포 파일은 변경하지 않았습니다.
