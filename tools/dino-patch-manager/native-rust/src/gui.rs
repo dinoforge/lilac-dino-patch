@@ -21,6 +21,8 @@ const SURFACE: u32 = 0x222F39;
 const SURFACE_DARK: u32 = 0x19252E;
 
 const TEXT_ZOOM: [f32; 3] = [1.0, 1.2, 1.4];
+const TEXT_ZOOM_KEY: &str = "dino.manager.ui.textZoom.v1";
+const ADVANCED_PANEL_KEY: &str = "dino.manager.ui.advancedOpen.v1";
 
 fn rgb(value: u32) -> Color32 {
     Color32::from_rgb((value >> 16) as u8, (value >> 8) as u8, value as u8)
@@ -232,6 +234,21 @@ impl Default for DinoUi {
 }
 
 impl DinoUi {
+    // Save only cosmetic preferences. Never persist the installed root,
+    // backup identifiers, auto-patch policy, or transaction status.
+    fn with_storage(storage: Option<&dyn eframe::Storage>) -> Self {
+        let mut app = Self::default();
+        if let Some(storage) = storage {
+            app.text_zoom_index = storage.get_string(TEXT_ZOOM_KEY)
+                .and_then(|raw| raw.parse::<usize>().ok())
+                .filter(|index| *index < TEXT_ZOOM.len())
+                .unwrap_or(0);
+            app.show_advanced = storage.get_string(ADVANCED_PANEL_KEY)
+                .is_some_and(|raw| raw == "true");
+        }
+        app
+    }
+
     // A visible, keyboard-accessible control. Zoom changes the entire egui
     // layout, including explicitly sized Korean labels and diagnostic logs.
     // No font files or settings are written to the user's app profile.
@@ -251,7 +268,7 @@ impl DinoUi {
                 }
             }
         });
-        label(ui, "글자가 흐리면 크기를 높여 주세요. 설정은 이번 실행에만 적용됩니다.");
+        label(ui, "글자가 흐리면 크기를 높여 주세요. 글자 크기와 창 크기는 다음 실행에도 유지됩니다.");
     }
 
     fn record(&mut self, text: impl Into<String>) {
@@ -905,6 +922,11 @@ impl DinoUi {
 }
 
 impl eframe::App for DinoUi {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        storage.set_string(TEXT_ZOOM_KEY, self.text_zoom_index.to_string());
+        storage.set_string(ADVANCED_PANEL_KEY, self.show_advanced.to_string());
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_result();
         self.monitor();
@@ -1022,6 +1044,7 @@ pub fn start() -> Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([940.0, 840.0])
             .with_min_inner_size([640.0, 560.0]),
+        persist_window: true,
         ..Default::default()
     };
     eframe::run_native(
@@ -1030,7 +1053,9 @@ pub fn start() -> Result<()> {
         Box::new(|cc| {
             register_windows_fonts(&cc.egui_ctx);
             setup_style(&cc.egui_ctx);
-            Ok(Box::<DinoUi>::default())
+            let app = DinoUi::with_storage(cc.storage);
+            cc.egui_ctx.set_zoom_factor(TEXT_ZOOM[app.text_zoom_index]);
+            Ok(Box::new(app))
         })
     ).map_err(|error| crate::fail(format!("Rust GUI 실행 실패: {error}")))
 }
