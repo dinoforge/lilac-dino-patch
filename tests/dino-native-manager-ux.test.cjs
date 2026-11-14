@@ -75,3 +75,52 @@ test('update links are read-only and the GUI never starts a shell subprocess',()
   assert.match(advanced,/https:\/\/github\.com\/whispelyn-byte\/LilacAnime-desktop\/releases/);
   assert.doesNotMatch(gui,/Command::new|std::process::Command|cmd\.exe|powershell\.exe/i);
 });
+
+
+test('readability controls expose 100, 120 and 140 percent zoom sizes',()=>{
+  assert.match(gui,/const TEXT_ZOOM: \[f32; 3\] = \[1\.0, 1\.2, 1\.4\];/);
+  assert.match(gui,/text_zoom_index: usize/);
+  assert.match(gui,/text_zoom_index: 0/);
+  assert.match(gui,/"기본 100%", "크게 120%", "매우 크게 140%"/);
+  assert.match(gui,/ctx\.set_zoom_factor\(TEXT_ZOOM\[index\]\)/);
+  assert.match(gui,/self\.readability_controls\(ui, ctx\)/);
+  assert.match(gui,/self\.text_zoom_index == index/);
+});
+test('text controls appear before the status-first primary card',()=>{
+  const screen=method('impl eframe::App for DinoUi {','fn register_windows_fonts(');
+  const controls=screen.indexOf('self.readability_controls(ui, ctx);');
+  const status=screen.indexOf('self.overview_card(ui);');
+  assert.ok(controls>=0 && status>controls);
+  assert.match(gui,/ui\.horizontal_wrapped\(\|ui\| \{\s*ui\.label\(RichText::new\("글자 크기"\)/);
+  assert.match(gui,/글자가 흐리면 크기를 높여 주세요/);
+});
+test('secondary UI text has high default contrast against both dark panels',()=>{
+  const foreground=Number(gui.match(/const MUTED: u32 = (0x[0-9A-F]+);/)?.[1]);
+  const bgColors=[0x172029,0x19252E];
+  const luminance=color=>{
+    const rgb=[color>>16&255,color>>8&255,color&255]
+      .map(x=>x/255).map(x=>x<=0.04045?x/12.92:((x+0.055)/1.055)**2.4);
+    return 0.2126*rgb[0]+0.7152*rgb[1]+0.0722*rgb[2];
+  };
+  for(const background of bgColors){
+    const a=luminance(foreground),b=luminance(background);
+    assert.ok((Math.max(a,b)+0.05)/(Math.min(a,b)+0.05)>=7,
+      'secondary text must remain readable against card/surface backgrounds');
+  }
+  assert.match(gui,/FontId::new\(12\.0, FontFamily::Monospace\)/);
+});
+test('Windows Korean fonts use multiple local fallback candidates without embedding files',()=>{
+  assert.match(gui,/let candidates = \["malgun\.ttf", "malgunbd\.ttf", "malgunsl\.ttf"\]/);
+  assert.match(gui,/ctx\.set_fonts\(fonts\)/);
+  assert.match(gui,/Windows Korean font missing/);
+  assert.doesNotMatch(gui,/include_bytes!\([^)]*\.(?:ttf|otf)/);
+});
+test('zoomed headers and patch labels may wrap rather than clipping',()=>{
+  const patch=method('    fn patch_list_card(&mut self, ui: &mut Ui) {',
+    '    fn advanced_card(&mut self, ui: &mut Ui, ctx: &egui::Context) {');
+  const overview=method('    fn overview_card(&mut self, ui: &mut Ui) {',
+    '    fn source_card(&mut self, ui: &mut Ui) {');
+  assert.match(patch,/ui\.horizontal_wrapped\(\|ui\|/);
+  assert.match(overview,/ui\.horizontal_wrapped\(\|ui\|/);
+  assert.match(source,/if ui\.available_width\(\) < 720\.0/);
+});
