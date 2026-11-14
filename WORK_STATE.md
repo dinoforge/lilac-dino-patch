@@ -775,3 +775,12 @@ LilacAnime 기반의 Windows 우선 애니메이션 앱을 별도 프로젝트�
 - 패치된 v0.5.58 renderer 격리 Electron E2E에서 월~일 주간표, 통합 검색·그룹핑, 공식 상세/공급원 선택·회차, 로컬 합성 MP4·한국어 VTT, 이어보기/시청 기록을 검증했다. IPC/공급원 데이터와 프로필은 전부 합성·OS Temp 격리였고 외부 요청은 0회다. live 공급원/외부 영상은 실행하지 않았다. 실제 패키지 관리자 창을 확인했으나 PNG는 저장하지 않았다. 최종 renderer 캡처는 OS Temp captures-e2e-19에 있다. E2E 격리 하네스는 Electron의 appData/userData/sessionData/temp/logs/crashDumps와 Chromium의 실제 user-data/cache/crash 스위치를 각각 검증한다. OS Temp 밖의 사용자 지정 root는 디렉터리 생성 전 거부되고 호출자 소유 root는 자동 삭제하지 않는다.
 - 전체 npm test 386개(382 통과, 4 건너뜀, 실패 0), Python 66/66, 공식 Patch 03 계약 13/13, Companion 별도 테스트 22/22 통과. `npm run test:phase1-electron`도 격리 경로 assert 보강 후 다시 통과했다. 외부 root 차단 검증은 기대한 nonzero 종료와 후보 폴더 미생성을 확인했다. 네 건너뜀은 v0.5.14 소스 fixture가 필요한 legacy adapter/fingerprint 검사다. 패키지 release를 테스트 디스커버리 중에만 같은 볼륨의 별도 경로로 옮기고 테스트 후 원위치했다.
 - 실험 패키지: tools/dino-patch-manager/release/DinoPatchManager-Electron-v1.2.4-full-integration-experimental (EXE/app.asar/engine SHA-256은 DINO_FUNCTIONAL_INTEGRATION_REPORT.md 참고). A35/A36 릴리스 아님. 기존 사용자 AppData·설치본·원래 개발 체크아웃은 건드리지 않았다. 최종 판정은 PARTIAL이며 전체 기능 보고서에 기능별 근거·캡처·미완료를 기록했다.
+
+## 2026-11-14 Beta 8 트랜잭션 복구 강화
+
+- 격리 작업 폴더 `Lilac-Dino-Beta8-Hardening`, 브랜치 `fix/dino-beta8-patch-recovery-hardening`에서만 작업했다. 기존 `LilacAnime-Player` 체크아웃, 사용자 AppData, 실제 설치본, 기존 배포본은 수정하지 않았다.
+- `transaction.rs`에서 백업 복사를 임시 파일에 수행하고 원본·임시 SHA-256을 검증한 뒤 같은 디렉터리 하드 링크로 발행하도록 보강했다. 기존 대상은 덮어쓰지 않으며 중간 복사 실패로 부분 백업이 완성본처럼 노출되지 않는다. 고아 임시 파일은 `PARTIAL_OR_UNKNOWN`으로 fail-closed 처리한다. 검증된 pending 기록과 일치하는 적용/복원 임시 파일만 재검사 뒤 복구 정리한다.
+- 추가 Rust 테스트는 복사 중 오류, 기존 백업 보호, 고아 staging 파일, 적용·해제의 교체 전후 중단, staging/백업 손상·누락을 다룬다. `cargo test --no-default-features` 7/7, `node scripts/dino-release-preflight.cjs` 195/195, 전체 `npm test -- --test-reporter=dot` 종료 코드 0이다. Node 테스트는 격리 clone에 없는 의존성을 원래 checkout의 `node_modules`에서 읽기 전용으로 제공했다.
+- 공식 v0.5.65 설치 아카이브 SHA-256 `BF659DA28112B53196947C08B75D91AC6667DC94726176EEAE93D7F051EAE8AA`, `app.asar` SHA-256 `9A5BBCDDDA592F173D6E1C5BC01AC0BBBEC8D003C40CB3A4113AFB307A08DA12`를 확인했다. OS Temp의 최소 설치 복사본에서 최초 적용, 재실행 멱등성, 해제, 명시적 재적용, 재해제를 확인했고 최종 `app.asar`는 공식 SHA로 복원됐으며 백업은 1개로 유지됐다.
+- Windows Rust GUI 빌드 통과: EXE SHA-256 `18FACEEFDB09884E985C05C78546C4539669C835965F585038C5D3461A565C48`, PE subsystem 2. 실제 GUI 시작 스모크는 OS Temp 경로에서 창 생성, 잘못된 ASAR 디렉터리의 비파괴 안전 거부, 백업 미생성을 확인했다. 실제 LilacAnime 앱 실행·사용자 설치본 검증은 하지 않았다.
+- `cargo fmt --all -- --check`는 기존 Rust 파일 전반의 미포맷 기준 때문에 실패했다. 기존 전체 형식을 대량 재작성하지 않았다. 원격 저장소에는 테스트·검증 Actions 16개를 비활성화하고 YAML 정의는 보존했다. 배포/릴리즈와 수동 패키징 워크플로는 활성 상태로 유지했다.

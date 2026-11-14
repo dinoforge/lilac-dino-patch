@@ -323,6 +323,114 @@ fn check_pending(root:&Path)->Result<bool>{
 
 fn archive_path(root:&Path)->PathBuf{root.join("resources").join("app.asar")}
 
+fn entry_exists(path:&Path)->Result<bool>{
+    match fs::symlink_metadata(path){
+        Ok(_)=>Ok(true),
+        Err(error) if error.kind()==std::io::ErrorKind::NotFound=>Ok(false),
+        Err(error)=>Err(error.into()),
+    }
+}
+
+fn copying_stage_path(destination:&Path)->Result<PathBuf>{
+    let name=destination.file_name().and_then(|value|value.to_str())
+        .ok_or_else(||fail("임시 복사 파일명을 확인할 수 없습니다."))?;
+    Ok(destination.with_file_name(format!(".{name}.dino-copying")))
+}
+
+fn orphan_transaction_stage(root:&Path)->Result<Option<String>>{
+    let resources=root.join("resources");
+    for name in [
+        "app.asar.dino-writing",
+        "app.asar.dino-restore",
+        ".app.asar.dino-restore.dino-copying",
+    ]{
+        let path=resources.join(name);
+        if entry_exists(&path)?{
+            asar::file_only(&path)?;
+            return Ok(Some(name.to_owned()));
+        }
+    }
+
+    let data=state_root(root)?;
+    if !entry_exists(&data)?{return Ok(None);}
+    asar::dir_only(&data)?;
+    for entry in fs::read_dir(&data)?{
+        let entry=entry?;
+        let name=entry.file_name().to_string_lossy().into_owned();
+        let backup_copy=name.starts_with(".original-") && name.ends_with(".asar.dino-copying");
+        let json_copy=name=="pending.json.writing" || name=="state.json.writing"
+            || (name.starts_with("state-") && name.ends_with(".json.writing"));
+        if backup_copy || json_copy{
+            asar::file_only(&entry.path())?;
+            return Ok(Some(name));
+        }
+    }
+    Ok(None)
+}
+
+fn recovery_stage(
+    root:&Path,
+    pending:&Value,
+    current_sha:&str,
+    original_sha:&str,
+    patched_sha:&str,
+)->Result<Option<PathBuf>>{
+    let resources=root.join("resources");
+    let writing=resources.join("app.asar.dino-writing");
+    let restoring=resources.join("app.asar.dino-restore");
+    let restore_copying=copying_stage_path(&restoring)?;
+    if entry_exists(&restore_copying)?{
+        asar::file_only(&restore_copying)?;
+        return Err(fail("복원 임시 파일을 만드는 중단 흔적이 있어 복구 기록을 보존합니다."));
+    }
+
+    let data=state_root(root)?;
+    if entry_exists(&data)?{
+        asar::dir_only(&data)?;
+        for entry in fs::read_dir(&data)?{
+            let entry=entry?;
+            let name=entry.file_name().to_string_lossy().into_owned();
+            let backup_copy=name.starts_with(".original-") && name.ends_with(".asar.dino-copying");
+            let json_copy=name=="pending.json.writing" || name=="state.json.writing"
+                || (name.starts_with("state-") && name.ends_with(".json.writing"));
+            if backup_copy || json_copy{
+                asar::file_only(&entry.path())?;
+                return Err(fail(format!("상태 임시 파일 {name}이 남아 있어 복구 기록을 보존합니다.")));
+            }
+        }
+    }
+
+    let writing_exists=entry_exists(&writing)?;
+    let restoring_exists=entry_exists(&restoring)?;
+    if writing_exists{asar::file_only(&writing)?;}
+    if restoring_exists{asar::file_only(&restoring)?;}
+    match (pending["status"].as_str(),current_sha){
+        (Some("APPLIED"),current) if current==original_sha=>{
+            if restoring_exists{return Err(fail("적용 전 복구 상태와 원본 복원 임시 파일이 충돌합니다."));}
+            if writing_exists{
+                if sha(&writing)?!=patched_sha{return Err(fail("패치 적용 임시 파일이 복구 기록과 다릅니다."));}
+                Ok(Some(writing))
+            }else{Ok(None)}
+        }
+        (Some("APPLIED"),current) if current==patched_sha=>{
+            if writing_exists || restoring_exists{return Err(fail("적용 후 예상하지 않은 ASAR 임시 파일이 남아 있습니다."));}
+            Ok(None)
+        }
+        (Some("UNPATCHED"),current) if current==patched_sha=>{
+            if writing_exists{return Err(fail("해제 전 복구 상태와 패치 적용 임시 파일이 충돌합니다."));}
+            if restoring_exists{
+                if sha(&restoring)?!=original_sha{return Err(fail("원본 복원 임시 파일이 백업과 다릅니다."));}
+                Ok(Some(restoring))
+            }else{Ok(None)}
+        }
+        (Some("UNPATCHED"),current) if current==original_sha=>{
+            if writing_exists || restoring_exists{return Err(fail("복원 후 예상하지 않은 ASAR 임시 파일이 남아 있습니다."));}
+            Ok(None)
+        }
+        _=>Err(fail("복구 상태와 현재 원본 파일이 일치하지 않습니다.")),
+    }
+}
+
 pub fn inspect(root:&Path)->Status {
     let result=(||->Result<Status>{
         let root=installed_root(root)?;
@@ -331,6 +439,10 @@ pub fn inspect(root:&Path)->Status {
         if check_pending(&root)? {
             return Ok(Status::new("PARTIAL_OR_UNKNOWN",&version,
                 "이전 패치 작업 기록 pending.json이 남아 있습니다. 수동 복구 검증 전에는 원본을 변경하지 않습니다."));
+        }
+        if let Some(name)=orphan_transaction_stage(&root)?{
+            return Ok(Status::new("PARTIAL_OR_UNKNOWN",&version,format!(
+                "미완료 임시 파일 {name}이 남아 있습니다. 원본을 변경하지 않고 임시 파일과 실제 상태를 확인해야 합니다.")));
         }
         let actual=sha(&archive_path(&root))?;
         if let Some(state)=read_state(&root)? {
@@ -433,12 +545,39 @@ fn write_json_atomic(path:&Path, data:&Value)->Result<()> {
 }
 
 fn copy_new(source:&Path,destination:&Path)->Result<()> {
+    copy_new_with(source,destination,|input,output|std::io::copy(input,output))
+}
+
+fn copy_new_with(
+    source:&Path,
+    destination:&Path,
+    copy:impl FnOnce(&mut File,&mut File)->std::io::Result<u64>,
+)->Result<()> {
     asar::file_only(source)?;
-    let mut src=File::open(source)?;
-    let mut out=OpenOptions::new().create_new(true).write(true).open(destination)?;
-    std::io::copy(&mut src,&mut out)?;
-    out.sync_all()?;
-    Ok(())
+    let expected=sha(source)?;
+    if entry_exists(destination)?{
+        return Err(fail("복사 대상 파일이 이미 있어 덮어쓰지 않습니다."));
+    }
+    let stage=copying_stage_path(destination)?;
+    let stage_file=OpenOptions::new().write(true).create_new(true).open(&stage)?;
+    let stage_for_copy=stage.clone();
+    let result=(move ||->Result<()>{
+        let mut input=File::open(source)?;
+        let mut output=stage_file;
+        copy(&mut input,&mut output)?;
+        output.sync_all()?;
+        drop(output);
+        if sha(&stage_for_copy)?!=expected || sha(source)?!=expected{
+            return Err(fail("복사 중 원본 또는 임시 파일의 SHA-256이 달라졌습니다."));
+        }
+        // A same-directory hard link publishes the fully written file without
+        // replacing a destination that appeared after the initial check.
+        fs::hard_link(&stage_for_copy,destination)?;
+        fs::remove_file(&stage_for_copy)?;
+        Ok(())
+    })();
+    if result.is_err(){let _=fs::remove_file(&stage);}
+    result
 }
 
 #[cfg(windows)]
@@ -603,9 +742,6 @@ pub fn review_recovery(root:&Path)->Result<Status>{
         || !matches!(pending["status"].as_str(), Some("APPLIED"|"UNPATCHED")) {
         return Err(fail("복구 기록의 설치 대상·버전·상태가 현재와 다릅니다."));
     }
-    for name in ["app.asar.dino-writing","app.asar.dino-restore"] {
-        if root.join("resources").join(name).exists() {return Err(fail("미완료 ASAR 임시 파일이 남아 있어 복구 기록을 보존합니다."));}
-    }
     let original=pending["originalSha256"].as_str().ok_or_else(||fail("원본 SHA-256 기록 없음"))?;
     let patched=pending["patchedSha256"].as_str().ok_or_else(||fail("패치 SHA-256 기록 없음"))?;
     let valid_sha=|x:&str| x.len()==64 && x.bytes().all(|b|b.is_ascii_hexdigit() && !b.is_ascii_lowercase());
@@ -616,6 +752,7 @@ pub fn review_recovery(root:&Path)->Result<Status>{
     let mode=if current_sha==patched {"APPLIED"} else if current_sha==original {"UNPATCHED"} else {
         return Err(fail("현재 ASAR가 복구 기록의 원본·패치본과 다릅니다."));
     };
+    recovery_stage(&root,&pending,&current_sha,original,patched)?;
     if let Some(state)=read_state(&root)?{
         if state["version"]!=version {
             // The pending record is a new official generation. The previous
@@ -637,7 +774,7 @@ pub fn review_recovery(root:&Path)->Result<Status>{
         }
     }
     Ok(Status { status:"PARTIAL_OR_UNKNOWN".into(), version,
-        reason:format!("검증된 복구 기록입니다. 현재 ASAR는 {mode} 상태입니다. 명시적 복구 명령으로 기록을 정리할 수 있습니다."),
+        reason:format!("검증된 복구 기록입니다. 현재 ASAR는 {mode} 상태입니다. 확인된 임시 파일이 있으면 해당 작업의 해시 검증 후에만 정리합니다."),
         recovery_available:true, manually_uninstalled:mode=="UNPATCHED" })
 }
 
@@ -650,14 +787,32 @@ pub fn recover(root:&Path)->Result<Status>{
     let marker=data.join("pending.json");
     let original_sha=sha(&marker)?;
     let mut state:Value=serde_json::from_slice(&fs::read(&marker)?)?;
-    let target_mode=if sha(&archive_path(&root))?==state["patchedSha256"].as_str().unwrap_or("") {"APPLIED"} else {"UNPATCHED"};
-    if sha(&marker)?!=original_sha || sha(&backup_for_state(&root,&state)?)?!=state["originalSha256"].as_str().unwrap_or("") {
+    let pending_record=state.clone();
+    let current_sha=sha(&archive_path(&root))?;
+    let original=state["originalSha256"].as_str().ok_or_else(||fail("원본 SHA-256 기록 없음"))?.to_owned();
+    let patched=state["patchedSha256"].as_str().ok_or_else(||fail("패치 SHA-256 기록 없음"))?.to_owned();
+    let target_mode=if current_sha==patched {"APPLIED"} else if current_sha==original {"UNPATCHED"} else {
+        return Err(fail("복구 중 원본 파일이 기록된 해시와 달라졌습니다."));
+    };
+    let staged=recovery_stage(&root,&state,&current_sha,&original,&patched)?;
+    if sha(&marker)?!=original_sha || sha(&backup_for_state(&root,&state)?)?!=original {
         return Err(fail("복구 검증 직후 기록 또는 원본 백업이 바뀌었습니다."));
     }
     state["status"]=json!(target_mode);
     let archived=data.join(format!("pending.reconciled-{}.json",Utc::now().format("%Y%m%dT%H%M%S%6fZ")));
     if archived.exists() {return Err(fail("복구 기록 보관 파일이 이미 존재합니다."));}
     write_state(&root,&state)?;
+    if let Some(stage)=staged{
+        if sha(&marker)?!=original_sha || sha(&archive_path(&root))?!=current_sha
+            || sha(&backup_for_state(&root,&state)?)?!=original {
+            return Err(fail("복구 정리 중 원본 또는 기록이 바뀌어 임시 파일을 보존했습니다."));
+        }
+        let rechecked=recovery_stage(&root,&pending_record,&current_sha,&original,&patched)?;
+        if rechecked.as_deref()!=Some(stage.as_path()){
+            return Err(fail("복구 임시 파일이 재검사 중 달라져 보존했습니다."));
+        }
+        fs::remove_file(&stage)?;
+    }
     fs::rename(&marker,archived)?;
     Ok(inspect(&root))
 }
@@ -696,6 +851,9 @@ pub fn restore(root:&Path,backup_id:&str)->Result<Status>{
 #[cfg(test)]
 mod versionless_tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static APPDATA_LOCK: Mutex<()> = Mutex::new(());
 
     // A minimal official-layout ASAR lets us validate new version numbers
     // without bundling a real LilacAnime installation or user content.
@@ -745,6 +903,277 @@ mod versionless_tests {
         Ok(())
     }
 
+    fn transaction_record(root:&Path,version:&str,status:&str,original:&str,patched:&str)->Value{
+        let at=Utc::now();
+        json!({
+            "schemaVersion":1,
+            "target":root.to_string_lossy(),
+            "version":version,
+            "patchVersion":PATCH_VERSION,
+            "status":status,
+            "originalSha256":original,
+            "patchedSha256":patched,
+            "backupId":at.format("%Y%m%dT%H%M%SZ").to_string(),
+            "createdAt":at.to_rfc3339(),
+            "backupFile":Value::Null
+        })
+    }
+
+    #[test]
+    fn failed_copy_does_not_publish_or_overwrite_a_backup() -> Result<()> {
+        let base=std::env::temp_dir().join(format!(
+            "dino-copy-stage-test-{}-{}",
+            std::process::id(),Utc::now().timestamp_nanos_opt().unwrap_or_default()));
+        fs::create_dir_all(&base)?;
+        let source=base.join("source.asar");
+        let destination=base.join("backup.asar");
+        fs::write(&source,b"original backup bytes")?;
+        let stage=copying_stage_path(&destination)?;
+        let failed=copy_new_with(&source,&destination,|input,output|{
+            let mut bytes=[0u8;8];
+            let length=input.read(&mut bytes)?;
+            output.write_all(&bytes[..length])?;
+            Err(std::io::Error::other("injected mid-copy failure"))
+        });
+        assert!(failed.is_err());
+        assert!(!destination.exists());
+        assert!(!stage.exists());
+        assert_eq!(fs::read(&source)?,b"original backup bytes");
+
+        fs::write(&destination,b"pre-existing verified backup")?;
+        let before=fs::read(&destination)?;
+        let refused=copy_new(&source,&destination);
+        assert!(refused.is_err());
+        assert_eq!(fs::read(&destination)?,before);
+        assert!(!stage.exists());
+        let _=fs::remove_dir_all(&base);
+        Ok(())
+    }
+
+    #[test]
+    fn orphaned_transaction_staging_files_fail_closed_without_touching_asar() -> Result<()> {
+        let _guard=APPDATA_LOCK.lock().map_err(|_|fail("APPDATA test lock poisoned"))?;
+        let base=std::env::temp_dir().join(format!(
+            "dino-orphaned-stage-test-{}-{}",
+            std::process::id(),Utc::now().timestamp_nanos_opt().unwrap_or_default()));
+        fs::create_dir_all(&base)?;
+        let previous=env::var_os("APPDATA");
+        let profile=base.join("isolated-appdata");
+        fs::create_dir_all(&profile)?;
+        env::set_var("APPDATA",&profile);
+        let result=(|| ->Result<()> {
+            for (index,name) in [
+                "app.asar.dino-writing",
+                "app.asar.dino-restore",
+                ".original-app.asar.dino-copying",
+            ].into_iter().enumerate() {
+                let root=base.join(format!("install-{index}"));
+                let resources=root.join("resources");
+                fs::create_dir_all(&resources)?;
+                fs::write(root.join("LilacAnime.exe"),b"DinoPatch test fixture only")?;
+                let archive=resources.join("app.asar");
+                fixture(&archive,"0.5.65",false)?;
+                let canonical_root=installed_root(&root)?;
+                let original_sha=sha(&archive)?;
+                let temporary=if name.starts_with('.') {
+                    let data=state_root(&canonical_root)?;
+                    fs::create_dir_all(&data)?;
+                    data.join(name)
+                } else {resources.join(name)};
+                fs::write(&temporary,b"partial transaction data")?;
+                let expected_stage=fs::read(&temporary)?;
+
+                let status=inspect(&root);
+                assert_eq!(status.status,"PARTIAL_OR_UNKNOWN","{name}: {}",status.reason);
+                assert!(status.reason.contains(name),"{name}: {}",status.reason);
+                let apply_status=apply(&root,true)?;
+                assert_eq!(apply_status.status,"PARTIAL_OR_UNKNOWN","{name}: {}",apply_status.reason);
+                assert_eq!(sha(&archive)?,original_sha);
+                assert_eq!(fs::read(&temporary)?,expected_stage);
+                assert!(!state_root(&canonical_root)?.join("pending.json").exists());
+            }
+            Ok(())
+        })();
+        if let Some(value)=previous {env::set_var("APPDATA",value);}
+        else {env::remove_var("APPDATA");}
+        let _=fs::remove_dir_all(&base);
+        result
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn pending_pre_swap_transactions_reconcile_without_changing_the_known_asar() -> Result<()> {
+        let _guard=APPDATA_LOCK.lock().map_err(|_|fail("APPDATA test lock poisoned"))?;
+        let base=std::env::temp_dir().join(format!(
+            "dino-pre-swap-recovery-test-{}-{}",
+            std::process::id(),Utc::now().timestamp_nanos_opt().unwrap_or_default()));
+        fs::create_dir_all(&base)?;
+        let previous=env::var_os("APPDATA");
+        let profile=base.join("isolated-appdata");
+        fs::create_dir_all(&profile)?;
+        env::set_var("APPDATA",&profile);
+        let result=(|| ->Result<()> {
+            // Apply crash window: journal is durable, patched ASAR is staged,
+            // but the atomic replacement has not yet happened.
+            let apply_root=base.join("apply-install");
+            let apply_resources=apply_root.join("resources");
+            fs::create_dir_all(&apply_resources)?;
+            fs::write(apply_root.join("LilacAnime.exe"),b"DinoPatch test fixture only")?;
+            let apply_asar=apply_resources.join("app.asar");
+            fixture(&apply_asar,"0.5.65",false)?;
+            let apply_root=installed_root(&apply_root)?;
+            let original_sha=sha(&apply_asar)?;
+            let apply_archive=Archive::open(&apply_asar)?;
+            let apply_changes=replacements(&apply_archive,"0.5.65")?;
+            let apply_stage=apply_resources.join("app.asar.dino-writing");
+            apply_archive.write_modified(&apply_stage,&apply_changes)?;
+            let patched_sha=sha(&apply_stage)?;
+            let apply_data=state_root(&apply_root)?;
+            fs::create_dir_all(&apply_data)?;
+            fs::copy(&apply_asar,apply_data.join("original-app.asar"))?;
+            let apply_pending=transaction_record(&apply_root,"0.5.65","APPLIED",&original_sha,&patched_sha);
+            write_json_atomic(&apply_data.join("pending.json"),&apply_pending)?;
+
+            let before_recovery=review_recovery(&apply_root)?;
+            assert!(before_recovery.recovery_available,"{}",before_recovery.reason);
+            let recovered= recover(&apply_root)?;
+            assert_eq!(recovered.status,"UNPATCHED","{}",recovered.reason);
+            assert_eq!(sha(&apply_asar)?,original_sha);
+            assert!(!apply_stage.exists());
+            assert!(!apply_data.join("pending.json").exists());
+            assert!(read_state(&apply_root)?.is_some());
+
+            // Apply post-swap crash window: the new ASAR is installed, while
+            // the pending journal still needs to be reconciled into state.
+            let post_swap_patch=apply_resources.join("post-swap-patched.asar");
+            Archive::open(&apply_asar)?.write_modified(&post_swap_patch,&apply_changes)?;
+            let post_swap_sha=sha(&post_swap_patch)?;
+            fs::rename(&post_swap_patch,&apply_asar)?;
+            let applied_pending=transaction_record(&apply_root,"0.5.65","APPLIED",&original_sha,&post_swap_sha);
+            write_json_atomic(&apply_data.join("pending.json"),&applied_pending)?;
+            let recovered=recover(&apply_root)?;
+            assert_eq!(recovered.status,"APPLIED","{}",recovered.reason);
+            assert_eq!(sha(&apply_asar)?,post_swap_sha);
+            assert!(!apply_data.join("pending.json").exists());
+
+            // Uninstall post-swap crash window: original ASAR is already
+            // restored, so recovery records UNPATCHED without another copy.
+            let post_swap_restore=apply_resources.join("post-swap-restored.asar");
+            fs::copy(apply_data.join("original-app.asar"),&post_swap_restore)?;
+            fs::rename(&post_swap_restore,&apply_asar)?;
+            let unpatched_pending=transaction_record(&apply_root,"0.5.65","UNPATCHED",&original_sha,&post_swap_sha);
+            write_json_atomic(&apply_data.join("pending.json"),&unpatched_pending)?;
+            let recovered=recover(&apply_root)?;
+            assert_eq!(recovered.status,"UNPATCHED","{}",recovered.reason);
+            assert_eq!(sha(&apply_asar)?,original_sha);
+            assert!(!apply_data.join("pending.json").exists());
+
+            // Uninstall crash window: journal is durable, verified original
+            // ASAR is staged, while the patched archive remains installed.
+            let uninstall_root=base.join("uninstall-install");
+            let uninstall_resources=uninstall_root.join("resources");
+            fs::create_dir_all(&uninstall_resources)?;
+            fs::write(uninstall_root.join("LilacAnime.exe"),b"DinoPatch test fixture only")?;
+            let uninstall_asar=uninstall_resources.join("app.asar");
+            fixture(&uninstall_asar,"0.5.65",false)?;
+            let uninstall_root=installed_root(&uninstall_root)?;
+            let uninstall_original_sha=sha(&uninstall_asar)?;
+            let uninstall_data=state_root(&uninstall_root)?;
+            fs::create_dir_all(&uninstall_data)?;
+            fs::copy(&uninstall_asar,uninstall_data.join("original-app.asar"))?;
+            let uninstall_archive=Archive::open(&uninstall_asar)?;
+            let uninstall_changes=replacements(&uninstall_archive,"0.5.65")?;
+            let patched_stage=uninstall_resources.join("patched.asar");
+            uninstall_archive.write_modified(&patched_stage,&uninstall_changes)?;
+            let uninstall_patched_sha=sha(&patched_stage)?;
+            fs::rename(&patched_stage,&uninstall_asar)?;
+            assert_eq!(sha(&uninstall_data.join("original-app.asar"))?,uninstall_original_sha);
+            let applied=transaction_record(&uninstall_root,"0.5.65","APPLIED",&uninstall_original_sha,&uninstall_patched_sha);
+            write_json_atomic(&uninstall_data.join("state.json"),&applied)?;
+            let restore_stage=uninstall_resources.join("app.asar.dino-restore");
+            fs::copy(&uninstall_data.join("original-app.asar"),&restore_stage)?;
+            let pending=transaction_record(&uninstall_root,"0.5.65","UNPATCHED",&uninstall_original_sha,&uninstall_patched_sha);
+            write_json_atomic(&uninstall_data.join("pending.json"),&pending)?;
+
+            let before_uninstall_recovery=review_recovery(&uninstall_root)?;
+            assert!(before_uninstall_recovery.recovery_available,"{}",before_uninstall_recovery.reason);
+            let recovered= recover(&uninstall_root)?;
+            assert_eq!(recovered.status,"APPLIED","{}",recovered.reason);
+            assert_eq!(sha(&uninstall_asar)?,uninstall_patched_sha);
+            assert!(!restore_stage.exists());
+            assert!(!uninstall_data.join("pending.json").exists());
+            assert_eq!(sha(&uninstall_data.join("original-app.asar"))?,uninstall_original_sha);
+            Ok(())
+        })();
+        if let Some(value)=previous {env::set_var("APPDATA",value);}
+        else {env::remove_var("APPDATA");}
+        let _=fs::remove_dir_all(&base);
+        result
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn corrupt_pre_swap_stage_keeps_pending_backup_and_official_asar() -> Result<()> {
+        let _guard=APPDATA_LOCK.lock().map_err(|_|fail("APPDATA test lock poisoned"))?;
+        let base=std::env::temp_dir().join(format!(
+            "dino-corrupt-stage-recovery-test-{}-{}",
+            std::process::id(),Utc::now().timestamp_nanos_opt().unwrap_or_default()));
+        fs::create_dir_all(&base)?;
+        let previous=env::var_os("APPDATA");
+        let profile=base.join("isolated-appdata");
+        fs::create_dir_all(&profile)?;
+        env::set_var("APPDATA",&profile);
+        let result=(|| ->Result<()> {
+            let raw_root=base.join("install");
+            let resources=raw_root.join("resources");
+            fs::create_dir_all(&resources)?;
+            fs::write(raw_root.join("LilacAnime.exe"),b"DinoPatch test fixture only")?;
+            let archive=resources.join("app.asar");
+            fixture(&archive,"0.5.65",false)?;
+            let root=installed_root(&raw_root)?;
+            let original_sha=sha(&archive)?;
+            let original=Archive::open(&archive)?;
+            let changes=replacements(&original,"0.5.65")?;
+            let expected=resources.join("expected-patched.asar");
+            original.write_modified(&expected,&changes)?;
+            let patched_sha=sha(&expected)?;
+            let data=state_root(&root)?;
+            fs::create_dir_all(&data)?;
+            fs::copy(&archive,data.join("original-app.asar"))?;
+            let stage=resources.join("app.asar.dino-writing");
+            fs::write(&stage,b"corrupt partial ASAR")?;
+            let pending=transaction_record(&root,"0.5.65","APPLIED",&original_sha,&patched_sha);
+            let marker=data.join("pending.json");
+            write_json_atomic(&marker,&pending)?;
+            let marker_before=fs::read(&marker)?;
+            let backup_before=sha(&data.join("original-app.asar"))?;
+            let stage_before=fs::read(&stage)?;
+
+            assert!(review_recovery(&root).is_err());
+            assert_eq!(fs::read(&marker)?,marker_before);
+            assert_eq!(sha(&data.join("original-app.asar"))?,backup_before);
+            assert_eq!(fs::read(&stage)?,stage_before);
+            assert_eq!(sha(&archive)?,original_sha);
+
+            // A valid staged ASAR cannot compensate for a missing or corrupt
+            // original backup; both cases must keep the pending journal.
+            fs::copy(&expected,&stage)?;
+            fs::write(data.join("original-app.asar"),b"corrupt backup")?;
+            assert!(review_recovery(&root).is_err());
+            assert!(marker.exists());
+            assert_eq!(sha(&archive)?,original_sha);
+            fs::remove_file(data.join("original-app.asar"))?;
+            assert!(review_recovery(&root).is_err());
+            assert!(marker.exists());
+            assert_eq!(sha(&archive)?,original_sha);
+            Ok(())
+        })();
+        if let Some(value)=previous {env::set_var("APPDATA",value);}
+        else {env::remove_var("APPDATA");}
+        let _=fs::remove_dir_all(&base);
+        result
+    }
+
     #[test]
     fn unknown_official_version_uses_unique_structural_anchors() -> Result<()> {
         let base=std::env::temp_dir().join(format!(
@@ -771,6 +1200,7 @@ mod versionless_tests {
     #[cfg(windows)]
     #[test]
     fn official_updates_keep_historical_backups_and_uninstall_current_version() -> Result<()> {
+        let _guard=APPDATA_LOCK.lock().map_err(|_|fail("APPDATA test lock poisoned"))?;
         let dir=std::env::temp_dir().join(format!(
             "dino-version-upgrade-{}-{}",
             std::process::id(),Utc::now().timestamp_nanos_opt().unwrap_or_default()));

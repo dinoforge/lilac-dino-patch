@@ -123,5 +123,5 @@ test('single historical record does not authorize changed ASAR',opts,t=>{
   f.record({legacy:true,original:'past official',patched:'past patched'});
   const r=f.run();
   assert.equal(r.currentAsarMatch,'DIFFERENT_FROM_BOTH_RECORDED_HASHES');
-  assert.match(r.recommendation,/Do not restore this old backup/);
+  assert.match(r.recommendation,/Preserve old backup and state/);
 });
