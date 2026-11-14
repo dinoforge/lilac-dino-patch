@@ -124,3 +124,28 @@ test('zoomed headers and patch labels may wrap rather than clipping',()=>{
   assert.match(overview,/ui\.horizontal_wrapped\(\|ui\|/);
   assert.match(source,/if ui\.available_width\(\) < 720\.0/);
 });
+
+
+test('native UI saves cosmetic settings and restores text zoom and advanced panel',()=>{
+  const cargo=fs.readFileSync(path.resolve(__dirname,
+    '../tools/dino-patch-manager/native-rust/Cargo.toml'),'utf8');
+  assert.match(cargo,/features = \["wgpu", "default_fonts", "x11", "wayland", "persistence"\]/);
+  assert.match(gui,/const TEXT_ZOOM_KEY: &str = "dino\.manager\.ui\.textZoom\.v1"/);
+  assert.match(gui,/const ADVANCED_PANEL_KEY: &str = "dino\.manager\.ui\.advancedOpen\.v1"/);
+  assert.match(gui,/fn with_storage\(storage: Option<&dyn eframe::Storage>\) -> Self/);
+  assert.match(gui,/storage\.set_string\(TEXT_ZOOM_KEY, self\.text_zoom_index\.to_string\(\)\)/);
+  assert.match(gui,/storage\.set_string\(ADVANCED_PANEL_KEY, self\.show_advanced\.to_string\(\)\)/);
+  assert.match(gui,/cc\.egui_ctx\.set_zoom_factor\(TEXT_ZOOM\[app\.text_zoom_index\]\)/);
+  assert.match(gui,/persist_window: true/);
+});
+test('saved UI zoom is validated and does not persist source or automatic patch policy',()=>{
+  const section=method('    fn with_storage(storage: Option<&dyn eframe::Storage>) -> Self {',
+    '    // A visible, keyboard-accessible control.');
+  assert.match(section,/\.and_then\(\|raw\| raw\.parse::<usize>\(\)\.ok\(\)\)/);
+  assert.match(section,/\.filter\(\|index\| \*index < TEXT_ZOOM\.len\(\)\)/);
+  assert.match(section,/\.unwrap_or\(0\)/);
+  const save=method('    fn save(&mut self, storage: &mut dyn eframe::Storage) {',
+    '    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {');
+  assert.doesNotMatch(save,/root|backup|auto_enabled|path_draft|transaction|status/);
+  assert.match(gui,/글자 크기와 창 크기는 다음 실행에도 유지됩니다/);
+});
