@@ -922,6 +922,12 @@ impl DinoUi {
 }
 
 impl eframe::App for DinoUi {
+    fn persist_egui_memory(&self) -> bool {
+        // The path editor may contain a draft installation path. Only save
+        // the whitelisted UI keys and the native window geometry.
+        false
+    }
+
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(TEXT_ZOOM_KEY, self.text_zoom_index.to_string());
         storage.set_string(ADVANCED_PANEL_KEY, self.show_advanced.to_string());
