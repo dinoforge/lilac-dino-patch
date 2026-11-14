@@ -469,7 +469,7 @@ impl DinoUi {
             .inner_margin(Margin::symmetric(20, 19))
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new("현재 패치 상태")
                         .size(12.0).strong().color(rgb(ACCENT)));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -667,7 +667,7 @@ impl DinoUi {
                 .inner_margin(Margin::symmetric(16, 15))
                 .show(ui, |ui| {
                     ui.set_min_width(ui.available_width());
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         Frame::new()
                             .fill(rgb(0x223934))
                             .stroke(Stroke::new(1.0, rgb(0x476B5D)))
