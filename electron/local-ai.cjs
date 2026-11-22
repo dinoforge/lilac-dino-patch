@@ -88,9 +88,27 @@ const PARALLEL = 4, IDLE_STOP = 30 * 1000;
 //   (Gemma 4's template turns it on with enable_thinking; Android's adapter keeps it off too).
 // - Anything else (Qwen3 Instruct and other chat models): the instruction with the list in English, Qwen's sampling.
 const INSTRUCTION = 'Translate the following segment into Korean, without additional explanation.';
+const languageTemplate = template => /\bsource_lang_code\b/.test(template) && /\btarget_lang_code\b/.test(template);
+const translationOnly = model => Boolean(model.run?.languageTemplate);
+function translationInput(model, template = '') {
+  const mode = model.inputMode || 'auto';
+  return mode === 'translation' || mode === 'auto' && languageTemplate(template);
+}
+function sourceLanguage(source, configured = 'auto') {
+  if (configured !== 'auto') return configured;
+  return /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(source) ? 'ja' : /\p{Script=Hangul}/u.test(source) ? 'ko' : 'en';
+}
+function translationRequest(source, model) {
+  return { messages: [{ role: 'user', content: source }], temperature: 0,
+    chat_template_kwargs: { type: 'text', source_lang_code: sourceLanguage(source, model.sourceLanguage), target_lang_code: 'ko' } };
+}
 const HY_MT2_INSTRUCTION = 'Translate the following text into Korean. Note that you should only output the translated result without any additional explanation:';
 // cast: the work's main characters ("堀京子 = 호리 쿄코 (female)"), for Gemma, which can tell from them who says 형 or 오빠.
-function request(source, terms, kind, before = [], cast = []) {
+// rules: 번역 프롬프트 {extra, custom}, for the models that follow instructions (Gemma, the general chat models): custom
+// takes the place of the rules below, extra comes after them; the names, word list, lines before and "the Korean line
+// only" stay. Translation-tuned models (HY-MT, Hy-MT2, ja-ko-vn) are asked their own way, without them.
+function request(source, terms, kind, before = [], cast = [], rules = {}) {
+  const extra = rules.extra ? [`Additional rules from the user (follow these first where they differ):\n${rules.extra}`] : [];
   const user = content => [{ role: 'user', content }];
   if (kind === 'jako') return { messages: [...(terms.length ? [{ role: 'system', content: terms.map(term => `${term.ja}=${term.ko}`).join(',') }] : []), { role: 'user', content: source }], temperature: 0.1, top_p: 0.9, repeat_penalty: 1.05 };
   if (kind === 'hy-mt2' || kind === 'hy-mt2-moe') {
@@ -102,16 +120,20 @@ function request(source, terms, kind, before = [], cast = []) {
   if (kind === 'gemma' || kind === 'general') {
     const parts = [...(terms.length ? [`Names and terms (use these Korean spellings):\n${terms.map(term => `${term.ja} = ${term.ko}`).join('\n')}`] : []), ...(before.length ? [`Previous lines (context only, do not translate them):\n${before.join('\n')}`] : []), `Translate this line:\n${source}`];
     const system = [
-      'You translate Japanese anime subtitles into natural spoken Korean, keeping each speaker\'s tone (반말 or 존댓말 as the scene calls for).',
-      'Words for family follow the speaker: お兄ちゃん / 兄さん → 형 from a boy, 오빠 from a girl; お姉ちゃん / 姉さん → 누나 from a boy, 언니 from a girl.',
-      'A speaker\'s name or a sound in brackets at the start stays in brackets, translated: （創太） → (소타), （ため息） → (한숨). Keep the line breaks.',
+      ...(rules.custom ? [rules.custom] : [
+        'You translate Japanese anime subtitles into natural spoken Korean, keeping each speaker\'s tone (반말 or 존댓말 as the scene calls for).',
+        'Words for family follow the speaker: お兄ちゃん / 兄さん → 형 from a boy, 오빠 from a girl; お姉ちゃん / 姉さん → 누나 from a boy, 언니 from a girl.',
+        'A speaker\'s name or a sound in brackets at the start stays in brackets, translated: （創太） → (소타), （ため息） → (한숨). Keep the line breaks.'
+      ]),
       ...(cast.length ? [`Main characters (Japanese name = Korean spelling, gender):\n${cast.join('\n')}`] : []),
+      ...extra,
       'Answer with the Korean line only: no notes, quotes or romanization.'
     ].join('\n');
     return { messages: [{ role: 'system', content: system }, { role: 'user', content: parts.join('\n\n') }], temperature: 0.3, top_p: 0.95, top_k: 64, chat_template_kwargs: { enable_thinking: false } };
   }
   if (kind === 'hy-mt') return { messages: user(terms.length ? `参考下面的翻译：\n${terms.map(term => `${term.ja} 翻译成 ${term.ko}`).join('\n')}\n\n${INSTRUCTION}\n\n${source}` : `${INSTRUCTION}\n\n${source}`), temperature: 0.7, top_p: 0.6, top_k: 20, repeat_penalty: 1.05 };
-  return { messages: user(terms.length ? `This is a line from a Japanese anime. Use these Korean translations:\n${terms.map(term => `${term.ja} = ${term.ko}`).join('\n')}\n\n${INSTRUCTION}\n\n${source}` : `${INSTRUCTION}\n\n${source}`), temperature: 0.7, top_p: 0.8, top_k: 20, repeat_penalty: 1.05 };
+  const instruction = [rules.custom || INSTRUCTION, ...extra].join('\n');
+  return { messages: user(terms.length ? `This is a line from a Japanese anime. Use these Korean translations:\n${terms.map(term => `${term.ja} = ${term.ko}`).join('\n')}\n\n${instruction}\n\n${source}` : `${instruction}\n\n${source}`), temperature: 0.7, top_p: 0.8, top_k: 20, repeat_penalty: 1.05 };
 }
 // Which way to ask: by the model's name, or for a file the user added (ja-ko-vn 12B ships as "model-Q4_K_M.gguf" too)
 // by the chat template llama.cpp read from it.
@@ -141,15 +163,30 @@ function createLocalAi(userData) {
   const memory = Math.round(os.totalmem() / 2 ** 30);
   const models = () => {
     const ran = runs();
-    return [...MODELS, ...added().map(item => ({ id: `file:${item.path}`, label: path.basename(item.path), note: '직접 추가한 파일 · 제공처에서 사용 조건을 확인해 주세요', path: item.path, size: item.size }))]
+    return [...MODELS, ...added().map(item => ({ id: `file:${item.path}`, label: path.basename(item.path), note: '직접 추가한 파일 · 제공처에서 사용 조건을 확인해 주세요', path: item.path, size: item.size, inputMode: item.inputMode || 'auto', sourceLanguage: item.sourceLanguage || 'auto', customPrompt: item.customPrompt || '' }))]
       .map(model => ({ ...model, installed: fs.existsSync(modelPath(model)), downloading: downloads.has(model.id) ? { done: downloads.get(model.id).done, total: downloads.get(model.id).total } : null, partial: !model.path && !downloads.has(model.id) ? partialSize(model) : 0, run: ran[modelPath(model)] || null, ...(model.ram ? { memory, lowMemory: memory < model.ram } : {}) }))
+      .map(model => ({ ...model, translationOnly: translationOnly(model) }))
       .filter(model => model.licenseBlocked || !model.legacy || model.installed);
   };
+  const allAdded = () => { try { const value = JSON.parse(fs.readFileSync(addedFile, 'utf8')); return Array.isArray(value) ? value : []; } catch { return []; } };
   const partialSize = model => { try { return fs.statSync(`${modelPath(model)}.part`).size; } catch { return 0; } };
   function addFile(file) {
     if (!/\.gguf$/i.test(file) || !fs.existsSync(file)) throw new Error('GGUF 파일을 골라 주세요.');
-    const list = added().filter(item => item.path !== file); list.push({ path: file, size: fs.statSync(file).size });
+    const previous = added().find(item => item.path === file);
+    const list = added().filter(item => item.path !== file); list.push({ ...previous, path: file, size: fs.statSync(file).size });
     fs.mkdirSync(root, { recursive: true }); fs.writeFileSync(addedFile, JSON.stringify(list)); return `file:${file}`;
+  }
+  function setModelOptions(id, options = {}) {
+    const list = allAdded(), item = list.find(item => `file:${item.path}` === id);
+    if (!item || !fs.existsSync(item.path)) throw new Error('직접 추가한 모델 파일을 찾지 못했습니다.');
+    const inputMode = options.inputMode || 'auto', configuredLanguage = options.sourceLanguage || 'auto';
+    if (!['auto', 'chat', 'translation'].includes(inputMode)) throw new Error('올바른 입력 형식을 선택해 주세요.');
+    if (!['auto', 'ja', 'en', 'zh', 'ko'].includes(configuredLanguage)) throw new Error('올바른 원문 언어를 선택해 주세요.');
+    const customPrompt = String(options.customPrompt || '');
+    if (customPrompt.length > 8000 || customPrompt && !customPrompt.includes('{text}')) throw new Error('프롬프트에는 원문이 들어갈 {text}를 넣어 주세요.');
+    if (customPrompt && inputMode === 'auto' && models().find(model => model.id === id)?.translationOnly) throw new Error('이 모델은 번역 전용이라 프롬프트를 지시로 따르지 않고 원문과 함께 번역해 버립니다. 프롬프트를 비워 주세요.');
+    Object.assign(item, { inputMode, sourceLanguage: configuredLanguage, customPrompt });
+    fs.writeFileSync(addedFile, JSON.stringify(list));
   }
   const runtimeExe = kind => {
     const walk = dir => { try { return fs.readdirSync(dir, { withFileTypes: true }).flatMap(item => item.isDirectory() ? walk(path.join(dir, item.name)) : [path.join(dir, item.name)]); } catch { return []; } };
@@ -526,12 +563,14 @@ function createLocalAi(userData) {
   // context: the work's {characters} from AniList, for the names in the terminology list. pick(): the index of the line
   // to translate next (undefined when none is left), asked as each slot frees up, so the lines follow where the episode
   // is playing (and where it jumps to); the lines before a line are still its neighbours. Without it, in order.
-  async function translateLines(texts, { modelId, progress = () => {}, status = () => {}, onLine = () => {}, context = {}, signal = null, pick = null } = {}) {
+  async function translateLines(texts, { modelId, progress = () => {}, status = () => {}, onLine = () => {}, context = {}, rules = {}, signal = null, pick = null } = {}) {
     const available = models(), requested = available.find(item => item.id === modelId);
     if (requested?.licenseBlocked) throw new Error(LOCAL_AI_LICENSE_ERROR);
     const model = requested || available.find(item => item.installed && !item.licenseBlocked);
     if (!model) throw new Error('로컬 AI 모델이 없습니다. 설정 > 자막 자동 번역에서 모델을 받아 주세요.');
     const { port, template } = await start(model, status);
+    const languageInput = translationInput(model, template);
+    if (template && translationOnly(model) !== languageTemplate(template)) saveRun(modelPath(model), { ...runs()[modelPath(model)], languageTemplate: languageTemplate(template) });
     const names = characterTerms(context.characters || []), kind = modelKind(model, template);
     const cast = (context.characters || []).slice(0, 15).map(character => { const full = names.find(term => term.ja === String(character.native || '').trim()); return full ? `${full.ja} = ${full.ko}${/^(?:male|female)$/i.test(character.gender) ? ` (${character.gender.toLowerCase()})` : ''}` : ''; }).filter(Boolean);
     // An answer is cut off at a few times the line's length (a subtitle line never needs more), so a model stuck
@@ -551,12 +590,18 @@ function createLocalAi(userData) {
       while (!fatal && !signal?.aborted) {
         const index = pick ? pick() : next < texts.length ? next++ : undefined;
         if (index === undefined) break;
-        const source = texts[index], body = request(source, [...termsFor(source, names), ...speakerTerms(source, context.characters)], kind, texts.slice(Math.max(0, index - 2), index), cast);
+        const source = texts[index], body = languageInput ? translationRequest(source, model)
+          : model.customPrompt ? { messages: [{ role: 'user', content: model.customPrompt.replace(/\{(text|source_lang|target_lang)\}/g, (_, key) => ({ text: source, source_lang: sourceLanguage(source, model.sourceLanguage), target_lang: 'ko' })[key]) }], temperature: 0.3 }
+          : request(source, [...termsFor(source, names), ...speakerTerms(source, context.characters)], model.inputMode === 'chat' ? 'chat' : kind, texts.slice(Math.max(0, index - 2), index), cast, rules);
         try {
           // A Japanese word left in the answer (えっ, 先輩) is asked again, twice at most. ja-ko-vn's temperature of 0.1
           // would give the same answer again, so its second and third tries are less certain.
           let text = '';
-          for (let attempt = 0; attempt < 3; attempt++) { text = clean(await ask(attempt && kind === 'jako' ? { ...body, temperature: 0.5 } : body, source), source); if (text && !KANA.test(text)) break; }
+          for (let attempt = 0; attempt < 3; attempt++) {
+            text = clean(await ask(attempt && kind === 'jako' ? { ...body, temperature: 0.5 } : body, source), source);
+            if (languageInput && /\p{L}/u.test(text) && !/\p{Script=Hangul}/u.test(text)) text = '';
+            if (text && !KANA.test(text)) break;
+          }
           if (text) { result.set(index, text); onLine(index, text); }
         } catch (error) { if (!server) fatal = error; }
         touch(); progress(++done, texts.length);
@@ -566,11 +611,11 @@ function createLocalAi(userData) {
     return { translations: result, model };
   }
 
-  return { models, installModel, cancelInstall, removeModel, addFile, translateLines, stop, modelPath };
+  return { models, installModel, cancelInstall, removeModel, addFile, setModelOptions, translateLines, stop, modelPath };
 }
 
 // The prompt a model is asked with, as part of the translation cache key (a changed prompt is not hidden behind
 // translations made with the old one).
-const promptVersion = model => !model ? '' : modelKind(model) === 'hy-mt2' ? '+context-1' : modelKind(model) === 'gemma' ? '+gemma-3' : '';
+const promptVersion = model => !model ? '' : '+input-1:' + JSON.stringify([model.path || '', model.inputMode || 'auto', model.sourceLanguage || 'auto', model.customPrompt || '']) + (modelKind(model) === 'hy-mt2' ? '+context-1' : modelKind(model) === 'gemma' ? '+gemma-3' : '');
 
 module.exports = { createLocalAi, LOCAL_AI_MODELS: MODELS, LOCAL_AI_LICENSE_ERROR, promptVersion };

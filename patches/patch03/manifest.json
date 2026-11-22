@@ -1,0 +1,160 @@
+{
+  "officialRepository": "https://github.com/whispelyn-byte/LilacAnime-desktop",
+  "patchVersion": "1.0.0",
+  "officialVersion": "0.5.54",
+  "officialCommit": "e4ac62214f5c4863eebae5052633e7f9f33dcbaa",
+  "officialArchiveSha256": "007B0141D416614829DACF5494CFC44FD2A1EA80AA58E7E50C856D0FCDBF27CD",
+  "officialTreeSha256": "4CAD7FA1107E1B32B13C424EC12C308E3B09FF33077C2D288AA741BB2DD75DFD",
+  "officialTreeFileCount": 141,
+  "officialTreeHashFormat": "SHA256(sorted(relative path UTF-8 + NUL + raw file SHA256 digest + LF))",
+  "officialConnectionFiles": [
+    "src/app.js",
+    "src/index.html"
+  ],
+  "connections": [
+    {
+      "file": "src/app.js",
+      "description": "레거시 통합 설정을 검증·복구하고 공식 공급원 선택과 디노 검색 모드를 분리",
+      "before": "const state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: localStorage.getItem('contentSource') || 'reanime',",
+      "after": "const dinoSourceSettings = window.LilacIntegratedSearch?.initializeSourceSettings(localStorage);\nconst savedContentSource = localStorage.getItem('contentSource');\nconst state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: window.LilacIntegratedSearch?.officialSourceForState?.(dinoSourceSettings, savedContentSource) || 'reanime',"
+    },
+    {
+      "file": "src/index.html",
+      "description": "공식 스타일시트 옆에 통합 검색 스타일 연결",
+      "before": "<link rel=\"stylesheet\" href=\"styles.css\" />",
+      "after": "<link rel=\"stylesheet\" href=\"styles.css\" />\n  <link rel=\"stylesheet\" href=\"integrated-search.css\" />"
+    },
+    {
+      "file": "src/index.html",
+      "description": "기존 공급원 설정에 통합 옵션 한 개 연결",
+      "before": "<button data-value=\"miruro\">Miruro</button></div><p>선택한 사이트의 애니 목록·제목·회차·영상 소스를 함께 사용합니다.</p>",
+      "after": "<button data-value=\"miruro\">Miruro</button><button data-value=\"integrated\">통합</button></div><p>개별 공급원은 선택한 사이트만 사용하고, 통합은 RE:Anime·Miruro·Animenosub·애니24·링크애니 결과를 작품별로 묶습니다. Linkkf는 개별 모드로 유지됩니다.</p>"
+    },
+    {
+      "file": "src/index.html",
+      "description": "기존 공급원 선택 요소에 통합 옵션 한 개 연결",
+      "before": "<option value=\"miruro\">Miruro</option></select>",
+      "after": "<option value=\"miruro\">Miruro</option><option value=\"integrated\">통합</option></select>"
+    },
+    {
+      "file": "src/index.html",
+      "description": "통합 모듈을 공식 앱 스크립트 전후로 로드",
+      "before": "<script src=\"app.js\"></script>",
+      "after": "<script src=\"integrated-search.js\"></script>\n  <script src=\"app.js\"></script>\n  <script src=\"dino-sqlite-sync.js\"></script>\n  <script src=\"patch03-bridge.js\"></script>"
+    }
+  ],
+  "runtimeModules": [
+    {
+      "source": "src/integrated-search.js",
+      "destination": "src/integrated-search.js",
+      "sha256": "CA3E59062FA15AE1887EAF331A15BBC4E21D53F29C0FBB5A5C04C1F529B053CD"
+    },
+    {
+      "source": "src/integrated-search.css",
+      "destination": "src/integrated-search.css",
+      "sha256": "7628C11EC8A017EEFDA84E14C14F9197B75BDC3BB48F826CB884884236727784"
+    },
+    {
+      "source": "patches/patch03/patch03-bridge.js",
+      "destination": "src/patch03-bridge.js",
+      "sha256": "6C0098542ACADF311D65B904D4BDB9E08DB9C7C88F99B040BBD10A0FA01EAF41"
+    },
+    {
+      "source": "src/dino-sqlite-sync.js",
+      "destination": "src/dino-sqlite-sync.js",
+      "sha256": "DAB42725FBB7D2430D2E3E4E005D6B80C00EEA3ABB4B66C660A003D6FF689DBB"
+    },
+    {
+      "source": "patches/patch03/dino-work-db.cjs",
+      "destination": "electron/dino-work-db.cjs",
+      "sha256": "EA561ADF00D91067241254D42523D58B79FB433C57B28448765C1617CB72B818"
+    }
+  ],
+  "officialRuntimeModifiedAllowlist": [
+    "src/app.js",
+    "src/index.html",
+    "electron/main.cjs",
+    "electron/preload.cjs"
+  ],
+  "officialApis": [
+    {
+      "name": "providerCatalog",
+      "channel": "provider:catalog"
+    },
+    {
+      "name": "providerDetail",
+      "channel": "provider:detail"
+    },
+    {
+      "name": "providerResolve",
+      "channel": "provider:resolve"
+    }
+  ],
+  "additionalOfficialSources": [
+    {
+      "officialVersion": "0.5.55",
+      "officialCommit": "207693ea7ee31b83276ac793b35136055a24de26",
+      "officialArchiveSha256": "994E1346C4562B7A0E501D9092D59CB2D1B0C52691D4CD2C250ADDACD5E7C3AC",
+      "officialTreeSha256": "CDA756AAEBA4A07EE5BB738B6850C1E0F850DBD74B3166A6D6BB09CB1221A523",
+      "officialTreeFileCount": 145,
+      "connections": [
+        {
+          "file": "src/app.js",
+          "description": "레거시 통합 설정을 검증·복구하고 공식 공급원 선택과 디노 검색 모드를 분리",
+          "before": "const state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: localStorage.getItem('contentSource') || 'reanime',",
+          "after": "const dinoSourceSettings = window.LilacIntegratedSearch?.initializeSourceSettings(localStorage);\nconst savedContentSource = localStorage.getItem('contentSource');\nconst state = { season: [], top: [], library: store.get('library'), history: store.get('history'), downloads:[], source: window.LilacIntegratedSearch?.officialSourceForState?.(dinoSourceSettings, savedContentSource) || 'reanime',"
+        },
+        {
+          "file": "src/index.html",
+          "description": "공식 스타일시트 옆에 통합 검색 스타일 연결",
+          "before": "<link rel=\"stylesheet\" href=\"styles.css\" />",
+          "after": "<link rel=\"stylesheet\" href=\"styles.css\" />\n  <link rel=\"stylesheet\" href=\"integrated-search.css\" />"
+        },
+        {
+          "file": "src/index.html",
+          "description": "기존 공급원 설정에 통합 옵션 한 개 연결",
+          "before": "<button data-value=\"miruro\">Miruro</button></div><p>선택한 사이트의 애니 목록·제목·회차·영상 소스를 함께 사용합니다.</p>",
+          "after": "<button data-value=\"miruro\">Miruro</button><button data-value=\"integrated\">통합</button></div><p>개별 공급원은 선택한 사이트만 사용하고, 통합은 RE:Anime·Miruro·Animenosub·애니24·링크애니 결과를 작품별로 묶습니다. Linkkf는 개별 모드로 유지됩니다.</p>"
+        },
+        {
+          "file": "src/index.html",
+          "description": "기존 공급원 선택 요소에 통합 옵션 한 개 연결",
+          "before": "<option value=\"miruro\">Miruro</option></select>",
+          "after": "<option value=\"miruro\">Miruro</option><option value=\"integrated\">통합</option></select>"
+        },
+        {
+          "file": "src/index.html",
+          "description": "통합 모듈을 공식 앱 스크립트 전후로 로드",
+          "before": "<script src=\"app.js\"></script>",
+          "after": "<script src=\"integrated-search.js\"></script>\n  <script src=\"app.js\"></script>\n  <script src=\"dino-sqlite-sync.js\"></script>\n  <script src=\"patch03-bridge.js\"></script>"
+        }
+      ]
+    }
+  ],
+  "integratedRuntimeNotes": {
+    "enabledBy": "lilacDinoPatch.searchMode = integrated",
+    "scope": "Shared source discovery for official anime detail entry points, including home and search",
+    "sourceVerification": "Matching external IDs or conservative alternate-title, release-year and season checks",
+    "quality": "Decoded video height shown only after verified playback; never inferred from a catalog",
+    "retry": "Manual retry for an initially undetected provider"
+  },
+  "optionalConnections": [
+    {
+      "file": "electron/main.cjs",
+      "description": "원본 main의 ready 진입 지점에 SQLite 전용 IPC만 추가하고 오류 시 원본을 유지",
+      "before": "app.whenReady().then(async () => {",
+      "after": "app.whenReady().then(async () => {\n  try { require('./dino-work-db.cjs').register({ app, ipcMain }); }\n  catch (error) { console.warn('[DinoPatch] SQLite fallback:', String(error?.message || error)); }"
+    },
+    {
+      "file": "electron/preload.cjs",
+      "description": "원본 contextBridge 객체에 제한된 SQLite IPC 함수 하나만 추가",
+      "before": "contextBridge.exposeInMainWorld('lilac', {",
+      "after": "contextBridge.exposeInMainWorld('lilac', {\n  dinoWorkIndex: (method, payload = null) => ipcRenderer.invoke('dino:work-index', method, payload),"
+    }
+  ],
+  "optionalPatchApi": {
+    "name": "dinoWorkIndex",
+    "channel": "dino:work-index",
+    "availableWhen": "Electron builtin node:sqlite enabled; otherwise safe localStorage fallback"
+  }
+}

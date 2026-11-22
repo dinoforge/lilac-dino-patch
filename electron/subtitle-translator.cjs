@@ -8,22 +8,73 @@ const path = require('path');
 const crypto = require('crypto');
 const { createLocalAi, LOCAL_AI_LICENSE_ERROR, promptVersion } = require('./local-ai.cjs');
 const { characterTerms } = require('./anime-glossary.cjs');
+const anthropic = require('./anthropic-api.cjs');
 
 const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta';
 const PROMPT_VERSION = 'prompt-3', LOCAL_PROMPT_VERSION = 'local-4';
+// 효과음·화자 이름 빼고 번역 (설정 > 자막 자동 번역): a line's caption labels and speaker name are taken out by the app
+// before it is translated, since a translation-only model (TranslateGemma) takes no instruction to leave them out.
+// - Labels in brackets anywhere on a line: a name or a sound, （創太） （ため息） （ドアの開く音） [laughs] (SIGHS). A Japanese
+//   one is a label when it is kanji / katakana alone (a name, 拍手, 足音) or ends in a sound word (…音, …声, ため息);
+//   one with hiragana otherwise is kept, as Japanese subtitles bracket a character's thoughts too: （どうしよう）.
+//   An English one is a label when it is three words at most without sentence marks.
+// - A short label before the words on a line is the speaker's, with hiragana too: （男の子）こんにちは.
+// - A speaker before a colon at the start: 創太： SOTA: (an English one in capitals only, so "Note: …" stays).
+// - A line of vocal sounds alone: あっ, うう…, くっ, はあ, あはは, ふふっ, Ugh!, Hahaha (not うん, ええ, ううん: those are words).
+// A cue left with nothing is not translated and is left out of the translated file.
+// How the APIs are told to translate (the TRANSLATION part of their system prompt). 번역 프롬프트 > 기본 규칙 불러오기
+// shows it, as the place to start a set of rules of one's own.
+const TRANSLATION_RULES = [
+  '- Read the lines as a scene: work out from the flow who is speaking to whom, and translate each line for that speaker and listener.',
+  '- Translate the meaning faithfully. Do not add, explain, soften or censor anything, and do not invent what is not said.',
+  '- Write natural spoken Korean, as short as a subtitle should be. Avoid translationese (needless 그녀/그, 당신, ~하는 것이다, literal idioms).',
+  '- Choose 반말 or 존댓말 from the relationship (friends, family, classmates: 반말; strangers, superiors, polite characters: 존댓말) and keep each character\'s voice the same throughout: rough or gentle, old-fashioned or childish speech, verbal tics and catchphrases.',
+  '- Words for people follow the speaker: お兄ちゃん / 兄さん → 오빠 from a girl, 형 from a boy; お姉ちゃん / 姉さん → 언니 from a girl, 누나 from a boy; 先輩 → 선배, 先生 → 선생님.',
+  '- Other Japanese names in Hangul by the usual Korean fan spelling (e.g. 마히루, 아마네, 츠카사, 쇼타; つ is 츠, not 쓰). Keep the original name order.',
+  '- Honorifics: -san → 씨 or nothing, -kun / -chan → nothing (or 군 / 짱 where it matters), -sama → 님.',
+  '- Set phrases as Koreans say them: いただきます → 잘 먹겠습니다, ごちそうさま → 잘 먹었습니다, ただいま → 다녀왔어, おかえり → 어서 와, いってきます → 다녀올게, お疲れ様 → 수고했어, よろしく → 잘 부탁해.',
+  '- Stammers and cut-off words stay stammers (べ、別に → 벼, 별로); interjections become Korean ones (えっ → 어?, はぁ? → 하아?, よし → 좋아, まあ → 뭐).',
+  '- Jokes and wordplay: keep the effect in Korean rather than the literal words. Song lyrics: translate as lyrics. Attack and spell names: as the fandom would say them, usually translated.',
+  '- Lines that are only sounds, music marks or symbols stay as they are. Keep caption labels in their brackets, translated: (男の子) → (남자아이), [ため息] → [한숨].',
+  '- Keep a line break (\\n) where the original has one if it still reads well.'
+].join('\n');
+const SOUND_WORD =/(?:音|声|息|笑い|笑|泣き|悲鳴|咳|咳払い|拍手|歓声|鼻歌|舌打ち|いびき|あくび|くしゃみ|うめき|叫び|ノック|チャイム|ベル|着信|振動|鳴る|鳴く|音楽|BGM)$/;
+const VOCAL = /^(?:[あぁアァ]+|[うぅウゥ]+|[くク]+|[ぐグ]+|[んン]+|[ひヒ]+|[へヘ]+|[ほホ]+|[ふフ]+|[はハ][あぁアァ]*|(?:[あぁアァ]?[はハ])+|(?:[うぅウゥ]?[ふフ])+|(?:[えぇエェ]?[へヘ])+|(?:[いぃイィ]?[ひヒ])+|a+h*|o+h+|u+g*h+|h+m+|m+|(?:h[aeio]){2,}|gr+|a+r+g+h+|o+w+)$/i;
+function captionLabel(inside) {
+  const value = inside.trim();
+  if (!value || /[。、！？!?…]/.test(value)) return false;
+  if (/^[\p{Script=Han}\p{Script=Katakana}ー・々\s]+$/u.test(value) || SOUND_WORD.test(value)) return true;
+  return !/[\p{Script=Hiragana}\p{Script=Han}\p{Script=Katakana}]/u.test(value) && value.split(/\s+/).length <= 3;
+}
+function dropCaptions(text) {
+  return String(text).split('\n').map(line => {
+    // A short label before the words is the speaker's, hiragana or not: （男の子）こんにちは.
+    let value = line.trim().replace(/^[（(［[]([^（）()［］[\]\n]{1,12})[）)］\]]\s*(?=\S)/, (label, inside) => /[。、！？!?…]/.test(inside) ? label : '');
+    value = value.replace(/[（(［[]([^（）()［］[\]\n]{1,20})[）)］\]]/g, (label, inside) => captionLabel(inside) ? ' ' : label).trim();
+    value = value.replace(/^[\p{Script=Han}\p{Script=Katakana}ー・々]{1,10}[：:]\s*/u, '').replace(/^[A-Z][A-Z0-9 .'-]{0,20}:\s+/, '').trim();
+    const words = value.split(/[\s、。，,.!！?？…‥~～〜・-]+/).map(word => word.replace(/[ーっッ]/g, '')).filter(Boolean);
+    return words.length && words.every(word => VOCAL.test(word)) || !/\p{L}/u.test(value) ? '' : value.replace(/\s{2,}/g, ' ');
+  }).filter(Boolean).join('\n');
+}
 // The translation APIs (with the Korean particles their names take) and how each is fed: Gemini gets a whole episode
 // (a few hundred short lines) in one request where possible, since its free tier allows only a few requests a minute
 // and a few dozen a day; OpenAI and Qwen answer shorter batches faster and stay within their output limits; DeepL takes
-// at most 50 texts a request.
+// at most 50 texts a request; Claude takes long batches, but a new key's per-minute output allowance is small.
 const CLOUDS = {
   gemini: { name: 'Gemini', eul: '를', ro: '로', lines: 600, chars: 30000, parallel: 2 },
   openai: { name: 'OpenAI', eul: '를', ro: '로', lines: 150, chars: 9000, parallel: 4 },
   deepl: { name: 'DeepL', eul: '을', ro: '로', lines: 50, chars: 20000, parallel: 2 },
-  qwen: { name: 'Qwen', eul: '을', ro: '으로', lines: 100, chars: 6000, parallel: 4 }
+  qwen: { name: 'Qwen', eul: '을', ro: '으로', lines: 100, chars: 6000, parallel: 4 },
+  claude: { name: 'Claude', eul: '를', ro: '로', lines: 200, chars: 12000, parallel: 3 }
 };
 const LOCAL_ENGINE = { name: '로컬 AI', eul: '를', ro: '로' };
 const QWEN_API = { international: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', china: 'https://dashscope.aliyuncs.com/compatible-mode/v1' };
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms, signal) => new Promise((resolve, reject) => {
+  const abort = () => { clearTimeout(timer); reject(signal.reason || Object.assign(new Error('번역을 취소했습니다.'), { name: 'AbortError' })); };
+  if (signal?.aborted) { reject(signal.reason); return; }
+  const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, ms);
+  signal?.addEventListener('abort', abort, { once: true });
+});
 
 function createTranslator(userData) {
   const settingsFile = path.join(userData, 'translation.json'), cacheDir = path.join(userData, 'subtitles', 'translated');
@@ -41,20 +92,27 @@ function createTranslator(userData) {
     let value = {}; try { value = JSON.parse(fs.readFileSync(fs.existsSync(settingsFile) ? settingsFile : oldSettingsFile, 'utf8')) || {}; } catch { /* defaults */ }
     const text = name => String(value[name] || '').trim(), list = name => Array.isArray(value[name]) ? value[name] : [];
     return { key: text('key'), model: text('model'), models: list('models'), translateDownloads: value.translateDownloadsChosen ? value.translateDownloads === true : true, translateDownloadsChosen: Boolean(value.translateDownloadsChosen),
-      // The API the 번역 API buttons use, and each API's key (and model, for OpenAI and Qwen; Qwen's region too).
+      // The API the 번역 API buttons use, and each API's key (and model, for OpenAI, Qwen and Claude; Qwen's region too).
       cloud: Object.hasOwn(CLOUDS, value.cloud) ? value.cloud : 'gemini',
       openaiKey: text('openaiKey'), openaiModel: text('openaiModel'), openaiModels: list('openaiModels'),
       deeplKey: text('deeplKey'),
       qwenKey: text('qwenKey'), qwenModel: text('qwenModel'), qwenModels: list('qwenModels'), qwenRegion: value.qwenRegion === 'china' ? 'china' : 'international',
+      claudeKey: text('claudeKey'), claudeModel: text('claudeModel'), claudeModels: list('claudeModels'),
       localModel: installedModel(String(value.localModel || 'gemma-4-e4b')),
       // The next episode is made ready ahead by the local AI when it translates; by the API only when this is on (it
       // spends the API's allowance on an episode that may not be watched).
       prepareNextCloud: value.prepareNextCloud === true,
+      // 효과음·화자 이름 빼고 번역: caption labels, sound-only lines and speaker names are taken out before any engine sees
+      // the lines (see dropCaptions).
+      dropCaptions: value.dropCaptions === true,
+      // 번역 프롬프트: promptExtra, the user's rules added after the app's; promptRules, the user's rules in place of the
+      // app's (the work, names, glossary, lines before and answer format are still given). See promptRules().
+      promptExtra: text('promptExtra'), promptRules: text('promptRules'),
       // How a picked Jimaku file is translated by itself: 'off', 'cloud' or 'local' ('gemini' before the other APIs came;
       // older settings still: on = whichever is set up).
       jimakuTranslate: value.jimakuTranslate === 'gemini' ? 'cloud' : ['off', 'cloud', 'local'].includes(value.jimakuTranslate) ? value.jimakuTranslate : value.autoJimaku === false ? 'off' : 'cloud' };
   };
-  const keyOf = (value, api) => ({ gemini: value.key, openai: value.openaiKey, deepl: value.deeplKey, qwen: value.qwenKey })[api];
+  const keyOf = (value, api) => ({ gemini: value.key, openai: value.openaiKey, deepl: value.deeplKey, qwen: value.qwenKey, claude: value.claudeKey })[api];
   // The API side is ready when any API has a key: the picked one is asked first, the others take over.
   const cloudKey = value => keyOf(value, value.cloud) || Object.keys(CLOUDS).map(api => keyOf(value, api)).find(Boolean);
   // With the local AI the installed model list is part of the settings the page shows, and the player needs to know
@@ -103,14 +161,15 @@ function createTranslator(userData) {
     }
     return root;
   }
-  async function retried(run) {
+  async function retried(run, signal) {
     for (let attempt = 0; ; attempt++) {
+      signal?.throwIfAborted();
       try { return await run(); }
       catch (error) {
         if (error.name === 'AbortError') throw error;
         const busy = (error.status === 429 && !/quota|billing|insufficient|exceeded your current/i.test(error.message)) || error.status >= 500 || error.name === 'TimeoutError';
         if (!busy || attempt >= 3) throw error;
-        await sleep(Math.min(60000, (error.retryAfter || 2.5 * 2 ** attempt) * 1000));
+        await sleep(Math.min(60000, (error.retryAfter || 2.5 * 2 ** attempt) * 1000), signal);
       }
     }
   }
@@ -137,11 +196,18 @@ function createTranslator(userData) {
     if ('translateDownloads' in change) Object.assign(next, { translateDownloads: change.translateDownloads === true, translateDownloadsChosen: true });
     if ('jimakuTranslate' in change && ['off', 'cloud', 'local'].includes(change.jimakuTranslate)) next.jimakuTranslate = change.jimakuTranslate;
     if ('prepareNextCloud' in change) next.prepareNextCloud = change.prepareNextCloud === true;
+    if ('dropCaptions' in change) next.dropCaptions = change.dropCaptions === true;
+    for (const name of ['promptExtra', 'promptRules']) if (name in change) {
+      const value = String(change[name] || '').trim();
+      if (value.length > 4000) throw new Error('번역 프롬프트는 4000자까지 쓸 수 있습니다.');
+      next[name] = value;
+    }
     if ('cloud' in change && Object.hasOwn(CLOUDS, change.cloud)) next.cloud = change.cloud;
     if ('qwenRegion' in change && ['international', 'china'].includes(change.qwenRegion)) next.qwenRegion = change.qwenRegion;
     if ('openaiModel' in change && next.openaiModels.includes(change.openaiModel)) next.openaiModel = change.openaiModel;
     if ('qwenModel' in change && (next.qwenModels.includes(change.qwenModel) || !next.qwenModels.length)) next.qwenModel = String(change.qwenModel || '').trim();
-    // A new key is checked before it is kept: OpenAI and Qwen by listing the models it can use, DeepL by its usage.
+    if ('claudeModel' in change && next.claudeModels.includes(change.claudeModel)) next.claudeModel = change.claudeModel;
+    // A new key is checked before it is kept: OpenAI, Qwen and Claude by listing usable models, DeepL by its usage.
     if ('openaiKey' in change && String(change.openaiKey || '').trim() !== current.openaiKey) {
       next.openaiKey = String(change.openaiKey || '').trim(); next.openaiModels = []; next.openaiModel = '';
       if (next.openaiKey) {
@@ -160,8 +226,20 @@ function createTranslator(userData) {
       if (next.qwenKey) {
         // A key belongs to one region (Singapore or Beijing): a 401 there means a wrong key or region.
         let models = [];
-        try { models = await qwenModels(next.qwenKey, next.qwenRegion); } catch (error) { if (error.status === 401 || error.status === 403) throw new Error(`Qwen API 키를 확인하지 못했습니다. 키와 지역(${next.qwenRegion === 'china' ? '중국' : '국제'})을 확인해 주세요.`); }
+        try { models = await qwenModels(next.qwenKey, next.qwenRegion); } catch (error) {
+          if (error.status === 401 || error.status === 403) throw new Error(`Qwen API 키를 확인하지 못했습니다. 키와 지역(${next.qwenRegion === 'china' ? '중국' : '국제'})을 확인해 주세요.`);
+          throw error;
+        }
+        if (!models.length) throw new Error('이 키로 쓸 수 있는 Qwen 모델이 없습니다.');
         Object.assign(next, { qwenModels: models, qwenModel: models.includes('qwen-plus') ? 'qwen-plus' : models.find(id => /plus/.test(id)) || models[0] || 'qwen-plus' });
+      }
+    }
+    if ('claudeKey' in change && String(change.claudeKey || '').trim() !== current.claudeKey) {
+      next.claudeKey = String(change.claudeKey || '').trim(); next.claudeModels = []; next.claudeModel = '';
+      if (next.claudeKey) {
+        const models = await anthropic.listModels(next.claudeKey, fetch);
+        if (!models.length) throw new Error('이 키로 쓸 수 있는 Claude 모델이 없습니다.');
+        Object.assign(next, { claudeModels: models, claudeModel: models.includes(change.claudeModel) ? change.claudeModel : anthropic.defaultModel(models) });
       }
     }
     if ('localModel' in change) {
@@ -208,10 +286,10 @@ function createTranslator(userData) {
             if (quotas.some(id => /PerDay/i.test(id))) throw Object.assign(new Error(`Gemini 무료 사용량을 오늘 다 썼습니다 (${model}). 내일 다시 번역하거나 로컬 AI 번역을 쓰세요.`), { status: 429, daily: true });
             const wait = Number(String((error.details || []).find(detail => detail.retryDelay)?.retryDelay || '').replace(/s$/, '')) || Number(error.message.match(/retry in ([\d.]+)\s*s/i)?.[1]) || 2.5 * 2 ** attempt;
             if (wait > 120) throw error;
-            await new Promise(resolve => setTimeout(resolve, (wait + 1) * 1000)); continue;
+            await sleep((wait + 1) * 1000, signal); continue;
           }
           // Busy (503 "high demand"): asked once more, then another Flash model takes over (translateCloud).
-          if (error.status >= 500 || error.name === 'TimeoutError') { if (attempt) throw error; await new Promise(resolve => setTimeout(resolve, 2500)); continue; }
+          if (error.status >= 500 || error.name === 'TimeoutError') { if (attempt) throw error; await sleep(2500, signal); continue; }
           break;
         }
       }
@@ -239,7 +317,10 @@ function createTranslator(userData) {
   // Written like a Korean fansub team's style guide: the work, what the answer must look like, then how to translate.
   // context: {title (as shown in the app, usually Korean), originalTitle, genres, synopsis, characters: [{name, native,
   // first, last, gender}] from AniList}. Names come with a Korean spelling (anime-glossary) so every batch agrees.
+  // context.rules: the user's {extra, custom} rules (번역 프롬프트): custom takes the place of TRANSLATION_RULES, extra comes
+  // after them and is followed first.
   const system = (context = {}, wrapped = false) => {
+    const rules = context.rules || {};
     const characters = (context.characters || []).filter(item => item.name || item.native).slice(0, 30);
     const korean = new Map(characterTerms(characters).map(term => [term.ja, term.ko]));
     const gender = item => item.gender === 'Female' ? 'female' : item.gender === 'Male' ? 'male' : '';
@@ -257,18 +338,8 @@ function createTranslator(userData) {
       '- A sentence can run over several lines: translate it so the lines read naturally one after another, but keep each part on its own line.',
       '',
       'TRANSLATION',
-      '- Read the lines as a scene: work out from the flow who is speaking to whom, and translate each line for that speaker and listener.',
-      '- Translate the meaning faithfully. Do not add, explain, soften or censor anything, and do not invent what is not said.',
-      '- Write natural spoken Korean, as short as a subtitle should be. Avoid translationese (needless 그녀/그, 당신, ~하는 것이다, literal idioms).',
-      '- Choose 반말 or 존댓말 from the relationship (friends, family, classmates: 반말; strangers, superiors, polite characters: 존댓말) and keep each character\'s voice the same throughout: rough or gentle, old-fashioned or childish speech, verbal tics and catchphrases.',
-      '- Words for people follow the speaker: お兄ちゃん / 兄さん → 오빠 from a girl, 형 from a boy; お姉ちゃん / 姉さん → 언니 from a girl, 누나 from a boy; 先輩 → 선배, 先生 → 선생님.',
-      '- Other Japanese names in Hangul by the usual Korean fan spelling (e.g. 마히루, 아마네, 츠카사, 쇼타; つ is 츠, not 쓰). Keep the original name order.',
-      '- Honorifics: -san → 씨 or nothing, -kun / -chan → nothing (or 군 / 짱 where it matters), -sama → 님.',
-      '- Set phrases as Koreans say them: いただきます → 잘 먹겠습니다, ごちそうさま → 잘 먹었습니다, ただいま → 다녀왔어, おかえり → 어서 와, いってきます → 다녀올게, お疲れ様 → 수고했어, よろしく → 잘 부탁해.',
-      '- Stammers and cut-off words stay stammers (べ、別に → 벼, 별로); interjections become Korean ones (えっ → 어?, はぁ? → 하아?, よし → 좋아, まあ → 뭐).',
-      '- Jokes and wordplay: keep the effect in Korean rather than the literal words. Song lyrics: translate as lyrics. Attack and spell names: as the fandom would say them, usually translated.',
-      '- Lines that are only sounds, music marks or symbols stay as they are. Keep caption labels in their brackets, translated: (男の子) → (남자아이), [ため息] → [한숨].',
-      '- Keep a line break (\\n) where the original has one if it still reads well.'
+      rules.custom || TRANSLATION_RULES,
+      ...(rules.extra ? ['', 'ADDITIONAL RULES FROM THE USER (follow these first where they differ from the rules above)', rules.extra] : [])
     ].filter(line => line !== null && line !== undefined).join('\n').replace(/\n{3,}/g, '\n\n').trim();
   };
 
@@ -284,27 +355,34 @@ function createTranslator(userData) {
     return askWithShapes(`openai:${model}`, shapes, async shape => {
       const root = await http('OpenAI', 'https://api.openai.com/v1/responses', { signal, headers: { Authorization: `Bearer ${settings.openaiKey}` }, body: { model, store: false, instructions, input, ...shape } });
       return (root.output || []).flatMap(item => item.content || []).filter(part => part.type === 'output_text').map(part => part.text).join('');
-    });
+    }, signal);
   }
   async function askQwen(settings, model, instructions, input, signal) {
     const shapes = [{ response_format: { type: 'json_object' }, enable_thinking: false }, { response_format: { type: 'json_object' } }, {}];
     return askWithShapes(`qwen:${model}`, shapes, async shape => {
       const root = await http('Qwen', `${QWEN_API[settings.qwenRegion]}/chat/completions`, { signal, headers: { Authorization: `Bearer ${settings.qwenKey}` }, body: { model, messages: [{ role: 'system', content: instructions }, { role: 'user', content: input }], temperature: 0.3, ...shape } });
       return root.choices?.[0]?.message?.content || '';
-    });
+    }, signal);
   }
-  async function askWithShapes(id, shapes, run) {
+  // Claude uses the official SDK adapter. Ask for structured output with low effort first, then
+  // fall back to a schema-only or plain request for models that do not support those options.
+  async function askClaude(settings, model, instructions, input, signal) {
+    const schema = { type: 'object', properties: { lines: { type: 'array', items: { type: 'object', properties: { i: { type: 'integer' }, t: { type: 'string' } }, required: ['i', 't'], additionalProperties: false } } }, required: ['lines'], additionalProperties: false };
+    const shapes = [{ effort: 'low', schema, fallback: true }, { schema }, {}];
+    return askWithShapes(`claude:${model}`, shapes, shape => anthropic.translate({ key: settings.claudeKey, model, instructions, input, shape, signal, fetch }), signal);
+  }
+  async function askWithShapes(id, shapes, run, signal) {
     let last = null;
     for (let index = workingRequest.get(id) || 0; index < shapes.length; index++) {
-      try { const text = await retried(() => run(shapes[index])); if (text) { workingRequest.set(id, index); return text; } last = new Error('API가 빈 응답을 보냈습니다.'); }
-      catch (error) { last = error; if (error.name === 'AbortError' || error.status !== 400) throw error; }
+      try { const text = await retried(() => run(shapes[index]), signal); if (text) { workingRequest.set(id, index); return text; } last = new Error('API가 빈 응답을 보냈습니다.'); }
+      catch (error) { last = error; if (error.name === 'AbortError' || error.status !== 400 || error.billing) throw error; }
     }
     throw last;
   }
   // DeepL translates the texts as they are, one answer for each, in order; the source language is detected (tracks can
   // be English). The anime's title goes along as context, which DeepL reads but does not translate.
   async function askDeepl(settings, texts, context, signal) {
-    const root = await retried(() => http('DeepL', `${deeplApi(settings.deeplKey)}/translate`, { signal, headers: { Authorization: `DeepL-Auth-Key ${settings.deeplKey}` }, body: { text: texts, target_lang: 'KO', preserve_formatting: true, ...(context.title ? { context: `Anime subtitles: ${context.title}` } : {}) } }));
+    const root = await retried(() => http('DeepL', `${deeplApi(settings.deeplKey)}/translate`, { signal, headers: { Authorization: `DeepL-Auth-Key ${settings.deeplKey}` }, body: { text: texts, target_lang: 'KO', preserve_formatting: true, ...(context.title ? { context: `Anime subtitles: ${context.title}` } : {}) } }), signal);
     const list = root.translations || [];
     if (list.length !== texts.length) throw new Error(`DeepL 응답 줄 수가 맞지 않습니다 (${texts.length}줄 중 ${list.length}줄).`);
     return list.map(item => String(item.text || '').trim());
@@ -317,12 +395,12 @@ function createTranslator(userData) {
   // model left, so the next API or the local AI takes over as before. A used-up model is passed over until Gemini's
   // allowance resets (midnight Pacific time; a per-minute limit that asks for a long wait, five minutes), or for an hour
   // on the others. A model the API is too busy to answer (503, "high demand", seen on Gemini's free tier) hands over too,
-  // and is passed over for five minutes.
+  // Claude rate limits are passed over for five minutes; other exhausted providers are passed over for an hour.
   const spent = new Map(); // `${api}:${model}` -> until
   const usedUp = (api, error) => error.status === 404 || (error.status === 429 && !(api === 'openai' && /insufficient_quota|billing|exceeded your current quota/i.test(error.message))) || (api === 'qwen' && error.status === 403 && /quota|free ?tier/i.test(error.message));
   const busy = error => error.status >= 500 || error.name === 'TimeoutError';
   const spentUntil = (api, error) => {
-    if (busy(error) || (api === 'gemini' && error.status === 429 && !error.daily)) return Date.now() + 300000;
+    if (busy(error) || (api === 'gemini' && error.status === 429 && !error.daily) || (api === 'claude' && error.status === 429)) return Date.now() + 300000;
     if (api !== 'gemini') return Date.now() + 3600000;
     const pacific = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
     return Date.now() + (86400 - (pacific.getHours() * 3600 + pacific.getMinutes() * 60 + pacific.getSeconds())) * 1000;
@@ -333,6 +411,7 @@ function createTranslator(userData) {
     const others = api === 'gemini' ? ranked(settings.models, name => !/flash/.test(name) || /transcribe|customtools|image|tts|live|audio/.test(name) ? -1 : (/lite/.test(name) ? 2 : 0) + (/preview/.test(name) ? 1 : 0))
       : api === 'openai' ? ranked(settings.openaiModels, name => /mini/.test(name) ? 0 : /nano/.test(name) ? 1 : -1)
       : api === 'qwen' ? ranked(settings.qwenModels, name => { const kind = /plus/.test(name) ? 0 : /flash/.test(name) ? 2 : /turbo/.test(name) ? 4 : -1; return kind < 0 ? -1 : kind + (/\d{4}-?\d{2}-?\d{2}|\d{4}$/.test(name) ? 1 : 0); })
+      : api === 'claude' ? ranked(settings.claudeModels, name => anthropic.familyOf(name) === anthropic.familyOf(model) ? 0 : -1)
       : [];
     const chain = [model, ...others.filter(name => name !== model)].filter(name => !isSpent(api, name));
     return chain.length ? chain : [model];
@@ -367,7 +446,7 @@ function createTranslator(userData) {
       if (api === 'deepl') { const texts = await askDeepl(settings, group.map(line => line.text), context, signal); return group.map((line, index) => ({ i: line.i, t: texts[index] })); }
       if (api === 'gemini') return answerItems(await generate(settings.key, model, system(context), JSON.stringify(group.map(line => ({ i: line.i, t: line.text }))), signal));
       const input = JSON.stringify({ lines: group.map(line => ({ i: line.i, t: line.text })) }), instructions = system(context, true);
-      return answerItems(api === 'openai' ? await askOpenai(settings, model, instructions, input, signal) : await askQwen(settings, model, instructions, input, signal));
+      return answerItems(api === 'openai' ? await askOpenai(settings, model, instructions, input, signal) : api === 'claude' ? await askClaude(settings, model, instructions, input, signal) : await askQwen(settings, model, instructions, input, signal));
     };
     let fatal = null, active = 0;
     progress(0, lines.length);
@@ -479,7 +558,10 @@ function createTranslator(userData) {
   // (the cue's text in the file, the translated cue's), a few at a time, so the player can show them before the rest is
   // done; control.done() gives all of them. fresh: made again (다시 번역), the saved translation and the lines kept from an
   // earlier run passed over; the new one takes the saved one's place.
-  async function translateOnce({ file, title = '', provider = '', context = {}, signal = null, progress = () => {}, status = () => {}, playing = 0, onLines = () => {}, control = {}, fresh = false, only = false, anySide = false }) {
+  // linesKey keeps partial subtitles (Whisper's still-growing VTT) keyed to the
+  // same subtitle source; partial runs keep line translations but never write a
+  // playable result until the source is complete.
+  async function translateOnce({ file, title = '', provider = '', context = {}, signal = null, progress = () => {}, status = () => {}, playing = 0, onLines = () => {}, control = {}, fresh = false, only = false, anySide = false, linesKey = '', partial = false }) {
     const settings = read(), wanted = provider || autoProvider() || 'cloud';
     // The engines in the order they are tried: an API's name, or 'local'.
     const apis = [settings.cloud, ...Object.keys(CLOUDS).filter(api => api !== settings.cloud)].filter(api => keyOf(settings, api));
@@ -488,12 +570,14 @@ function createTranslator(userData) {
     if (!order.length) throw new Error(wanted === 'local' ? '설정 > 자막 자동 번역에서 로컬 AI 모델을 먼저 받아 주세요.' : `설정 > 자막 자동 번역에서 ${CLOUDS[settings.cloud].name} API 키를 넣어 주세요.`);
     const localModel = local.models().find(item => item.id === settings.localModel);
     // A Gemini model is named as before (so translations made then are still found); the other APIs by their name.
-    const modelFor = api => ({ gemini: settings.model || defaultModel(settings.models) || 'gemini-flash-latest', openai: settings.openaiModel, deepl: '', qwen: settings.qwenModel || 'qwen-plus' })[api];
+    const modelFor = api => ({ gemini: settings.model || defaultModel(settings.models) || 'gemini-flash-latest', openai: settings.openaiModel, deepl: '', qwen: settings.qwenModel || 'qwen-plus', claude: settings.claudeModel || anthropic.defaultModel(settings.claudeModels) || anthropic.DEFAULT_MODEL })[api];
     const modelOf = name => name === 'local' ? `local:${localModel.file || localModel.label}` : name === 'gemini' ? modelFor(name) : `${name}${modelFor(name) ? `:${modelFor(name)}` : ''}`;
     const engineOf = name => name === 'local' ? LOCAL_ENGINE : CLOUDS[name];
     // The prompt version is part of the cache key, so a better prompt is not hidden behind older results.
     const source = fs.readFileSync(file, 'utf8');
-    const hashOf = name => crypto.createHash('sha1').update(`${modelOf(name)}\n${name === 'local' ? LOCAL_PROMPT_VERSION + promptVersion(localModel) : PROMPT_VERSION}\n${source}`).digest('hex').slice(0, 20);
+    // 번역 프롬프트 (DeepL takes no instruction: its translations are kept apart from them).
+    const rules = { extra: settings.promptExtra, custom: settings.promptRules };
+    const hashOf = name => crypto.createHash('sha1').update(`${modelOf(name)}\n${name === 'local' ? LOCAL_PROMPT_VERSION + promptVersion(localModel) : PROMPT_VERSION}${settings.dropCaptions ? '+drop-captions-1' : ''}${name !== 'deepl' && (rules.extra || rules.custom) ? `+rules:${JSON.stringify([rules.extra, rules.custom])}` : ''}\n${source}`).digest('hex').slice(0, 20);
     // Kept translations are taken from the side that translates now only: the local AI's for the local AI, the APIs'
     // (the picked one's first, then one another API made when it could not be used) for the API, so the two stay apart.
     // The side is the first one set up: the API asked for without any key is the local AI's side.
@@ -501,7 +585,7 @@ function createTranslator(userData) {
     // anySide (a translation made by itself, not a button pressed): with none on its own side, a finished one the other
     // side made is taken too (the next episode made ready by the local AI when the API's allowance ran out, opened on
     // the API's side).
-    for (const name of fresh ? [] : [...order.filter(sameSide), ...(anySide ? order.filter(name => !sameSide(name)) : [])]) {
+    for (const name of fresh || partial ? [] : [...order.filter(sameSide), ...(anySide ? order.filter(name => !sameSide(name)) : [])]) {
       const out = path.join(cacheDir, `${hashOf(name)}.vtt`);
       if (!fs.existsSync(out)) continue;
       const models = modelsIn(out);
@@ -524,6 +608,9 @@ function createTranslator(userData) {
     const blanks = [...new Set(paired.filter(span => dropped.has(span.cue)).map(span => span.text))].filter(raw => !cues.some(cue => plain(cue.text) === raw)).map(raw => ({ raw, text: '' }));
     // Identical lines (repeated cues, karaoke layers) are translated once. raw: the cue's text as it is (with its tags).
     const unique = [...new Set(cues.map(cue => plain(cue.text)).filter(text => /\p{L}/u.test(untagged(text))))].map((raw, i) => ({ i, raw, text: untagged(raw) }));
+    // 효과음·화자 이름 빼고 번역: the engines get each line without them; silent: the lines left with nothing.
+    const silent = new Set();
+    if (settings.dropCaptions) for (const line of unique) { line.text = dropCaptions(line.text); if (!line.text) silent.add(line.i); }
     // Where each line is first heard, and the order to translate them in: from a few seconds before where the episode is
     // playing to the end, then the beginning (in time order). A jump moves that place for the lines still left.
     const start = new Map(); for (const cue of cues) { const raw = plain(cue.text); if (!start.has(raw)) start.set(raw, seconds(cue.timing)); }
@@ -540,23 +627,25 @@ function createTranslator(userData) {
     // (lines that failed, the episode or the app closed, the allowance gone) goes on from where it was: only the
     // missing lines are translated again.
     // by: the engine of each line; lineModel: the model that translated it (kept lines: the engine's picked model).
-    const translated = new Map(), by = new Map(), lineModel = new Map(), linesFile = name => path.join(cacheDir, `${hashOf(name)}.lines.json`);
+    const keptName = name => linesKey ? crypto.createHash('sha1').update(`${modelOf(name)}\n${name === 'local' ? LOCAL_PROMPT_VERSION + promptVersion(localModel) : PROMPT_VERSION}\nlines:${linesKey}`).digest('hex').slice(0, 20) : hashOf(name);
+    const translated = new Map(), by = new Map(), lineModel = new Map(), linesFile = name => path.join(cacheDir, `${keptName(name)}.lines.json`);
     for (const name of fresh ? [] : order.filter(sameSide)) {
       let kept = {}; try { kept = JSON.parse(fs.readFileSync(linesFile(name), 'utf8')) || {}; } catch { continue; }
       for (const line of unique) if (!translated.has(line.i) && typeof kept[line.text] === 'string') { translated.set(line.i, kept[line.text]); by.set(line.i, name); lineModel.set(line.i, modelOf(name)); }
     }
     // The translated lines go to the player together every 0.7 s (the local AI writes a few a second).
     const pending = new Set(); let flushTimer = null;
-    const item = i => ({ raw: unique[i].raw, text: escapeCue(positionTag(unique[i].raw) + translated.get(i)) });
+    const item = i => ({ raw: unique[i].raw, text: silent.has(i) ? '' : escapeCue(positionTag(unique[i].raw) + translated.get(i)) });
     // The Chinese lines of a bilingual file go with the first ones, as blanks (the player leaves them out).
     let blanksSent = !blanks.length;
     const flush = () => { clearTimeout(flushTimer); flushTimer = null; if (!pending.size) return; onLines([...(blanksSent ? [] : blanks), ...[...pending].map(item)]); blanksSent = true; pending.clear(); };
     control.done = () => [...blanks, ...[...translated.keys()].map(item)];
     const shown = ids => { for (const i of ids) pending.add(i); flushTimer ||= setTimeout(flush, 700); };
+    for (const i of silent) translated.set(i, '');
     shown(translated.keys());
     let saveTimer = null;
     const keep = name => {
-      for (const i of translated.keys()) if (!by.has(i)) by.set(i, name);
+      for (const i of translated.keys()) if (!by.has(i) && !silent.has(i)) by.set(i, name);
       const lines = Object.fromEntries(unique.filter(line => by.get(line.i) === name).map(line => [line.text, translated.get(line.i)]));
       if (!Object.keys(lines).length) return;
       try { fs.mkdirSync(cacheDir, { recursive: true }); fs.writeFileSync(linesFile(name), JSON.stringify(lines), 'utf8'); } catch { /* kept in memory for this run */ }
@@ -577,8 +666,8 @@ function createTranslator(userData) {
           const position = new Map(lines.map((line, index) => [line, index])), left = new Set(lines);
           const pick = () => { const line = nextLine(left); if (!line) return undefined; left.delete(line); return position.get(line); };
           engine.jump = null;
-          await local.translateLines(lines.map(line => line.text), { modelId: localModel.id, progress, status, context, signal, pick, onLine: (index, text) => { translated.set(lines[index].i, text); lineModel.set(lines[index].i, modelOf(name)); shown([lines[index].i]); keepSoon(name); } });
-        } else await translateCloud(settings, name, modelFor(name), lines, translated, { title, ...context }, { progress, signal, onSwitch, order: playingFirst, near, control: engine, saved: (model, ids) => { for (const i of ids) lineModel.set(i, name === 'gemini' ? model : `${name}${model ? `:${model}` : ''}`); shown(ids); keepSoon(name); } });
+          await local.translateLines(lines.map(line => line.text), { modelId: localModel.id, progress, status, context, rules, signal, pick, onLine: (index, text) => { translated.set(lines[index].i, text); lineModel.set(lines[index].i, modelOf(name)); shown([lines[index].i]); keepSoon(name); } });
+        } else await translateCloud(settings, name, modelFor(name), lines, translated, { title, ...context, rules }, { progress, signal, onSwitch, order: playingFirst, near, control: engine, saved: (model, ids) => { for (const i of ids) lineModel.set(i, name === 'gemini' ? model : `${name}${model ? `:${model}` : ''}`); shown(ids); keepSoon(name); } });
         lastError = null;
       } catch (error) { lastError = error; }
       clearTimeout(saveTimer); saveTimer = null; keep(name); flush();
@@ -593,9 +682,10 @@ function createTranslator(userData) {
     // The models that did the lines, most first, are written into the file (the cache is named by the picked model, so
     // the file says which one it really was) and given with the result.
     const models = {};
-    for (const i of translated.keys()) { const model = lineModel.get(i) || modelOf(by.get(i) || main); models[model] = (models[model] || 0) + 1; }
+    for (const i of translated.keys()) { if (silent.has(i)) continue; const model = lineModel.get(i) || modelOf(by.get(i) || main); models[model] = (models[model] || 0) + 1; }
     const ranked = Object.fromEntries(Object.entries(models).sort((a, b) => b[1] - a[1]));
-    const written = writeResult(cues, unique, translated, hashOf(main), ranked);
+    if (partial) return { partial: true, engine: engineOf(main).name, failed: unique.length - translated.size, lines: translated.size };
+    const written = writeResult(cues, unique, translated, hashOf(main), ranked, new Set([...silent].map(i => unique[i].raw)));
     if (!written.failed) for (const name of used) try { fs.unlinkSync(linesFile(name)); } catch { /* none kept */ }
     const result = { ...written, engine: engineOf(main).name };
     // Said when the one asked for (the button's API or the local AI) did not do it all.
@@ -611,14 +701,15 @@ function createTranslator(userData) {
     const list = head.match(/^translated-by: (.+)$/m)?.[1] || '';
     return Object.fromEntries(list.split('; ').map(item => item.match(/^(.+)=(\d+)$/)).filter(Boolean).map(match => [match[1], Number(match[2])]));
   };
-  function writeResult(cues, unique, translated, hash, models) {
+  // left: the cues left out (the ones 효과음·화자 이름 빼고 번역 left with nothing).
+  function writeResult(cues, unique, translated, hash, models, left = new Set()) {
     if (!translated.size) throw new Error('번역 결과를 받지 못했습니다.');
     const out = path.join(cacheDir, `${hash}.vtt`), failed = unique.length - translated.size;
     const byText = new Map(unique.filter(line => translated.has(line.i)).map(line => [line.raw, positionTag(line.raw) + translated.get(line.i)]));
     // Cues with the same timing (an ASS file's separate lines) become one cue, or the player draws them on top of
     // each other; a top line ({\an8}) and a bottom one are kept apart, so each stays where it belongs.
     const merged = new Map();
-    for (const cue of cues) { const raw = plain(cue.text), text = escapeCue(byText.get(raw) || raw), key = `${cue.timing}\n${/\{\\an[789]\}/.test(raw) ? 'top' : ''}`; merged.set(key, merged.has(key) ? `${merged.get(key)}\n${text}` : text); }
+    for (const cue of cues) { const raw = plain(cue.text); if (left.has(raw)) continue; const text = escapeCue(byText.get(raw) || raw), key = `${cue.timing}\n${/\{\\an[789]\}/.test(raw) ? 'top' : ''}`; merged.set(key, merged.has(key) ? `${merged.get(key)}\n${text}` : text); }
     const body = [...merged].map(([key, text]) => `${key.split('\n')[0]}\n${text}`).join('\n\n');
     fs.mkdirSync(cacheDir, { recursive: true });
     // Unfinished results are not cached, so a later try can fill the gaps.
@@ -628,7 +719,7 @@ function createTranslator(userData) {
     return { path: target, model: Object.keys(models)[0] || '', models, failed, cached: false };
   }
 
-  return { settings, saveSettings, translate, cancel, jump, ready, local, clouds: CLOUDS };
+  return { settings, saveSettings, translate, cancel, jump, ready, local, clouds: CLOUDS, defaultRules: () => TRANSLATION_RULES };
 }
 
-module.exports = { createTranslator };
+module.exports = { createTranslator, dropCaptions };

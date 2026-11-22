@@ -57,7 +57,6 @@
     const completed = cues.reduce((count, cue) => count + (Object.hasOwn(translations, cue.id) ? 1 : 0), 0);
     return { completed, total, percent: total ? Math.floor(completed / total * 100) : 0 };
   }
-
   function makePrompt({ title = '', episode = '', items = [], contextBefore = [], contextAfter = [], translationInstructions = '', sourceLanguage = 'japanese' } = {}) {
     const context = [String(title).trim(), episode ? `${episode}화` : ''].filter(Boolean).join(' · ');
     return [

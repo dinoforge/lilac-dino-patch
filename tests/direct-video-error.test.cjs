@@ -29,10 +29,13 @@ function element(...initialClasses) {
 
 function setup({ error, currentUrl = 'https://media.test/episode.mp4', hlsPlayer = null } = {}) {
   const video = { error }, playerEmpty = element('hidden'), playerMessage = { textContent: '' }, spinner = element(), status = { textContent: '' }, diagnostics = element('hidden'), diagnosticStatus = { textContent: '' }, calls = [], failures = [];
-  const elements = { '#video': video, '#playerEmpty': playerEmpty, '#playerEmpty p': playerMessage, '.player-spinner': spinner, '#downloadStatus': status, '#playerDiagnosticActions': diagnostics, '#playerDiagnosticStatus': diagnosticStatus, '#copyPlayerDiagnostics': { addEventListener() {} } };
+  const elements = { '#video': video, '#playerBack': { addEventListener() {} }, '#playerEmpty': playerEmpty, '#playerEmpty p': playerMessage, '.player-spinner': spinner, '#downloadStatus': status, '#playerDiagnosticActions': diagnostics, '#playerDiagnosticStatus': diagnosticStatus, '#copyPlayerDiagnostics': { addEventListener() {} } };
   const context = vm.createContext({
     $: selector => elements[selector],
     currentPlaybackContext: { currentUrl },
+    markUnfinishedProviderPlayback() {},
+    playbackHttpStatus: () => 0,
+    trackProviderPlaybackAttempt() {},
     hlsPlayer,
     showPlayerControls: () => calls.push('controls'),
     recordPlayerFailure: failure => failures.push(failure)

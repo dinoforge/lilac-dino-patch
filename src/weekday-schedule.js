@@ -130,7 +130,28 @@
     return 'missing';
   }
 
-  const api = { PROVIDERS, matchesScheduledWork, matchScheduledSources, combineScheduledSources, localWeekday, scheduleCacheKey, mergeWeekdaySchedules, episodeAvailability, providerFallbackState };
+  // Keep one slow schedule source from holding the whole calendar open. A timed-out
+  // request is observed but not cancelled; its eventual rejection is still handled.
+  async function settleProviderSchedule(provider, request, { timeoutMs = 15000, now = Date.now, setTimer, clearTimer } = {}) {
+    const clock = typeof now === 'function' ? now : () => now;
+    const scheduleTimer = setTimer || (root && root.setTimeout ? root.setTimeout.bind(root) : setTimeout);
+    const cancelTimer = clearTimer || (root && root.clearTimeout ? root.clearTimeout.bind(root) : clearTimeout);
+    const startedAt = clock();
+    let timer;
+    const pending = Promise.resolve().then(() => typeof request === 'function' ? request() : request);
+    const completed = pending.then(
+      value => ({ provider, state: 'success', value, elapsedMs: Math.max(0, clock() - startedAt) }),
+      error => ({ provider, state: 'failed', error, elapsedMs: Math.max(0, clock() - startedAt) })
+    );
+    const timedOut = new Promise(resolve => {
+      timer = scheduleTimer(() => resolve({ provider, state: 'timeout', elapsedMs: Math.max(0, clock() - startedAt) }), Math.max(1, Number(timeoutMs) || 15000));
+    });
+    const result = await Promise.race([completed, timedOut]);
+    cancelTimer(timer);
+    return result;
+  }
+
+  const api = { PROVIDERS, matchesScheduledWork, matchScheduledSources, combineScheduledSources, localWeekday, scheduleCacheKey, mergeWeekdaySchedules, episodeAvailability, providerFallbackState, settleProviderSchedule };
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.LilacWeekdaySchedule = api;
 })(typeof window !== 'undefined' ? window : globalThis);

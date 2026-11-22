@@ -219,6 +219,46 @@ test('speed shortcuts reach 3x and 4x, respect the upper limit and step back', (
   }
 });
 
+test('keyboard seeks show the destination without raising the full player controls', () => {
+  const hint = { className: 'player-seek-hint', classList: classList(), children: [], replaceChildren(...children) { this.children = children; } };
+  const player = { classList: classList(), contains: () => false };
+  const video = { currentTime: 100, duration: 1000, paused: false, volume: 1, muted: false };
+  let controlsShown = 0;
+  const context = vm.createContext({
+    document: { activeElement: { tagName: 'BODY', isContentEditable: false }, fullscreenElement: null, createElement: () => ({ textContent: '' }) },
+    $: selector => ({ '#video': video, '#immersivePlayer': player, '#playerSeekHint': hint }[selector] || null),
+    localStorage: { getItem: key => key === 'seekSeconds' ? '10' : null },
+    playerLocked: false, playerSettingsOpen: () => false, playerFlag: () => false,
+    showPlayerControls: () => { controlsShown++; }, seekPlayer: time => { video.currentTime = time; },
+    formatTime: time => `${Math.floor(time / 60)}:${String(Math.floor(time % 60)).padStart(2, '0')}`,
+    setTimeout: () => 1, clearTimeout() {}
+  });
+  vm.runInContext(section('let seekHint = null;', 'function resetAutoSkipState()'), context);
+  const start = source.indexOf('function handlePlayerKey(event) {'), end = source.indexOf('async function takeScreenshot()', start);
+  assert.ok(start >= 0 && end > start, 'player keyboard handler exists');
+  vm.runInContext(source.slice(start, end), context);
+
+  const key = (value, code) => ({ key: value, code, preventDefault() { this.prevented = true; } });
+  context.handlePlayerKey(key('ArrowLeft', 'ArrowLeft'));
+  assert.equal(video.currentTime, 90);
+  assert.equal(hint.className, 'player-seek-hint back');
+  assert.equal(hint.children[0].textContent, '−10초');
+  assert.equal(hint.children[1].textContent, '1:30');
+  assert.equal(controlsShown, 0);
+
+  context.handlePlayerKey(key('ArrowLeft', 'ArrowLeft'));
+  assert.equal(video.currentTime, 80);
+  assert.equal(hint.children[0].textContent, '−20초', 'repeated seeks in the same direction accumulate');
+
+  context.handlePlayerKey(key('5', 'Digit5'));
+  assert.equal(video.currentTime, 500);
+  assert.equal(hint.className, 'player-seek-hint jump');
+  assert.deepEqual(hint.children.map(child => child.textContent), ['8:20']);
+  assert.equal(controlsShown, 0);
+  assert.equal(require('cheerio').load(indexHtml)('#playerSeekHint').length, 1);
+  assert.match(playerCss, /\.player-seek-hint\.show\s*\{\s*opacity:\s*1/);
+});
+
 test('3x and 4x settings persist in the playback select and default slider', () => {
   const h = setup(), originalSelect = h.context.$;
   const $html = require('cheerio').load(indexHtml);
@@ -237,6 +277,48 @@ test('3x and 4x settings persist in the playback select and default slider', () 
     h.context.handlePlayerKey(h.key()); h.advance(400); h.events.keyup(h.key());
     assert.equal(h.video.playbackRate, speed); assert.equal(h.storage.get('defaultSpeed'), String(speed));
   }
+});
+
+test('quality status distinguishes actual output from selected and automatic HLS levels', () => {
+  const nodes = new Map();
+  const makeNode = () => ({ textContent: '', children: [], classList: classList(), replaceChildren(...children) { this.children = children; } });
+  for (const id of ['#psQuality', '#psQualityList', '#psQualityActual', '#video']) nodes.set(id, makeNode());
+  const video = nodes.get('#video'); video.videoWidth = 1280; video.videoHeight = 720;
+  const context = vm.createContext({
+    hlsPlayer: { levels: [{ height: 480 }, { height: 1080 }], manualLevel: -1, currentLevel: 0, autoLevelEnabled: true },
+    $: selector => nodes.get(selector),
+    qualityLabel: level => `${level.height}p`,
+    localStorage: { setItem() {}, getItem() { return null; } },
+    document: { createElement: () => ({ classList: classList(), setAttribute() {} }) },
+    syncSettingChoices() {}
+  });
+  vm.runInContext(section('function renderQualityChoices()', '\n// Previous / next episode'), context);
+  context.renderQualityChoices();
+  assert.equal(nodes.get('#psQualityActual').textContent, '자동 · 현재 480p · 실제 영상 해상도 1280 × 720 · 720p');
+  assert.equal(nodes.get('#psQuality').classList.contains('hidden'), false);
+  assert.equal(nodes.get('#psQualityList').children.length, 3);
+
+  context.hlsPlayer.autoLevelEnabled = false; context.hlsPlayer.currentLevel = 1;
+  context.renderQualityChoices();
+  assert.equal(nodes.get('#psQualityActual').textContent, '선택 1080p · 실제 영상 해상도 1280 × 720 · 720p');
+
+  context.hlsPlayer.autoLevelEnabled = true; context.hlsPlayer.currentLevel = 0;
+  context.hlsPlayer.levels = [{ height: 720 }];
+  nodes.get('#video').videoWidth = 0; nodes.get('#video').videoHeight = 0;
+  context.renderQualityChoices();
+  assert.equal(nodes.get('#psQualityActual').textContent, '자동 · 현재 720p · 실제 출력 확인 중');
+  assert.equal(nodes.get('#psQualityList').children.length, 0);
+
+  context.hlsPlayer = null;
+  nodes.get('#video').videoWidth = 1920; nodes.get('#video').videoHeight = 1080;
+  context.renderQualityChoices();
+  assert.equal(nodes.get('#psQuality').classList.contains('hidden'), false);
+  assert.equal(nodes.get('#psQualityActual').textContent, '실제 영상 해상도 1920 × 1080 · 1080p');
+
+  nodes.get('#video').videoWidth = 0; nodes.get('#video').videoHeight = 0;
+  context.renderQualityChoices();
+  assert.equal(nodes.get('#psQualityActual').textContent, '화질 확인 불가');
+  assert.match(fs.readFileSync(path.join(__dirname, '../src/player.js'), 'utf8'), /addEventListener\('emptied', renderQualityChoices\)/);
 });
 
 test('aspect presets stretch within their ratio; fill uses all of an ultrawide window', () => {
@@ -460,149 +542,54 @@ test('continue card progress markup closes its width attribute before the episod
   assert.equal(progress[1], '">');
 });
 
-function scheduleHarness(linkkfSchedule, options = {}) {
-  const buttons = Array.from({ length: 7 }, () => ({ classList: classList(), attrs: {}, setAttribute(name, value) { this.attrs[name] = value; } }));
-  const rail = { classList: classList(), innerHTML: '', replaceChildren() { this.innerHTML = ''; } };
-  const retry = { classList: classList('hidden'), onclick: null };
-  const status = { textContent: '' }, storage = new Map();
-  const listeners = {}, ui = new Map([
-    ['#scheduleRail', rail], ['#scheduleRetry', retry], ['#scheduleStatus', status],
-    ['#airingSection', { classList: classList() }], ['#airingRail', { innerHTML: '' }],
-    ['#latestEpisodeSection', { classList: classList() }], ['#latestEpisodeTitle', { textContent: '' }],
-    ['#latestEpisodeStatus', { textContent: '' }], ['#latestEpisodeRetry', { classList: classList('hidden') }]
-  ]);
-  let nextCalendarChange = null;
-  const lilacQuarterSelection = { createCalendarWatcher: () => ({ check: () => { const change = nextCalendarChange; nextCalendarChange = null; return change; } }) };
-  const lilac = {
-    linkkfSchedule,
-    providerAiring: options.providerAiring || (async () => ({ data: [] })),
-    providerWeekdayEpisodes: options.providerWeekdayEpisodes || (async () => ({ supported: true, data: [] }))
-  };
-  const context = vm.createContext({
-    state: { season: [{ id: 'latest' }], source: options.source, airing: options.airing || [], current: [] },
-    QUARTER_PROVIDERS: ['reanime', 'miruro', 'animenosub'],
-    window: { lilac, addEventListener(type, listener) { listeners[`window:${type}`] = listener; } },
-    document: { visibilityState: 'visible', addEventListener(type, listener) { listeners[`document:${type}`] = listener; } },
-    LilacQuarterSelection: lilacQuarterSelection,
-    LilacWeekdaySchedule: {
-      PROVIDERS: ['reanime', 'miruro', 'animenosub', 'ohli24', 'linkkf'],
-      mergeWeekdaySchedules: days => days,
-      scheduleCacheKey: source => `weekdaySchedule:v3:2026:4:${source || 'test'}`
-    },
-    readQuarterSelection: () => ({ year: 2027, quarter: 1, label: '2027년 1분기' }),
-    syncQuarterControls() {},
-    selectHomeQuarter: options.selectHomeQuarter || (async () => {}),
-    loadLatestEpisodeRail: options.loadLatestEpisodeRail || (() => {}),
-    latestEpisodeSectionTitle: provider => `${provider} 최신 회차`,
-    renderHero() {},
-    store: { get: key => storage.get(key) ?? null, set: (key, value) => storage.set(key, value) },
-    $: selector => ui.get(selector) || null,
-    $$: selector => selector === '#scheduleTabs button' ? buttons : [],
-    renderCards: (selector, items) => { const target = ui.get(selector); if(target)target.innerHTML = `cards:${items.map(item => item.id).join(',')}`; }
-  });
-  vm.runInContext(appSection('const SCHEDULE_TABS=', '\nfunction loadLinkkfHome()'), context);
-  return {
-    context, rail, retry, status, buttons, storage,
-    setHomeCalendarReady() { vm.runInContext('homeCalendarReady=true', context); },
-    triggerCalendarChange(change) { nextCalendarChange = change; listeners['window:focus']?.(); },
-    triggerDocumentVisibilityChange(change) { nextCalendarChange = change; listeners['document:visibilitychange']?.(); }
-  };
-}
 
-test('weekday schedule distinguishes an empty day from a failed day and offers retry', async () => {
-  const empty = scheduleHarness(async () => ({ days: Array.from({ length: 7 }, () => []), unavailableDays: [] }));
-  await empty.context.loadLinkkfSchedule(1);
-  assert.match(empty.rail.innerHTML, /등록된 작품이 없습니다/);
-  assert.equal(empty.retry.classList.contains('hidden'), true);
-
-  const failed = scheduleHarness(async () => ({ days: Array.from({ length: 7 }, () => []), unavailableDays: [0] }));
-  await failed.context.loadLinkkfSchedule(0);
-  assert.match(failed.rail.innerHTML, /일정 정보를 불러오지 못했습니다/);
-  assert.equal(failed.retry.classList.contains('hidden'), false);
-});
-
-test('weekday schedule marks all days unavailable when the schedule request fails', async () => {
-  const h = scheduleHarness(async () => { throw new Error('offline'); });
-  await h.context.loadLinkkfSchedule(6);
-  assert.match(h.rail.innerHTML, /일정 정보를 불러오지 못했습니다/);
-  assert.equal(h.retry.classList.contains('hidden'), false);
-  assert.equal(h.buttons[6].attrs['aria-selected'], 'true');
-});
-
-test('weekday schedule caches verified days and a fresh cache avoids another provider request', async () => {
-  let calls = 0;
-  const h = scheduleHarness(async () => { calls++; return { days: Array.from({ length: 7 }, (_, index) => index === 0 ? [{ id: 'monday' }] : []), unavailableDays: [] }; });
-  await h.context.loadLinkkfSchedule(0);
-  assert.equal(calls, 1);
-  assert.match(h.rail.innerHTML, /monday/);
-  await h.context.loadLinkkfSchedule(0);
-  assert.equal(calls, 1);
-  assert.match(h.status.textContent, /저장된 통합 요일표/);
-});
-
-test('quarter activation refreshes the quarter catalog, airing list, Linkkf days and AniList schedule once', async () => {
-  const calls = { quarter: [], airing: 0, linkkf: 0, weekday: [] };
-  const h = scheduleHarness(async () => { calls.linkkf++; return { days: Array.from({ length: 7 }, () => []), unavailableDays: [] }; }, {
-    source: 'reanime',
-    airing: [{ provider: 'reanime', id: 'old', anilistId: 10 }],
-    selectHomeQuarter: async (...args) => { calls.quarter.push(args); },
-    providerAiring: async () => { calls.airing++; return { data: [{ provider: 'reanime', id: 'current', anilistId: 20 }] }; },
-    providerWeekdayEpisodes: async (...args) => { calls.weekday.push(args); return { supported: true, data: [] }; }
-  });
-  h.setHomeCalendarReady();
-  const change = { dateChanged: true, quarterChanged: true, current: { year: 2027, quarter: 1, label: '2027년 1분기' } };
-  h.triggerCalendarChange(change);
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(JSON.stringify(calls.quarter), JSON.stringify([[2027, 1, { refresh: true }]]));
-  assert.equal(calls.airing, 1);
-  assert.equal(calls.linkkf, 1);
-  assert.equal(calls.weekday.length, 1);
-  assert.equal(calls.weekday[0][0], 'reanime');
-  assert.equal(calls.weekday[0][1][0].id, 'current');
-  assert.equal(calls.weekday[0][2], true);
-
-  h.triggerCalendarChange(null);
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(calls.linkkf, 1, 'a repeated activation on the same date sends no extra refresh');
-});
-
-test('quarter airing refresh failure keeps saved airing data and reports the schedule failure', async () => {
-  let weekdayCalls = 0;
-  const h = scheduleHarness(async () => ({ days: Array.from({ length: 7 }, () => []), unavailableDays: [] }), {
-    source: 'reanime',
-    airing: [{ provider: 'reanime', id: 'saved', anilistId: 30 }],
-    providerAiring: async () => { throw new Error('offline'); },
-    providerWeekdayEpisodes: async () => { weekdayCalls++; return { supported: true, data: [] }; }
-  });
-  h.setHomeCalendarReady();
-  h.triggerCalendarChange({ dateChanged: true, quarterChanged: true, current: { year: 2027, quarter: 1, label: '2027년 1분기' } });
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(h.context.state.airing[0].id, 'saved');
-  assert.equal(weekdayCalls, 0, 'a failed airing refresh must not query AniList with stale candidates');
-  assert.match(h.context.$('#latestEpisodeStatus').textContent, /저장된 목록을 유지합니다: offline/);
-  assert.match(h.status.textContent, /Re:Anime 일정 확인 실패/);
-});
-
-test('removing LinkAni migrates only the saved content source and preserves user data', () => {
+test('LinkAni content-source migration retains the source and does not touch saved user data', () => {
   const storage = new Map([['contentSource', 'linkani'], ['history', '["keep"]'], ['library', '["keep"]']]);
   const context = vm.createContext({ localStorage: {
     getItem: key => storage.get(key) ?? null,
     setItem: (key, value) => storage.set(key, String(value))
   } });
   vm.runInContext(appSection('function migrateContentSource(', '\nconst state ='), context);
-  assert.equal(context.migrateContentSource('linkani'), 'reanime');
-  assert.equal(storage.get('contentSource'), 'reanime');
+  assert.equal(context.migrateContentSource('linkani'), 'linkani');
+  assert.equal(storage.get('contentSource'), 'linkani');
   assert.equal(storage.get('history'), '["keep"]');
   assert.equal(storage.get('library'), '["keep"]');
   assert.equal(context.migrateContentSource('miruro'), 'miruro');
 });
 
-test('LinkAni is absent from source choices and online provider adapters', () => {
+test('LinkAni is a selectable source and Patch 03 provider while original Linkkf remains separate', () => {
   const providerList = appSource.match(/const PROVIDER_SOURCES=\[([^\]]+)\]/)?.[1] || '';
   assert.ok(providerList);
-  assert.doesNotMatch(providerList, /linkani/i);
-  assert.doesNotMatch(indexHtml, /(?:data-value|option value)="linkani"/i);
-  assert.doesNotMatch(mainSource, /LINKANI_WEB|linkaniFetch|linkaniItems|linkaniDetail|resolveLinkaniEpisode|provider\s*===\s*['"]linkani['"]/i);
+  assert.match(providerList, /linkani/);
+  const integrated = fs.readFileSync(path.join(__dirname, '../src/integrated-search.js'), 'utf8');
+  assert.match(integrated, /PROVIDERS = \['reanime', 'miruro', 'animenosub', 'ohli24', 'linkani'\]/);
+  assert.match(indexHtml, /(?:data-value|option value)="linkani"/i);
+  assert.match(mainSource, /LINKANI_WEB|linkaniFetch|linkaniItems|linkaniDetail|resolveLinkaniEpisode/);
+  assert.match(mainSource, /ipcMain\.handle\('linkkf:resolve'/);
+  assert.doesNotMatch(integrated.match(/const PROVIDERS = \[([^\]]+)\]/)?.[1] || '', /linkkf/i);
+});
+
+test('AI subtitle selection does not treat a retired ChatGPT record as a current AI translation', async () => {
+  const entry = { source: 'chatgpt', path: 'legacy-chatgpt.vtt', url: 'file:///legacy-chatgpt.vtt' };
+  const applied = [], actions = [], notices = [];
+  const context = vm.createContext({
+    playbackRequestId: 12, subtitleSelectionRequestId: 4, currentPlaybackContext: {},
+    subtitleStoreKey: () => 'episode-key',
+    window: { lilac: { savedSubtitles: async key => { assert.equal(key, 'episode-key'); return [entry]; }, geminiSettings: async () => ({}) } },
+    pressSubtitleSource: source => actions.push(['pressed', source]),
+    preferAiSubtitle: enabled => actions.push(['preferred', enabled]),
+    renderSubtitleSheet: () => actions.push(['render']),
+    applySavedSubtitle: saved => applied.push(saved),
+    autoTranslateProvider: () => null, autoProvider: () => null, toast: message => notices.push(message)
+  });
+  vm.runInContext(section('async function switchSubtitleSource(', '// Quality:'), context);
+
+  await context.switchSubtitleSource('ai', 4, 12);
+
+  assert.equal(context.currentPlaybackContext.sheetSource, null);
+  assert.deepEqual(actions, [['pressed', 'ai'], ['preferred', true], ['render']]);
+  assert.deepEqual(applied, []);
+  assert.match(notices[0], /번역 API 키나 로컬 AI 모델/);
 });
 
 function subtitleSourceHarness() {
@@ -823,14 +810,16 @@ test('automatic subtitle lookup yields when the user changes the subtitle source
 function koreanSubtitleOfferHarness() {
   let resolveSearch;
   const currentSubtitle = { source: 'provider', url: 'provider-subtitle.vtt' };
-  const box = { classList: classList('hidden') }, offerText = { textContent: '' }, applyButton = { textContent: '', onclick: null }, dismissButton = { onclick: null }, attached = [];
+  const box = { classList: classList('hidden') }, offerText = { textContent: '' }, applyButton = { textContent: '', onclick: null }, dismissButton = { onclick: null }, syncButton = { textContent: '', onclick: null }, syncCheck = { checked: true }, prepareNext = [{}, {}, {}], arrowVolume = {}, attached = [];
   const context = vm.createContext({
     playbackRequestId: 3, subtitleSelectionRequestId: 6, currentSubtitle,
+    window: { lilac: { onSubtitleSyncStatus() {} } },
+    localStorage: { getItem: () => null },
     onlineSubtitleFor: () => new Promise(resolve => { resolveSearch = resolve; }),
     subtitleSearchAnime: () => ({ provider: 'reanime', id: 'test' }),
     communityLabel: () => 'Kairan 자막',
     clearTimeout() {}, setTimeout: () => 1,
-    $: selector => ({ '#subtitleOffer': box, '#subtitleOfferText': offerText, '#subtitleOfferApply': applyButton, '#subtitleOfferDismiss': dismissButton }[selector]),
+    $: selector => ({ '#subtitleOffer': box, '#subtitleOfferText': offerText, '#subtitleOfferApply': applyButton, '#subtitleOfferDismiss': dismissButton, '#autoSyncSubtitle': syncButton, '#subtitleSyncCheck': syncCheck, '#subtitleState': { textContent: '' }, '#prepareNextVideo': prepareNext[0], '#prepareNextSubtitle': prepareNext[1], '#prepareNextTranslation': prepareNext[2], '#arrowVolume': arrowVolume }[selector]),
     preferAiSubtitle() {}, attachOnlineSubtitle: result => attached.push(result)
   });
   vm.runInContext(appSection('async function offerKoreanSubtitle(', 'async function ensureSubtitle('), context);
@@ -870,7 +859,6 @@ test('an explicit subtitle choice invalidates and cancels pending translations',
     translationRun: 9,
     $: selector => ({ '#subtitleOffer': offer, '#translateNow': cloud, '#translateNowLocal': local }[selector]),
     cancelButtonRun: button => cancelled.push(button),
-    renderManualChatgptPanel() {}
   });
   vm.runInContext(appSection('function beginSubtitleSelection()', '\nfunction cancelOtherEpisodeTranslations'), context);
 

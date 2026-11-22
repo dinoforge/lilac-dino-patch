@@ -1,6 +1,6 @@
 {
   "name": "lilacanime-desktop",
-  "version": "0.5.9",
+  "version": "0.5.37",
   "description": "LilacAnime inspired desktop anime library and player",
   "main": "electron/main.cjs",
   "author": "LilacAnime Desktop",
@@ -14,7 +14,7 @@
     "test:phase1-exe": "node tests/windows-package-startup.cjs",
     "test:phase1-source-restart": "node tests/phase1-source-restart.cjs",
     "test:phase1-subtitle-layout": "node node_modules/electron/cli.js tests/subtitle-layout.electron.cjs",
-    "vendor": "node scripts/build-jassub.cjs",
+    "vendor": "node scripts/build-jassub.cjs && node scripts/build-anime4k.cjs",
     "prestart": "npm run vendor",
     "start": "electron .",
     "predev": "npm run vendor",
@@ -23,6 +23,8 @@
     "dist": "electron-builder --win nsis",
     "predist:mac": "npm run vendor",
     "dist:mac": "electron-builder --mac dmg",
+    "predist:linux": "npm run vendor",
+    "dist:linux": "electron-builder --linux deb",
     "prepack": "npm run vendor",
     "pack": "electron-builder --dir"
   },
@@ -76,10 +78,23 @@
       "identity": "-",
       "hardenedRuntime": false,
       "artifactName": "LilacAnime-mac-${arch}.${ext}"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "AudioVideo",
+      "executableName": "lilacanime",
+      "maintainer": "whispelyn-byte <246124296+whispelyn-byte@users.noreply.github.com>",
+      "synopsis": "LilacAnime 애니 라이브러리·플레이어",
+      "target": "deb"
+    },
+    "deb": {
+      "artifactName": "LilacAnime-linux-${arch}.${ext}"
     }
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "adm-zip": "^0.6.1",
+    "anime4k.js": "1.1.3",
     "cheerio": "^1.1.2",
     "ffmpeg-static": "^5.3.0",
     "hls.js": "^1.7.3"

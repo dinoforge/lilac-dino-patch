@@ -1,0 +1,19 @@
+{
+  "name": "dino-patch-manager-electron",
+  "version": "1.2.4",
+  "description": "LilacAnime DinoPatch Electron interface for the official LilacAnime source tree",
+  "main": "main.cjs",
+  "author": "LilacAnime DinoPatch",
+  "license": "UNLICENSED",
+  "packageManager": "npm@11.11.0",
+  "engines": {
+    "node": "24.14.1"
+  },
+  "dependencies": {
+    "classic-level": "3.0.0"
+  },
+  "devDependencies": {
+    "electron": "38.8.6",
+    "electron-builder": "26.15.3"
+  }
+}

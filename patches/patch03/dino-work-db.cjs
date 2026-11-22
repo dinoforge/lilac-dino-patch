@@ -1,0 +1,445 @@
+'use strict';
+// Optional work index inside Electron's userData. Original title caches,
+// profiles, downloads, and renderer localStorage are never modified here.
+const path=require('node:path');
+const fs=require('node:fs');
+const crypto=require('node:crypto');
+const PROVIDERS=new Set(['reanime','miruro','animenosub','ohli24','linkani']);
+const BATCH_LIMIT=48;
+const FILE='dino-work-index.sqlite';
+const clean=x=>typeof x==='string'?x.trim().slice(0,240):'';
+const number=x=>Number.isFinite(Number(x))?Math.max(0,Math.trunc(Number(x))):0;
+const korean=x=>/[가-힣]/.test(x||'')?clean(x):'';
+const object=x=>!!x&&typeof x==='object'&&!Array.isArray(x);
+const sourceKey=x=>String(x?.mal_id??(x?.provider&&x?.id!=null?x.provider+':'+x.id:'')).slice(0,300);
+const external=x=>String(x??'').trim().replace(/^0+/, '')||'';
+const identityConflict=(a,b)=>{
+  if(!object(a)||!object(b))return false;
+  const ids=[['anilistId','anilist_id'],['malId','malId']];
+  for(const [first,second] of ids){
+    const left=external(a[first]??a[second]),right=external(b[first]??b[second]);
+    if(left&&right&&left!==right)return true;
+  }
+  const leftYear=number(a.year),rightYear=number(b.year);
+  if(leftYear&&rightYear&&leftYear!==rightYear)return true;
+  if(clean(a.type)&&clean(b.type)&&clean(a.type).toUpperCase()!==clean(b.type).toUpperCase())
+    return true;
+  return false;
+};
+const parse=x=>{try{return JSON.parse(x)}catch{return null}};
+// Canonical ordering makes manual separation independent of which work opened it.
+function pairFields(a,b){
+  const aa={provider:a?.provider,id:sourceKey(a)},bb={provider:b?.provider,id:sourceKey(b)};
+  if(!PROVIDERS.has(aa.provider)||!PROVIDERS.has(bb.provider)||!aa.id||!bb.id
+    ||aa.provider===bb.provider&&aa.id===bb.id)return null;
+  const left=(aa.provider+'\0'+aa.id)<(bb.provider+'\0'+bb.id)?aa:bb;
+  const right=left===aa?bb:aa;
+  return [left.provider,left.id,right.provider,right.id];
+}
+function normalize(raw){
+  if(!object(raw)||!Array.isArray(raw.sources)||!raw.sources.length||raw.sources.length>8
+    || JSON.stringify(raw).length>40000)return null;
+  const sources=[],seen=new Set(),seenProviders=new Set();
+  for(const src of raw.sources){
+    if(!object(src)||!PROVIDERS.has(src.provider)||JSON.stringify(src).length>16000)continue;
+    const id=sourceKey(src),key=src.provider+':'+id;
+    if(!id||seen.has(key))continue;
+    // One canonical work should not contain multiple episodes/season entries
+    // from the same supplier: ask for a manual selection instead.
+    if(seenProviders.has(src.provider))return null;
+    seen.add(key);seenProviders.add(src.provider);sources.push({...src,mal_id:id});
+  }
+  if(!sources.length)return null;
+  const title=object(raw.titles)?raw.titles:{};
+  const ko=korean(title.ko),manual=title.manual===true&&!!ko;
+  return {sources,
+    names:[...new Set((Array.isArray(raw.names)?raw.names:[]).map(clean).filter(Boolean))].slice(0,24),
+    titles:{ko,en:clean(title.en),ja:clean(title.ja),
+      koSource:manual?'manual':ko&&['official','provider'].includes(title.koSource)?title.koSource:'',
+      koCheckedAt:number(title.koCheckedAt),manual},
+    explicitManualReset:raw.dinoResetManual===true,
+    checkedAt:number(raw.checkedAt),attemptedAt:number(raw.attemptedAt),
+    outcome:['verified','missing','error'].includes(raw.outcome)?raw.outcome:'',
+    updatedAt:number(raw.updatedAt)};
+}
+function createStore({app,DatabaseSync}={}){
+  let db=null,ready=false,problem='';
+  function init(){
+    if(ready)return true;
+    if(problem)return false;
+    try{
+      const Driver=DatabaseSync||require('node:sqlite').DatabaseSync;
+      if(typeof Driver!=='function')throw Error('node:sqlite not available');
+      db=new Driver(path.join(app.getPath('userData'),FILE));
+      // Verify the database BEFORE WAL configuration, DDL or migration.
+      // Never auto-delete, rename, reset or overwrite a damaged user DB.
+      // An intact v1 local cache remains available in the renderer.
+      const check=db.prepare('PRAGMA quick_check(1)').all();
+      if(!check.length||check.some(item=>item.quick_check!=='ok'))
+        throw Error('SQLite 무결성 검사 실패 · 원본 DB 보존, 로컬 캐시로 전환');
+      const links=db.prepare('PRAGMA foreign_key_check').all();
+      if(links.length)throw Error('SQLite 외래키 오류 · 원본 DB 보존, 로컬 캐시로 전환');
+      const version=Number(db.prepare('PRAGMA user_version').get().user_version)||0;
+      if(version>3)throw Error('newer SQLite schema: read-only fallback');
+      db.exec('PRAGMA foreign_keys=ON');
+      db.exec('PRAGMA busy_timeout=3000');
+      db.exec('PRAGMA journal_mode=WAL');
+      db.exec('PRAGMA synchronous=NORMAL');
+      db.exec('CREATE TABLE IF NOT EXISTS works(work_id TEXT PRIMARY KEY,names_json TEXT NOT NULL,title_ko TEXT NOT NULL,title_en TEXT NOT NULL,title_ja TEXT NOT NULL,ko_source TEXT NOT NULL,ko_checked_at INTEGER NOT NULL,manual INTEGER NOT NULL,checked_at INTEGER NOT NULL,attempted_at INTEGER NOT NULL,outcome TEXT NOT NULL,updated_at INTEGER NOT NULL)');
+      db.exec('CREATE TABLE IF NOT EXISTS work_sources(provider TEXT NOT NULL,source_id TEXT NOT NULL,work_id TEXT NOT NULL REFERENCES works(work_id),item_json TEXT NOT NULL,PRIMARY KEY(provider,source_id))');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_dino_source_work ON work_sources(work_id)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_dino_work_updated ON works(updated_at DESC)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_dino_work_ko ON works(title_ko)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_dino_work_ko_nocase ON works(title_ko COLLATE NOCASE)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_dino_work_en_nocase ON works(title_en COLLATE NOCASE)');
+      db.exec('CREATE TABLE IF NOT EXISTS manual_pair_blocks(left_provider TEXT NOT NULL,left_id TEXT NOT NULL,right_provider TEXT NOT NULL,right_id TEXT NOT NULL,PRIMARY KEY(left_provider,left_id,right_provider,right_id))');
+      // Added to schema v3 without rewriting the existing work/profile tables.
+      db.exec('CREATE TABLE IF NOT EXISTS title_history(id INTEGER PRIMARY KEY AUTOINCREMENT,work_id TEXT NOT NULL,old_title TEXT NOT NULL,new_title TEXT NOT NULL,changed_at INTEGER NOT NULL,source TEXT NOT NULL)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_dino_title_history_work ON title_history(work_id,id DESC)');
+      db.exec('CREATE TABLE IF NOT EXISTS link_history(id INTEGER PRIMARY KEY AUTOINCREMENT,action TEXT NOT NULL,anchor_provider TEXT NOT NULL,anchor_id TEXT NOT NULL,source_provider TEXT NOT NULL,source_id TEXT NOT NULL,created_at INTEGER NOT NULL)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_dino_link_history_time ON link_history(id DESC)');
+      if(version<3)db.exec('PRAGMA user_version=3');
+      ready=true;return true;
+    }catch(error){
+      problem=String(error?.message||error).slice(0,250);
+      try{db?.close()}catch{}
+      db=null;return false;
+    }
+  }
+  function status(){return {available:init(),schema:ready?3:0,reason:ready?'':problem,
+    engine:'node:sqlite',recovery:ready?'none':'local-cache-fallback',dbPreserved:true};}
+  function readRow(id){
+    const row=db.prepare('SELECT * FROM works WHERE work_id=?').get(id);
+    if(!row)return null;
+    const sources=db.prepare('SELECT item_json FROM work_sources WHERE work_id=? ORDER BY provider').all(id)
+      .map(x=>parse(x.item_json)).filter(Boolean);
+    return {id, sources,names:parse(row.names_json)||[],
+      titles:{ko:row.title_ko,en:row.title_en,ja:row.title_ja,koSource:row.ko_source,
+        koCheckedAt:Number(row.ko_checked_at),manual:!!row.manual},
+      checkedAt:Number(row.checked_at),attemptedAt:Number(row.attempted_at),
+      outcome:row.outcome,updatedAt:Number(row.updated_at)};
+  }
+  function upsert(rows){
+    if(!init())return {ok:false,reason:problem};
+    if(!Array.isArray(rows)||rows.length>BATCH_LIMIT)return {ok:false,reason:'invalid batch'};
+    const normalized=rows.map(normalize);
+    if(normalized.some(x=>!x))return {ok:false,reason:'invalid row'};
+    const sourceFind=db.prepare('SELECT work_id,item_json FROM work_sources WHERE provider=? AND source_id=?');
+    const workFind=db.prepare('SELECT * FROM works WHERE work_id=?');
+    const blockFind=db.prepare('SELECT 1 AS blocked FROM manual_pair_blocks WHERE left_provider=? AND left_id=? AND right_provider=? AND right_id=?');
+    const members=db.prepare('SELECT provider,source_id,item_json FROM work_sources WHERE work_id=?');
+    const putWork=db.prepare('INSERT INTO works(work_id,names_json,title_ko,title_en,title_ja,ko_source,ko_checked_at,manual,checked_at,attempted_at,outcome,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(work_id) DO UPDATE SET names_json=excluded.names_json,title_ko=excluded.title_ko,title_en=excluded.title_en,title_ja=excluded.title_ja,ko_source=excluded.ko_source,ko_checked_at=excluded.ko_checked_at,manual=excluded.manual,checked_at=excluded.checked_at,attempted_at=excluded.attempted_at,outcome=excluded.outcome,updated_at=excluded.updated_at');
+    const putSource=db.prepare('INSERT INTO work_sources(provider,source_id,work_id,item_json) VALUES(?,?,?,?) ON CONFLICT(provider,source_id) DO UPDATE SET item_json=excluded.item_json WHERE work_sources.work_id=excluded.work_id');
+    const recordTitle=db.prepare('INSERT INTO title_history(work_id,old_title,new_title,changed_at,source) VALUES(?,?,?,?,?)');
+    try{
+      db.exec('BEGIN IMMEDIATE');
+      for(const work of normalized){
+        // Never silently reassign a source URL/ID to a different season,
+        // movie, or AniList identity. Nor merge two already distinct works.
+        const knownIds=new Set();
+        for(const src of work.sources){
+          const known=sourceFind.get(src.provider,sourceKey(src));
+          if(!known)continue;
+          if(identityConflict(parse(known.item_json),src))
+            throw Error('provider source identity conflicts with the stored work');
+          knownIds.add(known.work_id);
+        }
+        if(knownIds.size>1)throw Error('conflicting existing work identities');
+        const id=[...knownIds][0]||work.sources[0].provider+':'+sourceKey(work.sources[0]);
+        const existing=members.all(id);
+        // Exact ID ownership alone cannot prove a newly discovered supplier
+        // belongs to this season. Validate it against all stored work members.
+        for(let i=0;i<work.sources.length;i++){
+          const src=work.sources[i];
+          for(let j=0;j<i;j++)if(identityConflict(src,work.sources[j]))
+            throw Error('incoming provider source identity conflicts with its work');
+          for(const old of existing){
+            const earlier=parse(old.item_json);
+            if(identityConflict(earlier,src))
+              throw Error('incoming provider source identity conflicts with the stored work');
+            const pair=pairFields(src,{provider:old.provider,mal_id:old.source_id});
+            if(pair&&blockFind.get(...pair))
+              throw Error('manually separated provider sources cannot be auto-linked');
+          }
+        }
+        const previous=workFind.get(id),titles={...work.titles};
+        if(previous){
+          const previousTime=Number(previous.ko_checked_at)||0;
+          // SQLite wins equal-time manual-title ties over stale v1 imports.
+           // Never roll back user-edited Korean titles through old cached data.
+          if((previous.manual&&!titles.manual&&!work.explicitManualReset)
+            ||(previous.manual&&titles.manual&&previousTime>=titles.koCheckedAt)){
+            titles.ko=previous.title_ko;titles.koSource='manual';
+            titles.koCheckedAt=previousTime;titles.manual=true;
+          }else if(!titles.ko&&previous.title_ko&&!work.explicitManualReset){
+            titles.ko=previous.title_ko;titles.koSource=previous.ko_source;
+            titles.koCheckedAt=previousTime;
+          }
+          // A verified Korean title outranks an unverified provider label.
+          if(previous.ko_source==='official'&&!titles.manual
+            &&(titles.koSource!=='official'
+              ||previousTime>titles.koCheckedAt)){
+            titles.ko=previous.title_ko;titles.koSource='official';
+            titles.koCheckedAt=previousTime;
+          }
+          if(!titles.en)titles.en=previous.title_en;
+          if(!titles.ja)titles.ja=previous.title_ja;
+        }
+        if(previous&&titles.ko!==previous.title_ko
+          &&(titles.manual||previous.manual||work.explicitManualReset))
+          recordTitle.run(id,previous.title_ko,titles.ko,
+            Math.max(Date.now(),titles.koCheckedAt),'manual');
+        const names=[...new Set([...work.names,
+          ...(previous?parse(previous.names_json)||[]:[]),titles.ko,titles.en,titles.ja]
+          .map(clean).filter(Boolean))].slice(0,24);
+        putWork.run(id,JSON.stringify(names),titles.ko,titles.en,titles.ja,
+          titles.koSource,titles.koCheckedAt,Number(titles.manual),
+          Math.max(work.checkedAt,Number(previous?.checked_at)||0),
+          Math.max(work.attemptedAt,Number(previous?.attempted_at)||0),
+          previous&&Number(previous.checked_at)>work.checkedAt?previous.outcome:work.outcome,
+          Math.max(work.updatedAt,Number(previous?.updated_at)||0));
+        for(const src of work.sources){
+          const previousSource=sourceFind.get(src.provider,sourceKey(src));
+          const earlier=previousSource?parse(previousSource.item_json):null;
+          const incomingEpisode=src.dinoEpisode;
+          const storedEpisode=earlier?.dinoEpisode;
+          // Passive catalog cards do not include episode metadata. Preserve
+          // the last verified snapshot across a legacy-cache migration or a
+          // delayed provider search response.
+          const older=Number(incomingEpisode?.attemptedAt)||0;
+          const newer=Number(storedEpisode?.attemptedAt)||0;
+          const selected=storedEpisode && newer>=older ? storedEpisode : incomingEpisode;
+          // Passive cards omit episode/status fields; never erase richer details.
+          const item={...(earlier||{}),...src};
+          if(selected)item.dinoEpisode=selected;
+          putSource.run(src.provider,sourceKey(src),id,JSON.stringify(item));
+        }
+      }
+      db.exec('COMMIT');return {ok:true,saved:normalized.length};
+    }catch(error){
+      try{db.exec('ROLLBACK')}catch{}
+      return {ok:false,reason:String(error?.message||error).slice(0,250)};
+    }
+  }
+  function lookup(request){
+    if(!init()||!object(request)||!PROVIDERS.has(request.provider))return null;
+    const id=sourceKey(request);
+    if(!id)return null;
+    const found=db.prepare('SELECT work_id FROM work_sources WHERE provider=? AND source_id=?')
+      .get(request.provider,id);
+    return found?readRow(found.work_id):null;
+  }
+  function recent(request={}){
+    if(!init())return [];
+    const limit=Math.min(300,Math.max(1,number(request?.limit)||100));
+    const offset=Math.min(200000,number(request?.offset));
+    return db.prepare('SELECT work_id FROM works ORDER BY updated_at DESC,work_id LIMIT ? OFFSET ?')
+      .all(limit,offset).map(x=>readRow(x.work_id)).filter(Boolean);
+  }
+  function stats(){
+    if(!init())return {available:false,reason:problem};
+    return {available:true,works:Number(db.prepare('SELECT COUNT(*) AS n FROM works').get().n),
+      sources:db.prepare('SELECT provider,COUNT(*) AS n FROM work_sources GROUP BY provider').all()
+        .map(x=>({provider:x.provider,count:Number(x.n)}))};
+  }
+  function search(request={}){
+    if(!init())return [];
+    const query=clean(request?.query);
+    if(query.length<2)return [];
+    const limit=Math.min(40,Math.max(1,number(request?.limit)||12));
+    // Escape SQL wildcards: user input must never become a full-table match.
+    const escaped=query.replace(/[\\%_]/g,value=>'\\'+value);
+    const prefix=escaped+'%',pattern='%'+escaped+'%';
+    const keys=new Set();
+    const sql="SELECT work_id FROM works WHERE title_ko LIKE ? ESCAPE '\\' OR title_en LIKE ? ESCAPE '\\' ORDER BY updated_at DESC LIMIT ?";
+    for(const match of db.prepare(sql).all(prefix,prefix,limit))keys.add(match.work_id);
+    // Fallback substring/names search only when indexed prefix candidates
+    // are insufficient. Return a bounded page even for a very large DB.
+    if(keys.size<limit){
+      const fallback=db.prepare("SELECT work_id FROM works WHERE title_ko LIKE ? ESCAPE '\\' OR title_en LIKE ? ESCAPE '\\' OR names_json LIKE ? ESCAPE '\\' ORDER BY updated_at DESC LIMIT ?")
+        .all(pattern,pattern,pattern,limit);
+      for(const found of fallback){keys.add(found.work_id);if(keys.size>=limit)break;}
+    }
+    return [...keys].map(id=>readRow(id)).filter(Boolean);
+  }
+  function preview(request){
+    if(!init())return {ok:false,reason:problem};
+    const anchor=request?.anchor,source=request?.source;
+    if(!object(anchor)||!object(source)||!PROVIDERS.has(anchor.provider)
+      ||!PROVIDERS.has(source.provider)||!sourceKey(anchor)||!sourceKey(source))
+      return {ok:false,reason:'invalid source identity'};
+    const target=lookup(anchor),candidate=lookup(source);
+    if(!target||!candidate)return {ok:false,reason:'공급원을 먼저 검색해 작품 DB에 저장해 주세요.'};
+    const stored=candidate.sources.find(x=>x.provider===source.provider
+      && sourceKey(x)===sourceKey(source));
+    if(!stored)return {ok:false,reason:'unknown source'};
+    const conflicts=target.sources.some(x=>x.provider===source.provider
+      && sourceKey(x)!==sourceKey(source))||target.sources.some(x=>identityConflict(x,stored));
+    return {ok:true,sameWork:target.id===candidate.id,compatible:!conflicts,
+      target:{title:target.titles.ko||target.titles.en||target.names[0]||'',id:target.id},
+      candidate:{title:candidate.titles.ko||candidate.titles.en||candidate.names[0]||'',
+        provider:source.provider,sourceId:sourceKey(source),year:number(stored.year),
+        type:clean(stored.type),anilistId:stored.anilistId||null}};
+  }
+  function titleHistory(request){
+    if(!init()||!object(request)||!PROVIDERS.has(request.provider))return [];
+    const item=db.prepare('SELECT work_id FROM work_sources WHERE provider=? AND source_id=?')
+      .get(request.provider,sourceKey(request));
+    if(!item)return [];
+    return db.prepare('SELECT old_title,new_title,changed_at,source FROM title_history WHERE work_id=? ORDER BY id DESC LIMIT 12')
+      .all(item.work_id);
+  }
+  function diagnostics(){
+    if(!init())return {available:false,reason:problem};
+    try{
+      const quick=db.prepare('PRAGMA quick_check').all().every(x=>x.quick_check==='ok');
+      const foreign=db.prepare('PRAGMA foreign_key_check').all();
+      return {available:true,healthy:quick&&foreign.length===0,schema:3,
+        integrity:quick?'ok':'failed',foreignKeyErrors:foreign.length,
+        works:Number(db.prepare('SELECT COUNT(*) AS n FROM works').get().n),
+        sources:Number(db.prepare('SELECT COUNT(*) AS n FROM work_sources').get().n),
+        manualPairs:Number(db.prepare('SELECT COUNT(*) AS n FROM manual_pair_blocks').get().n),
+        repairedLinks:Number(db.prepare('SELECT COUNT(*) AS n FROM link_history').get().n),
+        titleEdits:Number(db.prepare('SELECT COUNT(*) AS n FROM title_history').get().n)};
+    }catch(error){return {available:false,reason:String(error?.message||error).slice(0,200)};}
+  }
+  // Explicit, immutable, SQLite-consistent snapshot. Never restore, replace,
+  // or unlink the live DB here; leave all WAL and original user files intact.
+  function snapshot(){
+    if(!init())return {ok:false,reason:problem||'SQLite unavailable'};
+    try{
+      const check=diagnostics();
+      if(!check.available||!check.healthy)return {ok:false,reason:'SQLite 무결성 검사 실패 · 백업 중단'};
+      const folder=path.join(app.getPath('userData'),'DinoPatchBackups');
+      fs.mkdirSync(folder,{recursive:true,mode:0o700});
+      const stamp=new Date().toISOString().replace(/[:.]/g,'-');
+      const filename='dino-work-index-'+stamp+'-'+crypto.randomBytes(6).toString('hex')+'.sqlite';
+      const target=path.join(folder,filename);
+      if(fs.existsSync(target))return {ok:false,reason:'같은 이름의 DB 백업 파일이 이미 존재함'};
+      // VACUUM INTO copies a consistent snapshot even when the main DB uses
+      // WAL. The output must not exist; escaping the generated path is still
+      // required on Windows profiles containing apostrophes.
+      db.exec("VACUUM INTO '"+target.replace(/'/g,"''")+"'");
+      const Driver=DatabaseSync||require('node:sqlite').DatabaseSync;
+      const probe=new Driver(target,{readOnly:true});
+      try{
+        const healthy=probe.prepare('PRAGMA quick_check(1)').all()
+          .every(row=>row.quick_check==='ok');
+        const copies=Number(probe.prepare('SELECT COUNT(*) AS n FROM works').get()?.n);
+        if(!healthy||copies!==check.works)
+          return {ok:false,reason:'백업 검증 실패 · 생성된 파일은 원본과 별도로 보존',filename};
+      }finally{probe.close();}
+      return {ok:true,filename,folder,works:check.works,createdAt:new Date().toISOString()};
+    }catch(error){
+      return {ok:false,reason:String(error?.message||error).slice(0,200)};
+    }
+  }
+  function linkHistory(){
+    if(!init())return [];
+    return db.prepare('SELECT action,anchor_provider,anchor_id,source_provider,source_id,created_at FROM link_history ORDER BY id DESC LIMIT 20').all();
+  }
+  // Explicit user repair is transactional: never use the ordinary automatic
+  // upsert to move a source between works.
+  function repair(method,request){
+    if(!init())return {ok:false,reason:problem};
+    const anchor=request?.anchor,source=request?.source;
+    if(!object(anchor)||!object(source)||!PROVIDERS.has(anchor.provider)
+      ||!PROVIDERS.has(source.provider)||!sourceKey(anchor)||!sourceKey(source))
+      return {ok:false,reason:'invalid source identity'};
+    const find=db.prepare('SELECT work_id,item_json FROM work_sources WHERE provider=? AND source_id=?');
+    const origin=find.get(anchor.provider,sourceKey(anchor));
+    const moving=find.get(source.provider,sourceKey(source));
+    if(!origin||!moving)return {ok:false,reason:'공급원을 먼저 검색하여 작품 DB에 저장해 주세요.'};
+    const targetId=origin.work_id,sourceId=moving.work_id;
+    if(anchor.provider===source.provider&&sourceKey(anchor)===sourceKey(source))
+      return {ok:false,reason:'대표 공급원 자체는 이동할 수 없습니다.'};
+    const primary=readRow(targetId),item=parse(moving.item_json);
+    if(!primary||!item)return {ok:false,reason:'stored source is invalid'};
+    if(method==='detach'&&targetId!==sourceId)
+      return {ok:false,reason:'이 공급원은 이미 다른 작품으로 분리돼 있습니다.'};
+    if(method==='detach'&&primary.sources.length<2)
+      return {ok:false,reason:'마지막 공급원은 분리할 수 없습니다.'};
+    if(method==='attach'&&targetId===sourceId)
+      return {ok:true,unchanged:true,works:[primary],affected:[anchor,source]};
+    if(method==='attach'&&primary.sources.some(existing=>existing.provider===source.provider))
+      return {ok:false,reason:'이 작품에는 같은 공급원이 이미 연결돼 있습니다.'};
+    if(method==='attach'&&primary.sources.some(existing=>identityConflict(existing,item)))
+      return {ok:false,reason:'연도·형식·AniList ID가 달라 잘못된 시즌/극장판 연결을 차단했습니다.'};
+    if(!['attach','detach'].includes(method))return {ok:false,reason:'unsupported repair'};
+    const block=db.prepare('INSERT OR IGNORE INTO manual_pair_blocks(left_provider,left_id,right_provider,right_id) VALUES(?,?,?,?)');
+    const unblock=db.prepare('DELETE FROM manual_pair_blocks WHERE left_provider=? AND left_id=? AND right_provider=? AND right_id=?');
+    const mark=db.prepare("UPDATE works SET checked_at=0,attempted_at=0,outcome='',updated_at=? WHERE work_id=?");
+    const now=Date.now();
+    let destination=targetId;
+    try{
+      db.exec('BEGIN IMMEDIATE');
+      if(method==='detach'){
+        const base='manual:'+source.provider+':'+sourceKey(source);
+        destination=base;
+        let salt=0;
+        const exists=db.prepare('SELECT 1 FROM works WHERE work_id=?');
+        while(exists.get(destination))destination=base+':'+(++salt);
+        if(salt>1000)throw Error('cannot allocate detached work identity');
+        const ko=korean(item.displayTitle)||korean(item.title),en=clean(item.title_english)
+          ||(!ko?clean(item.title):''),ja=clean(item.title_japanese||item.title_native);
+        const names=[...new Set([ko,en,ja,clean(item.title),clean(item.displayTitle)].filter(Boolean))].slice(0,24);
+        db.prepare('INSERT INTO works(work_id,names_json,title_ko,title_en,title_ja,ko_source,ko_checked_at,manual,checked_at,attempted_at,outcome,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
+          .run(destination,JSON.stringify(names),ko,en,ja,ko?'provider':'',0,0,0,0,'',now);
+        for(const previous of primary.sources){
+          const pair=pairFields(previous,source);
+          if(pair)block.run(...pair);
+        }
+      }else{
+        const oldWork=readRow(sourceId);
+        for(const previous of oldWork.sources){
+          const pair=pairFields(previous,source);
+          if(pair)block.run(...pair);
+        }
+        for(const next of primary.sources){
+          const pair=pairFields(next,source);
+          if(pair)unblock.run(...pair);
+        }
+      }
+      db.prepare('UPDATE work_sources SET work_id=? WHERE provider=? AND source_id=?')
+        .run(destination,source.provider,sourceKey(source));
+      db.prepare('INSERT INTO link_history(action,anchor_provider,anchor_id,source_provider,source_id,created_at) VALUES(?,?,?,?,?,?)')
+        .run(method,anchor.provider,sourceKey(anchor),source.provider,sourceKey(source),now);
+      mark.run(now,targetId);
+      if(method==='attach'){
+        if(db.prepare('SELECT 1 FROM work_sources WHERE work_id=? LIMIT 1').get(sourceId))
+          mark.run(now,sourceId);
+        else db.prepare('DELETE FROM works WHERE work_id=?').run(sourceId);
+      }
+      db.exec('COMMIT');
+      const works=[readRow(targetId),readRow(method==='detach'?destination:sourceId)].filter(Boolean);
+      return {ok:true,works,affected:[anchor,source]};
+    }catch(error){
+      try{db.exec('ROLLBACK')}catch{}
+      return {ok:false,reason:String(error?.message||error).slice(0,250)};
+    }
+  }
+  function close(){if(db){db.close();db=null;ready=false;}}
+  return {status,upsert,lookup,recent,stats,search,preview,diagnostics,snapshot,titleHistory,linkHistory,repair,close};
+}
+function register({app,ipcMain,DatabaseSync}={}){
+  const store=createStore({app,DatabaseSync});
+  ipcMain.handle('dino:work-index',(_event,method,payload)=>{
+    switch(method){
+      case 'status':return store.status();
+      case 'upsert':return store.upsert(payload?.works);
+      case 'lookup':return store.lookup(payload);
+      case 'recent':return store.recent(payload);
+      case 'stats':return store.stats();
+      case 'search':return store.search(payload);
+      case 'preview':return store.preview(payload);
+      case 'diagnostics':return store.diagnostics();
+      case 'snapshot':return store.snapshot();
+      case 'titleHistory':return store.titleHistory(payload);
+      case 'linkHistory':return store.linkHistory();
+      case 'attach':case 'detach':return store.repair(method,payload);
+      default:return {ok:false,reason:'unknown method'};
+    }
+  });
+  return store;
+}
+module.exports={createStore,register,normalize,FILE};

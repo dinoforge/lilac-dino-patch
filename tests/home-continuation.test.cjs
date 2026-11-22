@@ -16,6 +16,10 @@ test('continue watching is the compact first home rail, ahead of hero and discov
   const latestAt = home.indexOf('id="latestEpisodeSection"');
   const scheduleAt = home.indexOf('id="scheduleSection"');
   assert.ok(continueAt >= 0 && continueAt < heroAt && heroAt < latestAt && latestAt < scheduleAt);
+  assert.match(home, /<div id="scheduleSection" class="content-section weekly-schedule hidden"/, 'the official weekly schedule has a visible home section');
+  assert.match(home, /id="scheduleTabs" role="tablist"/);
+  assert.match(home, /id="scheduleRail" class="schedule-grid"/);
+  assert.match(html, /weekly-schedule\.css/, 'the official weekly schedule styles are loaded');
   assert.ok(app.includes('hasContinue=latest.length>0;'));
   assert.ok(app.includes("classList.toggle('has-continue',hasContinue)"));
   assert.match(css, /#homeView\.has-continue\{padding-top:calc\(var\(--ott-head\) \+ 12px\)\}/);

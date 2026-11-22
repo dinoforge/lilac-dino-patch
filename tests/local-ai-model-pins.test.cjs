@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { createLocalAi, LOCAL_AI_MODELS } = require('../electron/local-ai.cjs');
+const { createLocalAi, LOCAL_AI_MODELS, promptVersion } = require('../electron/local-ai.cjs');
 
 function temporaryUserData(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lilac-local-ai-pins-'));
@@ -85,4 +85,25 @@ test('model download pins the URL and verifies fresh, resumed, and mismatched fi
     global.fetch = originalFetch;
     model.sha256 = expectedSha256;
   }
+});
+
+test('custom GGUF input options are validated, preserved, and version the translation cache', async t => {
+  const userData = temporaryUserData(t), local = createLocalAi(userData);
+  const root = path.join(userData, 'local-ai'), modelFile = path.join(userData, 'custom.gguf');
+  fs.mkdirSync(root, { recursive: true }); fs.writeFileSync(modelFile, 'test model bytes');
+  fs.writeFileSync(path.join(root, 'added.json'), JSON.stringify([{ path: modelFile, size: fs.statSync(modelFile).size }]));
+
+  const id = `file:${modelFile}`;
+  const before = local.models().find(model => model.id === id);
+  assert.equal(before.inputMode, 'auto');
+  assert.equal(before.sourceLanguage, 'auto');
+  local.setModelOptions(id, { inputMode: 'chat', sourceLanguage: 'ja', customPrompt: 'Translate {text} into {target_lang}.' });
+  const after = local.models().find(model => model.id === id);
+  assert.equal(after.inputMode, 'chat');
+  assert.equal(after.sourceLanguage, 'ja');
+  assert.equal(after.customPrompt, 'Translate {text} into {target_lang}.');
+  assert.notEqual(promptVersion(before), promptVersion(after));
+  assert.throws(() => local.setModelOptions(id, { inputMode: 'invalid', sourceLanguage: 'ja', customPrompt: '{text}' }), /입력 형식/);
+  assert.throws(() => local.setModelOptions(id, { inputMode: 'chat', sourceLanguage: 'ja', customPrompt: 'missing text token' }), /\{text\}/);
+  assert.equal(local.models().find(model => model.id === id).customPrompt, after.customPrompt, 'invalid options do not replace the saved configuration');
 });

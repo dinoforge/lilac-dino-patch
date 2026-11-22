@@ -16,6 +16,17 @@
 .player-episode:disabled { background: #00000042; border-color: #ffffff0f; color: #ffffff47; cursor: default; }
 
 .player-bottom { right: 96px; }
+.player-seek-hint {
+  position: absolute; top: 50%; z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 10px 18px; border-radius: 16px; background: #000a; color: #fff; pointer-events: none;
+  opacity: 0; transform: translateY(-50%); transition: opacity .25s;
+}
+.player-seek-hint.back { left: 12%; }
+.player-seek-hint.forward { right: 12%; }
+.player-seek-hint.jump { left: 50%; transform: translate(-50%, -50%); }
+.player-seek-hint.show { opacity: 1; transition: opacity .08s; }
+.player-seek-hint b { font-size: 18px; }
+.player-seek-hint span { font-size: 12px; color: #fffc; font-variant-numeric: tabular-nums; }
 .player-lock, .player-unlock {
   position: absolute; z-index: 3; display: grid; place-items: center;
   border: 1px solid #ffffff24; border-radius: 50%;
@@ -123,6 +134,34 @@
 
 /* Video + ASS canvas wrapper. */
 .video-stage { position: absolute; inset: 0; }
+/* Anime4K's canvas sits over the source video; subtitles remain above it. */
+.video-stage.anime4k-active #video { position: relative; }
+.video-stage.anime4k-active #video::-webkit-media-text-track-container { z-index: 1; }
+.anime4k-canvas { position: absolute; pointer-events: none; z-index: 0; }
+.video-stage.anime4k-active canvas.JASSUB { z-index: 1; }
+/* A tainted video frame falls back to a video-only window capture. */
+.immersive-player.capturing, .immersive-player.capturing * { visibility: hidden !important; }
+.immersive-player.capturing #videoStage, .immersive-player.capturing #video { visibility: visible !important; }
+/* 워터마크·자막 지우기 canvas shares the video stage with Anime4K. */
+.video-stage.cleanup-active #video { position: relative; }
+.video-stage.cleanup-active #video::-webkit-media-text-track-container { z-index: 1; }
+.video-stage.cleanup-active canvas.JASSUB { z-index: 1; }
+.region-picker { position: absolute; inset: 0; z-index: 30; display: grid; grid-template-rows: auto 1fr auto; gap: 12px; padding: 20px 24px; background: #000000e6; color: #fff; cursor: default; }
+.region-picker-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.region-picker-head b { font-size: 17px; }
+.region-picker-head span { color: #ffffffa8; font-size: 13px; }
+.region-picker-frame { position: relative; justify-self: center; align-self: center; max-width: 100%; max-height: 100%; aspect-ratio: auto; line-height: 0; }
+.region-picker-frame canvas { display: block; max-width: calc(100vw - 48px); max-height: calc(100vh - 150px); cursor: crosshair; touch-action: none; }
+.region-picker .region { position: absolute; border: 2px solid #c8a2c8; background: #c8a2c833; padding: 0; cursor: pointer; }
+.region-picker .region:hover { border-color: #ff7a85; background: #ff7a8533; }
+.region-picker .region.drawing { pointer-events: none; border-style: dashed; }
+.region-picker-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.region-picker-actions button { height: 34px; padding: 0 16px; border: 1px solid #ffffff30; border-radius: 6px; background: #ffffff14; color: #fff; font: inherit; cursor: pointer; }
+.region-picker-actions button.primary { border-color: transparent; background: #fff; color: #000; font-weight: 700; }
+.cleanup-learning { position: absolute; z-index: 30; left: 50%; top: 50%; transform: translate(-50%, -50%); display: grid; gap: 8px; width: min(420px, calc(100vw - 32px)); padding: 20px; border: 1px solid #ffffff24; border-radius: 10px; background: #1e1e1ef2; color: #fff; }
+.cleanup-learning span { color: #ffffffb3; font-size: 13px; line-height: 1.5; }
+.cleanup-learning .cleanup-learning-count { color: #c8a2c8; font-variant-numeric: tabular-nums; }
+.cleanup-learning button { justify-self: end; height: 34px; padding: 0 16px; border: 1px solid #ffffff30; border-radius: 6px; background: #ffffff14; color: #fff; font: inherit; cursor: pointer; }
 /* Keep Chromium's percentage-positioned text centered without narrowing the cue box. */
 #video::-webkit-media-text-track-display { padding-inline: 5%; box-sizing: border-box; }
 .player-speed-boost { position: absolute; top: 90px; left: 50%; transform: translateX(-50%); z-index: 3; padding: 8px 18px; border-radius: 20px; background: #000b; color: #fff; font-weight: 700; pointer-events: none; }
@@ -145,15 +184,6 @@
 .ps-body .sheet-tracks > .sheet-button, .ps-body .sheet-tracks > .sheet-button-row { margin-top: 10px; }
 .ps-pane > .sheet-button-row { margin-top: 8px; }
 .ps-pane > .sheet-button-row + .ps-note { margin-top: 6px; }
-.manual-translation-panel { display: grid; gap: 8px; margin-top: 10px; padding: 12px; border: 1px solid #ffffff20; border-radius: 12px; background: #ffffff08; }
-.manual-translation-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.manual-translation-head span, .manual-translation-panel > p { color: #ffffffa8; font-size: 12px; line-height: 1.45; }
-.manual-translation-panel > p { margin: 0; }
-.manual-translation-panel > label { font-size: 12px; font-weight: 700; }
-.manual-translation-panel textarea { box-sizing: border-box; width: 100%; min-height: 130px; resize: vertical; padding: 9px; border: 1px solid #ffffff25; border-radius: 9px; background: #101010; color: #fff; font: inherit; font-size: 12px; line-height: 1.5; }
-.manual-translation-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
-.manual-translation-actions .sheet-button { margin: 0; }
-.manual-translation-panel [aria-live] { min-height: 1em; }
 .ps-body .track-list { max-height: 260px; }
 .ps-body .track-option { font: inherit; font-size: 13px; }
 .ps-body .track-option > span { display: grid; gap: 1px; min-width: 0; }

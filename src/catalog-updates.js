@@ -1,6 +1,6 @@
 // Update order uses each provider's own recent-episode feed. Saved library data is never reordered in storage.
 const catalogUpdateUI = (() => {
-  const supported = ['reanime', 'miruro', 'animenosub', 'ohli24'];
+  const supported = ['reanime', 'miruro', 'animenosub', 'ohli24', 'linkani'];
   const librarySupported = [...supported, 'linkkf'];
   const cache = new Map();
   const linkkfEpisodeCache = new Map();
@@ -23,7 +23,7 @@ const catalogUpdateUI = (() => {
   function availableEpisodes(item) {
     const values = item?.provider === 'reanime' ? [item.availableEpisodes, item.subbed, item.dubbed]
       : item?.provider === 'miruro' ? [item.availableEpisodes ?? (Number(item.availableEpisodeCount) > 0 ? item.availableEpisodeCount : null)]
-        : ['animenosub', 'ohli24', 'linkkf'].includes(item?.provider) ? [item.availableEpisodes] : [];
+      : ['animenosub', 'ohli24', 'linkani', 'linkkf'].includes(item?.provider) ? [item.availableEpisodes] : [];
     const numbers = values.filter(value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) && Number(value) >= 0).map(Number);
     return numbers.length ? Math.max(...numbers) : null;
   }
@@ -235,7 +235,8 @@ const catalogUpdateUI = (() => {
   $('#seeAllSeason').onclick = () => {
     if (homeOrder === 'season') {
       const quarter = QUARTER_PROVIDERS.includes(state.source);
-      showHomeList(homeItems(), quarter ? (state.quarterSelection?.label || '분기별 작품') : '이번 시즌 신작');
+      const label = quarter ? (state.quarterSelection?.label || '분기별 작품') : '이번 시즌 신작';
+      showHomeList(homeItems(), label);
       return;
     }
     try { localStorage.setItem('allSort:' + state.source, 'updated'); } catch {}

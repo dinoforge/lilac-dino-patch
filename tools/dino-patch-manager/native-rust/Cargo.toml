@@ -1,0 +1,40 @@
+[package]
+name = "dino-native-manager"
+version = "0.2.0-beta.9"
+edition = "2021"
+publish = false
+description = "Native Rust LilacAnime patch manager (independent from upstream Electron)"
+license = "MIT"
+
+[features]
+default = []
+gui = ["dep:eframe", "dep:rfd", "dep:wgpu"]
+updater-test-harness = []
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+sha1 = "0.10"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+eframe = { version = "0.33", default-features = false, features = ["wgpu", "default_fonts", "x11", "wayland", "persistence"], optional = true }
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_Storage_FileSystem", "Win32_UI_WindowsAndMessaging", "Win32_Networking_WinHttp"] }
+wgpu = { version = "27", default-features = false, features = ["dx12"], optional = true }
+
+[[bin]]
+name = "dino-native-updater"
+path = "src/bin/dino-native-updater.rs"
+
+[[bin]]
+name = "dino-native-updater-harness"
+path = "src/bin/dino-native-updater-harness.rs"
+required-features = ["updater-test-harness"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "unwind"

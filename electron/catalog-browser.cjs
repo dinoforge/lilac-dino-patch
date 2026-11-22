@@ -1,7 +1,7 @@
 const cheerio = require('cheerio');
 
 const SEASONS = ['WINTER', 'SPRING', 'SUMMER', 'FALL'];
-const PROVIDERS = new Set(['reanime', 'animenosub', 'linkkf', 'miruro', 'ohli24']);
+const PROVIDERS = new Set(['reanime', 'animenosub', 'linkkf', 'miruro', 'ohli24', 'linkani']);
 const GENRE_NAMES = { action: '액션', adventure: '모험', comedy: '코미디', drama: '드라마', fantasy: '판타지', horror: '공포', mystery: '미스터리', romance: '로맨스', 'sci-fi': 'SF', 'slice of life': '일상', sports: '스포츠', supernatural: '초자연', psychological: '심리', thriller: '스릴러', music: '음악', mecha: '메카', ecchi: '에치', 'mahou shoujo': '마법소녀' };
 const FORMAT_NAMES = { TV: 'TV 애니', MOVIE: '극장판', OVA: 'OVA', ONA: '웹 애니', SPECIAL: '스페셜', TV_SHORT: '단편 TV', MUSIC: '뮤직비디오', 'LIVE ACTION': '실사', BD: 'BD' };
 const option = (value, name = value) => ({ value: String(value), name: String(name) });
@@ -71,6 +71,25 @@ function createCatalogBrowser(deps) {
       formats: ['TV', 'Movie'].map(name => option(name, formatName(name))),
       sorts: ['default', 'updated'], note: '애니24는 TV 애니·극장판만 분류하며 연도·분기 정보는 제공하지 않습니다.'
     };
+    if (provider === 'linkani') {
+      const $ = cheerio.load(await deps.linkaniFetch(`${deps.linkaniBase}/list/2/`));
+      const genres = unique($('a[href]').map((_, node) => {
+        let url; try { url = new URL($(node).attr('href'), deps.linkaniBase); } catch { return null; }
+        const match = url.pathname.match(/^\/list\/2\/class\/([^/]+)\/?$/);
+        if (!match) return null;
+        let value; try { value = decodeURIComponent(match[1].replace(/\+/g, ' ')); } catch { return null; }
+        if (/^[월화수목금토일月火水木金土日]$/.test(value)) return null;
+        return option(value, genreName(value));
+      }).get().filter(Boolean));
+      const years = unique($('a[href]').map((_, node) => {
+        let url; try { url = new URL($(node).attr('href'), deps.linkaniBase); } catch { return null; }
+        const match = url.pathname.match(/^\/list\/2\/year\/(\d{4})\/?$/);
+        return match ? option(match[1], `${match[1]}년`) : null;
+      }).get().filter(Boolean)).sort((a, b) => Number(b.value) - Number(a.value));
+      if (!genres.length && !years.length) throw new Error('링크애니 분류를 불러오지 못했습니다.');
+      return { ...base, genres, year: years.length > 0, yearOptions: years,
+        sorts: ['default', 'updated'], note: '링크애니가 제공하는 장르·연도 기준입니다.' };
+    }
     throw new Error('이 콘텐츠 소스는 상세 필터를 지원하지 않습니다.');
   }
 
@@ -123,13 +142,23 @@ function createCatalogBrowser(deps) {
       return { data: deps.animenosubItems(cards.map((_, node) => $.html(node)).get().join('')), nextOffset: page + 1, done: !cards.length };
     }
 
+    if (provider === 'linkani') {
+      const page = Math.max(1, offset);
+      const route = `${genre ? `class/${encodeURIComponent(genre)}/` : ''}${year ? `year/${encodeURIComponent(year)}/` : ''}${page > 1 ? `page/${page}/` : ''}`;
+      const html = await deps.linkaniFetch(`${deps.linkaniBase}/list/2/${route}`);
+      const items = deps.linkaniItems(html), $ = cheerio.load(html);
+      const next = $('a[href]').filter((_, node) => $(node).text().trim() === '→').first().attr('href');
+      return { data: items, nextOffset: page + 1, done: !items.length || (next !== undefined && !/^(?:https?:\/\/|\/)/.test(next)) };
+    }
+
     const page = Math.max(1, offset);
     if (sort === 'updated' && provider === 'ohli24') {
       const result = await deps.updates.page(provider, offset);
       return { ...result, data: result.data.filter(item => !format || item.type === format) };
     }
-    const raw = deps.ohliItems(await deps.ohliFetch(page === 1 ? `${deps.ohliBase}/` : `${deps.ohliBase}/finished/${page - 1}-1.html`));
-    return { data: raw.filter(item => !format || item.type === format), nextOffset: page + 1, done: !raw.length };
+    const result = await deps.ohliBrowse(page, format);
+    const data = (result.data || []).filter(item => !format || item.type === format);
+    return { ...result, data, nextOffset: page + 1, done: Boolean(result.done) };
   }
 
   return { facets, browse };

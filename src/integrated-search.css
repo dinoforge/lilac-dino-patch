@@ -9,12 +9,518 @@
 .detail-source-picker>div{display:flex;flex-wrap:wrap;gap:7px}
 .detail-source-picker button{border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--text);padding:7px 11px;font-size:11px;cursor:pointer}
 .detail-source-picker button:hover,.detail-source-picker button[aria-pressed="true"]{border-color:var(--lilac);background:color-mix(in srgb,var(--lilac) 17%,var(--panel))}
-.detail-source-picker.weekday-source-picker>div{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:7px}
-.detail-source-picker.weekday-source-picker button,.detail-source-picker .weekday-source-state{display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);padding:8px 10px;font-size:11px;text-align:left}
-.detail-source-picker .weekday-source-state{color:var(--muted)}
-.detail-source-picker .source-availability{font-size:10px;white-space:nowrap;color:var(--muted)}
-.detail-source-picker [data-availability-state="playable"] .source-availability{color:#56c58b}
-.detail-source-picker [data-availability-state="provided"] .source-availability{color:#d6ae57}
-.detail-source-picker [data-availability-state="missing"] .source-availability{color:#e39a78}
-.detail-source-picker [data-availability-state="failed"] .source-availability{color:#e47c84}
+.detail-source-picker .source-search-note{display:block;margin-top:8px;color:var(--muted);font-size:10px}
+.detail-playback-info{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;margin:-8px 0 14px;color:var(--muted);font-size:11px;line-height:1.45}
+.detail-playback-info span{color:var(--text)}
+.detail-playback-info small{color:var(--muted);font-size:10.5px}
 @media(max-width:650px){.search-provider-filters{gap:6px}.search-provider-chip{padding:7px 10px;font-size:10px}.detail-source-picker{padding:10px}.detail-source-picker>div{gap:6px}}
+
+/* Integrated source tabs: one horizontal rail, never a vertical card grid. */
+.detail-source-picker .dino-source-track{
+  display:flex;
+  flex-wrap:nowrap;
+  gap:8px;
+  min-width:0;
+  overflow-x:auto;
+  overflow-y:hidden;
+  padding:2px 2px 9px;
+  scrollbar-width:thin;
+  scrollbar-color:var(--lilac2) transparent;
+  overscroll-behavior-x:contain;
+  scroll-snap-type:x proximity;
+  -webkit-overflow-scrolling:touch
+}
+.detail-source-picker .dino-source-option{
+  display:block;
+  flex:0 0 218px;
+  width:218px;
+  min-height:58px;
+  padding:10px 12px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--panel);
+  color:var(--muted);
+  font-size:11px;
+  line-height:1.6;
+  text-align:left;
+  white-space:pre-line;
+  overflow-wrap:normal;
+  word-break:keep-all;
+  scroll-snap-align:start;
+  cursor:pointer;
+  transition:background .15s,border-color .15s
+}
+.detail-source-picker .dino-source-option::first-line{font-size:12px;font-weight:750;color:var(--text)}
+.detail-source-picker .dino-source-option:hover{border-color:var(--lilac2)}
+.detail-source-picker .dino-source-option[aria-pressed="true"]{
+  border-color:var(--lilac);
+  background:color-mix(in srgb,var(--lilac) 17%,var(--panel));
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--lilac) 35%,transparent)
+}
+.detail-source-picker .dino-source-option:focus-visible{
+  outline:2px solid var(--lilac);
+  outline-offset:2px
+}
+@media(max-width:520px){.detail-source-picker .dino-source-option{flex-basis:190px;width:190px}}
+.detail-source-picker .source-search-note{line-height:1.5}
+.dino-fixed-quality{font-size:11px}
+.detail-source-picker .dino-source-retry{margin-top:10px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--muted);font-size:11px}
+.detail-source-picker .dino-source-retry:hover:not(:disabled){border-color:var(--lilac);color:var(--text)}
+.detail-source-picker .dino-source-retry:disabled{opacity:.6;cursor:wait}
+
+/* Only shown after playback fails; stays compact in the official player header. */
+.dino-playback-alternate{
+  flex:0 0 auto;
+  max-width:190px;
+  padding:6px 10px;
+  border:1px solid var(--lilac);
+  border-radius:8px;
+  background:color-mix(in srgb,var(--lilac) 17%,var(--panel));
+  color:var(--text);
+  font-size:11px;
+  font-weight:650;
+  cursor:pointer
+}
+.dino-playback-alternate:hover{background:color-mix(in srgb,var(--lilac) 26%,var(--panel))}
+.dino-playback-alternate:disabled{opacity:.6;cursor:wait}
+@media(max-width:650px){.dino-playback-alternate{max-width:135px;font-size:10px;line-height:1.3}}
+
+/* One editable Korean representative per work; provider titles remain untouched. */
+.detail-source-picker .dino-work-title-edit{
+  display:inline-flex;align-items:center;margin:0 0 9px 10px;
+  padding:5px 8px;font-size:10px;border-radius:7px;color:var(--muted);
+  background:transparent;border:1px solid var(--line)
+}
+.detail-source-picker .dino-work-title-edit:hover{color:var(--text);border-color:var(--lilac)}
+.detail-source-picker .dino-work-title-form{
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  margin:0 0 10px
+}
+.detail-source-picker .dino-work-title-input{
+  flex:1 1 160px;min-width:100px;padding:8px 10px;border:1px solid var(--line);
+  border-radius:7px;background:var(--panel);color:var(--text);font-size:12px
+}
+.detail-source-picker .dino-work-title-input:focus-visible{
+  outline:2px solid var(--lilac);outline-offset:1px
+}
+.detail-source-picker .dino-work-title-save,
+.detail-source-picker .dino-work-title-reset{border-radius:7px;font-size:11px}
+
+
+/* Compact five-source overview: title, connection count and edit affordance. */
+.detail-source-picker{
+  border-color:color-mix(in srgb,var(--lilac) 20%,var(--line));
+  background:color-mix(in srgb,var(--panel) 93%,transparent);
+  box-shadow:0 9px 26px -26px color-mix(in srgb,var(--lilac) 45%,transparent)
+}
+.detail-source-picker .dino-source-header{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  flex-wrap:wrap;
+  gap:9px 14px;
+  margin-bottom:13px
+}
+.detail-source-picker .dino-source-heading{
+  display:flex;
+  flex-direction:column;
+  flex:1 1 195px;
+  min-width:0;
+  gap:4px
+}
+.detail-source-picker .dino-source-heading-label{
+  display:block;
+  color:var(--muted);
+  font-size:11px;
+  font-weight:650;
+  letter-spacing:.01em
+}
+.detail-source-picker .dino-source-heading-name{
+  color:var(--text);
+  font-size:14px;
+  font-weight:750;
+  line-height:1.45;
+  overflow-wrap:anywhere;
+  word-break:keep-all
+}
+.detail-source-picker .dino-source-heading-actions{
+  display:flex;
+  flex:0 0 auto;
+  align-items:center;
+  justify-content:flex-end;
+  flex-wrap:wrap;
+  gap:7px
+}
+.detail-source-picker .dino-source-linked-count{
+  display:inline-flex;
+  align-items:center;
+  min-height:26px;
+  padding:4px 9px;
+  border:1px solid var(--line);
+  border-radius:7px;
+  background:color-mix(in srgb,var(--panel) 78%,var(--lilac) 8%);
+  color:var(--muted);
+  font-size:11px;
+  font-weight:750;
+  white-space:nowrap;
+  font-variant-numeric:tabular-nums
+}
+.detail-source-picker .dino-work-title-edit{
+  min-height:26px;
+  margin:0;
+  border-radius:7px;
+  white-space:nowrap
+}
+.detail-source-picker .dino-source-track{gap:9px;margin:0 0 2px}
+.detail-source-picker .dino-source-option{
+  position:relative;
+  flex:0 0 218px;
+  min-height:77px;
+  padding:12px 12px 11px 19px;
+  border-radius:11px;
+  line-height:1.65;
+  letter-spacing:.005em;
+  background:color-mix(in srgb,var(--panel) 94%,var(--lilac) 6%)
+}
+.detail-source-picker .dino-source-option::before{
+  content:"";
+  position:absolute;
+  top:16px;
+  left:9px;
+  width:5px;
+  height:5px;
+  border-radius:50%;
+  background:var(--muted);
+  opacity:.7
+}
+.detail-source-picker .dino-source-option[data-availability="checking"]{
+  border-style:dashed
+}
+.detail-source-picker .dino-source-option[data-availability="error"]::before,
+.detail-source-picker .dino-source-option[data-availability="unavailable"]::before{
+  background:#d98a8a;
+  opacity:1
+}
+.detail-source-picker .dino-source-option[data-availability="error"],
+.detail-source-picker .dino-source-option[data-availability="unavailable"]{
+  border-color:color-mix(in srgb,#d98a8a 37%,var(--line))
+}
+.detail-source-picker .dino-source-option[aria-pressed="true"]{
+  padding-right:70px;
+  border-width:1px;
+  border-color:var(--lilac);
+  background:color-mix(in srgb,var(--lilac) 14%,var(--panel));
+  box-shadow:inset 3px 0 0 var(--lilac)
+}
+.detail-source-picker .dino-source-option[aria-pressed="true"]::after{
+  content:"선택 중";
+  position:absolute;
+  right:8px;
+  top:10px;
+  padding:3px 6px;
+  border:1px solid color-mix(in srgb,var(--lilac) 36%,transparent);
+  border-radius:5px;
+  background:color-mix(in srgb,var(--lilac) 17%,var(--panel));
+  color:var(--text);
+  font-size:9px;
+  font-weight:750;
+  line-height:1.25
+}
+.detail-source-picker .dino-source-hint{
+  display:block;
+  margin:7px 0 0;
+  color:var(--muted);
+  font-size:10px;
+  line-height:1.55
+}
+.detail-source-picker .dino-work-title-form{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  width:100%;
+  gap:7px;
+  margin:0 0 12px;
+  padding:10px;
+  border:1px solid var(--line);
+  border-radius:9px;
+  background:color-mix(in srgb,var(--panel) 88%,var(--lilac) 12%)
+}
+.detail-source-picker .dino-work-title-input{
+  flex:1 1 175px;
+  min-height:34px
+}
+.detail-source-picker .dino-work-title-save,
+.detail-source-picker .dino-work-title-reset{
+  min-height:32px;
+  border-radius:7px
+}
+.detail-source-picker .dino-work-title-save{
+  background:color-mix(in srgb,var(--lilac) 20%,var(--panel));
+  border-color:var(--lilac);
+  font-weight:750
+}
+.detail-source-picker button:focus-visible,
+.search-provider-chip:focus-visible{
+  outline:2px solid var(--lilac);
+  outline-offset:3px
+}
+@media(max-width:650px){
+  .search-provider-filters{
+    display:flex;
+    flex-wrap:nowrap;
+    overflow-x:auto;
+    overflow-y:hidden;
+    gap:7px;
+    padding:4px 2px 10px;
+    scroll-snap-type:x proximity;
+    -webkit-overflow-scrolling:touch
+  }
+  .search-provider-chip{flex:0 0 auto;white-space:nowrap;scroll-snap-align:start}
+  .detail-source-picker .dino-source-heading-name{font-size:13px}
+  .detail-source-picker .dino-source-header{gap:8px 10px}
+  .detail-source-picker .dino-source-option{min-height:75px}
+}
+@media(max-width:520px){
+  .detail-source-picker .dino-source-option{flex-basis:190px;width:190px}
+  .detail-source-picker .dino-source-option[aria-pressed="true"]{padding-right:62px}
+  .detail-source-picker .dino-source-linked-count{font-size:10px}
+  .detail-source-picker .dino-work-title-form{gap:6px;padding:8px}
+}
+@media(prefers-reduced-motion:reduce){
+  .detail-source-picker .dino-source-option,
+  .search-provider-chip{transition:none}
+}
+
+
+/* Only actual provider-detail episode increases receive the subtle new-episode
+   accent; no catalog-only guess is presented as a confirmed new episode. */
+.detail-source-picker .dino-source-option[data-new-episodes]:not([data-new-episodes="0"]){
+  border-color:color-mix(in srgb,var(--lilac) 58%,var(--line));
+  background:color-mix(in srgb,var(--lilac) 12%,var(--panel));
+}
+.detail-source-picker .dino-source-option[data-new-episodes]:not([data-new-episodes="0"])::before{
+  background:var(--lilac);
+  opacity:1;
+}
+
+/* Optional SQLite-only correction controls; hidden when the legacy cache is in use. */
+.detail-source-picker .dino-link-repair{display:grid;gap:9px;padding:12px;margin-bottom:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.detail-source-picker .dino-link-repair p,.detail-source-picker .dino-link-repair small{margin:0;color:var(--muted);font-size:11px;line-height:1.6}
+.detail-source-picker .dino-link-repair b{font-size:11px}
+.detail-source-picker .dino-link-repair-row{display:flex;flex-wrap:wrap;align-items:center;gap:7px;min-width:0}
+.detail-source-picker .dino-link-repair-row span{flex:1;min-width:140px;overflow-wrap:anywhere;font-size:11px}
+.detail-source-picker .dino-link-repair-row input{flex:1;min-width:135px;padding:8px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;font-size:11px}
+.detail-source-picker .dino-link-repair-row select{padding:8px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;font-size:11px}
+.detail-source-picker .dino-link-repair-row button{font-size:11px;border-radius:7px;white-space:nowrap}
+.detail-source-picker .dino-link-repair-toggle[hidden]{display:none}
+
+/* SQLite-assisted link review, provider health and keyboard-accessible options. */
+.detail-source-picker .dino-link-search-results{display:flex;flex-wrap:wrap;gap:6px;margin:7px 0 10px}
+.detail-source-picker .dino-link-search-results .dino-link-result{
+  border-radius:8px;white-space:normal;text-align:left;max-width:100%;
+  overflow-wrap:anywhere;line-height:1.4;padding:7px 10px
+}
+.detail-source-picker .dino-link-repair input[type="search"]{flex:1 1 175px;min-width:110px}
+.detail-source-picker .dino-diagnostics-panel{
+  border:1px solid var(--line);border-radius:9px;padding:12px;margin:0 0 12px;
+  display:flex;flex-wrap:wrap;align-items:center;gap:8px
+}
+.detail-source-picker .dino-diagnostics-panel p{
+  width:100%;margin:0;color:var(--muted);font-size:11px;line-height:1.65;overflow-wrap:anywhere
+}
+.detail-source-picker .dino-diagnostics-panel button{border-radius:8px}
+
+/* Beta 8: integrated-only compact supplier status cards and precise retry.
+   The official individual-provider detail page never mounts this picker. */
+.detail-source-picker .dino-provider-connection-diagnostics{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));
+  align-items:stretch;gap:9px;margin:10px 0 4px
+}
+.detail-source-picker .dino-provider-diagnostic{
+  display:flex;flex-direction:column;align-items:stretch;gap:5px;
+  padding:11px 12px;border:1px solid var(--line);border-radius:11px;
+  background:var(--panel);min-width:0;line-height:1.5
+}
+.detail-source-picker .dino-provider-diagnostic strong{
+  color:var(--text);font-size:12px;line-height:1.3
+}
+.detail-source-picker .dino-provider-diagnostic .source-search-note{
+  margin:0;font-size:11px;min-height:16px;line-height:1.55;
+  white-space:normal;word-break:keep-all
+}
+.detail-source-picker .dino-provider-diagnostic-meta{
+  color:var(--muted);opacity:.85;font-size:10px;
+  overflow-wrap:anywhere;line-height:1.5
+}
+.detail-source-picker .dino-provider-diagnostic[data-reason="linked"]{
+  border-color:color-mix(in srgb,var(--lilac) 45%,var(--line));
+  background:color-mix(in srgb,var(--lilac) 8%,var(--panel))
+}
+.detail-source-picker .dino-provider-diagnostic[data-reason="error"],
+.detail-source-picker .dino-provider-diagnostic[data-reason="partial"]{
+  border-color:color-mix(in srgb,#d9a65b 45%,var(--line))
+}
+.detail-source-picker .dino-provider-retry{
+  align-self:flex-start;width:auto;max-width:100%;
+  margin-top:auto;padding:6px 10px;white-space:normal;
+  border-radius:8px;font-size:11px;font-weight:600
+}
+.detail-source-picker .dino-provider-retry:disabled{opacity:.6;cursor:progress}
+.detail-source-picker .dino-provider-retry:focus-visible{
+  outline:2px solid var(--lilac);outline-offset:2px
+}
+@media(max-width:580px){
+  .detail-source-picker .dino-provider-connection-diagnostics{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .detail-source-picker .dino-provider-diagnostic{padding:9px}
+  .detail-source-picker .dino-provider-retry{width:100%;justify-content:center}
+}
+@media(max-width:355px){
+  .detail-source-picker .dino-provider-connection-diagnostics{grid-template-columns:1fr}
+}
+@media(prefers-reduced-motion:reduce){
+  .detail-source-picker .dino-provider-retry{transition:none}
+}
+
+/* Final layout pass: isolate the integrated detail UI from official panels.
+   Let full titles wrap instead of squeezing controls into unreadable columns. */
+.detail-source-picker.dino-integrated-picker{
+  box-sizing:border-box;
+  width:100%;
+  max-width:100%;
+  min-width:0
+}
+.detail-source-picker .dino-source-header{
+  align-items:flex-start;
+  gap:10px 14px
+}
+.detail-source-picker .dino-source-heading{
+  flex:1 1 230px;
+  min-width:0;
+  max-width:100%
+}
+.detail-source-picker .dino-source-heading-name{
+  display:block;
+  min-width:0;
+  max-width:100%;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  word-break:normal;
+  line-height:1.5
+}
+.detail-source-picker .dino-source-heading-actions{
+  display:flex;
+  flex:1 1 230px;
+  min-width:0;
+  max-width:100%;
+  gap:6px;
+  justify-content:flex-end
+}
+.detail-source-picker .dino-source-heading-actions > button{
+  white-space:normal;
+  overflow-wrap:anywhere;
+  text-align:center;
+  min-height:32px
+}
+.detail-source-picker .dino-source-track{max-width:100%;min-width:0}
+.detail-source-picker .dino-source-option{
+  box-sizing:border-box;
+  max-width:min(220px,82vw);
+  height:auto;
+  min-height:78px;
+  white-space:pre-line;
+  overflow-wrap:anywhere;
+  word-break:normal
+}
+.detail-source-picker .dino-source-hint,
+.detail-source-picker .source-search-note,
+.detail-source-picker .dino-provider-diagnostic-meta{
+  overflow-wrap:anywhere;
+  white-space:normal
+}
+.detail-source-picker .dino-provider-connection-diagnostics{
+  width:100%;max-width:100%;min-width:0;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,205px),1fr));
+  gap:8px
+}
+.detail-source-picker .dino-provider-diagnostic{box-sizing:border-box;min-width:0}
+.detail-source-picker .dino-provider-diagnostic-meta{max-width:100%}
+.detail-source-picker .dino-provider-retry{
+  min-height:34px;
+  line-height:1.35;
+  overflow-wrap:anywhere
+}
+.detail-source-picker .dino-diagnostics-panel{min-width:0;max-width:100%}
+.detail-source-picker .dino-diagnostics-panel button{
+  min-height:34px;
+  white-space:normal;
+  overflow-wrap:anywhere
+}
+@media(max-width:700px){
+  .detail-source-picker .dino-source-heading-actions{
+    flex:1 1 100%;
+    justify-content:flex-start
+  }
+  .detail-source-picker .dino-source-header{gap:9px}
+  .detail-source-picker .dino-source-option{flex-basis:205px;width:205px}
+}
+@media(max-width:580px){
+  .detail-source-picker .dino-provider-connection-diagnostics{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:7px
+  }
+  .detail-source-picker .dino-source-heading-actions > button{
+    flex:0 1 auto;
+    max-width:100%
+  }
+  .detail-source-picker .dino-provider-retry{width:100%}
+}
+@media(max-width:380px){
+  .detail-source-picker .dino-provider-connection-diagnostics{grid-template-columns:1fr;}
+  .detail-source-picker .dino-source-heading-actions{gap:6px}
+  .detail-source-picker .dino-source-option{flex-basis:180px;width:180px}
+}
+
+/* SQLite recovery is advisory only; show loss-prevention instructions in
+   integrated diagnostics without altering official provider panels. */
+.detail-source-picker.dino-integrated-picker .dino-sqlite-recovery-notice{
+  display:block;
+  flex:1 1 100%;
+  margin:0;
+  border:1px solid var(--line);
+  border-radius:8px;
+  padding:10px 12px;
+  font-size:11px;
+  line-height:1.65;
+  color:var(--muted);
+  background:var(--panel);
+  white-space:normal;
+  overflow-wrap:anywhere
+}
+
+
+/* Optional integrated-mode-only accent colors; never change upstream panels
+   or the app's global light/dark preference. */
+.detail-source-picker.dino-integrated-picker[data-dino-accent="mint"]{
+  --lilac:#40b89e;
+  --lilac2:#7ad6c1
+}
+.detail-source-picker.dino-integrated-picker[data-dino-accent="blue"]{
+  --lilac:#7b9be7;
+  --lilac2:#a3baf4
+}
+.detail-source-picker.dino-integrated-picker .dino-accent-switch{
+  margin-left:0;
+  min-height:32px
+}
+.detail-source-picker.dino-integrated-picker .dino-accent-switch:focus-visible{
+  outline:2px solid var(--lilac);
+  outline-offset:2px
+}
+.detail-source-picker.dino-integrated-picker .dino-season-observation{
+  width:100%;
+  font-size:11px;
+  color:var(--muted);
+  line-height:1.5;
+  overflow-wrap:anywhere
+}

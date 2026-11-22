@@ -57,5 +57,20 @@
     return {...context,serverOverride,serverOnly:true,excludeVideoServers:failed,failedVideoServers:failed,
       autoFallbackLabels:queue.slice(1),autoFallbackCount:attempts+1};
   }
-  return {MAX_AUTO_SERVER_FALLBACKS,filterProviderServers,createPlan,begin,advance};
+  function createMiruroStallTracker({stallMs=15000,progressTolerance=0.1}={}){
+    const timeout=Math.max(1000,Number(stallMs)||15000),tolerance=Math.max(0,Number(progressTolerance)||0.1);
+    let state={context:null,position:0,since:0,inactive:true};
+    function reset(context,position,now,inactive=true){state={context,position,since:now,inactive}}
+    return {
+      tick({context,video,active=false,now=Date.now()}={}){
+        const position=Number(video?.currentTime)||0;
+        if(!video||!active||context?.episode?.provider!=='miruro'||context.resolving||context.offline||video.paused||video.seeking||video.ended){reset(context,position,now);return false}
+        if(state.inactive||context!==state.context||Math.abs(position-state.position)>tolerance){reset(context,position,now,false);return false}
+        if(Number(video.readyState)<3&&now-state.since>=timeout){state.since=now;return true}
+        return false;
+      },
+      reset(){state={context:null,position:0,since:0,inactive:true}}
+    };
+  }
+  return {MAX_AUTO_SERVER_FALLBACKS,filterProviderServers,createPlan,begin,advance,createMiruroStallTracker};
 });

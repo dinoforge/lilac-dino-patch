@@ -4,7 +4,9 @@ const MIN_REQUEST_INTERVAL_MS = 2100;
 
 let cooldownUntil = 0;
 let nextRequestAt = 0;
-let requestQueue = Promise.resolve();
+let requestQueue = [];
+let queueRunning = false;
+let requestSequence = 0;
 
 class AniListRateLimitError extends Error {
   constructor(retryAfterAt) {
@@ -35,7 +37,8 @@ function getAniListCooldownUntil(now = Date.now()) {
 function resetAniListClientState() {
   cooldownUntil = 0;
   nextRequestAt = 0;
-  requestQueue = Promise.resolve();
+  requestQueue = [];
+  requestSequence = 0;
 }
 
 function currentTime(now) {
@@ -45,28 +48,79 @@ function currentTime(now) {
 
 function wait(milliseconds) { return new Promise(resolve => setTimeout(resolve, milliseconds)); }
 
-async function requestInSlot(startRequest, { now, waitImpl, minIntervalMs }) {
-  const previous = requestQueue;
-  let release;
-  requestQueue = new Promise(resolve => { release = resolve; });
-  await previous;
+function waitForSlot(waitImpl, milliseconds, signal) {
+  if (!signal) return waitImpl(milliseconds);
+  if (signal.aborted) return Promise.reject(signal.reason || new DOMException('요청이 취소되었습니다.', 'AbortError'));
+  return new Promise((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener('abort', onAbort);
+    const onAbort = () => { cleanup(); reject(signal.reason || new DOMException('요청이 취소되었습니다.', 'AbortError')); };
+    signal.addEventListener('abort', onAbort, { once: true });
+    Promise.resolve().then(() => waitImpl(milliseconds)).then(value => { cleanup(); resolve(value); }, error => { cleanup(); reject(error); });
+  });
+}
 
-  try {
-    let current = currentTime(now);
-    let blockedUntil = getAniListCooldownUntil(current);
-    if (blockedUntil > current) throw new AniListRateLimitError(blockedUntil);
+function pumpRequestQueue() {
+  if (queueRunning) return;
+  queueRunning = true;
+  void (async () => {
+    try {
+      while (requestQueue.length) {
+        requestQueue.sort((left, right) => right.priority - left.priority || left.sequence - right.sequence);
+        const entry = requestQueue.shift();
+        if (entry.signal?.aborted) {
+          entry.reject(entry.signal.reason || new DOMException('요청이 취소되었습니다.', 'AbortError'));
+          continue;
+        }
+        try {
+          let current = currentTime(entry.now);
+          let blockedUntil = getAniListCooldownUntil(current);
+          if (blockedUntil > current) throw new AniListRateLimitError(blockedUntil);
 
-    const delayMs = Math.max(0, nextRequestAt - current);
-    if (delayMs > 0) await waitImpl(delayMs);
+          const delayMs = Math.max(0, nextRequestAt - current);
+          if (delayMs > 0) await waitForSlot(entry.waitImpl, delayMs, entry.signal);
 
-    current = currentTime(now);
-    blockedUntil = getAniListCooldownUntil(current);
-    if (blockedUntil > current) throw new AniListRateLimitError(blockedUntil);
-    nextRequestAt = Math.max(nextRequestAt, current) + minIntervalMs;
-    return startRequest();
-  } finally {
-    release();
-  }
+          current = currentTime(entry.now);
+          blockedUntil = getAniListCooldownUntil(current);
+          if (blockedUntil > current) throw new AniListRateLimitError(blockedUntil);
+          if (entry.signal?.aborted) {
+            entry.reject(entry.signal.reason || new DOMException('요청이 취소되었습니다.', 'AbortError'));
+            continue;
+          }
+          nextRequestAt = Math.max(nextRequestAt, current) + entry.minIntervalMs;
+          let started;
+          try { entry.started = true; started = entry.startRequest(); }
+          catch (error) { entry.reject(error); continue; }
+          Promise.resolve(started).then(entry.resolve, entry.reject);
+        } catch (error) {
+          entry.reject(error);
+        }
+      }
+    } finally {
+      queueRunning = false;
+      if (requestQueue.length) pumpRequestQueue();
+    }
+  })();
+}
+
+function requestInSlot(startRequest, { now, waitImpl, minIntervalMs, priority, signal }) {
+  return new Promise((resolve, reject) => {
+    const entry = { startRequest, now, waitImpl, minIntervalMs, priority, signal, resolve, reject, sequence: requestSequence++ };
+    const removeAborted = () => {
+      const index = requestQueue.indexOf(entry);
+      if (index >= 0) requestQueue.splice(index, 1);
+      if (!entry.started) entry.reject(signal.reason || new DOMException('요청이 취소되었습니다.', 'AbortError'));
+    };
+    if (signal?.aborted) { reject(signal.reason || new DOMException('요청이 취소되었습니다.', 'AbortError')); return; }
+    if (signal) signal.addEventListener('abort', removeAborted, { once: true });
+    const settle = callback => value => {
+      signal?.removeEventListener('abort', removeAborted);
+      callback(value);
+    };
+    entry.resolve = settle(resolve);
+    entry.reject = settle(reject);
+    requestQueue.push(entry);
+    pumpRequestQueue();
+  });
 }
 
 async function requestAniListGraphQL(query, variables = {}, {
@@ -75,7 +129,9 @@ async function requestAniListGraphQL(query, variables = {}, {
   timeoutMs = 25000,
   userAgent = 'LilacAnime Desktop',
   minIntervalMs = MIN_REQUEST_INTERVAL_MS,
-  waitImpl = wait
+  waitImpl = wait,
+  priority = 0,
+  signal
 } = {}) {
   const initialTime = currentTime(now);
   const blockedUntil = getAniListCooldownUntil(initialTime);
@@ -86,11 +142,13 @@ async function requestAniListGraphQL(query, variables = {}, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': userAgent },
     body: JSON.stringify({ query, variables }),
-    signal: AbortSignal.timeout(timeoutMs)
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs)
   }), {
     now,
     waitImpl,
-    minIntervalMs: interval
+    minIntervalMs: interval,
+    priority: Number.isFinite(priority) ? priority : 0,
+    signal
   });
   if (response.status === 429) {
     cooldownUntil = Math.max(cooldownUntil, retryAfterAt(response, currentTime(now)));

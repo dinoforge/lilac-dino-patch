@@ -154,7 +154,7 @@ test('latest episode home rail is connected through HTML, renderer, preload, and
   assert.match(app, /item\.playable!==false/, 'The clicked episode must be checked against the provider detail');
   assert.match(preload, /providerLatestEpisodes: \(provider, candidates\) => ipcRenderer\.invoke\('provider:latest-episodes'/);
   assert.match(main, /ipcMain\.handle\('provider:latest-episodes'/);
-  assert.equal((main.match(/requestAniListGraphQL\(/g) || []).length, 5);
+  assert.equal((main.match(/requestAniListGraphQL\(/g) || []).length, 6);
   assert.equal(main.includes("fetch('https://graphql.anilist.co'"), false);
 });
 

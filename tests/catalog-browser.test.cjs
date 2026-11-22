@@ -6,6 +6,7 @@ function setup(overrides = {}) {
   const requests = [];
   const deps = {
     reanimeBase: 'https://reanime.test', animenosubBase: 'https://animenosub.test', ohliBase: 'https://ohli.test',
+    linkaniBase: 'https://linkani.test',
     reanimeFetch: async url => { requests.push(url); return url.includes('facets=true') ? { facets: { genres: { Action: 100, Comedy: 200 }, format: { TV: 100, MOVIE: 30 } } } : { results: Array.from({ length: 36 }, (_, at) => ({ mal_id: String(Number(new URL(url).searchParams.get('offset')) + at), title: `작품 ${at}` })), total: 80 }; },
     reanimeItems: root => root.results,
     animenosubFetch: async url => { requests.push(url); return '<input name="genre[]" value="action"><input name="type" value="tv"><input name="type" value="movie"><input name="season[]" value="winter-2026"><input name="season[]" value="spring-2026"><input name="season[]" value="fall-2025">'; },
@@ -14,8 +15,11 @@ function setup(overrides = {}) {
     linkkfFilter: async request => { requests.push(request); return { data: [{ mal_id: 'linkkf:1' }], total: 100, totalPages: 3 }; },
     miruroApi: async (name, request) => { requests.push(request); return { data: [{ id: 'show' }], next_cursor: 'next:cursor', has_more: true }; },
     miruroItem: raw => ({ mal_id: `miruro:${raw.id}` }),
-    ohliFetch: async url => { requests.push(url); return 'page'; },
-    ohliItems: () => [{ mal_id: 'ohli:tv', type: 'TV' }, { mal_id: 'ohli:movie', type: 'Movie' }],
+    ohliBrowse: async (page, format) => { requests.push({ provider: 'ohli24', page, format }); return {
+      data: [{ mal_id: 'ohli:tv', type: 'TV' }, { mal_id: 'ohli:movie', type: 'Movie' }], done: page > 1
+    }; },
+    linkaniFetch: async url => { requests.push(url); return '<a href="/list/2/class/action/">액션</a><a href="/list/2/class/月/">월</a><a href="/list/2/year/2026/">2026년</a><a href="/list/2/year/2025/">2025년</a><a href="/list/2/page/2/">→</a>'; },
+    linkaniItems: html => [{ mal_id: `linkani:${requests.length}`, title: html }],
     ...overrides
   };
   return { browser: createCatalogBrowser(deps), requests, deps };
@@ -53,8 +57,7 @@ test('unsupported and unknown filters are rejected instead of silently ignored',
   for (const request of [{ genre: 'unknown' }, { format: 'unknown' }, { season: 'FALL' }, { year: 'NaN' }, { year: '2026', season: 'unknown' }]) await assert.rejects(h.browser.browse('reanime', request));
   await assert.rejects(h.browser.browse('miruro', { genre: 'Action' }));
   await assert.rejects(h.browser.browse('ohli24', { year: '2026' }));
-  await assert.rejects(h.browser.facets('linkani'), /지원하지 않습니다/);
-  await assert.rejects(h.browser.browse('linkani', {}), /지원하지 않습니다/);
+  await assert.rejects(h.browser.browse('linkani', { genre: 'missing' }), /장르/);
 });
 
 test('Animenosub keeps its native slugs and combines available seasons for a year', async () => {
@@ -86,11 +89,25 @@ test('Miruro sends only its supported year and quarter filters and preserves cur
   assert.equal(h.requests.at(-1).cursor, 'next:cursor'); assert.equal(h.requests.at(-1).season_year, '2026'); assert.equal(h.requests.at(-1).season, 'SPRING');
 });
 
-test('Ani24 supports only its available format filter and keeps paging after a nonmatching page', async () => {
+test('Ani24 uses the current provider catalog and carries its format filter through paging', async () => {
   const h = setup(), first = await h.browser.browse('ohli24', { format: 'Movie' });
   assert.equal(first.data.length, 1); assert.equal(first.data[0].mal_id, 'ohli:movie'); assert.equal(first.done, false);
   await h.browser.browse('ohli24', { format: 'Movie', offset: first.nextOffset });
-  assert.equal(h.requests[1], 'https://ohli.test/finished/1-1.html');
+  assert.deepEqual(h.requests, [
+    { provider: 'ohli24', page: 1, format: 'Movie' },
+    { provider: 'ohli24', page: 2, format: 'Movie' }
+  ]);
+});
+
+test('LinkAni facets and browse reuse its live year and class routes, excluding weekday classes from genres', async () => {
+  const h = setup(), facets = await h.browser.facets('linkani');
+  assert.deepEqual(facets.genres.map(item => item.value), ['action']);
+  assert.deepEqual(facets.yearOptions.map(item => item.value), ['2026', '2025']);
+  assert.equal(facets.season, false);
+  const result = await h.browser.browse('linkani', { genre: 'action', year: '2026', offset: 2 });
+  assert.equal(h.requests.at(-1), 'https://linkani.test/list/2/class/action/year/2026/page/2/');
+  assert.equal(result.done, false);
+  assert.equal(result.nextOffset, 3);
 });
 
 test('recent update sorting retains source order and applies available filters', async () => {

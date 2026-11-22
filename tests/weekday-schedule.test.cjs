@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { matchesScheduledWork, matchScheduledSources, combineScheduledSources, mergeWeekdaySchedules, localWeekday, scheduleCacheKey, episodeAvailability, providerFallbackState } = require('../src/weekday-schedule.js');
+const { matchesScheduledWork, matchScheduledSources, combineScheduledSources, mergeWeekdaySchedules, localWeekday, scheduleCacheKey, episodeAvailability, providerFallbackState, settleProviderSchedule } = require('../src/weekday-schedule.js');
 
 test('weekday cache keys are isolated by calendar quarter and keep old keys addressable', () => {
   const prior = scheduleCacheKey('reanime', new Date(2026, 2, 31));
@@ -76,4 +76,18 @@ test('unmatched search results never count as an exact provider episode match', 
   assert.equal(providerFallbackState({ state: 'ready', resultCount: 7 }, false), 'missing');
   assert.equal(providerFallbackState({ state: 'partial', resultCount: 1 }, false), 'failed');
   assert.equal(providerFallbackState({ state: 'ready', resultCount: 1 }, true), 'checking');
+});
+
+test('provider schedule requests settle independently on success, rejection, or timeout', async () => {
+  const success = await settleProviderSchedule('Re:Anime', async () => ['episode'], { timeoutMs: 50 });
+  assert.equal(success.state, 'success');
+  assert.deepEqual(success.value, ['episode']);
+
+  const failure = await settleProviderSchedule('Miruro', async () => { throw new Error('offline'); }, { timeoutMs: 50 });
+  assert.equal(failure.state, 'failed');
+  assert.match(failure.error.message, /offline/);
+
+  const timedOut = await settleProviderSchedule('Linkkf', () => new Promise(() => {}), { timeoutMs: 5 });
+  assert.equal(timedOut.state, 'timeout');
+  assert.ok(timedOut.elapsedMs >= 0);
 });

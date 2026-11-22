@@ -16,7 +16,8 @@
     if (available == null && item.provider === 'reanime' && (item.subbed != null || item.dubbed != null)) available = Math.max(count(item.subbed) || 0, count(item.dubbed) || 0);
     if (item.totalEpisodes === undefined && (!item.provider || ['reanime', 'miruro', 'jikan'].includes(item.provider))) total = count(item.episodes) || null;
     if (available == null && item.provider === 'ohli24') available = count(item.episodes);
-    if (available === 0) available = null;
+    if (available == null && item.provider === 'linkani' && item.totalEpisodes != null) available = count(item.episodes);
+    if (available === 0 && item.provider === 'animenosub') available = null;
     if (available != null) return `업로드 ${available}화${total ? ` / 총 ${total}화` : ''}`;
     return total ? `총 ${total}화` : '';
   }

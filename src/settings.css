@@ -2,6 +2,7 @@
 /* 설정 > 자막 자동 번역 > 로컬 AI 모델 */
 /* Same look as the choice buttons: a card per model, the one in use tinted lilac, its action button like 저장. */
 .local-models { display: grid; gap: 8px; margin: 0 0 10px; }
+.local-model-custom{flex-wrap:wrap}.local-model-options{flex:0 0 100%;font-size:12px;color:var(--muted)}.local-model-options summary{cursor:pointer;padding:4px 0}.local-model-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px 0}.local-model-fields label{display:grid;gap:6px}.local-model-fields select,.local-model-fields textarea{width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);color:var(--text);font:inherit}.local-prompt-field{grid-column:1/-1}.local-prompt-field[hidden]{display:none}.local-prompt-field small{line-height:1.5}.local-options-save{justify-self:start;padding:7px 16px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);color:var(--text);cursor:pointer}
 .local-model { display: flex; align-items: center; gap: 12px; min-height: 58px; padding: 8px 8px 8px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .light .local-model { background: #fff; }
 .local-model.selected { background: #c8a2c826; border-color: #c8a2c8; }
@@ -17,3 +18,11 @@
 .local-model-terms:focus-visible { outline: 2px solid var(--lilac); outline-offset: 3px; border-radius: 3px; }
 .local-model-action { flex: none; width: 120px; height: 38px; padding: 0 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel2); color: var(--text); font: inherit; cursor: pointer; }
 .local-model-action:disabled { cursor: default; opacity: .7; }
+/* 번역 프롬프트: the text boxes take the whole width of the block. */
+.android-settings .setting-block.prompt-setting{display:flex;flex-direction:column;align-items:stretch;gap:10px}
+.android-settings .setting-block.prompt-setting>*{justify-self:stretch}
+.prompt-setting .button-row{justify-content:flex-end}
+.prompt-field{display:grid;gap:6px;font-size:12.5px;color:var(--muted)}
+.prompt-field textarea{width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);color:var(--text);font:inherit;font-size:13px;resize:vertical}
+.prompt-advanced summary{cursor:pointer;padding:4px 0;font-size:12.5px;color:var(--muted)}
+.prompt-advanced[open]{display:grid;gap:8px}
