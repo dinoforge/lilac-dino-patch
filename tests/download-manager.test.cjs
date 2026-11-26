@@ -22,6 +22,29 @@ async function finished(manager) {
   assert.fail('download did not finish');
 }
 
+test('the default Videos folder is created only after a download resolves', async t => {
+  const { app } = fixture(t), videos = app.getPath('videos'), root = path.join(videos, 'LilacAnime');
+  let resolveStream;
+  const stream = new Promise(resolve => { resolveStream = resolve; });
+  const manager = new DownloadManager({ app, resolveEpisode: () => stream, broadcast() {} });
+  t.after(() => manager.shutdown());
+  assert.equal(manager.root, root);
+  assert.equal(fs.existsSync(videos), false);
+  const job = manager.enqueue({ title: 'Lazy Folder Test', episode: { id: 'one' }, episodeNumber: 1 });
+  await tick();
+  assert.equal(job.status, 'resolving');
+  assert.equal(fs.existsSync(videos), false, 'resolving a download must not create its destination');
+  manager.mirrorFile = async () => {
+    assert.equal(fs.existsSync(root), true, 'the destination is created immediately before writing media');
+    return { inputs: [] };
+  };
+  manager.runFfmpeg = async current => fs.writeFileSync(current.partialPath, 'test video');
+  resolveStream({ url: 'https://example.test/video.mp4', burnedKorean: true });
+  await finished(manager);
+  assert.equal(job.status, 'completed', job.error);
+  assert.equal(fs.existsSync(root), true);
+});
+
 test('closing during an ordinary HLS download resumes cached segments after restart and produces a playable MP4', async t => {
   const { dir, app } = fixture(t), media = path.join(dir, 'media'); fs.mkdirSync(media);
   const generated = spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=160x90:rate=10', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100',

@@ -64,6 +64,15 @@ test('startup registers catalog and TMDB handlers before opening the main window
   assert.equal(run.windows.length, 1);
 });
 
+test('the default Videos download folder is not created during startup', async t => {
+  const run = boot(t); await run.start();
+  const videos = path.join(path.dirname(run.userData), 'videos');
+  assert.equal(run.handlers.get('downloads:root')(), path.join(videos, 'LilacAnime'));
+  assert.equal(fs.existsSync(videos), false);
+  assert.equal(fs.existsSync(path.join(videos, 'LilacAnime')), false);
+  assert.equal(fs.existsSync(path.join(run.userData, 'downloads.json')), true, 'the existing per-user download state remains persisted');
+});
+
 test('an unavailable Windows Videos path cannot prevent catalog and settings registration', async t => {
   const run = boot(t, { brokenVideos: true }); await run.start();
   assert.equal(run.handlers.has('provider:catalog'), true);

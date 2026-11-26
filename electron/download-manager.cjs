@@ -31,10 +31,20 @@ class DownloadManager {
     this.root = null;
     for (const root of [...new Set([saved, this.defaultRoot].filter(Boolean))]) {
       try {
-        if (root === saved && !fs.existsSync(root)) continue;
-        fs.mkdirSync(root, { recursive: true });
-        if (!fs.statSync(root).isDirectory()) continue;
-        fs.accessSync(root, fs.constants.W_OK);
+        const exists = fs.existsSync(root);
+        if (root === saved && !exists && root !== this.defaultRoot) continue;
+        if (exists) {
+          if (!fs.statSync(root).isDirectory()) continue;
+          fs.accessSync(root, fs.constants.W_OK);
+        } else if (root === this.defaultRoot) {
+          // Keep the default destination available without creating Videos\LilacAnime at startup.
+          // run() creates it only after a download has resolved and is about to write media.
+          const parent = path.dirname(root);
+          if (fs.existsSync(parent)) {
+            if (!fs.statSync(parent).isDirectory()) continue;
+            fs.accessSync(parent, fs.constants.W_OK);
+          }
+        } else continue;
         this.root = root; break;
       } catch { /* try another available download folder without blocking startup */ }
     }
