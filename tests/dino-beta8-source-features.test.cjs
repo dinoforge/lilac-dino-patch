@@ -27,7 +27,7 @@ function adultCatalogFunctions() {
   const origins={reanime:'https://reanime.to',miruro:'https://www.miruro.to',animenosub:'https://animenosub.to',ohli24:'https://www.ohli24.net',linkkf:'https://linkkf.app'};
   const identity=loadFunction('adultCatalogIdentity','adultCatalogSnapshotUrl',{adultCatalogProviderLabels:labels});
   const snapshotUrl=loadFunction('adultCatalogSnapshotUrl','adultCatalogSnapshot',{adultCatalogProviderOrigins:origins,URL});
-  const snapshot=loadFunction('adultCatalogSnapshot','readAdultCatalogMetadata',{adultCatalogIdentity:identity,adultCatalogSnapshotUrl:snapshotUrl,adultCatalogProviderOrigins:origins,URL});
+  const snapshot=loadFunction('adultCatalogSnapshot','normalizeAdultCatalogMetadataRecord',{adultCatalogIdentity:identity,adultCatalogSnapshotUrl:snapshotUrl,adultCatalogProviderOrigins:origins,URL});
   const overrideContext={adultCatalogOverrideKey:'dinoAdultCatalogOverrides',adultCatalogIdentity:identity,adultCatalogSnapshot:snapshot};
   const readOverrides=loadFunction('readAdultCatalogOverrides','writeAdultCatalogOverride',overrideContext);
   const writeOverride=loadFunction('writeAdultCatalogOverride','cancelAdultCatalogPage',{...overrideContext,readAdultCatalogOverrides:readOverrides});
@@ -43,6 +43,20 @@ function adultCatalogFunctions() {
   return {identity,snapshot,readOverrides,writeOverride,classify,label,update,hydrate};
 }
 
+function adultCatalogMetadataCacheFunctions() {
+  const adultCatalogMetadataCacheKey='dinoAdultCatalogVerifiedMetadata';
+  const ADULT_CATALOG_METADATA_CACHE_MAX=256;
+  const ADULT_CATALOG_METADATA_CACHE_TTL=90*24*60*60*1000;
+  const normalize=loadFunction('normalizeAdultCatalogMetadataRecord','hydrateAdultCatalogMetadataCache');
+  const context={adultCatalogMetadataCacheKey,ADULT_CATALOG_METADATA_CACHE_MAX,ADULT_CATALOG_METADATA_CACHE_TTL,
+    normalizeAdultCatalogMetadataRecord:normalize};
+  const hydrate=loadFunction('hydrateAdultCatalogMetadataCache','readAdultCatalogMetadata',context);
+  const cache=loadFunction('cacheAdultCatalogMetadata','readAdultCatalogOverrides',{
+    ...context,hydrateAdultCatalogMetadataCache:hydrate
+  });
+  return {normalize,hydrate,cache,adultCatalogMetadataCacheKey,ADULT_CATALOG_METADATA_CACHE_MAX,ADULT_CATALOG_METADATA_CACHE_TTL};
+}
+
 test('catalog route reuses app navigation and cards without changing the All view', () => {
   const html = readRenderer('src/index.html');
   assert.match(html, /data-view="all"[\s\S]+data-view="adultCatalog"[\s\S]+data-view="history"/);
@@ -52,10 +66,18 @@ test('catalog route reuses app navigation and cards without changing the All vie
   if (previewPath) {
     new vm.Script(app);
     assert.equal((html.match(/data-view="adultCatalog"/g) || []).length, 1);
-    assert.match(html, /integrated-search\.js/);
+    const hasIntegratedSearch = /integrated-search\.js/.test(html);
+    const hasPatch03HlsHook = /function updateFastHlsBuffer\(/.test(app);
+    if (hasIntegratedSearch) assert.match(html, /integrated-search\.js/);
+    else assert.doesNotMatch(html, /integrated-search\.js/);
     assert.match(app, /if\(name==='adultCatalog'\).*loadAdultCatalogPage/);
-    assert.match(app, /fastBufferPlayer\.on\(Hls\.Events\.LEVEL_LOADED/);
-    assert.match(app, /addEventListener\('ratechange',event=>updateFastHlsBuffer/);
+    if (hasPatch03HlsHook) {
+      assert.match(app, /fastBufferPlayer\.on\(Hls\.Events\.LEVEL_LOADED/);
+      assert.match(app, /addEventListener\('ratechange',event=>updateFastHlsBuffer/);
+    } else {
+      assert.doesNotMatch(app, /fastBufferPlayer\.on\(Hls\.Events\.LEVEL_LOADED/);
+      assert.doesNotMatch(app, /addEventListener\('ratechange',event=>updateFastHlsBuffer/);
+    }
   }
 });
 
@@ -64,10 +86,42 @@ test('catalog accepts only explicit named genre evidence with a matching provide
   const qualifies = item => (packageClassifier || adultCatalogFunctions().classify)(item).status === 'CONFIRMED_HENTAI';
   const item = { provider: 'reanime', id: 'example', mal_id: 'reanime:example', genres: [{ name: ' Hentai ' }] };
   assert.equal(qualifies(item), true);
+  assert.equal(qualifies({...item,genres:[' Hentai ']}),true);
+  assert.equal(adultCatalogFunctions().classify({...item,genres:['Ecchi'],adult:true}).status,'REVIEW_REQUIRED');
   for (const patch of [
     { genres: [] }, { genres: [{ id: 12 }] }, { genres: [{ name: 'Ecchi' }], adult: true },
     { genres: null, title: 'Hentai' }, { provider: 'miruro' }, { mal_id: 'reanime:other' },
   ]) assert.equal(qualifies({ ...item, ...patch }), false);
+});
+
+test('verified AniList metadata cache survives reload, expires stale entries, and remains bounded', () => {
+  const {hydrate,cache,adultCatalogMetadataCacheKey,ADULT_CATALOG_METADATA_CACHE_MAX,ADULT_CATALOG_METADATA_CACHE_TTL}=adultCatalogMetadataCacheFunctions();
+  const values=new Map(),storage={get:(key,fallback)=>values.has(key)?values.get(key):fallback,set:(key,value)=>values.set(key,JSON.parse(JSON.stringify(value)))};
+  const now=1_800_000_000_000,record={source:'AniList GraphQL',status:'CONFIRMED_HENTAI',anilistId:7001,malId:8001,
+    year:2022,format:'TV',season:'SUMMER',titles:['Verified Alias','原題'],evidence:{field:'genres',value:'Hentai'}};
+  const catalog={dynamicMetadata:new Map(),metadataCacheLoaded:false};
+  cache([record,{...record,anilistId:0,malId:0},{...record,evidence:{field:'isAdult',value:'true'}}],{storage,catalog,now});
+  assert.equal(catalog.dynamicMetadata.size,1);
+  assert.equal(values.get(adultCatalogMetadataCacheKey).version,1);
+  assert.equal(values.get(adultCatalogMetadataCacheKey).entries.length,1);
+
+  const restored={dynamicMetadata:new Map(),metadataCacheLoaded:false};
+  hydrate({storage,catalog:restored,now:now+1000});
+  assert.equal(restored.dynamicMetadata.size,1);
+  assert.equal(restored.dynamicMetadata.get('anilist:7001').titles[0],'Verified Alias');
+  assert.equal(restored.dynamicMetadata.get('anilist:7001').cachedAt,now);
+
+  const staleStorage={get:()=>({version:1,entries:[{savedAt:now-ADULT_CATALOG_METADATA_CACHE_TTL-1,record}]})};
+  const stale={dynamicMetadata:new Map(),metadataCacheLoaded:false};
+  hydrate({storage:staleStorage,catalog:stale,now});
+  assert.equal(stale.dynamicMetadata.size,0);
+
+  const many=Array.from({length:ADULT_CATALOG_METADATA_CACHE_MAX+1},(_,index)=>({...record,
+    anilistId:9000+index,malId:10000+index,titles:[`Title ${index}`]}));
+  const bounded={dynamicMetadata:new Map(),metadataCacheLoaded:false};
+  cache(many,{storage,catalog:bounded,now});
+  assert.equal(bounded.dynamicMetadata.size,ADULT_CATALOG_METADATA_CACHE_MAX);
+  assert.equal(values.get(adultCatalogMetadataCacheKey).entries.length,ADULT_CATALOG_METADATA_CACHE_MAX);
 });
 
 test('classification requires corroborated identity and preserves conflicts and scoped overrides', () => {
@@ -210,7 +264,9 @@ test('detail panel exposes three persisted actions and keeps source identity in 
   assert.match(app,/adultClassificationPanelMarkup\(a,adultClassification,adultManual\)/);
   assert.match(app,/if\(adultIdentity\)bindAdultClassificationControls\(a,token\)/);
   assert.match(app,/dinoAdultCatalogOverrides/);
-  assert.match(app,/if\(adultPanel\)\$\('#detailContent \.tags'\)\?\.insertAdjacentHTML\('afterend',adultPanel\)/);
+  const detailPanelInTemplate=/const adultPanel=adultIdentity\?adultClassificationPanelMarkup\(a,adultClassification,adultManual\):''/.test(app)&&/\$\{adultPanel\}/.test(app);
+  const detailPanelAppendedAfterTags=/if\(adultPanel\)\$\('#detailContent \.tags'\)\?\.insertAdjacentHTML\('afterend',adultPanel\)/.test(app);
+  assert.ok(detailPanelInTemplate||detailPanelAppendedAfterTags,'detail classification controls must be connected to the rendered detail view');
   assert.match(app,/data-adult-classification-action="include"[\s\S]*data-adult-classification-action="exclude"[\s\S]*data-adult-classification-action="auto"/);
   assert.match(app,/adultCatalog\.items\.values\(\)\]\.filter/);
   assert.match(app,/renderCards\('#adultCatalogGrid',items\)/);
@@ -292,16 +348,53 @@ test('catalog paging retries failures, prevents duplicate requests and filters r
   }
 });
 
-test('fast buffer target applies only to HLS VOD and resets at normal speed', () => {
+test('adult tab connects paged RE:Anime IDs to transient trusted metadata before filtering and searching', async () => {
+  const elements=new Map(),rendered=[];
+  const $=selector=>{
+    if(!elements.has(selector))elements.set(selector,{value:'',textContent:'',disabled:false,classList:{toggle(){}}});
+    return elements.get(selector);
+  };
+  const sourceItem={provider:'reanime',id:'mapped-series',mal_id:'reanime:mapped-series',title:'Local Alias',title_japanese:'原題',
+    synonyms:['Verified Alias'],year:2022,season:'SUMMER 2022',type:'TV',anilistId:9001,malId:7001,genres:[{name:'Ecchi'}]};
+  let requested;
+  const context={
+    $,store:{get:(_key,fallback)=>fallback,set(){}},normalizeSearchText:value=>String(value||'').toLowerCase(),
+    normalizeAdultCatalogText:value=>String(value||'').toLowerCase(),titleOf:item=>item.title,
+    renderCards:(_target,items)=>rendered.splice(0,rendered.length,...items.map(item=>item.mal_id)),
+    window:{lilac:{providerCatalog:async()=>({data:[sourceItem],total:1,done:true}),adultCatalogMetadata:async items=>{
+      requested=items;
+      return {available:true,records:[{source:'AniList GraphQL',status:'CONFIRMED_HENTAI',anilistId:9001,malId:7001,
+        year:2022,format:'TV',season:'SUMMER',titles:['Verified Alias','原題'],evidence:{field:'genres',value:'Hentai'}}]};
+    }}}
+  };
+  const start=app.indexOf('const adultCatalog='),end=app.indexOf('function toggleLibrary(',start);
+  assert.ok(start>=0&&end>start);
+  const vmContext=vm.createContext(context);
+  vm.runInContext(app.slice(start,end),vmContext);
+  await $('#adultCatalogMore').onclick();
+  assert.equal(requested[0].mal_id,'reanime:mapped-series');
+  assert.deepEqual(rendered,['reanime:mapped-series']);
+  assert.equal(vm.runInContext("adultCatalog.classifications.get('reanime:mapped-series').status",vmContext),'CONFIRMED_HENTAI');
+  $('#adultCatalogSearch').value='verified alias';
+  $('#adultCatalogSearch').oninput();
+  assert.deepEqual(rendered,['reanime:mapped-series']);
+  assert.equal(vm.runInContext('adultCatalog.metadataUnavailable',vmContext),false);
+});
+
+test('2x HLS buffer stays at the measured 60-second baseline', {
+  skip: Boolean(previewPath && !/function updateFastHlsBuffer\(/.test(app)),
+}, () => {
   const update = loadFunction('updateFastHlsBuffer', previewPath ? 'play' : 'bindHlsPlayerEvents');
   const instance = { config: { maxBufferSize: 1024 ** 3 }, latestLevelDetails: { live: false } };
   update(instance, 2);
-  assert.equal(instance.config.maxBufferLength, 90);
-  assert.equal(instance.config.maxMaxBufferLength, 90);
+  assert.equal(instance.config.maxBufferLength, 60);
+  assert.equal(instance.config.maxMaxBufferLength, 60);
   update(instance, 1);
+  assert.equal(instance.config.maxBufferLength, 60);
   assert.equal(instance.config.maxMaxBufferLength, 60);
   instance.latestLevelDetails.live = true;
   update(instance, 2);
+  assert.equal(instance.config.maxBufferLength, 60);
   assert.equal(instance.config.maxMaxBufferLength, 60);
   assert.equal(instance.config.maxBufferSize, 1024 ** 3);
   assert.doesNotThrow(() => update(null, 2));

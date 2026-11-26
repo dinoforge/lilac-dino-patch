@@ -181,8 +181,11 @@ function card(a) {
 
 function renderCards(target, items) { const el=$(target); el.classList.remove('loading-cards'); el.replaceChildren(...items.map(card)); }
 
-const adultCatalog={items:new Map(),classifications:new Map(),seen:new Set(),offset:0,scrollTop:0,loading:false,done:false,started:false,error:false,request:0};
+const adultCatalog={items:new Map(),classifications:new Map(),dynamicMetadata:new Map(),metadataCacheLoaded:false,seen:new Set(),offset:0,scrollTop:0,loading:false,done:false,started:false,error:false,metadataUnavailable:false,request:0};
 const adultCatalogOverrideKey='dinoAdultCatalogOverrides';
+const adultCatalogMetadataCacheKey='dinoAdultCatalogVerifiedMetadata';
+const ADULT_CATALOG_METADATA_CACHE_MAX=256;
+const ADULT_CATALOG_METADATA_CACHE_TTL=90*24*60*60*1000;
 const adultCatalogProviderLabels={reanime:'RE:Anime',miruro:'Miruro',animenosub:'Animenosub',ohli24:'Ohli24',linkkf:'Linkkf'};
 const adultCatalogProviderOrigins={reanime:'https://reanime.to',miruro:'https://www.miruro.to',animenosub:'https://animenosub.to',ohli24:'https://www.ohli24.net',linkkf:'https://linkkf.app'};
 
@@ -236,12 +239,61 @@ function adultCatalogSnapshot(item) {
   };
 }
 
+function normalizeAdultCatalogMetadataRecord(record) {
+  const positiveId=value=>Number.isSafeInteger(value)&&value>0?value:null;
+  const anilistId=positiveId(record?.anilistId),malId=positiveId(record?.malId),year=positiveId(record?.year);
+  const explicitEvidence=record?.evidence?.field==='genres'&&typeof record.evidence.value==='string'&&
+    record.evidence.value.normalize('NFKC').trim().toLowerCase()==='hentai';
+  if(record?.source!=='AniList GraphQL'||record.status!=='CONFIRMED_HENTAI'||(!anilistId&&!malId)||
+    !year||year<1900||year>2100||!explicitEvidence||!Array.isArray(record.titles))return null;
+  const titles=[...new Set(record.titles.filter(value=>typeof value==='string').map(value=>value.normalize('NFKC').trim())
+    .filter(value=>value.length>0&&value.length<=300))].slice(0,32);
+  if(!titles.length)return null;
+  const formats=new Set(['TV','TV_SHORT','MOVIE','SPECIAL','OVA','ONA','MUSIC']);
+  const seasons=new Set(['WINTER','SPRING','SUMMER','FALL']);
+  const format=typeof record.format==='string'?record.format.slice(0,40):'';
+  const season=typeof record.season==='string'?record.season.toUpperCase().slice(0,12):'';
+  return {source:'AniList GraphQL',status:'CONFIRMED_HENTAI',anilistId,malId,year,
+    format:formats.has(format)?format:'',season:seasons.has(season)?season:'',titles,
+    evidence:{field:'genres',value:'Hentai'}};
+}
+
+function hydrateAdultCatalogMetadataCache({storage=store,catalog=adultCatalog,now=Date.now()}={}) {
+  if(catalog.metadataCacheLoaded)return;
+  catalog.metadataCacheLoaded=true;
+  const data=storage.get(adultCatalogMetadataCacheKey,null);
+  if(data?.version!==1||!Array.isArray(data.entries))return;
+  const entries=data.entries.slice(-ADULT_CATALOG_METADATA_CACHE_MAX);
+  for(const entry of entries){
+    const savedAt=Number(entry?.savedAt),record=normalizeAdultCatalogMetadataRecord(entry?.record);
+    if(!Number.isSafeInteger(savedAt)||savedAt<=0||savedAt>now+5*60*1000||now-savedAt>ADULT_CATALOG_METADATA_CACHE_TTL||!record)continue;
+    const key=record.anilistId?`anilist:${record.anilistId}`:`mal:${record.malId}`;
+    catalog.dynamicMetadata.set(key,{...record,cachedAt:savedAt});
+  }
+}
+
 function readAdultCatalogMetadata() {
   // This element is part of the packaged HTML. Provider responses never populate it.
+  hydrateAdultCatalogMetadataCache();
   try {
     const data=JSON.parse($('#adultCatalogMetadata')?.textContent||'null');
-    return data?.version===1&&Array.isArray(data.records)?data.records:[];
+    const packaged=data?.version===1&&Array.isArray(data.records)?data.records:[];
+    return [...packaged,...[...adultCatalog.dynamicMetadata.values()].map(({cachedAt,...record})=>record)];
   } catch { return []; }
+}
+
+function cacheAdultCatalogMetadata(records, {storage=store,catalog=adultCatalog,now=Date.now()}={}) {
+  if(!Array.isArray(records))return;
+  hydrateAdultCatalogMetadataCache({storage,catalog,now});
+  for(const record of records){
+    const normalized=normalizeAdultCatalogMetadataRecord(record);
+    if(!normalized)continue;
+    const key=normalized.anilistId?`anilist:${normalized.anilistId}`:`mal:${normalized.malId}`;
+    catalog.dynamicMetadata.set(key,{...normalized,cachedAt:now});
+  }
+  while(catalog.dynamicMetadata.size>ADULT_CATALOG_METADATA_CACHE_MAX)catalog.dynamicMetadata.delete(catalog.dynamicMetadata.keys().next().value);
+  const entries=[...catalog.dynamicMetadata.values()].map(({cachedAt,...record})=>({savedAt:cachedAt,record}));
+  try{storage.set(adultCatalogMetadataCacheKey,{version:1,entries})}catch{}
 }
 
 function readAdultCatalogOverrides(storage) {
@@ -289,10 +341,12 @@ function classifyAdultCatalogItem(item, {verifiedMetadata=[], manual=null}={}) {
   if(!identity)return result;
   result.workKey=identity.workKey;
   const normalize=value=>typeof value==='string'?value.normalize('NFKC').trim().replace(/\s+/g,' ').toLowerCase():'';
-  if(Array.isArray(item.genres)&&item.genres.some(genre=>normalize(genre?.name)==='hentai')){
+  const genres=Array.isArray(item.genres)?item.genres.map(genre=>normalize(typeof genre==='string'?genre:genre?.name)).filter(Boolean):[];
+  if(genres.includes('hentai')){
     result.evidence.push({source:identity.provider,basis:'explicit-genre',status:'CONFIRMED_HENTAI'});
   }
-  const titles=[item.title,item.title_english,item.title_japanese,item.title_native,item.title_original,item.romaji].map(normalize).filter(Boolean);
+  const titles=[item.title,item.title_english,item.title_japanese,item.title_native,item.title_original,item.romaji,
+    ...(Array.isArray(item.synonyms)?item.synonyms:[])].map(normalize).filter(Boolean);
   let identityMismatch=false;
   for(const record of verifiedMetadata){
     if(typeof record?.source!=='string'||!record.source.trim()||
@@ -304,10 +358,16 @@ function classifyAdultCatalogItem(item, {verifiedMetadata=[], manual=null}={}) {
     const contradictoryId=idFields.some(key=>validId(item[key])&&validId(record[key])&&item[key]!==record[key]);
     const year=Number(item.year);
     const names=Array.isArray(record.titles)?record.titles:[];
-    if(contradictoryId||!Number.isInteger(year)||year<1900||year!==Number(record.year)||
+    const itemFormat=normalize(item.type).replace(/[_-]+/g,' '),metadataFormat=normalize(record.format).replace(/[_-]+/g,' ');
+    const knownFormats=new Set(['tv','tv short','movie','special','ova','ona','music']);
+    const formatMismatch=knownFormats.has(itemFormat)&&knownFormats.has(metadataFormat)&&itemFormat!==metadataFormat;
+    const seasonName=value=>normalize(value).match(/\b(winter|spring|summer|fall)\b/)?.[1]||'';
+    const itemSeason=seasonName(item.season),metadataSeason=seasonName(record.season);
+    const seasonMismatch=Boolean(itemSeason&&metadataSeason&&itemSeason!==metadataSeason);
+    if(contradictoryId||formatMismatch||seasonMismatch||!Number.isInteger(year)||year<1900||year!==Number(record.year)||
       !names.some(name=>titles.includes(normalize(name)))){
       identityMismatch=true;
-      result.evidence.push({source:record.source,basis:'identity-mismatch',ids:matchingIds});
+      result.evidence.push({source:record.source,basis:'identity-mismatch',ids:matchingIds,formatMismatch,seasonMismatch});
       continue;
     }
     result.evidence.push({source:record.source,basis:'id-title-year',ids:matchingIds,status:record.status});
@@ -315,7 +375,7 @@ function classifyAdultCatalogItem(item, {verifiedMetadata=[], manual=null}={}) {
   const outcomes=new Set(result.evidence.map(entry=>entry.status).filter(Boolean));
   result.conflict=outcomes.size>1||identityMismatch;
   result.status=result.conflict?'REVIEW_REQUIRED':outcomes.size?[...outcomes][0]:
-    Array.isArray(item.genres)&&item.genres.some(genre=>normalize(genre?.name))?'REVIEW_REQUIRED':'UNKNOWN';
+    genres.length?'REVIEW_REQUIRED':'UNKNOWN';
   if(manual?.workKey===result.workKey&&['include','exclude'].includes(manual.action)){
     result.manual=manual.action;
     result.status=manual.action==='include'?'CONFIRMED_HENTAI':'NOT_HENTAI';
@@ -403,7 +463,7 @@ function renderAdultCatalog() {
   const query=normalizeSearchText($('#adultCatalogSearch').value);
   const sort=$('#adultCatalogSort').value;
   const items=[...adultCatalog.items.values()].filter(item=>
-    [titleOf(item),item.title,item.title_english,item.title_japanese,item.romaji].some(title=>normalizeSearchText(title).includes(query)));
+    [titleOf(item),item.title,item.title_english,item.title_japanese,item.romaji,...(Array.isArray(item.synonyms)?item.synonyms:[])].some(title=>normalizeSearchText(title).includes(query)));
   if(sort==='title')items.sort((a,b)=>titleOf(a).localeCompare(titleOf(b),'ko'));
   if(sort==='score')items.sort((a,b)=>(Number(b.score)||0)-(Number(a.score)||0));
   renderCards('#adultCatalogGrid',items);
@@ -411,7 +471,7 @@ function renderAdultCatalog() {
   $('#adultCatalogStatus').textContent=adultCatalog.loading?'RE:Anime 목록을 확인하는 중…':
     adultCatalog.error?manualCount?`RE:Anime 목록을 불러오지 못했습니다. 직접 지정한 작품 ${manualCount}개만 표시 중입니다.`:'목록을 불러오지 못했습니다. 다시 시도해 주세요.':
     items.length?`작품 ${items.length}개 · 자동 ${automaticCount} · 직접 지정 ${manualCount}`:
-    query?'불러온 작품 중 검색 결과가 없습니다.':'확인된 작품이 없습니다. 다른 공급원 작품은 상세 화면에서 직접 지정할 수 있습니다.';
+    query?'불러온 작품 중 검색 결과가 없습니다.':adultCatalog.metadataUnavailable?'분류 메타데이터를 확인하지 못했습니다. 자동 분류는 보류됩니다.':'확인된 작품이 없습니다. 다른 공급원 작품은 상세 화면에서 직접 지정할 수 있습니다.';
   const more=$('#adultCatalogMore');
   more.disabled=adultCatalog.loading||adultCatalog.done;
   more.textContent=adultCatalog.error?'다시 시도':'더 불러오기';
@@ -430,6 +490,11 @@ async function loadAdultCatalogPage() {
     const page=await window.lilac.providerCatalog('reanime','',adultCatalog.offset);
     if(request!==adultCatalog.request)return;
     if(!Array.isArray(page?.data))throw new Error('Invalid catalog page');
+    const metadataResult=typeof window.lilac.adultCatalogMetadata==='function'
+      ?await window.lilac.adultCatalogMetadata(page.data):{available:false,records:[]};
+    if(request!==adultCatalog.request)return;
+    adultCatalog.metadataUnavailable=metadataResult?.available!==true;
+    if(metadataResult?.available===true)cacheAdultCatalogMetadata(metadataResult.records);
     const verifiedMetadata=readAdultCatalogMetadata();
     const overrides=readAdultCatalogOverrides(store);
     let newIds=0;
@@ -1199,9 +1264,8 @@ function startAutomaticVideoServerFallback(instance,video){
 
 function updateFastHlsBuffer(instance, rate) {
   if (!instance) return;
-  const seconds = rate >= 2 && instance.latestLevelDetails?.live === false ? 90 : 60;
-  instance.config.maxBufferLength = seconds;
-  instance.config.maxMaxBufferLength = seconds;
+  instance.config.maxBufferLength = 60;
+  instance.config.maxMaxBufferLength = 60;
 }
 
 function bindHlsPlayerEvents(instance,video){

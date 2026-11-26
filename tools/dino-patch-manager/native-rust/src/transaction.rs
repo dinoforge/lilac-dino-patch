@@ -4,7 +4,7 @@
 
 use crate::asar::{self, Archive};
 use crate::patch_set::{
-    self, CandidateCheck, CandidateManifest, ManagerInstallSupport, PatchSet,
+    self, CandidateCheck, CandidateManifest, ManagerInstallSupport, PatchRevision, PatchSet,
 };
 use crate::{fail, Result};
 use chrono::Utc;
@@ -30,6 +30,7 @@ pub struct Status {
     pub version: String,
     pub reason: String,
     pub composition_id: Option<String>,
+    pub revision_id: Option<String>,
     pub recovery_available: bool,
     pub manually_uninstalled: bool,
 }
@@ -41,6 +42,7 @@ impl Status {
             version: version.into(),
             reason: reason.into(),
             composition_id: None,
+            revision_id: None,
             recovery_available: false,
             manually_uninstalled: false,
         }
@@ -48,6 +50,11 @@ impl Status {
 
     fn with_composition(mut self, set: PatchSet) -> Self {
         self.composition_id = Some(set.id());
+        self
+    }
+
+    fn with_revision(mut self, revision: PatchRevision) -> Self {
+        self.revision_id = Some(revision.id.to_owned());
         self
     }
 }
@@ -261,24 +268,55 @@ fn backup_filename(version:&str)->String{
 }
 
 fn recorded_composition(state: &Value) -> Result<Option<PatchSet>> {
-    let Some(value) = state.get("compositionId") else { return Ok(None); };
+    let Some(value) = state.get("compositionId") else {
+        if state.get("revisionId").is_some() || state.get("revisionNumber").is_some() {
+            return Err(fail("개정판 기록에 패치 조합 ID가 없습니다."));
+        }
+        return Ok(None);
+    };
     let id = value.as_str().ok_or_else(|| fail("패치 조합 ID 형식이 올바르지 않습니다."))?;
     let set = PatchSet::parse_id(id).map_err(fail)?;
-    let capability = patch_set::combination_capability(set);
-    if capability.manager_install != ManagerInstallSupport::Supported {
-        return Err(fail("기록된 패치 조합은 현재 관리자에서 지원하지 않습니다."));
+    if state["patchVersion"] != PATCH_VERSION {
+        return Err(fail("기록된 패치 조합의 패치 버전이 현재 관리자와 다릅니다."));
     }
-    let fingerprint = capability
-        .fingerprint
-        .ok_or_else(|| fail("기록된 조합의 검증 지문이 없습니다."))?;
-    if state["patchVersion"] != PATCH_VERSION
-        || state["version"] != fingerprint.app_version
-        || state["originalSha256"] != fingerprint.original_sha256
-        || state["patchedSha256"] != fingerprint.result_sha256
-    {
-        return Err(fail("기록된 패치 조합의 버전 또는 지문이 알려진 결과와 다릅니다."));
-    }
+    recorded_revision(state, set)?;
     Ok(Some(set))
+}
+
+fn recorded_revision(state: &Value, set: PatchSet) -> Result<PatchRevision> {
+    let revision_id = match state.get("revisionId") {
+        Some(Value::String(id)) => Some(id.as_str()),
+        None => None,
+        Some(_) => return Err(fail("패치 개정판 ID 형식이 올바르지 않습니다.")),
+    };
+    let app_version = state["version"]
+        .as_str()
+        .ok_or_else(|| fail("패치 기록의 LilacAnime 버전이 없습니다."))?;
+    let original_sha = state["originalSha256"]
+        .as_str()
+        .ok_or_else(|| fail("패치 기록의 원본 지문이 없습니다."))?;
+    let result_sha = state["patchedSha256"]
+        .as_str()
+        .ok_or_else(|| fail("패치 기록의 결과 지문이 없습니다."))?;
+    let revision = patch_set::resolve_registered_revision(
+        set,
+        revision_id,
+        app_version,
+        original_sha,
+        result_sha,
+    )
+    .ok_or_else(|| fail("패치 기록의 개정판 또는 결과 지문이 등록된 결과와 일치하지 않습니다."))?;
+    match state.get("revisionNumber") {
+        Some(Value::Number(number))
+            if revision_id.is_some()
+                && number.as_u64() == Some(u64::from(revision.number)) => {}
+        Some(_) => return Err(fail("패치 기록의 개정판 번호와 ID가 일치하지 않습니다.")),
+        None if revision_id.is_some() => {
+            return Err(fail("새 개정판 기록에 개정판 번호가 없습니다."))
+        }
+        None => {}
+    }
+    Ok(revision)
 }
 
 fn state_composition(state: &Value) -> Result<PatchSet> {
@@ -289,14 +327,14 @@ fn compose_verified_selection(
     archive: &Archive,
     archive_path: &Path,
     set: PatchSet,
-) -> Result<(BTreeMap<String, Vec<u8>>, &'static str)> {
+) -> Result<(BTreeMap<String, Vec<u8>>, PatchRevision)> {
     let capability = patch_set::combination_capability(set);
     if capability.manager_install != ManagerInstallSupport::Supported {
         return Err(fail("선택한 패치 조합은 관리자 설치가 지원되지 않습니다."));
     }
-    let fingerprint = capability
-        .fingerprint
-        .ok_or_else(|| fail("선택한 패치 조합의 검증 결과 지문이 없습니다."))?;
+    let revision = patch_set::latest_installable_revision(set)
+        .ok_or_else(|| fail("선택한 패치 조합의 설치 가능한 개정판이 없습니다."))?;
+    let fingerprint = revision.fingerprint;
     let version = archive.version()?;
     if version != fingerprint.app_version || sha(archive_path)? != fingerprint.original_sha256 {
         return Err(fail("선택 조합은 검증된 공식 LilacAnime v0.5.65 원본에서만 설치할 수 있습니다."));
@@ -307,6 +345,7 @@ fn compose_verified_selection(
     let changed_files = changes.keys().map(String::as_str).collect::<Vec<_>>();
     let candidate = CandidateManifest {
         combination_id: &id,
+        revision_id: Some(revision.id),
         app_version: version.as_str(),
         original_sha256: fingerprint.original_sha256,
         result_sha256: fingerprint.result_sha256,
@@ -317,12 +356,13 @@ fn compose_verified_selection(
     {
         return Err(fail("선택 조합의 생성 파일·변경 목록이 검증된 결과 지문과 일치하지 않습니다."));
     }
-    Ok((changes, fingerprint.result_sha256))
+    Ok((changes, revision))
 }
 
 fn composition_state(
     root: &Path,
     set: PatchSet,
+    revision: PatchRevision,
     original_sha: &str,
     patched_sha: &str,
     backup_file: Option<&str>,
@@ -335,6 +375,8 @@ fn composition_state(
         "patchVersion": PATCH_VERSION,
         "status": "APPLIED",
         "compositionId": set.id(),
+        "revisionId": revision.id,
+        "revisionNumber": revision.number,
         "originalSha256": original_sha,
         "patchedSha256": patched_sha,
         "backupId": now.format("%Y%m%dT%H%M%SZ").to_string(),
@@ -343,7 +385,7 @@ fn composition_state(
     })
 }
 
-fn validate_transition_source(root: &Path, state: &Value) -> Result<PatchSet> {
+fn validate_transition_source_revision(root: &Path, state: &Value) -> Result<(PatchSet, PatchRevision)> {
     if state["schemaVersion"] != 1
         || state["target"] != root.to_string_lossy().as_ref()
         || state["version"] != patch_set::VERIFIED_APP_VERSION
@@ -353,19 +395,17 @@ fn validate_transition_source(root: &Path, state: &Value) -> Result<PatchSet> {
         return Err(fail("조합 전환의 기존 적용 기록을 검증할 수 없습니다."));
     }
     let set = state_composition(state)?;
-    let fingerprint = patch_set::combination_capability(set)
-        .fingerprint
-        .ok_or_else(|| fail("기존 조합의 검증 지문이 없습니다."))?;
-    if state["originalSha256"] != fingerprint.original_sha256
-        || state["patchedSha256"] != fingerprint.result_sha256
-    {
-        return Err(fail("기존 조합 기록의 원본 또는 결과 지문이 검증되지 않았습니다."));
-    }
+    let revision = recorded_revision(state, set)?;
+    let fingerprint = revision.fingerprint;
     let backup = backup_for_state(root, state)?;
     if sha(&backup)? != fingerprint.original_sha256 {
         return Err(fail("기존 조합의 원본 백업이 검증되지 않았습니다."));
     }
-    Ok(set)
+    Ok((set, revision))
+}
+
+fn validate_transition_source(root: &Path, state: &Value) -> Result<PatchSet> {
+    validate_transition_source_revision(root, state).map(|(set, _)| set)
 }
 
 fn clean_transition_record(mut state: Value) -> Value {
@@ -381,15 +421,14 @@ fn composition_transition_record(
     root: &Path,
     previous: &Value,
     set: PatchSet,
+    revision: PatchRevision,
     original_sha: &str,
     patched_sha: &str,
     backup_file: Option<&str>,
 ) -> Result<Value> {
-    let old_set = validate_transition_source(root, previous)?;
-    let old_fingerprint = patch_set::combination_capability(old_set)
-        .fingerprint
-        .ok_or_else(|| fail("기존 조합 지문이 없습니다."))?;
-    let mut next = composition_state(root, set, original_sha, patched_sha, backup_file);
+    let (_, old_revision) = validate_transition_source_revision(root, previous)?;
+    let old_fingerprint = old_revision.fingerprint;
+    let mut next = composition_state(root, set, revision, original_sha, patched_sha, backup_file);
     next["transactionType"] = json!("COMPOSITION_TRANSITION");
     next["previousState"] = previous.clone();
     next["previousPatchedSha256"] = json!(old_fingerprint.result_sha256);
@@ -398,12 +437,25 @@ fn composition_transition_record(
 
 fn install_verified_selection(root: &Path, set: PatchSet, manual: bool) -> Result<Status> {
     let current = inspect(root);
-    if current.status == "APPLIED" {
-        if current.composition_id.as_deref() == Some(set.id().as_str()) {
-            return Ok(Status::new("ALREADY_APPLIED", &current.version, "선택한 패치 조합이 이미 적용돼 있습니다.")
+    if matches!(current.status.as_str(), "APPLIED" | "REVISION_UPDATE_AVAILABLE")
+        && current.composition_id.as_deref() == Some(set.id().as_str())
+    {
+        let state = read_state(root)?.ok_or_else(|| fail("기존 적용 기록이 없습니다."))?;
+        let installed_revision = recorded_revision(&state, set)?;
+        let latest = patch_set::latest_installable_revision(set)
+            .ok_or_else(|| fail("선택한 조합에 설치 가능한 개정판이 없습니다."))?;
+        if installed_revision.id == latest.id {
+            return Ok(Status::new("ALREADY_APPLIED", &current.version, "선택한 조합과 개정판이 이미 적용돼 있습니다.")
                 .with_composition(set));
         }
-    } else if current.status != "UNPATCHED" {
+        if !manual {
+            return Ok(Status::new(
+                "REVISION_UPDATE_AVAILABLE",
+                &current.version,
+                format!("{} 조합의 {} 개정판이 적용돼 있습니다. 검증된 {} 개정판으로 바꾸려면 수동 적용을 선택하세요.", set.id(), installed_revision.id, latest.id),
+            ).with_composition(set));
+        }
+    } else if !matches!(current.status.as_str(), "UNPATCHED" | "APPLIED" | "REVISION_UPDATE_AVAILABLE") {
         return Ok(current);
     }
     if current.manually_uninstalled && !manual {
@@ -415,10 +467,10 @@ fn install_verified_selection(root: &Path, set: PatchSet, manual: bool) -> Resul
     let archive_file = archive_path(&root);
     let installed_sha = sha(&archive_file)?;
     let previous = read_state(&root)?;
-    let transitioning = current.status == "APPLIED";
+    let transitioning = matches!(current.status.as_str(), "APPLIED" | "REVISION_UPDATE_AVAILABLE");
     let (source_file, previous_set) = if transitioning {
         let previous = previous.as_ref().ok_or_else(|| fail("기존 적용 기록이 없습니다."))?;
-        let old_set = validate_transition_source(&root, previous)?;
+        let (old_set, _) = validate_transition_source_revision(&root, previous)?;
         if installed_sha != previous["patchedSha256"].as_str().unwrap_or("") {
             return Err(fail("조합 전환 직전에 현재 ASAR가 기존 적용 기록과 달라졌습니다."));
         }
@@ -434,16 +486,15 @@ fn install_verified_selection(root: &Path, set: PatchSet, manual: bool) -> Resul
         (archive_file.clone(), None)
     };
 
-    let (changes, expected_sha) = compose_verified_selection(
+    let (changes, revision) = compose_verified_selection(
         &Archive::open(&source_file)?,
         &source_file,
         set,
     )?;
-    let fingerprint = patch_set::combination_capability(set)
-        .fingerprint
-        .ok_or_else(|| fail("선택 조합의 검증 결과가 없습니다."))?;
-    if expected_sha != fingerprint.result_sha256 {
-        return Err(fail("선택 조합의 예상 결과 지문이 등록된 지문과 다릅니다."));
+    let fingerprint = revision.fingerprint;
+    let expected_sha = fingerprint.result_sha256;
+    if !revision.installable {
+        return Err(fail("선택 조합의 개정판은 설치 허용 상태가 아닙니다."));
     }
 
     let data_root = ensure_state_dir(&root)?;
@@ -498,10 +549,10 @@ fn install_verified_selection(root: &Path, set: PatchSet, manual: bool) -> Resul
             return Err(fail("조합 전환의 기존 조합이 없습니다."));
         }
         composition_transition_record(
-            &root, previous, set, original_sha, expected_sha, backup_file.as_deref()
+            &root, previous, set, revision, original_sha, expected_sha, backup_file.as_deref()
         )?
     } else {
-        composition_state(&root, set, original_sha, expected_sha, backup_file.as_deref())
+        composition_state(&root, set, revision, original_sha, expected_sha, backup_file.as_deref())
     };
     write_json_atomic(&pending_path, &next)?;
     fs::rename(&temp, &archive_file)?;
@@ -784,12 +835,24 @@ pub fn inspect(root:&Path)->Status {
                 let backup=backup_for_state(&root,&state)?;
                 if sha(&backup)?!=original {return Ok(Status::new("PARTIAL_OR_UNKNOWN",&version,"원본 ASAR 백업을 검증할 수 없습니다."));}
                 if state["compositionId"].is_string() {
-                    return Ok(Status::new(
-                        "APPLIED",
-                        &version,
-                        format!("선택 조합 {} 적용 및 원본 백업 무결성 확인 완료", composition.id()),
-                    )
-                    .with_composition(composition));
+                    let revision = recorded_revision(&state, composition)?;
+                    let latest = patch_set::latest_installable_revision(composition);
+                    let update_available = patch_set::new_install_allowed(composition)
+                        && latest.is_some_and(|item| item.number > revision.number);
+                    let status = if update_available {
+                        "REVISION_UPDATE_AVAILABLE"
+                    } else {
+                        "APPLIED"
+                    };
+                    let reason = if update_available {
+                        let latest = latest.expect("checked as present");
+                        format!("선택 조합 {}의 {} 개정판과 원본 백업을 확인했습니다. 검증된 {} 개정판으로 전환할 수 있습니다.", composition.id(), revision.id, latest.id)
+                    } else {
+                        format!("선택 조합 {} {} 적용 및 원본 백업 무결성 확인 완료", composition.id(), revision.id)
+                    };
+                    return Ok(Status::new(status, &version, reason)
+                        .with_composition(composition)
+                        .with_revision(revision));
                 }
                 // A user's older verified patch is still safe to uninstall.
                 // Never silently replace it, but make the newly embedded
@@ -821,6 +884,9 @@ pub fn inspect(root:&Path)->Status {
                 let mut item=Status::new("UNPATCHED",&version,"수동 해제 상태를 보존합니다.");
                 item.manually_uninstalled=true;
                 item.composition_id = Some(composition.id());
+                if state["revisionId"].is_string() {
+                    item.revision_id = state["revisionId"].as_str().map(str::to_owned);
+                }
                 return Ok(item);
             }
             return Ok(Status::new("PARTIAL_OR_UNKNOWN",&version,"패치 기록 상태 값이 올바르지 않습니다."));
@@ -1018,20 +1084,17 @@ pub fn apply(root:&Path,manual:bool)->Result<Status>{
 
 pub fn apply_selection(root: &Path, set: PatchSet, manual: bool) -> Result<Status> {
     let root = installed_root(root)?;
+    if !patch_set::new_install_allowed(set) {
+        return Err(fail(
+            "03 포함 조합의 신규 적용은 보류 중입니다. 기존 적용본은 해제하거나 01·02 지원 조합으로 변경할 수 있습니다.",
+        ));
+    }
     let capability = patch_set::combination_capability(set);
     if capability.manager_install != ManagerInstallSupport::Supported {
         return Err(fail("선택한 패치 조합은 관리자 설치가 지원되지 않습니다."));
     }
     let current = inspect(&root);
-    if current.status == "APPLIED" && current.composition_id.as_deref() == Some(set.id().as_str()) {
-        return Ok(Status::new(
-            "ALREADY_APPLIED",
-            &current.version,
-            "선택한 패치 조합이 이미 적용돼 있습니다.",
-        )
-        .with_composition(set));
-    }
-    if !matches!(current.status.as_str(), "UNPATCHED" | "APPLIED") {
+    if !matches!(current.status.as_str(), "UNPATCHED" | "APPLIED" | "REVISION_UPDATE_AVAILABLE") {
         return Ok(current);
     }
     let legacy_single = set.id() == "01";
@@ -1065,7 +1128,9 @@ pub fn uninstall(root:&Path)->Result<Status>{
     let root=installed_root(root)?;
     let checked=inspect(&root);
     if checked.status=="UNPATCHED" {return Ok(Status::new("ALREADY_UNPATCHED",&checked.version,"이미 패치 해제 상태입니다."));}
-    if checked.status!="APPLIED" {return Err(fail(format!("원복 전 상태 확인 실패: {}",checked.reason)));}
+    if !matches!(checked.status.as_str(), "APPLIED" | "REVISION_UPDATE_AVAILABLE") {
+        return Err(fail(format!("원복 전 상태 확인 실패: {}",checked.reason)));
+    }
     assert_not_running()?;
     let state=read_state(&root)?.ok_or_else(||fail("설치본 패치 상태 기록이 없습니다."))?;
     let source=backup_for_state(&root,&state)?;
@@ -1117,6 +1182,13 @@ pub fn review_recovery(root:&Path)->Result<Status>{
     let patched=pending["patchedSha256"].as_str().ok_or_else(||fail("패치 SHA-256 기록 없음"))?;
     let valid_sha=|x:&str| x.len()==64 && x.bytes().all(|b|b.is_ascii_hexdigit() && !b.is_ascii_lowercase());
     if !valid_sha(original)||!valid_sha(patched)||original==patched {return Err(fail("복구 SHA-256 형식이 올바르지 않습니다."));}
+    if pending["transactionType"] != "COMPOSITION_TRANSITION" {
+        if pending["compositionId"].is_string() {
+            recorded_composition(&pending)?;
+        } else if pending.get("revisionId").is_some() || pending.get("revisionNumber").is_some() {
+            return Err(fail("복구 기록에 조합 ID가 없는 개정판 정보가 있습니다."));
+        }
+    }
     let backup=backup_for_state(&root,&pending)?;
     if sha(&backup)?!=original {return Err(fail("백업 SHA-256이 복구 기록과 다릅니다."));}
     let current_sha=sha(&archive_path(&root))?;
@@ -1135,6 +1207,7 @@ pub fn review_recovery(root:&Path)->Result<Status>{
                 active_set.id()
             ),
             composition_id: Some(active_set.id()),
+            revision_id: None,
             recovery_available: true,
             manually_uninstalled: false,
         });
@@ -1166,6 +1239,7 @@ pub fn review_recovery(root:&Path)->Result<Status>{
     Ok(Status { status:"PARTIAL_OR_UNKNOWN".into(), version,
         reason:format!("검증된 복구 기록입니다. 현재 ASAR는 {mode} 상태입니다. 확인된 임시 파일이 있으면 해당 작업의 해시 검증 후에만 정리합니다."),
         composition_id: recorded_composition(&pending)?.map(|set| set.id()),
+        revision_id: None,
         recovery_available:true, manually_uninstalled:mode=="UNPATCHED" })
 }
 
@@ -1303,20 +1377,17 @@ fn review_composition_transition(
     }
     let target_set = recorded_composition(pending)?
         .ok_or_else(|| fail("전환 대상 패치 조합이 기록되지 않았습니다."))?;
-    let target_fingerprint = patch_set::combination_capability(target_set)
-        .fingerprint
-        .ok_or_else(|| fail("전환 대상의 알려진 지문이 없습니다."))?;
+    let target_revision = recorded_revision(pending, target_set)?;
+    let target_fingerprint = target_revision.fingerprint;
     let previous = pending["previousState"]
         .as_object()
         .map(|_| &pending["previousState"])
         .ok_or_else(|| fail("전환 저널에 기존 적용 기록이 없습니다."))?;
-    let source_set = validate_transition_source(root, previous)?;
+    let (source_set, source_revision) = validate_transition_source_revision(root, previous)?;
     let source_sha = previous["patchedSha256"]
         .as_str()
         .ok_or_else(|| fail("전환 이전 결과 지문이 없습니다."))?;
-    let source_fingerprint = patch_set::combination_capability(source_set)
-        .fingerprint
-        .ok_or_else(|| fail("전환 이전 조합의 알려진 지문이 없습니다."))?;
+    let source_fingerprint = source_revision.fingerprint;
     if source_sha != source_fingerprint.result_sha256
         || pending["previousPatchedSha256"] != source_sha
         || pending["originalSha256"] != previous["originalSha256"]
@@ -1704,6 +1775,37 @@ mod versionless_tests {
     }
 
     #[test]
+    fn apply_selection_rejects_new_patch03_before_any_file_or_profile_write() -> Result<()> {
+        let base = std::env::temp_dir().join(format!(
+            "dino-paused-patch03-apply-{}-{}",
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let resources = base.join("resources");
+        fs::create_dir_all(&resources)?;
+        fs::write(base.join("LilacAnime.exe"), b"test fixture only")?;
+        let archive = resources.join("app.asar");
+        fs::write(&archive, b"unchanged source marker")?;
+        let archive_before = fs::read(&archive)?;
+
+        let unsupported = ["03", "01+03", "02+03", "01+02+03"];
+        for id in unsupported {
+            let set = PatchSet::parse_id(id).map_err(fail)?;
+            let error = apply_selection(&base, set, true).expect_err("new Patch 03 install must be blocked");
+            assert!(error.to_string().contains("03 포함 조합의 신규 적용은 보류"), "{id}: {error}");
+            assert_eq!(fs::read(&archive)?, archive_before, "{id} must not change app.asar");
+            assert_eq!(
+                fs::read_dir(&resources)?.count(),
+                1,
+                "{id} must not create transaction staging files"
+            );
+        }
+
+        let _ = fs::remove_dir_all(&base);
+        Ok(())
+    }
+
+    #[test]
     fn unknown_official_version_uses_unique_structural_anchors() -> Result<()> {
         let base=std::env::temp_dir().join(format!(
             "dino-versionless-test-{}-{}",
@@ -1725,6 +1827,55 @@ mod versionless_tests {
         })();
         let _=fs::remove_dir_all(base);
         result
+    }
+
+    #[test]
+    fn composition_state_reads_legacy_r1_and_requires_exact_revision_identity() -> Result<()> {
+        let set = PatchSet::parse_id("01+02+03").map_err(fail)?;
+        let revision = patch_set::registered_revisions(set)
+            .into_iter()
+            .find(|revision| revision.id == "r1")
+            .ok_or_else(|| fail("registered r1 revision is missing"))?;
+        let fingerprint = revision.fingerprint;
+        let legacy = json!({
+            "schemaVersion": 1,
+            "patchVersion": PATCH_VERSION,
+            "version": fingerprint.app_version,
+            "compositionId": set.id(),
+            "originalSha256": fingerprint.original_sha256,
+            "patchedSha256": fingerprint.result_sha256
+        });
+        assert_eq!(recorded_composition(&legacy)?, Some(set));
+        assert_eq!(recorded_revision(&legacy, set)?.id, "r1");
+
+        let current = composition_state(
+            Path::new("isolated-fixture"),
+            set,
+            revision,
+            fingerprint.original_sha256,
+            fingerprint.result_sha256,
+            None,
+        );
+        assert_eq!(current["revisionId"], "r1");
+        assert_eq!(current["revisionNumber"], 1);
+        assert_eq!(recorded_composition(&current)?, Some(set));
+
+        let mut unknown = current.clone();
+        unknown["revisionId"] = json!("r2");
+        assert!(recorded_composition(&unknown).is_err());
+
+        let mut mismatched_hash = current.clone();
+        mismatched_hash["patchedSha256"] = json!("1111111111111111111111111111111111111111111111111111111111111111");
+        assert!(recorded_composition(&mismatched_hash).is_err());
+
+        let mut mismatched_number = current.clone();
+        mismatched_number["revisionNumber"] = json!(2);
+        assert!(recorded_composition(&mismatched_number).is_err());
+
+        let mut missing_number = current;
+        missing_number.as_object_mut().unwrap().remove("revisionNumber");
+        assert!(recorded_composition(&missing_number).is_err());
+        Ok(())
     }
     #[cfg(windows)]
     #[test]
@@ -1799,7 +1950,165 @@ mod versionless_tests {
     #[cfg(windows)]
     #[test]
     #[ignore = "isolated real-ASAR install, transition, recovery, and restore verification"]
-    fn isolated_official_archive_supports_all_seven_compositions_and_transition_recovery() -> Result<()> {
+    fn isolated_legacy_patch03_records_transition_to_supported_sets_and_restore_official_source() -> Result<()> {
+        use std::ffi::OsString;
+
+        struct RestoreEnv(Option<OsString>);
+        impl Drop for RestoreEnv {
+            fn drop(&mut self) {
+                if let Some(value) = self.0.take() {
+                    env::set_var("APPDATA", value);
+                } else {
+                    env::remove_var("APPDATA");
+                }
+            }
+        }
+
+        let _guard = APPDATA_LOCK.lock().map_err(|_| fail("APPDATA test lock poisoned"))?;
+        let evidence_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../validation-evidence")
+            .canonicalize()?;
+        let run_root = env::var_os("DINO_COMBO_INSTALL_E2E_ROOT")
+            .map(PathBuf::from)
+            .ok_or_else(|| fail("isolated E2E evidence directory was not provided"))?;
+        let run_parent = run_root
+            .parent()
+            .ok_or_else(|| fail("isolated E2E root must be directly under validation-evidence"))?
+            .canonicalize()?;
+        if run_parent != evidence_root || run_root.file_name().is_none() || entry_exists(&run_root)? {
+            return Err(fail("isolated E2E root must be a new direct child of validation-evidence"));
+        }
+        fs::create_dir(&run_root)?;
+        let run_root = run_root.canonicalize()?;
+        if !run_root.starts_with(&evidence_root) {
+            return Err(fail("isolated E2E root escaped the repository evidence directory"));
+        }
+
+        let fixtures = [
+            ("03", "r1", "02", "beta9-composition-preview-20261122/sets/03/combined.asar"),
+            ("01+03", "r1", "01", "beta9-patch-revision-20261124/previews/01+03/combined.asar"),
+            ("02+03", "r1", "02", "beta9-composition-preview-20261122/sets/02+03/combined.asar"),
+            ("01+02+03", "r1", "01+02", "beta9-patch-revision-20261124/previews/01+02+03/combined.asar"),
+            ("01+02+03", "r2", "01+02", "beta9-adult-catalog-r2-20261124/previews/01-02-03-r2/combined.asar"),
+        ];
+        let official = Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../../validation-evidence/beta8-integration-final-20261118/combined-preview-r2/original.asar",
+        );
+        asar::file_only(&official)?;
+        let official_sha = sha(&official)?;
+        if official_sha != patch_set::OFFICIAL_V065_SHA256 {
+            return Err(fail("provided official v0.5.65 ASAR does not match its recorded SHA-256"));
+        }
+        let appdata_root = run_root.join("isolated-appdata");
+        fs::create_dir(&appdata_root)?;
+        let restore_env = RestoreEnv(env::var_os("APPDATA"));
+        env::set_var("APPDATA", &appdata_root);
+        let mut results = Vec::new();
+
+        let result = (|| -> Result<()> {
+            for (index, (source_id, revision_id, target_id, artifact)) in fixtures.into_iter().enumerate() {
+                let source_set = PatchSet::parse_id(source_id).map_err(fail)?;
+                let target_set = PatchSet::parse_id(target_id).map_err(fail)?;
+                if patch_set::new_install_allowed(source_set) || !patch_set::new_install_allowed(target_set) {
+                    return Err(fail(format!("invalid legacy transition fixture {source_id} -> {target_id}")));
+                }
+                let revision = patch_set::registered_revisions(source_set)
+                    .into_iter()
+                    .find(|item| item.id == revision_id)
+                    .ok_or_else(|| fail(format!("registered {source_id} {revision_id} fingerprint is missing")))?;
+                let source_archive = evidence_root.join(artifact);
+                asar::file_only(&source_archive)?;
+                let expected_source_sha = revision.fingerprint.result_sha256;
+                if sha(&source_archive)? != expected_source_sha {
+                    return Err(fail(format!("legacy {source_id} {revision_id} artifact SHA-256 mismatch")));
+                }
+
+                let raw_root = run_root.join(format!("legacy-install-{index}"));
+                let resources = raw_root.join("resources");
+                fs::create_dir_all(&resources)?;
+                fs::write(raw_root.join("LilacAnime.exe"), b"isolated legacy transaction fixture only")?;
+                let archive_file = resources.join("app.asar");
+                fs::copy(&source_archive, &archive_file)?;
+                let root = installed_root(&raw_root)?;
+                let data = ensure_state_dir(&root)?;
+                let backup_file = backup_filename(patch_set::VERIFIED_APP_VERSION);
+                let backup_path = data.join(&backup_file);
+                copy_new(&official, &backup_path)?;
+                let seeded = composition_state(
+                    &root,
+                    source_set,
+                    revision,
+                    &official_sha,
+                    expected_source_sha,
+                    Some(&backup_file),
+                );
+                write_state(&root, &seeded)?;
+
+                let before = inspect(&root);
+                assert_eq!(before.status, "APPLIED", "{} {}: {}", source_id, revision_id, before.reason);
+                assert_eq!(before.composition_id.as_deref(), Some(source_id));
+                assert_eq!(before.revision_id.as_deref(), Some(revision_id));
+                assert_eq!(sha(&backup_path)?, official_sha);
+
+                let transitioned = apply_selection(&root, target_set, true)?;
+                assert_eq!(transitioned.status, "APPLIED", "{} -> {}: {}", source_id, target_id, transitioned.reason);
+                assert_eq!(transitioned.composition_id.as_deref(), Some(target_id));
+                let target_revision = patch_set::latest_installable_revision(target_set)
+                    .ok_or_else(|| fail(format!("target {target_id} has no installable revision")))?;
+                assert_eq!(sha(&archive_file)?, target_revision.fingerprint.result_sha256);
+                assert_eq!(sha(&backup_path)?, official_sha);
+
+                let active = read_state(&root)?.ok_or_else(|| fail("transition target state is missing"))?;
+                assert_eq!(active["compositionId"], target_id);
+                assert_eq!(active["backupFile"], backup_file);
+                let mut preserved_legacy_record = false;
+                for entry in fs::read_dir(&data)? {
+                    let entry = entry?;
+                    let filename = entry.file_name().to_string_lossy().into_owned();
+                    if filename.starts_with("state-history-") && filename.ends_with(".json") {
+                        let history = read_state_file(&root, &entry.path())?;
+                        if history["compositionId"] == source_id
+                            && history["revisionId"] == revision_id
+                            && history["patchedSha256"] == expected_source_sha
+                        {
+                            preserved_legacy_record = true;
+                        }
+                    }
+                }
+                assert!(preserved_legacy_record, "legacy state history was not preserved: {source_id} {revision_id}");
+
+                let restored = uninstall(&root)?;
+                assert_eq!(restored.status, "UNPATCHED", "{} -> {} restore: {}", source_id, target_id, restored.reason);
+                assert_eq!(sha(&archive_file)?, official_sha);
+                assert_eq!(sha(&backup_path)?, official_sha);
+                results.push(json!({
+                    "sourceComposition": source_id,
+                    "sourceRevision": revision_id,
+                    "sourceSha256": expected_source_sha,
+                    "targetComposition": target_id,
+                    "targetSha256": target_revision.fingerprint.result_sha256,
+                    "restoredOfficialSha256": sha(&archive_file)?,
+                    "legacyRecordPreserved": preserved_legacy_record,
+                }));
+            }
+
+            fs::write(
+                run_root.join("legacy-patch03-transition-results.json"),
+                serde_json::to_vec_pretty(&json!({
+                    "officialOriginalSha256": official_sha,
+                    "cases": results,
+                }))?,
+            )?;
+            Ok(())
+        })();
+        drop(restore_env);
+        result
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "isolated real-ASAR install, transition, recovery, and restore verification"]
+    fn isolated_official_archive_installs_only_01_02_compositions_and_recovers_transitions() -> Result<()> {
         use std::ffi::OsString;
 
         struct RestoreEnv(Option<OsString>);
@@ -1859,7 +2168,15 @@ mod versionless_tests {
             let original_sha = sha(&installed_archive)?;
             assert_eq!(original_sha, patch_set::OFFICIAL_V065_SHA256);
             let mut checked = Vec::new();
-            for set in PatchSet::logical_combinations() {
+            let installable_sets = PatchSet::logical_combinations()
+                .into_iter()
+                .filter(|set| patch_set::new_install_allowed(*set))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                installable_sets.iter().map(|set| set.id()).collect::<Vec<_>>(),
+                ["01", "02", "01+02"]
+            );
+            for set in installable_sets.iter().copied() {
                 let fingerprint = patch_set::combination_capability(set)
                     .fingerprint
                     .ok_or_else(|| fail("a logical composition is missing its registered output fingerprint"))?;
@@ -1882,17 +2199,18 @@ mod versionless_tests {
             }
 
             let before = read_state(&root)?.ok_or_else(|| fail("final composition state was not recorded"))?;
-            let target_set = PatchSet::parse_id("01+02").map_err(fail)?;
+            let target_set = PatchSet::parse_id("01").map_err(fail)?;
             let target_fingerprint = patch_set::combination_capability(target_set)
                 .fingerprint
                 .ok_or_else(|| fail("transition target fingerprint is missing"))?;
             let backup = backup_for_state(&root, &before)?;
-            let (changes, expected_sha) = compose_verified_selection(
+            let (changes, target_revision) = compose_verified_selection(
                 &Archive::open(&backup)?,
                 &backup,
                 target_set,
             )?;
-            assert_eq!(expected_sha, target_fingerprint.result_sha256);
+            assert_eq!(target_revision.fingerprint.result_sha256, target_fingerprint.result_sha256);
+            let expected_sha = target_revision.fingerprint.result_sha256;
 
             // Crash after the transition journal is durable, before the atomic swap.
             let stage = resources.join("app.asar.dino-writing");
@@ -1901,6 +2219,7 @@ mod versionless_tests {
                 &root,
                 &before,
                 target_set,
+                target_revision,
                 original_sha.as_str(),
                 expected_sha,
                 before["backupFile"].as_str(),
@@ -1911,7 +2230,7 @@ mod versionless_tests {
             assert!(review_recovery(&root)?.recovery_available);
             let recovered = recover(&root)?;
             assert_eq!(recovered.status, "APPLIED", "{}", recovered.reason);
-            assert_eq!(recovered.composition_id.as_deref(), Some("01+02+03"));
+            assert_eq!(recovered.composition_id.as_deref(), Some("01+02"));
             assert!(!stage.exists());
             assert_eq!(sha(&installed_archive)?, before["patchedSha256"].as_str().unwrap());
 
@@ -1922,6 +2241,7 @@ mod versionless_tests {
                 &root,
                 &before,
                 target_set,
+                target_revision,
                 original_sha.as_str(),
                 expected_sha,
                 before["backupFile"].as_str(),
@@ -1933,7 +2253,7 @@ mod versionless_tests {
             assert!(review_recovery(&root)?.recovery_available);
             let recovered = recover(&root)?;
             assert_eq!(recovered.status, "APPLIED", "{}", recovered.reason);
-            assert_eq!(recovered.composition_id.as_deref(), Some("01+02"));
+            assert_eq!(recovered.composition_id.as_deref(), Some("01"));
             assert_eq!(sha(&installed_archive)?, target_fingerprint.result_sha256);
             let target_state = read_state(&root)?.ok_or_else(|| fail("recovered target state is missing"))?;
             assert_eq!(sha(&backup_for_state(&root, &target_state)?)?, original_sha);
@@ -1967,7 +2287,7 @@ mod versionless_tests {
                 .collect::<Result<Vec<_>>>()?;
             retained_compositions.sort();
             retained_compositions.dedup();
-            let mut expected_compositions = PatchSet::logical_combinations()
+            let mut expected_compositions = installable_sets
                 .into_iter()
                 .map(|set| set.id())
                 .collect::<Vec<_>>();
@@ -1981,7 +2301,7 @@ mod versionless_tests {
                     "checkedCompositions": checked,
                     "transitionPreSwapRecovery": "source composition retained",
                     "transitionPostSwapRecovery": "target composition committed",
-                    "automaticTransitions": "verified combinations changed through the automatic transaction path",
+                    "automaticTransitions": "newly installable 01/02 combinations changed through the automatic transaction path",
                     "automaticReapplyAfterManualRestore": "blocked; original remains intact",
                     "restoreSha256": sha(&installed_archive)?,
                     "originalBackupSha256AfterRestore": retained_backup_sha,

@@ -91,7 +91,7 @@ test('operation progress is event-driven and stale worker results are discarded'
 test('worker success, engine errors, state recheck failure and disconnect all clear busy safely',()=>{
   assert.match(gui,/std::panic::catch_unwind\(std::panic::AssertUnwindSafe\(\|\|\s*\{\s*match kind/);
   assert.match(gui,/status_error: Option<String>/);
-  assert.match(gui,/self\.busy = false;\s*self\.response = None;/);
+  assert.match(gui,/self\.busy = false;\s*self\.inspection_running = false;\s*self\.response = None;/);
   assert.match(gui,/if disconnected && self\.busy/);
   assert.match(gui,/self\.operation_state = "오류 발생 · 작업 응답이 끊겼습니다"/);
   assert.match(gui,/self\.show_advanced = true;\s*self\.show_log = true;/);
@@ -178,8 +178,9 @@ test('patch catalog exposes stable IDs and labels while blocking uninstalled pre
   assert.match(patchModel,/DoubleSpeedBuffering => "2배속 버퍼링 최적화"/);
   assert.match(patchActions,/for feature in patch_set::PATCH_CATALOG/);
   assert.match(patchModel,/enum FeatureAvailability\s*\{[\s\S]*?ManagerSelectable[\s\S]*?PreviewOnly/);
-  assert.match(patchActions,/let actual_status = actual_patch_status\(feature\.id, &self\.status\)\.0/);
+  assert.match(patchActions,/let actual_status = if self\.inspection_running[\s\S]*?actual_patch_status\(feature\.id, &self\.status\)\.0/);
   assert.match(patchActions,/patch_row_status\(feature, &self\.status\)/);
+  assert.match(patchActions,/상태 자동 갱신/);
   assert.match(patchActions,/FeatureAvailability::PreviewOnly => "미리보기 전용 · 설치 미지원"/);
   assert.match(gui,/FeatureAvailability::PreviewOnly => \("미리보기", StatusTone::Preview\)/,
     'compact row badge fits the narrow layout while the tooltip retains the full support label');
@@ -214,10 +215,12 @@ test('update section is compact and keeps long release details in its own window
 
 test('main footer exposes auto-monitor toggle, recent work, log copy and diagnostic access',()=>{
   assert.match(patchActions,/heading\(ui, "패치 관리"\)/);
+  assert.match(patchActions,/상태 자동 갱신/);
   assert.match(settingsScreen,/egui::Checkbox::new\(\s*&mut self\.auto_enabled/);
   assert.match(settingsScreen,/RichText::new\("자동 적용"\)/);
   assert.match(settingsScreen,/호환되는 공식 v0\.5\.65 원본을 확인하면 저장된 선택 구성을 자동으로 유지합니다/);
-  assert.match(settingsScreen,/검증된 일곱 조합만 적용하며,[\s\S]*?미지원 조합·충돌·검증 실패에서는 자동 적용을 보류합니다/);
+  assert.match(settingsScreen,/신규 설치는 01·02·01\+02 조합만 지원합니다/);
+  assert.match(settingsScreen,/기존 03 포함 조합은 검사 후 해제하거나 지원 조합으로 변경할 수 있습니다/);
   assert.doesNotMatch(settingsScreen,/compact_pill\(ui, "원본 확인 대기"/,
     'source waiting is consolidated into the single header status badge');
   const renderMain=method('    fn render_main(&mut self, ctx: &egui::Context) {',
@@ -261,7 +264,7 @@ test('compact window truncates long paths and keeps copy and change actions sepa
   assert.match(gui,/return \(DISABLED_FILL, DISABLED_TEXT, DISABLED_BORDER\)/,
     'disabled controls use a named light neutral palette with readable labels');
   assert.match(gui,/const MUTED: u32 = 0x4C596E/);
-  assert.match(gui,/let compact = ctx\.content_rect\(\)\.height\(\) <= 400\.0;[\s\S]*?let vertical_inset = if compact[\s\S]*?inner_margin\(Margin::symmetric\(14, vertical_inset\)\)/);
+  assert.match(gui,/let compact = ctx\.content_rect\(\)\.height\(\) <= 400\.0;[\s\S]*?let vertical_inset = if compact[\s\S]*?inner_margin\(Margin\s*\{\s*left:\s*14,\s*right:\s*14,\s*top:\s*vertical_inset,\s*bottom:\s*18,\s*\}\)/);
   assert.doesNotMatch(method('    fn render_main(&mut self, ctx: &egui::Context) {',
     'impl eframe::App for DinoUi'),/ScrollArea::/);
   assert.match(gui,/tooltip_width = PATH_TOOLTIP_MAX_SIZE\.x/);
@@ -291,7 +294,7 @@ test('backup empty and unavailable states explain why restore cannot run',()=>{
 });
 
 test('patch selection, actual installation status and support status are distinct',()=>{
-  assert.match(patchActions,/let actual_status = actual_patch_status\(feature\.id, &self\.status\)\.0/);
+  assert.match(patchActions,/let actual_status = if self\.inspection_running[\s\S]*?actual_patch_status\(feature\.id, &self\.status\)\.0/);
   assert.match(patchActions,/patch_row_status\(feature, &self\.status\)/);
   assert.match(gui,/else if id == patch_set::PatchId::IntegratedSearchProviderSwitch \{[\s\S]*?integrated_patch_status\(&status\.status\)[\s\S]*?else \{\s*\("확인 불가", StatusTone::Warning\)/);
   assert.match(patchActions,/patch_support_summary\([\s\S]*?PATCH_CATALOG/);
@@ -394,6 +397,22 @@ test('small-window headers and patch labels wrap rather than clipping',()=>{
   assert.match(gui,/ArchiveWatch::Missing/);
   assert.match(gui,/선택한 폴더에서 resources\/app\.asar를 찾을 수 없습니다\./);
   assert.doesNotMatch(gui,/SOURCE_MISSING"[\s\S]{0,120}변경이 중단됨/);
+});
+
+test('read-only install status refresh is independent from automatic application',()=>{
+  const monitor=method('    fn monitor(&mut self) {','    fn choose_folder(&mut self) {');
+  assert.doesNotMatch(monitor,/if !self\.auto_enabled\s*\|\|/);
+  assert.match(monitor,/self\.auto_enabled\s*&&\s*self\.auto_apply_config_block\(\)\.is_none\(\)/,
+    'the setting gates only automatic file changes');
+  assert.match(gui,/fn inspect_monitored_records\(root: &std::path::Path\) -> RecordWatch/);
+  assert.match(gui,/std::fs::symlink_metadata\(entry\.path\(\)\)/,
+    'record watcher rejects links without hashing files every frame');
+  assert.match(gui,/self\.enqueue\("원본 다시 확인"\);\s*\}\s*\}/,
+    'confirming a selection schedules a separate read-only status inspection');
+  assert.match(gui,/DINO_ORIGINAL_ROOT is an explicit target override/,
+    'an explicit isolated test root cannot fall through to a host installation');
+  assert.match(gui,/\("검사 중", StatusTone::Warning\)/,
+    'inspection state is shown instead of stale installed-patch badges');
 });
 
 

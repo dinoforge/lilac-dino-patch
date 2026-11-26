@@ -63,8 +63,8 @@ test('Native manager renders one fixed integrated screen without scrollbars or t
     'long diagnostics remain available in an independent detail window');
   assert.match(gui,/fn update_details_window\([\s\S]*?ScrollArea::vertical\(\)/,
     'long release notes remain available in an independent detail window');
-  assert.match(gui, /let compact = ctx\.content_rect\(\)\.height\(\) <= 400\.0;[\s\S]*?let vertical_inset = if compact\s*\{\s*6\s*\}\s*else\s*\{\s*10\s*\};[\s\S]*?inner_margin\(Margin::symmetric\(14, vertical_inset\)\)/,
-    'short windows keep compact vertical spacing while standard windows gain breathing room');
+  assert.match(gui, /let compact = ctx\.content_rect\(\)\.height\(\) <= 400\.0;[\s\S]*?let vertical_inset = if compact\s*\{\s*6\s*\}\s*else\s*\{\s*10\s*\};[\s\S]*?inner_margin\(Margin\s*\{\s*left:\s*14,\s*right:\s*14,\s*top:\s*vertical_inset,\s*bottom:\s*18,\s*\}\)/,
+    'short windows keep compact top spacing and an explicit footer-safe bottom inset');
   assert.match(gui,/with_inner_size\(\[680\.0, 420\.0\]\)/);
   assert.match(gui,/with_min_inner_size\(\[600\.0, 380\.0\]\)/);
 });
@@ -92,6 +92,12 @@ test('Patch and restore actions retain engine checks, selected IDs and confirmat
   const monitor = gui.slice(gui.indexOf('    fn monitor(&mut self) {'),
     gui.indexOf('    fn choose_folder(&mut self) {'));
   assert.match(monitor, /self\.auto_apply_config_block\(\)/);
+  assert.doesNotMatch(monitor, /if !self\.auto_enabled\s*\|\|/,
+    'read-only status monitoring must remain active when automatic application is off');
+  assert.match(monitor, /inspect_monitored_records/,
+    'installation records are watched in addition to app.asar metadata');
+  assert.match(gui, /self\.inspection_running = matches!\(kind, "원본 다시 확인" \| "자동 검사"\)/,
+    'read-only inspect work is shown separately from stale installed status');
   assert.match(monitor, /Some\("원본 다시 확인"\) => self\.enqueue\("원본 다시 확인"\)/,
     'new and changed archives are inspected before automatic application');
   assert.match(monitor, /Some\("자동 검사"\) => self\.enqueue\("자동 검사"\)/,

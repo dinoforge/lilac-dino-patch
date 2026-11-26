@@ -3,9 +3,35 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { groupResults, filterGroups, chooseSource, searchProviders, mergeSearchResults } = require('../src/integrated-search.js');
-const appSource = fs.readFileSync(path.join(__dirname, '../src/app.js'), 'utf8');
-const htmlSource = fs.readFileSync(path.join(__dirname, '../src/index.html'), 'utf8');
+const previewPath = process.env.DINO_COMBINED_PREVIEW_ASAR;
+const sourcePath = file => file === 'src/patch03-bridge.js'
+  ? path.join(__dirname, '..', 'patches', 'patch03', 'patch03-bridge.js')
+  : path.join(__dirname, '..', file);
+const readPackageFile = file => previewPath
+  ? require('@electron/asar').extractFile(previewPath, file).toString('utf8')
+  : fs.readFileSync(sourcePath(file), 'utf8');
+const loadCommonJs = source => {
+  const module = { exports: {} };
+  new Function('module', 'exports', source)(module, module.exports);
+  return module.exports;
+};
+const { groupResults, filterGroups, chooseSource, searchProviders, mergeSearchResults } = loadCommonJs(readPackageFile('src/integrated-search.js'));
+const appSource = readPackageFile('src/app.js');
+const htmlSource = readPackageFile('src/index.html');
+const bridgeSource = readPackageFile('src/patch03-bridge.js');
+const rendererOwnsIntegratedSearch = appSource.includes('function detailSourcePickerMarkup(');
+
+function assertBridgeDetailPickerContract() {
+  const start = bridgeSource.indexOf('function renderSourcePicker(');
+  const end = bridgeSource.indexOf('\n  async function loadVerifiedEpisodeCounts', start);
+  assert.ok(start >= 0 && end > start, 'Missing packaged detail source picker');
+  const picker = bridgeSource.slice(start, end);
+  assert.match(picker, /for \(const item of group\.sourceItems\)/);
+  assert.match(picker, /button\.dataset\.providerSource = id/);
+  assert.match(picker, /button\.setAttribute\('aria-pressed', String\(id === String\(activeId\)\)\)/);
+  assert.doesNotMatch(picker, /sourceSearchStatuses|resultStatuses/);
+  assert.match(picker, /window\.openDetail\(id, \{ sourceSelection: true \}\)/);
+}
 
 const item = (provider, id, values = {}) => ({ provider, mal_id: `${provider}:${id}`, title: '같은 제목', ...values });
 
@@ -162,7 +188,11 @@ test('merged query and title-variant runs deduplicate provider items and preserv
   ]);
 });
 
-test('detail source picker identifies the active raw provider item and hides for a single source', () => {
+test('detail source picker identifies the active raw provider item without inventing providers', () => {
+  if (!rendererOwnsIntegratedSearch) {
+    assertBridgeDetailPickerContract();
+    return;
+  }
   const start = appSource.indexOf('function detailSourcePickerMarkup(');
   const end = appSource.indexOf('\nasync function openDetail', start);
   assert.ok(start >= 0 && end > start, 'Missing detail source picker');
@@ -178,7 +208,14 @@ test('detail source picker identifies the active raw provider item and hides for
   assert.equal(context.renderPicker({ sourceItems: [item('reanime', 'one')] }, item('reanime', 'one')), '');
 });
 
-test('selecting a grouped provider opens its exact source item and remembers the choice', () => {
+test('selecting a grouped provider opens its exact source item through the official detail entry point', () => {
+  if (!rendererOwnsIntegratedSearch) {
+    assertBridgeDetailPickerContract();
+    assert.match(bridgeSource, /sourceId: \(options\?\.sourceSelection \|\| !inIntegratedSearch \|\| currentFilter === 'all'\) \? id : ''/);
+    assert.match(bridgeSource, /const selectedId = String\(selected\?\.mal_id \?\? id\)/);
+    assert.match(bridgeSource, /officialOpenDetail\.call\(this, selectedId\)/);
+    return;
+  }
   const group = groupResults([
     item('reanime', 'one', { anilistId: 100 }),
     item('miruro', 'two', { anilistId: 100 })
@@ -206,6 +243,11 @@ test('selecting a grouped provider opens its exact source item and remembers the
 });
 
 test('detail source picker only lists observed providers and does not infer sources from search hit counts', () => {
+  if (!rendererOwnsIntegratedSearch) {
+    assertBridgeDetailPickerContract();
+    assert.match(bridgeSource, /function renderSourcePicker\(group, activeId, searching = false\)/);
+    return;
+  }
   const start = appSource.indexOf('function detailSourcePickerMarkup(');
   const end = appSource.indexOf('\nfunction bindDetailSourcePicker', start);
   assert.ok(start >= 0 && end > start, 'Missing detail source picker');
@@ -224,6 +266,19 @@ test('detail source picker only lists observed providers and does not infer sour
 });
 
 test('search UI loads the grouping model before app code and routes source changes through real item IDs', () => {
+  if (!rendererOwnsIntegratedSearch) {
+    const moduleIndex = htmlSource.indexOf('src="integrated-search.js"');
+    const appIndex = htmlSource.indexOf('src="app.js"');
+    const bridgeIndex = htmlSource.indexOf('src="patch03-bridge.js"');
+    assert.ok(moduleIndex >= 0 && moduleIndex < appIndex && appIndex < bridgeIndex,
+      'the official renderer must load before the bridge, and the model before both');
+    assert.match(htmlSource, /id="searchStatus"/);
+    assert.match(bridgeSource, /api\.searchProviders\(\{ \.\.\.options, query \}\)/);
+    assert.match(bridgeSource, /api\.groupResults\(localized, selectedProvider\(\)\)/);
+    assert.match(bridgeSource, /status\.insertAdjacentElement\('afterend', filterRoot\)/);
+    assertBridgeDetailPickerContract();
+    return;
+  }
   assert.match(htmlSource, /id="searchProviderFilters"[^>]*role="group"/);
   assert.ok(htmlSource.indexOf('src="integrated-search.js"') < htmlSource.indexOf('src="app.js"'));
   assert.match(appSource, /LilacIntegratedSearch\.searchProviders\(/);

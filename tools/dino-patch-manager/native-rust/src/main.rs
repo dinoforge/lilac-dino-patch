@@ -33,6 +33,7 @@ fn status_json(value: transaction::Status) -> Value {
         "version":value.version,
         "reason":value.reason,
         "compositionId":value.composition_id,
+        "revisionId":value.revision_id,
         "targetKind":"INSTALLED_ASAR",
         "patchVersion":"1.0.0",
         "recoveryAvailable":value.recovery_available,

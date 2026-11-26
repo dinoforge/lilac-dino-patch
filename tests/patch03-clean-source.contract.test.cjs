@@ -7,8 +7,18 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 
 const sourceRoot = process.env.PATCH03_SOURCE_ROOT ? path.resolve(process.env.PATCH03_SOURCE_ROOT) : '';
-const cleanSourceOnly = sourceRoot ? undefined : 'run through validate-patch03-clean-source.cjs with PATCH03_SOURCE_ROOT';
-const read = relative => fs.readFileSync(path.join(sourceRoot, relative), 'utf8');
+const runtimeAsar = process.env.PATCH03_SOURCE_ASAR ? path.resolve(process.env.PATCH03_SOURCE_ASAR) : '';
+const asar = runtimeAsar ? require('@electron/asar') : null;
+const cleanSourceOnly = sourceRoot || runtimeAsar ? undefined : 'run with PATCH03_SOURCE_ROOT or PATCH03_SOURCE_ASAR';
+const read = relative => runtimeAsar
+  ? asar.extractFile(runtimeAsar, relative.replaceAll('\\', '/')).toString('utf8')
+  : fs.readFileSync(path.join(sourceRoot, relative), 'utf8');
+const loadIntegratedSearch = () => {
+  if (!runtimeAsar) return require(path.join(sourceRoot, 'src', 'integrated-search.js'));
+  const module = { exports: {} };
+  new Function('module', 'exports', read('src/integrated-search.js'))(module, module.exports);
+  return module.exports;
+};
 
 class FakeClassList {
   constructor(values = []) { this.values = new Set(values); }
@@ -181,12 +191,12 @@ function makeBridgeContext(api, options = {}) {
     setTimeout(callback, delay) { calls.timers.push({ callback, delay }); return calls.timers.length; }
   });
   vm.runInContext('this.window=window;', context);
-  vm.runInContext(fs.readFileSync(path.join(sourceRoot, 'src', 'patch03-bridge.js'), 'utf8'), context, { filename: 'src/patch03-bridge.js' });
+  vm.runInContext(read('src/patch03-bridge.js'), context, { filename: 'src/patch03-bridge.js' });
   return { context, window, document, calls, storage, elements, sourceSelect, detailContent, detailDialog, searchView };
 }
 
-test('clean-source contract suite requires an explicit official source root', { skip: cleanSourceOnly }, () => {
-  assert.equal(fs.existsSync(path.join(sourceRoot, 'package.json')), true);
+test('runtime contract suite reads an explicit source tree or packaged ASAR', { skip: cleanSourceOnly }, () => {
+  assert.ok(read('package.json').includes('LilacAnime'));
 });
 test('pinned official IPC signatures stay the boundary for catalog, detail, and resolve', { skip: cleanSourceOnly }, () => {
   const preload = read('electron/preload.cjs');
@@ -215,7 +225,7 @@ test('the patch preserves the official detail dialog and exposes one integrated 
 });
 
 test('the same official identity is grouped while different seasons remain separate', { skip: cleanSourceOnly }, () => {
-  const { PROVIDERS, groupResults } = require(path.join(sourceRoot, 'src', 'integrated-search.js'));
+  const { PROVIDERS, groupResults } = loadIntegratedSearch();
   assert.deepEqual(PROVIDERS, ['reanime', 'miruro', 'animenosub', 'ohli24', 'linkani']);
   assert.equal(PROVIDERS.includes('linkkf'), false);
   const grouped = groupResults([
@@ -228,7 +238,7 @@ test('the same official identity is grouped while different seasons remain separ
 });
 
 test('bridge performs integrated search through the five official catalog calls and keeps individual mode delegated', { skip: cleanSourceOnly }, async () => {
-  const app = makeBridgeContext(require(path.join(sourceRoot, 'src', 'integrated-search.js')));
+  const app = makeBridgeContext(loadIntegratedSearch());
   await app.window.doSearch('Frieren Season 2');
   assert.equal(app.storage.get('contentSource'), 'reanime', 'legacy integrated mode is restored to its original provider');
   assert.equal(app.storage.get('lilacDinoPatch.searchMode'), 'integrated');
@@ -252,7 +262,7 @@ test('bridge performs integrated search through the five official catalog calls 
 });
 
 test('group source selection calls the original detail entry point and renders one picker in the same dialog', { skip: cleanSourceOnly }, async () => {
-  const app = makeBridgeContext(require(path.join(sourceRoot, 'src', 'integrated-search.js')));
+  const app = makeBridgeContext(loadIntegratedSearch());
   await app.window.doSearch('Frieren Season 2');
   await app.window.openDetail('reanime:reanime-frieren-s2');
   assert.equal(app.calls.details.length, 1);
@@ -270,7 +280,7 @@ test('group source selection calls the original detail entry point and renders o
 });
 
 test('a provider filter selects that provider as the initial detail source', { skip: cleanSourceOnly }, async () => {
-  const app = makeBridgeContext(require(path.join(sourceRoot, 'src', 'integrated-search.js')));
+  const app = makeBridgeContext(loadIntegratedSearch());
   await app.window.doSearch('Frieren Season 2');
   app.document.querySelector('#searchProviderFilters').querySelectorAll('button')
     .find(button => button.dataset.provider === 'miruro').click();
@@ -283,7 +293,7 @@ test('a provider filter selects that provider as the initial detail source', { s
 });
 
 test('provider failures remain distinct from empty results and do not suppress healthy providers', { skip: cleanSourceOnly }, async () => {
-  const api = require(path.join(sourceRoot, 'src', 'integrated-search.js'));
+  const api = loadIntegratedSearch();
   const app = makeBridgeContext(api);
   const reanime = {
     provider: 'reanime', id: 'known-title', mal_id: 'reanime:known-title', anilistId: 999001,
@@ -304,7 +314,7 @@ test('provider failures remain distinct from empty results and do not suppress h
 });
 
 test('title variants query ready-empty and skipped providers, avoid failed providers, and remain capped at three terms', { skip: cleanSourceOnly }, async () => {
-  const api = require(path.join(sourceRoot, 'src', 'integrated-search.js'));
+  const api = loadIntegratedSearch();
   const app = makeBridgeContext(api);
   const calls = [];
   const anchor = { provider: 'reanime', id: 'anchor', mal_id: 'reanime:anchor', anilistId: 888001,
@@ -327,7 +337,7 @@ test('title variants query ready-empty and skipped providers, avoid failed provi
 });
 
 test('Korean integrated searches retry providers skipped for the original query with safe title variants', { skip: cleanSourceOnly }, async () => {
-  const api = require(path.join(sourceRoot, 'src', 'integrated-search.js'));
+  const api = loadIntegratedSearch();
   const app = makeBridgeContext(api);
   const anchor = { provider: 'reanime', id: 'ko-anchor', mal_id: 'reanime:ko-anchor', anilistId: 1888001,
     title: '한국어 작품', year: 2025, type: 'TV' };
@@ -352,12 +362,14 @@ test('Korean integrated searches retry providers skipped for the original query 
 });
 
 test('a delayed old detail cannot replace the most recently selected source picker', { skip: cleanSourceOnly }, async () => {
-  const api = require(path.join(sourceRoot, 'src', 'integrated-search.js'));
+  const api = loadIntegratedSearch();
   const pending = new Map();
   const app = makeBridgeContext(api, { openDetail: id => new Promise(resolve => pending.set(id, resolve)) });
   await app.window.doSearch('Frieren Season 2');
   const oldDetail = app.window.openDetail('reanime:reanime-frieren-s2');
   const newestDetail = app.window.openDetail('miruro:miruro-frieren-s2');
+  for (let attempt = 0; attempt < 10 && pending.size < 2; attempt++) await Promise.resolve();
+  assert.equal(pending.size, 2, 'both official detail requests should reach the renderer before either response resolves');
   pending.get('miruro:miruro-frieren-s2')('newest detail');
   await newestDetail;
   assert.equal(app.detailContent.querySelectorAll('.detail-source-picker').length, 1);
@@ -369,7 +381,7 @@ test('a delayed old detail cannot replace the most recently selected source pick
 });
 
 test('Linkkf stays on the official individual search path and is not aggregated', { skip: cleanSourceOnly }, async () => {
-  const app = makeBridgeContext(require(path.join(sourceRoot, 'src', 'integrated-search.js')));
+  const app = makeBridgeContext(loadIntegratedSearch());
   app.sourceSelect.onchange({ target: { value: 'linkkf' } });
   assert.equal(app.storage.get('contentSource'), 'linkkf');
   assert.equal(app.storage.get('contentSourceProvider'), 'linkkf');
@@ -380,7 +392,7 @@ test('Linkkf stays on the official individual search path and is not aggregated'
 });
 
 test('late integrated results cannot overwrite an original home list', { skip: cleanSourceOnly }, async () => {
-  const api = require(path.join(sourceRoot, 'src', 'integrated-search.js'));
+  const api = loadIntegratedSearch();
   const app = makeBridgeContext(api);
   const pending = [];
   app.window.lilac.providerCatalog = (provider, query) => new Promise(resolve => pending.push({ provider, query, resolve }));

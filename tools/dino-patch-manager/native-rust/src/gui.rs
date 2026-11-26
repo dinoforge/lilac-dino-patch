@@ -43,6 +43,7 @@ const BUTTON_HEIGHT: f32 = 38.0;
 fn integrated_patch_status(status: &str) -> &'static str {
     match status {
         "APPLIED" | "ALREADY_APPLIED" => "적용됨",
+        "REVISION_UPDATE_AVAILABLE" => "개정판 업데이트 가능",
         "UNPATCHED" | "ALREADY_UNPATCHED" => "미적용",
         "UNSUPPORTED" => "지원되지 않음",
         _ => "확인 불가",
@@ -52,6 +53,7 @@ fn integrated_patch_status(status: &str) -> &'static str {
 fn integrated_patch_status_tone(status: &str) -> StatusTone {
     match status {
         "APPLIED" | "ALREADY_APPLIED" => StatusTone::Good,
+        "REVISION_UPDATE_AVAILABLE" => StatusTone::Warning,
         "UNPATCHED" | "ALREADY_UNPATCHED" => StatusTone::Neutral,
         "CONFLICT" | "PARTIAL_OR_UNKNOWN" | "UNSUPPORTED" => StatusTone::Bad,
         _ => StatusTone::Warning,
@@ -102,6 +104,9 @@ fn automatic_apply_config_block(
         return Some("선택된 패치 없음 · 자동 적용하지 않습니다");
     }
     if !confirmed.manager_install_supported() {
+        if confirmed.contains(patch_set::PatchId::DoubleSpeedBuffering) {
+            return Some("03 신규 적용 보류 · 자동 적용 보류");
+        }
         return Some("선택 조합 설치 미지원 · 자동 적용 보류");
     }
     None
@@ -110,6 +115,7 @@ fn automatic_apply_config_block(
 fn automatic_apply_status_block(status: &str) -> Option<&'static str> {
     match status {
         "UNPATCHED" | "ALREADY_UNPATCHED" | "APPLIED" | "ALREADY_APPLIED" => None,
+        "REVISION_UPDATE_AVAILABLE" => Some("검증된 개정판 업데이트 가능 · 수동 적용 확인 필요"),
         "SOURCE_FOUND" => Some("원본 상태 검사 필요 · 자동 적용 보류"),
         "SOURCE_MISSING" => Some("원본 확인 대기 · 자동 적용 보류"),
         "UNSUPPORTED" => Some("지원되지 않는 원본 · 자동 적용 보류"),
@@ -154,12 +160,25 @@ fn automatic_monitor_operation(
     }
 }
 
+fn initial_installed_root(
+    explicit_root: Option<PathBuf>,
+    fallback_roots: impl IntoIterator<Item = PathBuf>,
+    is_valid_install: impl Fn(&std::path::Path) -> bool,
+) -> String {
+    if let Some(root) = explicit_root.filter(|root| !root.as_os_str().is_empty()) {
+        // DINO_ORIGINAL_ROOT is an explicit target override. Keep it even if
+        // invalid so a test target can never fall through to a host install.
+        return root.to_string_lossy().to_string();
+    }
+    first_valid_installed_root(fallback_roots, is_valid_install)
+}
+
 fn actual_patch_status(
     id: patch_set::PatchId,
     status: &transaction::Status,
 ) -> (&'static str, StatusTone) {
     match status.status.as_str() {
-        "APPLIED" | "ALREADY_APPLIED" => {
+        "APPLIED" | "ALREADY_APPLIED" | "REVISION_UPDATE_AVAILABLE" => {
             if let Some(set) = status.composition_id.as_deref()
                 .and_then(|value| patch_set::PatchSet::parse_id(value).ok()) {
                 if set.contains(id) {
@@ -185,8 +204,25 @@ fn patch_row_status(
 ) -> (&'static str, StatusTone) {
     match feature.availability {
         patch_set::FeatureAvailability::ManagerSelectable => actual_patch_status(feature.id, status),
+        patch_set::FeatureAvailability::NewInstallPaused => {
+            if matches!(status.status.as_str(), "APPLIED" | "ALREADY_APPLIED" | "REVISION_UPDATE_AVAILABLE")
+                && status.composition_id.as_deref()
+                    .and_then(|value| patch_set::PatchSet::parse_id(value).ok())
+                    .is_some_and(|set| set.contains(feature.id))
+            {
+                ("적용됨", StatusTone::Good)
+            } else if matches!(status.status.as_str(), "UNPATCHED" | "ALREADY_UNPATCHED") {
+                ("신규 적용 보류", StatusTone::Warning)
+            } else {
+                actual_patch_status(feature.id, status)
+            }
+        }
         patch_set::FeatureAvailability::PreviewOnly => ("미리보기", StatusTone::Preview),
     }
+}
+
+fn patch_selection_enabled(availability: patch_set::FeatureAvailability, selected: bool) -> bool {
+    availability != patch_set::FeatureAvailability::NewInstallPaused || selected
 }
 
 fn patch_list_max_height(viewport_height: f32) -> f32 {
@@ -200,25 +236,35 @@ fn patch_list_max_height(viewport_height: f32) -> f32 {
 fn patch_support_summary(
     availability: impl IntoIterator<Item = patch_set::FeatureAvailability>,
 ) -> String {
-    let (install_supported, preview_only) = availability.into_iter().fold(
-        (0usize, 0usize),
-        |(install_supported, preview_only), item| match item {
+    let (install_supported, install_paused, preview_only) = availability.into_iter().fold(
+        (0usize, 0usize, 0usize),
+        |(install_supported, install_paused, preview_only), item| match item {
             patch_set::FeatureAvailability::ManagerSelectable => {
-                (install_supported + 1, preview_only)
+                (install_supported + 1, install_paused, preview_only)
+            }
+            patch_set::FeatureAvailability::NewInstallPaused => {
+                (install_supported, install_paused + 1, preview_only)
             }
             patch_set::FeatureAvailability::PreviewOnly => {
-                (install_supported, preview_only + 1)
+                (install_supported, install_paused, preview_only + 1)
             }
         },
     );
 
-    match (install_supported, preview_only) {
-        (0, 0) => "등록된 패치가 없습니다".to_owned(),
-        (0, preview_only) => format!("미리보기 전용 {preview_only}개"),
-        (install_supported, 0) => format!("관리자 설치 지원 {install_supported}개"),
-        (install_supported, preview_only) => {
-            format!("설치 지원 {install_supported}개 · 미리보기 전용 {preview_only}개")
-        }
+    let mut labels = Vec::new();
+    if install_supported > 0 {
+        labels.push(format!("관리자 설치 지원 {install_supported}개"));
+    }
+    if install_paused > 0 {
+        labels.push(format!("신규 적용 보류 {install_paused}개"));
+    }
+    if preview_only > 0 {
+        labels.push(format!("미리보기 전용 {preview_only}개"));
+    }
+    if labels.is_empty() {
+        "등록된 패치가 없습니다".to_owned()
+    } else {
+        labels.join(" · ")
     }
 }
 
@@ -442,6 +488,21 @@ enum ArchiveWatch {
     Invalid(String),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WatchedRecordEntry {
+    name: String,
+    len: u64,
+    modified: Option<SystemTime>,
+    is_dir: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum RecordWatch {
+    Available(Option<SystemTime>, Vec<WatchedRecordEntry>),
+    Missing,
+    Invalid(String),
+}
+
 fn inspect_monitored_archive(path: &PathBuf) -> ArchiveWatch {
     match std::fs::symlink_metadata(path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => ArchiveWatch::Missing,
@@ -456,6 +517,72 @@ fn inspect_monitored_archive(path: &PathBuf) -> ArchiveWatch {
         ),
         Ok(metadata) => ArchiveWatch::Available(metadata.len(), metadata.modified().ok()),
     }
+}
+
+fn inspect_monitored_records(root: &std::path::Path) -> RecordWatch {
+    let directory = match transaction::state_root(root) {
+        Ok(directory) => directory,
+        Err(error) => {
+            return RecordWatch::Invalid(format!(
+                "설치 기록 경로를 감시할 수 없습니다: {error}"
+            ));
+        }
+    };
+    inspect_record_directory(&directory)
+}
+
+fn inspect_record_directory(directory: &std::path::Path) -> RecordWatch {
+    let directory_metadata = match std::fs::symlink_metadata(&directory) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return RecordWatch::Missing,
+        Err(error) => {
+            return RecordWatch::Invalid(format!("설치 기록 폴더를 확인할 수 없습니다: {error}"));
+        }
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return RecordWatch::Invalid("설치 기록 폴더가 링크입니다. 상태 검사를 보류했습니다.".into());
+        }
+        Ok(metadata) if !metadata.is_dir() => {
+            return RecordWatch::Invalid("설치 기록 경로가 폴더가 아닙니다. 상태 검사를 보류했습니다.".into());
+        }
+        Ok(metadata) => metadata,
+    };
+    let entries = match std::fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) => {
+            return RecordWatch::Invalid(format!("설치 기록 목록을 확인할 수 없습니다: {error}"));
+        }
+    };
+    let mut snapshot = Vec::new();
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                return RecordWatch::Invalid(format!("설치 기록 항목을 확인할 수 없습니다: {error}"));
+            }
+        };
+        let metadata = match std::fs::symlink_metadata(entry.path()) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                return RecordWatch::Invalid(format!("설치 기록 항목 상태를 확인할 수 없습니다: {error}"));
+            }
+        };
+        if metadata.file_type().is_symlink() {
+            return RecordWatch::Invalid("설치 기록 폴더에 링크가 있어 상태 검사를 보류했습니다.".into());
+        }
+        if !metadata.is_file() && !metadata.is_dir() {
+            return RecordWatch::Invalid("설치 기록 폴더에 일반 파일이 아닌 항목이 있습니다.".into());
+        }
+        snapshot.push(WatchedRecordEntry {
+            name: entry.file_name().to_string_lossy().into_owned(),
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+            is_dir: metadata.is_dir(),
+        });
+        if snapshot.len() > 512 {
+            return RecordWatch::Invalid("설치 기록 항목이 너무 많아 감시를 중단했습니다.".into());
+        }
+    }
+    snapshot.sort_by(|left, right| left.name.cmp(&right.name));
+    RecordWatch::Available(directory_metadata.modified().ok(), snapshot)
 }
 
 fn status_style(tone: StatusTone) -> (u32, u32) {
@@ -639,7 +766,7 @@ fn parse_backup_items(value: &serde_json::Value) -> std::result::Result<Vec<Back
 
 fn operation_stage(kind: &str) -> &'static str {
     match kind {
-        "원본 다시 확인" => "원본 구조와 현재 파일 상태 확인 중",
+        "원본 다시 확인" => "원본 구조와 설치 상태 읽기 전용 확인 중",
         "자동 검사" | "디노 패치 수동 적용" => "원본·백업 검증 및 패치 적용 작업 중",
         "디노 패치 해제" | "백업 복원" => "원본·백업 SHA-256 검증 및 복원 작업 중",
         "복구 상태 검사" | "복구 기록 정리" => "복구 기록·원본·백업 검증 중",
@@ -701,6 +828,8 @@ struct DinoUi {
     activity: Vec<String>,
     response: Option<Receiver<WorkerMessage>>,
     last_archive_change: Option<(u64, Option<SystemTime>)>,
+    last_record_change: Option<RecordWatch>,
+    inspection_running: bool,
     last_monitor: Instant,
     backup_items: Vec<BackupItem>,
     backup_list_root: Option<String>,
@@ -731,12 +860,10 @@ fn first_valid_installed_root(
 }
 
 fn detect_installed_root() -> String {
+    let explicit_root = std::env::var_os("DINO_ORIGINAL_ROOT")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
     let mut guesses = Vec::new();
-    if let Some(value) = std::env::var_os("DINO_ORIGINAL_ROOT") {
-        if !value.is_empty() {
-            guesses.push(PathBuf::from(value));
-        }
-    }
     if let Some(value) = std::env::var_os("ProgramFiles") {
         guesses.push(PathBuf::from(value).join("LilacAnime"));
     }
@@ -744,7 +871,9 @@ fn detect_installed_root() -> String {
         guesses.push(PathBuf::from(value).join("Programs").join("LilacAnime"));
     }
     guesses.push(PathBuf::from(r"D:\LilacAnime"));
-    first_valid_installed_root(guesses, |guess| transaction::installed_root(guess).is_ok())
+    initial_installed_root(explicit_root, guesses, |guess| {
+        transaction::installed_root(guess).is_ok()
+    })
 }
 
 impl Default for DinoUi {
@@ -775,6 +904,8 @@ impl Default for DinoUi {
             activity,
             response: None,
             last_archive_change: None,
+            last_record_change: None,
+            inspection_running: false,
             last_monitor: Instant::now() - Duration::from_secs(5),
             backup_items: Vec::new(),
             backup_list_root: None,
@@ -836,6 +967,8 @@ impl DinoUi {
             self.root = root;
             self.root_selected_by_user = false;
             self.task_generation = self.task_generation.wrapping_add(1);
+            self.last_archive_change = None;
+            self.last_record_change = None;
             self.clear_backup_list();
             self.operation_state = "새 설치 경로에서 원본과 백업을 확인해야 합니다.".into();
         }
@@ -861,7 +994,7 @@ impl DinoUi {
 
     fn can_restore_selected_backup(&self) -> bool {
         !self.busy
-            && matches!(self.status.status.as_str(), "APPLIED" | "ALREADY_APPLIED")
+            && matches!(self.status.status.as_str(), "APPLIED" | "ALREADY_APPLIED" | "REVISION_UPDATE_AVAILABLE")
             && self.selected_backup().is_some_and(|item| item.restorable)
     }
 
@@ -879,6 +1012,9 @@ impl DinoUi {
     fn can_apply_confirmed_selection(&self) -> bool {
         let Some(desired) = self.confirmed_patch_selection.as_patch_set() else { return false; };
         let different_from_installed = self.status.status == "UNPATCHED"
+            || (self.status.status == "REVISION_UPDATE_AVAILABLE"
+                && self.status.composition_id.as_deref()
+                    .and_then(|id| patch_set::PatchSet::parse_id(id).ok()) == Some(desired))
             || (self.status.status == "APPLIED"
                 && self.status.composition_id.as_deref()
                     .and_then(|id| patch_set::PatchSet::parse_id(id).ok())
@@ -898,15 +1034,24 @@ impl DinoUi {
         } else if self.confirmed_patch_selection.is_empty() {
             "선택된 패치가 없습니다. 전체 해제는 별도 해제 버튼에서 확인하세요."
         } else if !self.confirmed_patch_selection.manager_install_supported() {
-            "선택한 패치 조합은 검증된 관리자 설치 대상이 아닙니다."
+            if self.confirmed_patch_selection.contains(patch_set::PatchId::DoubleSpeedBuffering) {
+                "03 신규 적용은 보류 중입니다. 기존 적용본은 01·02 조합으로 변경할 수 있습니다."
+            } else {
+                "선택한 패치 조합은 검증된 관리자 설치 대상이 아닙니다."
+            }
         } else if self.root.trim().is_empty() {
             "LilacAnime 설치 경로를 먼저 선택하세요."
+        } else if self.status.status == "REVISION_UPDATE_AVAILABLE"
+            && self.status.composition_id.as_deref()
+                .and_then(|id| patch_set::PatchSet::parse_id(id).ok())
+                == self.confirmed_patch_selection.as_patch_set() {
+            "같은 조합의 검증된 새 개정판으로 전환할 수 있습니다."
         } else if self.status.status == "APPLIED"
             && self.status.composition_id.as_deref()
                 .and_then(|id| patch_set::PatchSet::parse_id(id).ok())
                 .is_some_and(|installed| self.confirmed_patch_selection.as_patch_set() == Some(installed)) {
             "선택한 조합이 이미 적용돼 있습니다."
-        } else if !matches!(self.status.status.as_str(), "UNPATCHED" | "APPLIED") {
+        } else if !matches!(self.status.status.as_str(), "UNPATCHED" | "APPLIED" | "REVISION_UPDATE_AVAILABLE") {
             "호환되는 원본 또는 검증된 적용 상태를 확인한 뒤 진행할 수 있습니다."
         } else {
             ""
@@ -927,6 +1072,9 @@ impl DinoUi {
         } else {
             "목표 구성 저장 · 관리자 설치 미지원 조합입니다".into()
         };
+        if !self.root.trim().is_empty() {
+            self.enqueue("원본 다시 확인");
+        }
     }
 
     fn update_backup_list(
@@ -984,6 +1132,7 @@ impl DinoUi {
         }
 
         self.busy = true;
+        self.inspection_running = matches!(kind, "원본 다시 확인" | "자동 검사");
         self.operation_state = "작업 요청 접수".into();
         self.record(format!("{kind} 작업 요청 접수"));
         self.task_generation = self.task_generation.wrapping_add(1);
@@ -1079,6 +1228,7 @@ impl DinoUi {
         if let Err(error) = spawned {
             self.record(format!("작업 스레드를 실행할 수 없습니다: {error}"));
             self.busy = false;
+            self.inspection_running = false;
             self.operation_state = "오류 발생 · 작업 스레드를 시작하지 못했습니다".into();
             self.response = None;
             self.show_advanced = true;
@@ -1111,6 +1261,7 @@ impl DinoUi {
                 WorkerMessage::Completed(event)
                     if self.task_is_current(&event.root, event.generation) => {
                         self.busy = false;
+                        self.inspection_running = false;
                         self.response = None;
                         if let Some(status) = event.status {
                             self.status = status;
@@ -1154,6 +1305,7 @@ impl DinoUi {
             );
             self.operation_state = "오류 발생 · 작업 응답이 끊겼습니다".into();
             self.busy = false;
+            self.inspection_running = false;
             self.response = None;
             self.show_advanced = true;
             self.show_log = true;
@@ -1357,7 +1509,7 @@ impl DinoUi {
     }
 
     fn monitor(&mut self) {
-        if !self.auto_enabled || self.busy || self.root.is_empty() {
+        if self.busy || self.root.is_empty() {
             return;
         }
         if self.last_monitor.elapsed() < Duration::from_secs(4) {
@@ -1394,29 +1546,32 @@ impl DinoUi {
                 return;
             }
         };
-        if !self.root_selected_by_user {
-            self.operation_state = self
-                .auto_apply_config_block()
-                .unwrap_or("설치 경로를 직접 확인하세요")
-                .into();
+        let records = inspect_monitored_records(std::path::Path::new(self.root.trim()));
+        let records_changed = self.last_record_change.as_ref() != Some(&records);
+        self.last_record_change = Some(records.clone());
+        if let RecordWatch::Invalid(reason) = records {
+            if records_changed {
+                self.status = transaction::Status::new(
+                    "PARTIAL_OR_UNKNOWN",
+                    &self.status.version,
+                    reason.clone(),
+                );
+                self.operation_state = "설치 기록을 확인할 수 없어 자동 검사를 보류했습니다".into();
+                self.record(reason);
+            }
             return;
         }
-        let changed = self.last_archive_change.as_ref() != Some(&current);
+        let archive_changed = self.last_archive_change.as_ref() != Some(&current);
         self.last_archive_change = Some(current);
-        let automatic_apply_ready = self.auto_apply_config_block().is_none()
+        let changed = archive_changed || records_changed;
+        let automatic_apply_ready = self.auto_enabled
+            && self.auto_apply_config_block().is_none()
             && automatic_apply_status_block(&self.status.status).is_none()
             && automatic_apply_needed(&self.status, self.confirmed_patch_selection);
         match automatic_monitor_operation(&self.status.status, changed, automatic_apply_ready) {
             Some("원본 다시 확인") => self.enqueue("원본 다시 확인"),
             Some("자동 검사") => self.enqueue("자동 검사"),
-            _ => {
-                if let Some(reason) = self
-                    .auto_apply_config_block()
-                    .or_else(|| automatic_apply_status_block(&self.status.status))
-                {
-                    self.operation_state = reason.into();
-                }
-            }
+            _ => {}
         }
     }
 
@@ -1438,6 +1593,7 @@ impl DinoUi {
             self.root_selected_by_user = true;
             self.path_draft = self.root.clone();
             self.last_archive_change = None;
+            self.last_record_change = None;
             self.last_monitor = Instant::now();
             self.status = transaction::Status::new(
                 "SOURCE_FOUND", "", "선택한 설치 폴더를 검사할 수 있습니다."
@@ -1459,6 +1615,7 @@ impl DinoUi {
         } else {
             match self.status.status.as_str() {
                 "APPLIED" | "ALREADY_APPLIED" => "통합 검색·공급원 전환 · 적용됨",
+                "REVISION_UPDATE_AVAILABLE" => "검증된 패치 개정판 업데이트 가능 · 수동 적용 필요",
                 "UNPATCHED" | "ALREADY_UNPATCHED" if self.status.manually_uninstalled => {
                     "수동 해제 상태 · 원할 때 다시 적용할 수 있습니다."
                 }
@@ -1591,6 +1748,7 @@ impl DinoUi {
                             self.root_selected_by_user = true;
                         }
                         self.last_archive_change = None;
+                        self.last_record_change = None;
                         close_after_action = true;
                         self.enqueue("원본 다시 확인");
                     } else if cancel {
@@ -1613,14 +1771,14 @@ impl DinoUi {
         ui.add_sized(
             Vec2::new(ui.available_width(), 16.0),
             egui::Label::new(
-                RichText::new(support_summary)
+                RichText::new(format!("상태 자동 갱신 · {support_summary}"))
                     .size(HELP_TEXT_SIZE)
                     .strong()
                     .color(rgb(support_ink)),
             )
             .truncate(),
         )
-        .on_hover_text("각 패치 상태는 현재 설치 기록으로 확인하며, 체크한 선택 구성은 별도로 확정해야 합니다.");
+        .on_hover_text("실제 설치 상태는 자동으로 읽기 전용 확인합니다. 새로고침은 수동 재검사이며, 체크한 선택 구성은 별도로 확정해야 합니다.");
         let compact = ui.ctx().content_rect().height() <= 400.0;
         egui::ScrollArea::vertical()
             .id_salt("native-patch-catalog-list")
@@ -1632,25 +1790,39 @@ impl DinoUi {
                 for feature in patch_set::PATCH_CATALOG {
                     let selected_before = self.draft_patch_selection.contains(feature.id);
                     let mut selected = selected_before;
-                    let actual_status = actual_patch_status(feature.id, &self.status).0;
-                    let (row_status, tone) = patch_row_status(feature, &self.status);
+                    let actual_status = if self.inspection_running {
+                        "검사 중"
+                    } else {
+                        actual_patch_status(feature.id, &self.status).0
+                    };
+                    let (row_status, tone) = if self.inspection_running {
+                        ("검사 중", StatusTone::Warning)
+                    } else {
+                        patch_row_status(feature, &self.status)
+                    };
                     let availability = match feature.availability {
                         patch_set::FeatureAvailability::ManagerSelectable => "검증된 선택 조합 설치 지원",
+                        patch_set::FeatureAvailability::NewInstallPaused => "신규 적용 보류 · 기존 적용본 해제/전환 지원",
                         patch_set::FeatureAvailability::PreviewOnly => "미리보기 전용 · 설치 미지원",
                     };
+                    let selection_enabled = patch_selection_enabled(feature.availability, selected_before);
                     list.horizontal_wrapped(|row| {
                         row.spacing_mut().item_spacing.x = 4.0;
-                        let response = row.checkbox(
-                            &mut selected,
-                            RichText::new(format!(
-                                "{} · {}",
-                                feature.id.code(),
-                                feature.display_name
-                            ))
-                            .size(BODY_TEXT_SIZE)
-                            .strong()
-                            .color(rgb(TEXT)),
-                        );
+                        let response = row
+                            .add_enabled_ui(selection_enabled, |row| {
+                                row.checkbox(
+                                    &mut selected,
+                                    RichText::new(format!(
+                                        "{} · {}",
+                                        feature.id.code(),
+                                        feature.display_name
+                                    ))
+                                    .size(BODY_TEXT_SIZE)
+                                    .strong()
+                                    .color(rgb(TEXT)),
+                                )
+                            })
+                            .inner;
                         compact_pill(row, row_status, tone);
                         response
                     })
@@ -1671,7 +1843,11 @@ impl DinoUi {
         } else if self.draft_patch_selection.is_empty() {
             "저장됨 · 적용 안 함"
         } else if !self.draft_patch_selection.manager_install_supported() {
-            "저장됨 · 설치 미지원"
+            if self.draft_patch_selection.contains(patch_set::PatchId::DoubleSpeedBuffering) {
+                "저장됨 · 03 신규 적용 보류"
+            } else {
+                "저장됨 · 설치 미지원"
+            }
         } else {
             "저장됨"
         };
@@ -1701,7 +1877,11 @@ impl DinoUi {
         } else if self.confirmed_patch_selection.is_empty() {
             "선택 없음"
         } else if !self.confirmed_patch_selection.manager_install_supported() {
-            "설치 미지원"
+            if self.confirmed_patch_selection.contains(patch_set::PatchId::DoubleSpeedBuffering) {
+                "03 적용 보류"
+            } else {
+                "설치 미지원"
+            }
         } else {
             "패치 적용"
         };
@@ -1944,7 +2124,7 @@ impl DinoUi {
                 "다른 작업이 끝날 때까지 복원할 수 없습니다."
             } else if self.selected_backup_id.is_none() {
                 "복원 가능한 백업을 선택하세요."
-            } else if !matches!(self.status.status.as_str(), "APPLIED" | "ALREADY_APPLIED") {
+            } else if !matches!(self.status.status.as_str(), "APPLIED" | "ALREADY_APPLIED" | "REVISION_UPDATE_AVAILABLE") {
                 "패치 적용 상태를 확인한 뒤 복원할 수 있습니다."
             } else {
                 "선택한 백업은 복원할 수 없습니다."
@@ -1998,12 +2178,13 @@ impl DinoUi {
                 ),
             )
             .on_hover_text(
-                "호환되는 공식 v0.5.65 원본을 확인하면 저장된 선택 구성을 자동으로 유지합니다. 검증된 일곱 조합만 적용하며, 임시 선택·미지원 조합·충돌·검증 실패에서는 자동 적용을 보류합니다.",
+                "호환되는 공식 v0.5.65 원본을 확인하면 저장된 선택 구성을 자동으로 유지합니다. 신규 설치는 01·02·01+02 조합만 지원합니다. 기존 03 포함 조합은 검사 후 해제하거나 지원 조합으로 변경할 수 있습니다.",
             )
             .changed();
         if changed {
             if self.auto_enabled {
                 self.last_archive_change = None;
+                self.last_record_change = None;
                 self.operation_state = "자동 적용 켬 · 호환성과 백업을 검사합니다".into();
             } else {
                 self.operation_state = "자동 적용 끔 · 수동 작업은 사용할 수 있습니다".into();
@@ -2421,6 +2602,7 @@ impl DinoUi {
                 } else if idle {
                     match self.status.status.as_str() {
                         "APPLIED" | "ALREADY_APPLIED" => StatusTone::Good,
+                        "REVISION_UPDATE_AVAILABLE" => StatusTone::Warning,
                         _ => StatusTone::Neutral,
                     }
                 } else if self.operation_state.starts_with("완료") {
@@ -2639,7 +2821,12 @@ impl DinoUi {
             .frame(
                 Frame::new()
                     .fill(rgb(PAGE))
-                    .inner_margin(Margin::symmetric(14, vertical_inset)),
+                    .inner_margin(Margin {
+                        left: 14,
+                        right: 14,
+                        top: vertical_inset,
+                        bottom: 18,
+                    }),
             )
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing =
@@ -2660,7 +2847,9 @@ impl DinoUi {
                         );
                     }
                     row.with_layout(Layout::right_to_left(Align::Center), |status_row| {
-                        let (status, tone) = if automatic_apply_waiting_for_source(
+                        let (status, tone) = if self.inspection_running {
+                            ("검사 중", StatusTone::Warning)
+                        } else if automatic_apply_waiting_for_source(
                             self.auto_enabled,
                             !self.root.trim().is_empty(),
                             &self.status.status,
@@ -2856,8 +3045,9 @@ pub fn start() -> Result<()> {
 mod backup_list_tests {
     use super::{
         action_button_palette, badge_for, integrated_patch_status,
-        integrated_patch_status_tone, inspect_monitored_archive, native_options,
-        operation_stage, parse_backup_items, persistence_path_for, status_style, ArchiveWatch,
+        integrated_patch_status_tone, inspect_monitored_archive, inspect_record_directory,
+        initial_installed_root, native_options, operation_stage, parse_backup_items,
+        persistence_path_for, status_style, ArchiveWatch, RecordWatch,
         BackupItem, ButtonTone, ConfirmationChoice, DinoUi, GUI_PERSISTENCE_VERSION, StatusTone,
         UpdateState,
     };
@@ -2883,6 +3073,8 @@ mod backup_list_tests {
             activity: Vec::new(),
             response: None,
             last_archive_change: None,
+            last_record_change: None,
+            inspection_running: false,
             last_monitor: Instant::now(),
             backup_items: Vec::new(),
             backup_list_root: Some(root.to_owned()),
@@ -2902,17 +3094,102 @@ mod backup_list_tests {
     }
 
     #[test]
-    fn invalid_explicit_original_root_does_not_hide_valid_install_fallback() {
+    fn explicit_original_root_never_falls_through_to_host_install() {
         let roots = [
-            PathBuf::from(r"D:\Codex-Coding-Folder\Lilac-Dino-Patch"),
             PathBuf::from(r"D:\LilacAnime"),
         ];
 
-        let selected = super::first_valid_installed_root(roots, |root| {
-            root == std::path::Path::new(r"D:\LilacAnime")
-        });
+        let selected = initial_installed_root(
+            Some(PathBuf::from(r"D:\Codex-Coding-Folder\LilacAnime-Test")),
+            roots,
+            |_| panic!("explicit test root must prevent host fallback probing"),
+        );
 
+        assert_eq!(selected, r"D:\Codex-Coding-Folder\LilacAnime-Test");
+    }
+
+    #[test]
+    fn default_root_detection_uses_fallbacks_only_when_no_explicit_target_exists() {
+        let selected = initial_installed_root(
+            None,
+            [
+                PathBuf::from(r"D:\Install\invalid"),
+                PathBuf::from(r"D:\LilacAnime"),
+            ],
+            |root| root == std::path::Path::new(r"D:\LilacAnime"),
+        );
         assert_eq!(selected, r"D:\LilacAnime");
+    }
+
+    #[test]
+    fn monitored_install_records_detect_external_metadata_changes() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "dino-gui-record-watch-{}-{nonce}",
+            std::process::id()
+        ));
+        assert_eq!(inspect_record_directory(&directory), RecordWatch::Missing);
+        std::fs::create_dir_all(&directory).unwrap();
+        let record = directory.join("state-0.5.65.json");
+        std::fs::write(&record, b"state-a").unwrap();
+        let before = inspect_record_directory(&directory);
+        std::fs::write(&record, b"state-a-with-external-change").unwrap();
+        let after = inspect_record_directory(&directory);
+        assert_ne!(before, after, "record size or timestamp change must trigger a read-only inspect");
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn read_only_monitor_decision_is_independent_of_auto_apply_setting() {
+        assert_eq!(
+            super::automatic_monitor_operation("SOURCE_FOUND", true, false),
+            Some("원본 다시 확인")
+        );
+        assert_eq!(
+            super::automatic_monitor_operation("APPLIED", true, false),
+            Some("원본 다시 확인"),
+            "external archive or state change remains inspectable with auto-apply disabled"
+        );
+        assert_eq!(
+            super::automatic_monitor_operation("UNPATCHED", false, false),
+            None,
+            "stable sources are not fully inspected every polling interval"
+        );
+    }
+
+    #[test]
+    fn set_root_invalidates_prior_inspection_generation_and_watch_snapshots() {
+        let mut ui = test_ui(r"D:\LilacAnime");
+        ui.last_archive_change = Some((100, None));
+        ui.last_record_change = Some(RecordWatch::Missing);
+        let old_generation = ui.task_generation;
+        ui.set_root(r"D:\Codex-Coding-Folder\LilacAnime-Test".into());
+        assert!(!ui.task_is_current(r"D:\LilacAnime", old_generation));
+        assert!(ui.last_archive_change.is_none());
+        assert!(ui.last_record_change.is_none());
+    }
+
+    #[test]
+    fn confirmation_schedules_only_non_mutating_inspection_and_busy_blocks_manual_apply() {
+        use crate::patch_set::PatchId;
+        let root = std::env::temp_dir().join(format!("dino-confirm-inspect-{}", std::process::id()));
+        let mut ui = test_ui(&root.to_string_lossy());
+        ui.status = transaction::Status::new("SOURCE_MISSING", "", "missing");
+        ui.draft_patch_selection = ui
+            .draft_patch_selection
+            .with(PatchId::AdultOnlyTab, true);
+        ui.confirm_draft_selection();
+        assert!(ui.busy);
+        assert!(ui.inspection_running);
+        assert_eq!(ui.confirmed_patch_selection.id(), "01+02");
+        let activity = ui.activity.clone();
+        ui.enqueue("디노 패치 수동 적용");
+        assert_eq!(ui.activity, activity, "apply must not queue while inspection is running");
+        assert!(ui.inspection_running);
+        // The detached worker only reads this missing temporary directory and exits.
     }
 
     #[test]
@@ -3019,6 +3296,18 @@ mod backup_list_tests {
         let mut different = transaction::Status::new("APPLIED", "0.5.65", "other composition");
         different.composition_id = Some("02".into());
         assert!(super::automatic_apply_needed(&different, desired));
+        let mut revision_update = transaction::Status::new(
+            "REVISION_UPDATE_AVAILABLE",
+            "0.5.65",
+            "verified newer revision available",
+        );
+        revision_update.composition_id = Some("01".into());
+        revision_update.revision_id = Some("r1".into());
+        assert!(!super::automatic_apply_needed(&revision_update, desired));
+        assert_eq!(
+            super::automatic_apply_status_block(&revision_update.status),
+            Some("검증된 개정판 업데이트 가능 · 수동 적용 확인 필요")
+        );
         let mut manually_removed = transaction::Status::new("UNPATCHED", "0.5.65", "manual");
         manually_removed.manually_uninstalled = true;
         assert!(!super::automatic_apply_needed(&manually_removed, desired));
@@ -3061,6 +3350,40 @@ mod backup_list_tests {
             super::patch_row_status(crate::patch_set::PATCH_CATALOG[0], &missing),
             ("확인 불가", super::StatusTone::Warning)
         );
+    }
+
+    #[test]
+    fn paused_patch03_can_be_removed_but_not_newly_selected_and_legacy_state_stays_visible() {
+        use crate::patch_set::{FeatureAvailability, PatchId};
+
+        assert!(!super::patch_selection_enabled(FeatureAvailability::NewInstallPaused, false));
+        assert!(super::patch_selection_enabled(FeatureAvailability::NewInstallPaused, true));
+        assert!(super::patch_selection_enabled(FeatureAvailability::ManagerSelectable, false));
+
+        let mut legacy = transaction::Status::new("APPLIED", "0.5.65", "verified legacy composition");
+        legacy.composition_id = Some("01+02+03".into());
+        assert_eq!(
+            super::patch_row_status(crate::patch_set::PATCH_CATALOG[2], &legacy),
+            ("적용됨", super::StatusTone::Good)
+        );
+
+        let unpatched = transaction::Status::new("UNPATCHED", "0.5.65", "official source");
+        assert_eq!(
+            super::patch_row_status(crate::patch_set::PATCH_CATALOG[2], &unpatched),
+            ("신규 적용 보류", super::StatusTone::Warning)
+        );
+
+        let mut ui = test_ui(r"C:\test\LilacAnime");
+        ui.confirmed_patch_selection = ui.confirmed_patch_selection.with(PatchId::DoubleSpeedBuffering, true);
+        ui.draft_patch_selection = ui.confirmed_patch_selection;
+        ui.status = legacy;
+        ui.auto_enabled = true;
+        assert_eq!(
+            ui.auto_apply_config_block(),
+            Some("03 신규 적용 보류 · 자동 적용 보류")
+        );
+        assert!(!ui.can_apply_confirmed_selection());
+        assert!(ui.apply_button_reason().contains("03 신규 적용은 보류"));
     }
 
     #[test]
@@ -3120,14 +3443,18 @@ mod backup_list_tests {
         assert_eq!(ui.status.status, status_code);
         assert_eq!(ui.status.version, status_version);
         assert_eq!(ui.status.reason, status_reason);
-        assert!(!ui.busy);
-        assert!(ui.response.is_none());
-        assert_eq!(ui.auto_apply_config_block(), None);
-        assert!(ui.can_apply_confirmed_selection());
-        assert!(ui.activity.last().is_some_and(|entry| {
+        assert!(ui.busy);
+        assert!(ui.inspection_running);
+        assert!(ui.response.is_some());
+        assert_eq!(
+            ui.auto_apply_config_block(),
+            Some("작업 중 · 자동 적용 대기")
+        );
+        assert!(!ui.can_apply_confirmed_selection());
+        assert!(ui.activity.iter().any(|entry| {
             entry.contains("파일은 변경하지 않았습니다")
         }));
-        assert!(ui.operation_state.contains("패치 적용은 별도 확인"));
+        assert!(ui.operation_state.contains("작업 요청 접수"));
     }
 
     fn render_shapes(
@@ -3195,12 +3522,17 @@ mod backup_list_tests {
     #[test]
     fn patch_status_labels_and_tones_are_separate_and_semantic() {
         assert_eq!(integrated_patch_status("APPLIED"), "적용됨");
+        assert_eq!(integrated_patch_status("REVISION_UPDATE_AVAILABLE"), "개정판 업데이트 가능");
         assert_eq!(integrated_patch_status("UNPATCHED"), "미적용");
         assert_eq!(integrated_patch_status("SOURCE_MISSING"), "확인 불가");
         assert_eq!(integrated_patch_status("CONFLICT"), "확인 불가");
         assert_eq!(
             integrated_patch_status_tone("APPLIED"),
             StatusTone::Good
+        );
+        assert_eq!(
+            integrated_patch_status_tone("REVISION_UPDATE_AVAILABLE"),
+            StatusTone::Warning
         );
         assert_eq!(
             integrated_patch_status_tone("UNPATCHED"),
@@ -3332,7 +3664,7 @@ mod backup_list_tests {
 
     #[test]
     fn operation_stages_are_truthful_and_do_not_claim_percentages() {
-        assert_eq!(operation_stage("원본 다시 확인"), "원본 구조와 현재 파일 상태 확인 중");
+        assert_eq!(operation_stage("원본 다시 확인"), "원본 구조와 설치 상태 읽기 전용 확인 중");
         assert_eq!(operation_stage("백업 복원"), "원본·백업 SHA-256 검증 및 복원 작업 중");
         assert!(!operation_stage("자동 검사").contains('%'));
     }
@@ -3812,6 +4144,7 @@ mod backup_list_tests {
 
         let availability = [
             FeatureAvailability::ManagerSelectable,
+            FeatureAvailability::NewInstallPaused,
             FeatureAvailability::PreviewOnly,
             FeatureAvailability::PreviewOnly,
             FeatureAvailability::ManagerSelectable,
@@ -3819,7 +4152,7 @@ mod backup_list_tests {
         ];
         assert_eq!(
             super::patch_support_summary(availability),
-            "설치 지원 2개 · 미리보기 전용 3개"
+            "관리자 설치 지원 2개 · 신규 적용 보류 1개 · 미리보기 전용 3개"
         );
         assert_eq!(
             super::patch_support_summary(std::iter::empty::<FeatureAvailability>()),
@@ -3991,6 +4324,41 @@ mod backup_list_tests {
     }
 
     #[test]
+    fn automatic_inspection_is_visible_without_showing_stale_patch_status() {
+        let root = r"C:\test\LilacAnime";
+        for (width, height, scale) in [
+            (600.0, 380.0, 1.0),
+            (600.0, 380.0, 1.25),
+            (600.0, 380.0, 1.5),
+            (680.0, 420.0, 1.0),
+            (680.0, 420.0, 1.25),
+            (680.0, 420.0, 1.5),
+        ] {
+            let mut ui = test_ui(root);
+            ui.inspection_running = true;
+            let texts = render_text_bounds(&mut ui, width, height, scale);
+            for required in ["검사 중", "상태 자동 갱신", "01 · 통합 검색·공급원 전환"] {
+                let rect = texts
+                    .iter()
+                    .find(|(text, rect)| text.contains(required) && rect.is_positive())
+                    .map(|(_, rect)| *rect)
+                    .unwrap_or_else(|| panic!("inspection UI omitted {required:?}: {texts:?}"));
+                assert!(
+                    rect.left() >= 0.0
+                        && rect.right() <= width
+                        && rect.top() >= 0.0
+                        && rect.bottom() <= height,
+                    "inspection UI {required:?} clipped at {width}x{height} DPI {scale}: {rect:?}"
+                );
+            }
+            assert!(
+                !texts.iter().any(|(text, _)| text.contains("적용됨")),
+                "inspection in progress must not present stale APPLIED rows as current"
+            );
+        }
+    }
+
+    #[test]
     fn available_update_summary_stays_compact_and_changelog_is_separate() {
         let mut ui = test_ui(r"C:\test\LilacAnime");
         let candidate = super::release_update::ReleaseCandidate {
@@ -4073,7 +4441,7 @@ mod backup_list_tests {
                 .as_nanos()
         ));
         let mut ui = test_ui(&root.to_string_lossy());
-        ui.auto_enabled = true;
+        ui.auto_enabled = false;
         ui.status = transaction::Status::new("SOURCE_FOUND", "", "호환성 검사 대기");
         ui.last_monitor = Instant::now() - std::time::Duration::from_secs(5);
 
@@ -4166,6 +4534,7 @@ mod backup_list_tests {
             "LilacAnime v0.5.65",
             "C:/test/LilacAnime",
             "상태 검사",
+            "상태 자동 갱신",
             "패치 적용",
             "패치 해제",
             "백업 · 복원",

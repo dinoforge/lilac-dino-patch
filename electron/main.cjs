@@ -18,6 +18,7 @@ const { DesktopState } = require('./desktop-state.cjs');
 const { DeviceSync } = require('./device-sync.cjs');
 const { detectOpEd } = require('./oped-fingerprint.cjs');
 const { requestAniListGraphQL } = require('./anilist-client.cjs');
+const { lookupAdultCatalogMetadata } = require('./adult-catalog-metadata.cjs');
 const { compareRelease } = require('../src/anime-metadata.js');
 const { DownloadManager } = require('./download-manager.cjs');
 const { Updater } = require('./updater.cjs');
@@ -2665,6 +2666,16 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('catalog:facets', (_, provider) => catalogBrowser.facets(String(provider || '')));
   ipcMain.handle('catalog:browse', (_, provider, request) => catalogBrowser.browse(String(provider || ''), request || {}));
+  ipcMain.handle('adult-catalog:metadata', async (event, items) => {
+    if (event.sender !== mainWindow?.webContents) return { available: false, requested: 0, records: [] };
+    return lookupAdultCatalogMetadata(items, async (query, variables) => {
+      const response = await requestAniListGraphQL(query, variables, { timeoutMs: 15_000, priority: -5 });
+      if (!response.ok) throw new Error(`AniList HTTP ${response.status}`);
+      const payload = await response.json();
+      if (Array.isArray(payload?.errors) && payload.errors.length) throw new Error('AniList GraphQL response error');
+      return payload?.data;
+    });
+  });
   ipcMain.handle('provider:catalog', async (_, provider, query = '', offset = 0, sort = '') => {
     if (sort && !query) return sortedCatalog(provider, String(sort), offset);
     if (provider === 'reanime') {
