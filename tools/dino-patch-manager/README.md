@@ -1,4 +1,6 @@
-# LilacAnime DinoPatch
+# Legacy Electron/Python manager (historical)
+
+> This README describes the retired Electron/Python manager and its packaging layout. It is not the DinoPatch Beta 9 installation guide. For the current native Rust manager, see the repository root `README.md` and `docs/USER_GUIDE.md`.
 
 관리자는 승인된 A Electron HTML/CSS 화면을 사용하고, 패치 적용은 기존 manager_core.py 엔진에 위임합니다. 렌더러는 파일 경로를 직접 다루거나 셸 명령을 실행하지 않습니다. Electron main은 allowlist된 JSON 요청만 Python 엔진에 전달합니다.
 
